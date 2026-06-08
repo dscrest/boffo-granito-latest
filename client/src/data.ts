@@ -107,6 +107,7 @@ export const DESIGNS: Design[] = [
 export const STAGES: Stage[] = [
   { id: "po", label: "Purchase Order", short: "PO", color: "amber" },
   { id: "prod", label: "In Production", short: "Production", color: "blue" },
+  { id: "qc", label: "Quality Control", short: "QC", color: "teal" },
   { id: "packing", label: "Pallet Packing", short: "Packing", color: "violet" },
   { id: "loading", label: "Loading", short: "Loading", color: "cyan" },
   { id: "final", label: "Final Loading", short: "Final", color: "green" },
@@ -215,6 +216,16 @@ function buildOrders(): Order[] {
 
 export const ORDERS: Order[] = buildOrders();
 
+/* Carve a QC stage out of production/packing so the new QC workflow has live
+   work-in-flight. Mutated after generation to keep the seeded sequence intact.
+   Pre-pallet QC = produced-but-not-yet-palletized; post-pallet = palletized,
+   awaiting clearance before loading. */
+ORDERS.filter((o) => o.stage === "packing")
+  .slice(0, 5)
+  .forEach((o) => {
+    o.stage = "qc";
+  });
+
 export const ACTIVITY: Activity[] = [
   { time: "08:42", who: "Ramesh", action: "updated production", detail: "836 boxes — Etna Beige 600x1200", tag: "production" },
   { time: "08:21", who: "Priya", action: "closed pallet", detail: "[38x22] Etna Beige · 17-05 batch", tag: "packing" },
@@ -229,3 +240,148 @@ export const ACTIVITY: Activity[] = [
 export const READY_TO_LOAD: Order[] = ORDERS.filter(
   (o) => o.stage === "loading" || (o.stage === "packing" && o.palletizedQty >= o.orderQty * 0.85),
 ).slice(0, 7);
+
+/* ============================================================
+   QUOTES — sales process step before a Sales Order. A quote is
+   raised, shared with the party, and on acceptance converted
+   (fully or partially) into a Sales Order. Field keys mirror the
+   Export Tracker reference for 1:1 Data Store wiring later.
+   ============================================================ */
+
+export type QuoteStatus =
+  | "Draft"
+  | "Sent"
+  | "Accepted"
+  | "Rejected"
+  | "Converted"
+  | "PartiallyConverted";
+
+export interface QuoteLine {
+  /** Design/item name — resolves against DESIGNS for size/finish/brand. */
+  item: string;
+  qty: number; // boxes
+  rate: number; // per box
+  discount: number; // percent
+}
+
+export interface Quote {
+  id: string;
+  quoteNo: string;
+  customer: string;
+  partyCode: string;
+  address: string;
+  quoteDate: string;
+  paymentTerm: string;
+  portOfDischarge: string;
+  status: QuoteStatus;
+  currency: string;
+  remarks: string;
+  lines: QuoteLine[];
+  /** SO number once converted (full or partial). */
+  soNumber: string | null;
+}
+
+export const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
+export const PORTS = ["Mundra", "Nhava Sheva", "Pipavav", "Hazira", "Kandla"];
+export const CURRENCIES = ["INR", "USD", "EUR"];
+
+export interface QuoteLineTotals {
+  gross: number; // qty * rate
+  discountAmt: number;
+  subTotal: number; // gross - discount
+}
+
+export function lineTotals(l: QuoteLine): QuoteLineTotals {
+  const gross = (l.qty || 0) * (l.rate || 0);
+  const discountAmt = gross * ((l.discount || 0) / 100);
+  return { gross, discountAmt, subTotal: gross - discountAmt };
+}
+
+export function quoteTotals(q: { lines: QuoteLine[] }) {
+  return q.lines.reduce(
+    (acc, l) => {
+      const t = lineTotals(l);
+      acc.gross += t.gross;
+      acc.discount += t.discountAmt;
+      acc.final += t.subTotal;
+      return acc;
+    },
+    { gross: 0, discount: 0, final: 0 },
+  );
+}
+
+const CUSTOMER_ADDR: Record<string, string> = {
+  MRK: "ul. Czerwone Maki 65, 30-392 Kraków, Poland",
+  FLB: "Obrtnička 5, 10000 Zagreb, Croatia",
+  ABS: "Verkių g. 25C, 08223 Vilnius, Lithuania",
+  DDM: "Str. Alexandru Vlahuță 1, Bacău 600310, Romania",
+};
+
+export const QUOTES: Quote[] = [
+  {
+    id: "Q1001",
+    quoteNo: "QT/2026-27/001",
+    customer: "Merkury Market",
+    partyCode: "MRK",
+    address: CUSTOMER_ADDR.MRK,
+    quoteDate: "02/04/2026",
+    paymentTerm: "Advance",
+    portOfDischarge: "Mundra",
+    status: "Accepted",
+    currency: "EUR",
+    remarks: "Container load — mixed sizes.",
+    soNumber: null,
+    lines: [
+      { item: "Desert Beige", qty: 1280, rate: 4.85, discount: 3 },
+      { item: "Onyx Gris", qty: 960, rate: 5.2, discount: 0 },
+    ],
+  },
+  {
+    id: "Q1002",
+    quoteNo: "QT/2026-27/002",
+    customer: "Fliba D.O.O.",
+    partyCode: "FLB",
+    address: CUSTOMER_ADDR.FLB,
+    quoteDate: "05/04/2026",
+    paymentTerm: "Net 30",
+    portOfDischarge: "Nhava Sheva",
+    status: "Sent",
+    currency: "EUR",
+    remarks: "",
+    soNumber: null,
+    lines: [{ item: "Chester Wood Natural", qty: 2400, rate: 6.1, discount: 5 }],
+  },
+  {
+    id: "Q1003",
+    quoteNo: "QT/2026-27/003",
+    customer: "S.C. Dedeman SRL",
+    partyCode: "DDM",
+    address: CUSTOMER_ADDR.DDM,
+    quoteDate: "09/04/2026",
+    paymentTerm: "Net 45",
+    portOfDischarge: "Pipavav",
+    status: "Converted",
+    currency: "EUR",
+    remarks: "Repeat order.",
+    soNumber: "07/2026-27",
+    lines: [
+      { item: "Streetline Grey", qty: 1856, rate: 4.95, discount: 2 },
+      { item: "New Carrara", qty: 1456, rate: 5.4, discount: 2 },
+    ],
+  },
+  {
+    id: "Q1004",
+    quoteNo: "QT/2026-27/004",
+    customer: "AB Specializuota",
+    partyCode: "ABS",
+    address: CUSTOMER_ADDR.ABS,
+    quoteDate: "14/04/2026",
+    paymentTerm: "Net 60",
+    portOfDischarge: "Mundra",
+    status: "Draft",
+    currency: "EUR",
+    remarks: "Awaiting size confirmation.",
+    soNumber: null,
+    lines: [{ item: "Earth", qty: 928, rate: 3.9, discount: 0 }],
+  },
+];

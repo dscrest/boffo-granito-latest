@@ -7,15 +7,18 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { DESIGNS, ORDERS, PARTIES, STAGES } from "@/data";
+import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
+const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({ default: m.QuotesTable })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
 const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
 const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })));
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
+const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
+const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m) => ({ default: m.OperationsLog })));
 const PalletPacking = lazy(() => import("@/features/stages/PalletPacking").then((m) => ({ default: m.PalletPacking })));
 const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
@@ -61,9 +64,9 @@ const NAV_TREE: NavNode[] = [
     label: "Sales",
     icon: "orders",
     children: [
-      { id: "parties", label: "Customers", icon: "flag" },
+      { id: "quotes", label: "Quotes", icon: "quote" },
       {
-        label: "Orders",
+        label: "Sales Orders",
         icon: "docs",
         children: [
           { id: "kanban", label: "Pipeline", icon: "kanban" },
@@ -71,6 +74,7 @@ const NAV_TREE: NavNode[] = [
           { id: "orders", label: "All Orders", icon: "docs" },
         ],
       },
+      { id: "parties", label: "Customers", icon: "flag" },
     ],
   },
   {
@@ -78,9 +82,15 @@ const NAV_TREE: NavNode[] = [
     icon: "truck",
     children: [
       { id: "po", label: "Purchase Orders", icon: "docs" },
+      { id: "qc", label: "Quality Control", icon: "shield-check" },
       { id: "loading", label: "Loading", icon: "truck" },
       { id: "final", label: "Final Loading", icon: "invoice" },
     ],
+  },
+  {
+    label: "System",
+    icon: "settings",
+    children: [{ id: "ops", label: "Operations Log", icon: "clock" }],
   },
 ];
 
@@ -91,13 +101,16 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   masters: ["Items", "Masters"],
   prod: ["Items", "Production"],
   packing: ["Items", "Pallets"],
+  quotes: ["Sales", "Quotes"],
   parties: ["Sales", "Customers"],
-  kanban: ["Orders", "Pipeline"],
-  byorder: ["Orders", "By Order"],
-  orders: ["Orders", "All Orders"],
+  kanban: ["Sales Orders", "Pipeline"],
+  byorder: ["Sales Orders", "By Order"],
+  orders: ["Sales Orders", "All Orders"],
   po: ["Stages", "Purchase Orders"],
+  qc: ["Stages", "Quality Control"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
+  ops: ["System", "Operations Log"],
 };
 
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
@@ -192,7 +205,7 @@ export default function App() {
   }, []);
 
   const counts = useMemo<Record<string, number | string>>(() => {
-    const c: Record<string, number | string> = { dashboard: "", kanban: ORDERS.length, orders: ORDERS.length };
+    const c: Record<string, number | string> = { dashboard: "", quotes: QUOTES.length, kanban: ORDERS.length, orders: ORDERS.length };
     const distinctPOs = new Set<string>();
     ORDERS.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
     c.byorder = distinctPOs.size;
@@ -268,11 +281,14 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/quotes" element={<Quotes />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
             <Route path="/orders" element={<OrdersTable />} />
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
+            <Route path="/qc" element={<QC />} />
+            <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalletPacking />} />
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />

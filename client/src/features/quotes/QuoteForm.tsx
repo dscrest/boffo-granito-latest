@@ -1,0 +1,273 @@
+/* ============================================================
+   New Quote form — header (customer, terms, port, currency) +
+   line items (item/design, qty, rate, discount %). FRONTEND-ONLY:
+   emits a Quote draft to QuotesTable local state. Field keys mirror
+   the Export Tracker `Quotes` reference for later Data Store wiring.
+   Reuses shared form/modal CSS (df-*, form-*, ord-*).
+   ============================================================ */
+import { useMemo, useState } from "react";
+import { Icon } from "@/ui/Icon";
+import {
+  CURRENCIES,
+  DESIGNS,
+  PARTIES,
+  PAYMENT_TERMS,
+  PORTS,
+  lineTotals,
+  quoteTotals,
+  type Quote,
+  type QuoteLine,
+} from "@/data";
+import { fmt } from "@/lib/format";
+
+const STATUSES = ["Draft", "Sent", "Accepted"] as const;
+
+const CUSTOMER_ADDR: Record<string, string> = {
+  MRK: "ul. Czerwone Maki 65, 30-392 Kraków, Poland",
+  FLB: "Obrtnička 5, 10000 Zagreb, Croatia",
+  ABS: "Verkių g. 25C, 08223 Vilnius, Lithuania",
+  DDM: "Str. Alexandru Vlahuță 1, Bacău 600310, Romania",
+};
+
+const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0 });
+
+let _seq = 0;
+const newId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `q${++_seq}`;
+
+type Head = Pick<
+  Quote,
+  "customer" | "address" | "quoteDate" | "paymentTerm" | "portOfDischarge" | "status" | "currency" | "remarks"
+>;
+
+export function QuoteForm({
+  nextSeq,
+  onSave,
+  onClose,
+}: {
+  nextSeq: number;
+  onSave: (q: Quote) => void;
+  onClose: () => void;
+}) {
+  const [h, setH] = useState<Head>({
+    customer: "",
+    address: "",
+    quoteDate: "",
+    paymentTerm: "",
+    portOfDischarge: "",
+    status: "Draft",
+    currency: "EUR",
+    remarks: "",
+  });
+  const [lines, setLines] = useState<QuoteLine[]>([emptyLine()]);
+
+  const setHead = (k: keyof Head, val: string) =>
+    setH((p) => {
+      const next = { ...p, [k]: val };
+      // Auto-fill address when a known customer is picked.
+      if (k === "customer") {
+        const party = PARTIES.find((x) => x.name === val);
+        if (party && CUSTOMER_ADDR[party.code]) next.address = CUSTOMER_ADDR[party.code];
+      }
+      return next;
+    });
+
+  const setLine = (i: number, k: keyof QuoteLine, val: string) =>
+    setLines((ls) =>
+      ls.map((l, j) => (j === i ? { ...l, [k]: k === "item" ? val : Number(val) || 0 } : l)),
+    );
+  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
+  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+
+  const validLines = lines.filter((l) => l.item && l.qty > 0);
+  const totals = useMemo(() => quoteTotals({ lines: validLines }), [validLines]);
+  const missing = !h.customer.trim() || validLines.length === 0;
+
+  const submit = () => {
+    if (missing) return;
+    const party = PARTIES.find((x) => x.name === h.customer);
+    onSave({
+      ...h,
+      id: newId().slice(0, 6).toUpperCase(),
+      quoteNo: `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
+      partyCode: party?.code ?? "",
+      soNumber: null,
+      lines: validLines,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico">
+            <Icon name="quote" size={18} />
+          </div>
+          <div>
+            <div className="ttl">New Quote</div>
+            <div className="sub2">Sales quote · local draft — not yet saved to database</div>
+          </div>
+          <button className="btn x" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="df-body">
+          <div className="form-section">
+            <div className="form-section-title">Quote Details</div>
+            <div className="form-grid">
+              <label className="form-field">
+                <span className="lbl">
+                  Customer<span className="req"> *</span>
+                </span>
+                <select value={h.customer} onChange={(e) => setHead("customer", e.target.value)}>
+                  <option value="">—</option>
+                  {PARTIES.map((p) => (
+                    <option key={p.code} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Quote Date</span>
+                <input type="date" value={h.quoteDate} onChange={(e) => setHead("quoteDate", e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Payment Term</span>
+                <select value={h.paymentTerm} onChange={(e) => setHead("paymentTerm", e.target.value)}>
+                  <option value="">—</option>
+                  {PAYMENT_TERMS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Port of Discharge</span>
+                <select value={h.portOfDischarge} onChange={(e) => setHead("portOfDischarge", e.target.value)}>
+                  <option value="">—</option>
+                  {PORTS.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Currency</span>
+                <select value={h.currency} onChange={(e) => setHead("currency", e.target.value)}>
+                  {CURRENCIES.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Status</span>
+                <select value={h.status} onChange={(e) => setHead("status", e.target.value)}>
+                  {STATUSES.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Address</span>
+                <input value={h.address} onChange={(e) => setHead("address", e.target.value)} placeholder="Customer address" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Remarks</span>
+                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
+              </label>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section-title">
+              Line Items
+              <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                {h.currency} {fmt(totals.final)} final
+              </span>
+            </div>
+
+            <div className="ord-lines">
+              <div className="ord-line ord-line-head qt-line">
+                <span>Item</span>
+                <span>Qty</span>
+                <span>Rate</span>
+                <span>Disc %</span>
+                <span>Sub Total</span>
+                <span />
+              </div>
+              {lines.map((l, i) => {
+                const d = DESIGNS.find((x) => x.name === l.item);
+                const t = lineTotals(l);
+                return (
+                  <div className="ord-line qt-line" key={i}>
+                    <div className="form-field" style={{ gap: 2 }}>
+                      <select value={l.item} onChange={(e) => setLine(i, "item", e.target.value)}>
+                        <option value="">Select item…</option>
+                        {DESIGNS.map((x) => (
+                          <option key={x.name} value={x.name}>
+                            {x.name}
+                          </option>
+                        ))}
+                      </select>
+                      {d && (
+                        <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                          {d.size} · {d.finish} · {d.brand}
+                        </span>
+                      )}
+                    </div>
+                    <input type="number" value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
+                    <input type="number" value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
+                    <input type="number" value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
+                    <span className="mono" style={{ alignSelf: "center", color: "var(--fg)" }}>
+                      {fmt(t.subTotal)}
+                    </span>
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
+              <Icon name="plus" size={12} /> Add line
+            </button>
+
+            <div className="qt-totals">
+              <div className="row">
+                <span className="dim">Gross</span>
+                <span className="mono">{h.currency} {fmt(totals.gross)}</span>
+              </div>
+              <div className="row">
+                <span className="dim">Discount</span>
+                <span className="mono" style={{ color: "var(--c-red)" }}>− {h.currency} {fmt(totals.discount)}</span>
+              </div>
+              <div className="row total">
+                <span>Final Total</span>
+                <span className="mono">{h.currency} {fmt(totals.final)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="df-foot">
+          <span className="df-req-note">* required · ≥1 line item</span>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="hbtn primary" disabled={missing} onClick={submit}>
+            <Icon name="check" size={13} />
+            Save quote
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

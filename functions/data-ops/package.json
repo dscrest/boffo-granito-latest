@@ -1,0 +1,13 @@
+{
+  "name": "data-ops",
+  "version": "1.0.0",
+  "description": "BOFFO modular Data Store CRUD + OperationLog Advanced I/O function",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "zcatalyst-sdk-node": "^3.4.0"
+  }
+}
