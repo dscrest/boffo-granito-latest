@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "functions",
+    "targets": ["api-health"],
+    "ignore": [".git", "*.log"]
+  },
+  "client": {
+    "source": "client/dist"
+  }
+}

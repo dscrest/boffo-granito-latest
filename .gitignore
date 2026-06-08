@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+client/node_modules/
+functions/*/node_modules/
+
+# build output
+client/dist/
+webclient/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+*.tsbuildinfo
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example

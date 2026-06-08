@@ -1,0 +1,194 @@
+/* Login screen styling. Kept separate from the prototype's styles.css (untouched).
+   Two-column split: the sign-in form (left) and a branded illustration panel
+   (right). Themes both the BOFFO wrapper and the Catalyst embedded sign-in form,
+   which renders its markup inside #login. Uses the app's design tokens. */
+
+.boffo-auth {
+  /* Fill the dynamic viewport (100dvh tracks mobile browser chrome). */
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  padding: 24px;
+  overflow-x: hidden;
+  background:
+    radial-gradient(1100px 560px at 100% -10%, var(--accent-soft), transparent 60%),
+    var(--bg);
+  font-family: var(--font-sans);
+}
+
+/* The "checking…" state is a single centered line. */
+.boffo-auth--center {
+  align-items: center;
+  justify-content: center;
+}
+
+/* The split card: form pane + illustration pane, side by side. */
+.boffo-auth-split {
+  width: 100%;
+  max-width: 980px;
+  margin: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 18px 50px rgba(15, 20, 25, 0.1);
+}
+
+/* ---------- Left: form pane ---------- */
+.boffo-auth-pane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 44px 40px;
+}
+.boffo-auth-form {
+  width: 100%;
+  max-width: 340px;
+}
+
+.boffo-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 34px;
+}
+.boffo-auth-brand .mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 18px;
+}
+.boffo-auth-brand .wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.boffo-auth-brand .name {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.2px;
+  color: var(--fg);
+}
+.boffo-auth-brand .sub {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.boffo-auth-h1 {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  color: var(--fg);
+  margin: 0 0 8px;
+}
+.boffo-auth-tag {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0 0 22px;
+}
+
+/* "Sign in with Zoho" — the single primary CTA (full-page hosted Zoho login). */
+.boffo-zoho-btn {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: filter 0.15s, box-shadow 0.15s;
+}
+.boffo-zoho-btn:hover {
+  filter: brightness(0.96);
+}
+.boffo-zoho-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.boffo-zoho-btn svg {
+  flex-shrink: 0;
+}
+
+/* Sub-line under the CTA. */
+.boffo-auth-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+.boffo-auth-foot {
+  margin-top: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--dim);
+}
+.boffo-auth-foot .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ---------- Right: illustration panel ---------- */
+.boffo-auth-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 120% at 20% 0%, oklch(0.62 0.16 150), oklch(0.5 0.15 152) 60%, oklch(0.42 0.13 153));
+}
+/* Faint dot texture over the gradient. */
+.boffo-auth-art::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.16) 1px, transparent 1.4px);
+  background-size: 22px 22px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.boffo-art-svg {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+}
+
+/* ---------- Responsive: stack and drop the art panel ---------- */
+@media (max-width: 760px) {
+  .boffo-auth {
+    padding: 16px;
+  }
+  .boffo-auth-split {
+    grid-template-columns: 1fr;
+    max-width: 420px;
+  }
+  .boffo-auth-art {
+    display: none;
+  }
+  .boffo-auth-pane {
+    padding: 36px 28px;
+  }
+}
+

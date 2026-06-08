@@ -1,0 +1,14 @@
+{
+  "name": "boffo-order-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BOFFO Order OS — tile-export order tracking on Zoho Catalyst (Vite client + Catalyst Functions)",
+  "scripts": {
+    "dev": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "preview": "npm --prefix client run preview",
+    "install:all": "npm --prefix client install && npm --prefix functions/api-health install",
+    "deploy": "catalyst deploy",
+    "serve": "catalyst serve"
+  }
+}

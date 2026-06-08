@@ -1,0 +1,13 @@
+{
+  "name": "api-health",
+  "version": "1.0.0",
+  "description": "BOFFO health-check Advanced I/O function",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "zcatalyst-sdk-node": "^3.4.0"
+  }
+}
