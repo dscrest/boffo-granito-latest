@@ -62,7 +62,7 @@ export function Dashboard() {
             <Icon name="calendar" size={13} />
             This week
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => { location.hash = "#/orders"; }}>
             <Icon name="plus" size={13} />
             New Order
           </button>

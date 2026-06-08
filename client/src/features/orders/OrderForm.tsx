@@ -1,0 +1,217 @@
+/* ============================================================
+   New Order form — captures the Catalyst `SalesOrder` header +
+   `OrderItem` line items. FRONTEND-ONLY: emits an OrderDraft to
+   OrdersTable local state (no DB writes yet). Header field keys +
+   line keys match the Data Store column names for 1:1 API wiring
+   later. Reuses the shared form/modal CSS (df-*, form-*).
+   ============================================================ */
+import { useMemo, useState } from "react";
+import { Icon } from "@/ui/Icon";
+import { DESIGNS, PARTIES } from "@/data";
+
+export interface OrderLine {
+  design: string;
+  ordered_qty_boxes: string;
+  rate: string;
+}
+
+export interface OrderDraft {
+  _id: string;
+  customer: string;
+  po_number: string;
+  order_date: string;
+  payment_term: string;
+  port_of_discharge: string;
+  status: string;
+  currency: string;
+  remarks: string;
+  lines: OrderLine[];
+}
+
+const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
+const STATUSES = ["Confirmed", "InProgress", "Cancelled"];
+const CURRENCIES = ["INR", "USD", "EUR"];
+
+type FieldKind = "text" | "date" | "select";
+interface FieldSpec {
+  key: keyof OrderDraft;
+  label: string;
+  kind?: FieldKind;
+  options?: string[];
+  required?: boolean;
+}
+
+const HEADER: FieldSpec[] = [
+  { key: "customer", label: "Customer", kind: "select", options: PARTIES.map((p) => p.name), required: true },
+  { key: "po_number", label: "PO Number", required: true },
+  { key: "order_date", label: "Order Date", kind: "date" },
+  { key: "payment_term", label: "Payment Term", kind: "select", options: PAYMENT_TERMS },
+  { key: "currency", label: "Currency", kind: "select", options: CURRENCIES },
+  { key: "status", label: "Status", kind: "select", options: STATUSES },
+  { key: "port_of_discharge", label: "Port of Discharge" },
+];
+
+const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "" });
+
+let _seq = 0;
+const newId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `o${++_seq}`;
+
+export function OrderForm({
+  onSave,
+  onClose,
+}: {
+  onSave: (o: OrderDraft) => void;
+  onClose: () => void;
+}) {
+  const [h, setH] = useState<Omit<OrderDraft, "_id" | "lines">>({
+    customer: "",
+    po_number: "",
+    order_date: "",
+    payment_term: "",
+    port_of_discharge: "",
+    status: "Confirmed",
+    currency: "EUR",
+    remarks: "",
+  });
+  const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
+
+  const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }));
+  const setLine = (i: number, k: keyof OrderLine, val: string) =>
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
+  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
+  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+
+  const totalBoxes = useMemo(
+    () => lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0),
+    [lines],
+  );
+  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
+  const missing = HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) || validLines.length === 0;
+
+  const submit = () => {
+    if (missing) return;
+    onSave({ ...h, _id: newId(), lines: validLines });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico">
+            <Icon name="orders" size={18} />
+          </div>
+          <div>
+            <div className="ttl">New Order</div>
+            <div className="sub2">Sales order · local draft — not yet saved to database</div>
+          </div>
+          <button className="btn x" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="df-body">
+          <div className="form-section">
+            <div className="form-section-title">Order Details</div>
+            <div className="form-grid">
+              {HEADER.map((f) => (
+                <label key={f.key} className="form-field">
+                  <span className="lbl">
+                    {f.label}
+                    {f.required && <span className="req"> *</span>}
+                  </span>
+                  {f.kind === "select" ? (
+                    <select value={h[f.key as keyof typeof h]} onChange={(e) => setHead(f.key, e.target.value)}>
+                      <option value="">—</option>
+                      {f.options!.map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={f.kind === "date" ? "date" : "text"}
+                      value={h[f.key as keyof typeof h]}
+                      onChange={(e) => setHead(f.key, e.target.value)}
+                      placeholder={f.label}
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section-title">
+              Line Items
+              <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                {totalBoxes} boxes
+              </span>
+            </div>
+
+            <div className="ord-lines">
+              <div className="ord-line ord-line-head">
+                <span>Design</span>
+                <span>Qty (boxes)</span>
+                <span>Rate</span>
+                <span />
+              </div>
+              {lines.map((l, i) => {
+                const d = DESIGNS.find((x) => x.name === l.design);
+                return (
+                  <div className="ord-line" key={i}>
+                    <div className="form-field" style={{ gap: 2 }}>
+                      <select value={l.design} onChange={(e) => setLine(i, "design", e.target.value)}>
+                        <option value="">Select design…</option>
+                        {DESIGNS.map((x) => (
+                          <option key={x.name} value={x.name}>
+                            {x.name}
+                          </option>
+                        ))}
+                      </select>
+                      {d && (
+                        <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                          {d.size} · {d.finish} · {d.brand}
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      value={l.ordered_qty_boxes}
+                      onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
+                      placeholder="0"
+                    />
+                    <input
+                      type="number"
+                      value={l.rate}
+                      onChange={(e) => setLine(i, "rate", e.target.value)}
+                      placeholder="0.00"
+                    />
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
+              <Icon name="plus" size={12} /> Add line
+            </button>
+          </div>
+        </div>
+
+        <div className="df-foot">
+          <span className="df-req-note">* required · ≥1 line item</span>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="hbtn primary" disabled={missing} onClick={submit}>
+            <Icon name="check" size={13} />
+            Save order
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

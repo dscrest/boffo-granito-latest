@@ -4,7 +4,7 @@
    Navigation is HashRouter-based; each page is lazy-loaded into its own
    chunk (code-splitting). Route path === the prototype's view id.
    ============================================================ */
-import { Suspense, lazy, useEffect, useMemo } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, ORDERS, PARTIES, STAGES } from "@/data";
@@ -21,6 +21,7 @@ const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ de
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
+const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
 
 const TWEAK_DEFAULTS = {
   accent: "oklch(0.55 0.16 150)",
@@ -34,62 +35,154 @@ function applyAccent(color: string) {
   r.style.setProperty("--accent-soft", soft);
 }
 
-interface NavItem {
-  id: string;
+/* Sidebar is a nested tree: a node is a leaf (has `id` → route) or a
+   collapsible parent (has `children`). Parents accordion open/close on click;
+   the branch holding the active route auto-expands. */
+interface NavNode {
+  id?: string;
   label: string;
   icon: string;
-}
-interface NavGroup {
-  title: string;
-  items: NavItem[];
+  children?: NavNode[];
 }
 
-const NAV_GROUPS: NavGroup[] = [
+const NAV_TREE: NavNode[] = [
+  { id: "dashboard", label: "Dashboard", icon: "dashboard" },
   {
-    title: "Overview",
-    items: [
-      { id: "dashboard", label: "Dashboard", icon: "dashboard" },
-      { id: "kanban", label: "Pipeline", icon: "kanban" },
-      { id: "byorder", label: "By Order", icon: "orders" },
-      { id: "orders", label: "All Orders", icon: "docs" },
+    label: "Items",
+    icon: "tile",
+    children: [
+      { id: "design", label: "Items", icon: "tile" },
+      { id: "masters", label: "Masters", icon: "settings" },
+      { id: "prod", label: "Production", icon: "factory" },
+      { id: "packing", label: "Pallets", icon: "palette" },
     ],
   },
   {
-    title: "Stages",
-    items: [
+    label: "Sales",
+    icon: "orders",
+    children: [
+      { id: "parties", label: "Customers", icon: "flag" },
+      {
+        label: "Orders",
+        icon: "docs",
+        children: [
+          { id: "kanban", label: "Pipeline", icon: "kanban" },
+          { id: "byorder", label: "By Order", icon: "orders" },
+          { id: "orders", label: "All Orders", icon: "docs" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Stages",
+    icon: "truck",
+    children: [
       { id: "po", label: "Purchase Orders", icon: "docs" },
-      { id: "prod", label: "Production", icon: "factory" },
-      { id: "packing", label: "Pallet Packing", icon: "palette" },
       { id: "loading", label: "Loading", icon: "truck" },
       { id: "final", label: "Final Loading", icon: "invoice" },
     ],
   },
-  {
-    title: "Masters",
-    items: [
-      { id: "design", label: "Design Master", icon: "tile" },
-      { id: "parties", label: "Parties", icon: "flag" },
-    ],
-  },
 ];
 
+/* breadcrumb [section, page] per route id, mirrors the tree hierarchy. */
 const VIEW_LABELS: Record<string, [string, string]> = {
   dashboard: ["Workspace", "Dashboard"],
+  design: ["Items", "Items"],
+  masters: ["Items", "Masters"],
+  prod: ["Items", "Production"],
+  packing: ["Items", "Pallets"],
+  parties: ["Sales", "Customers"],
   kanban: ["Orders", "Pipeline"],
   byorder: ["Orders", "By Order"],
   orders: ["Orders", "All Orders"],
   po: ["Stages", "Purchase Orders"],
-  prod: ["Stages", "Production"],
-  packing: ["Stages", "Pallet Packing"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
-  design: ["Masters", "Design Master"],
-  parties: ["Masters", "Parties"],
 };
+
+/* Labels of every parent on the path to `id` — used to auto-open ancestors. */
+function ancestorsOf(id: string, nodes: NavNode[] = NAV_TREE, trail: string[] = []): string[] | null {
+  for (const n of nodes) {
+    if (n.id === id) return trail;
+    if (n.children) {
+      const found = ancestorsOf(id, n.children, [...trail, n.label]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+interface NavNodeRowProps {
+  node: NavNode;
+  depth: number;
+  counts: Record<string, number | string>;
+  openGroups: Record<string, boolean>;
+  onToggle: (label: string) => void;
+}
+
+/* Renders one tree node: a NavLink leaf, or a collapsible parent that
+   recurses into its children when open. `depth` drives the indent. */
+function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowProps) {
+  const pad = { paddingLeft: 8 + depth * 14 } as const;
+
+  if (!node.children) {
+    const c = counts[node.id!];
+    return (
+      <NavLink to={`/${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
+        <Icon name={node.icon} size={14} className="ic" />
+        <span>{node.label}</span>
+        {c != null && c !== "" && <span className="count">{c}</span>}
+      </NavLink>
+    );
+  }
+
+  const open = !!openGroups[node.label];
+  return (
+    <>
+      <button
+        type="button"
+        className={`item parent ${open ? "open" : ""}`}
+        style={pad}
+        aria-expanded={open}
+        onClick={() => onToggle(node.label)}
+      >
+        <Icon name={node.icon} size={14} className="ic" />
+        <span>{node.label}</span>
+        <Icon name="chev-r" size={13} className="chev" />
+      </button>
+      {open && (
+        <div className="subnav">
+          {node.children.map((child) => (
+            <NavNodeRow
+              key={child.label}
+              node={child}
+              depth={depth + 1}
+              counts={counts}
+              openGroups={openGroups}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function App() {
   const location = useLocation();
   const currentId = location.pathname.replace(/^\//, "") || "dashboard";
+
+  // Which parent groups are expanded. Active route's ancestors auto-open.
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    (ancestorsOf(currentId) || []).forEach((l) => (init[l] = true));
+    return init;
+  });
+  useEffect(() => {
+    const anc = ancestorsOf(currentId);
+    if (anc?.length) setOpenGroups((p) => ({ ...p, ...Object.fromEntries(anc.map((l) => [l, true])) }));
+  }, [currentId]);
+  const toggleGroup = (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] }));
 
   useEffect(() => {
     applyAccent(TWEAK_DEFAULTS.accent);
@@ -120,18 +213,18 @@ export default function App() {
           <div className="ver">v4.0</div>
         </div>
 
-        {NAV_GROUPS.map((g) => (
-          <div className="group" key={g.title}>
-            <div className="group-title">{g.title}</div>
-            {g.items.map((it) => (
-              <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`}>
-                <Icon name={it.icon} size={14} className="ic" />
-                <span>{it.label}</span>
-                {counts[it.id] != null && counts[it.id] !== "" && <span className="count">{counts[it.id]}</span>}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+        <nav className="group">
+          {NAV_TREE.map((n) => (
+            <NavNodeRow
+              key={n.label}
+              node={n}
+              depth={0}
+              counts={counts}
+              openGroups={openGroups}
+              onToggle={toggleGroup}
+            />
+          ))}
+        </nav>
 
         <div className="foot">
           <div className="row" style={{ marginBottom: 6 }}>
@@ -184,6 +277,7 @@ export default function App() {
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/design" element={<DesignMaster />} />
+            <Route path="/masters" element={<Masters />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

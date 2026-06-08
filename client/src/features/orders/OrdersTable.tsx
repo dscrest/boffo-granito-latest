@@ -1,24 +1,79 @@
-/* All Orders table — ported verbatim from prototype/views.jsx. */
+/* All Orders table. Base rows from mock ORDERS; newly-entered orders are
+   kept in local `drafts` state (frontend-only) and shown first. */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass } from "@/lib/format";
-import { ORDERS, STAGES } from "@/data";
+import { DESIGNS, ORDERS, PARTIES, STAGES, type Order } from "@/data";
+import { OrderForm, type OrderDraft } from "./OrderForm";
+
+type OrderRow = Order & { _draft?: boolean };
 
 export function OrdersTable() {
   const [tab, setTab] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [drafts, setDrafts] = useState<OrderDraft[]>([]);
+
+  const addDraft = (dr: OrderDraft) => {
+    setDrafts((p) => [dr, ...p]);
+    setShowForm(false);
+  };
+
+  const allRows = useMemo<OrderRow[]>(() => {
+    const draftRows: OrderRow[] = drafts.map((dr) => {
+      const line = dr.lines[0];
+      const d = DESIGNS.find((x) => x.name === line.design);
+      const party = PARTIES.find((p) => p.name === dr.customer);
+      const orderQty = dr.lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0);
+      return {
+        id: dr._id.slice(0, 6).toUpperCase(),
+        poNumber: dr.po_number,
+        partyCode: party?.code ?? "",
+        party: dr.customer,
+        country: party?.country ?? "",
+        flag: party?.flag ?? "",
+        design: line.design,
+        size: d?.size ?? "",
+        finish: d?.finish ?? "",
+        brand: d?.brand ?? "",
+        orderQty,
+        producedQty: 0,
+        palletizedQty: 0,
+        loadedQty: 0,
+        boxesPerPallet: 0,
+        totalBoxes: orderQty,
+        pallets: 0,
+        stage: STAGES[0].id,
+        orderDate: dr.order_date || "",
+        dueDate: dr.order_date || "—",
+        invoice: null,
+        priority: "normal",
+        daysFromPI: 0,
+        _draft: true,
+      };
+    });
+    return [...draftRows, ...ORDERS];
+  }, [drafts]);
+
   const filtered = useMemo(() => {
-    if (tab === "all") return ORDERS;
-    return ORDERS.filter((o) => o.stage === tab);
-  }, [tab]);
+    if (tab === "all") return allRows;
+    return allRows.filter((o) => o.stage === tab);
+  }, [tab, allRows]);
 
   return (
     <div>
+      {showForm && <OrderForm onSave={addDraft} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">All Orders</div>
           <div className="sub">
-            {filtered.length} of {ORDERS.length} orders · grouped by stage
+            {filtered.length} of {allRows.length} orders · grouped by stage
+            {drafts.length > 0 && (
+              <>
+                {" · "}
+                <span className="dim">{drafts.length} unsaved draft{drafts.length > 1 ? "s" : ""}</span>
+              </>
+            )}
           </div>
         </div>
         <div className="right">
@@ -26,7 +81,7 @@ export function OrdersTable() {
             <Icon name="download" size={13} />
             Export CSV
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New Order
           </button>
@@ -98,6 +153,11 @@ export function OrdersTable() {
                     <td className="mono muted">{o.id}</td>
                     <td className="mono" style={{ color: "var(--fg)" }}>
                       {o.poNumber}
+                      {o._draft && (
+                        <span className="chip" style={{ marginLeft: 6, background: "var(--accent-soft)", color: "var(--accent)" }}>
+                          draft
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span style={{ marginRight: 6 }}>{o.flag}</span>

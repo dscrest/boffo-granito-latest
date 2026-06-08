@@ -1,10 +1,20 @@
-/* Production — ported verbatim from prototype/views.jsx. */
+/* Production — active jobs + Log Production entry form. Logged
+   entries kept in local `logs` state (frontend-only, not persisted). */
+import { useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { ORDERS, type Order } from "@/data";
+import { ProductionForm, type ProductionLog } from "./ProductionForm";
 
 export function Production() {
+  const [showForm, setShowForm] = useState(false);
+  const [logs, setLogs] = useState<ProductionLog[]>([]);
+  const addLog = (l: ProductionLog) => {
+    setLogs((p) => [l, ...p]);
+    setShowForm(false);
+  };
+
   const prodOrders = ORDERS.filter((o) => o.stage === "prod" || o.stage === "packing");
   const grouped: Record<string, Order[]> = {};
   prodOrders.forEach((o) => (grouped[o.size] ||= []).push(o));
@@ -15,22 +25,73 @@ export function Production() {
 
   return (
     <div>
+      {showForm && <ProductionForm onSave={addLog} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Production</div>
-          <div className="sub">{prodOrders.length} active jobs · Plant Morbi · Shift A (07:00–15:00)</div>
+          <div className="sub">
+            {prodOrders.length} active jobs · Plant Morbi · Shift A (07:00–15:00)
+            {logs.length > 0 && (
+              <>
+                {" · "}
+                <span className="dim">{logs.length} unsaved log{logs.length > 1 ? "s" : ""}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="right">
           <button className="hbtn">
             <Icon name="calendar" size={13} />
             26 May 2026
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             Log Production
           </button>
         </div>
       </div>
+
+      {logs.length > 0 && (
+        <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
+          <div className="card-head">
+            <Icon name="factory" size={13} className="ic" />
+            <span style={{ fontWeight: 600 }}>Recent production logs</span>
+            <span className="muted">· {logs.length} this session (local draft)</span>
+          </div>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Design</th>
+                <th>Order</th>
+                <th className="num" style={{ textAlign: "right" }}>
+                  Produced
+                </th>
+                <th>Date</th>
+                <th>Shift</th>
+                <th>By</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((l) => (
+                <tr key={l._id}>
+                  <td>
+                    <span className="design-name">{l.design}</span>
+                  </td>
+                  <td className="mono muted">{l.orderLabel}</td>
+                  <td className="num" style={{ color: "var(--c-blue)" }}>
+                    +{fmt(parseInt(l.qty_delta, 10) || 0)}
+                  </td>
+                  <td className="mono muted">{l.production_date || "—"}</td>
+                  <td className="muted">{l.shift.split(" ")[0]}</td>
+                  <td className="muted">{l.performed_by || "—"}</td>
+                  <td className="muted">{l.note || <span className="dim">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Produced Today" value={fmt(totalProd / 1000) + "k"} unit="sqm" delta="+4.2k vs target" trend="up" spark={[5, 6, 7, 9, 8, 10, 12]} color="var(--c-blue)" />

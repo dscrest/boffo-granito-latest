@@ -13,6 +13,11 @@ export interface SessionUser {
 
 const DEV_USER: SessionUser = { email: "dev@boffo.local", name: "Dev Admin", role: "Admin" };
 
+// Dev-only: a sessionStorage flag stands in for a real session. The login screen
+// shows until the user clicks "Sign in" (no auth backend wired yet); the flag then
+// persists the "signed in" state across reloads until signOut clears it.
+const DEV_SESSION_KEY = "boffo_dev_session";
+
 function toSessionUser(u: CatalystUser): SessionUser {
   const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
   return {
@@ -26,12 +31,8 @@ const useStub = import.meta.env.DEV || !window.catalyst?.auth;
 
 export async function checkSession(): Promise<SessionUser | null> {
   if (useStub) {
-    // Dev-only preview escape hatch: append `?login` to view the anon login screen
-    // (the stub otherwise auto-authenticates and you never see it).
-    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("login")) {
-      return null;
-    }
-    return DEV_USER;
+    // Show the login screen until the user clicks "Sign in" (sets the flag below).
+    return sessionStorage.getItem(DEV_SESSION_KEY) ? DEV_USER : null;
   }
   try {
     const u = await window.catalyst!.auth.isUserAuthenticated();
@@ -60,14 +61,20 @@ export function showLogin(elementId: string): void {
 // route only exists on the deployed/served Catalyst domain.
 export function signInWithZoho(): void {
   if (useStub) {
-    // Dev stub: no real auth available; the gate already treats us as signed in.
-    window.location.assign("/app/index.html");
+    // Dev stub: no real auth backend. Mark the session and reload so the gate
+    // re-checks and lands on the dashboard.
+    sessionStorage.setItem(DEV_SESSION_KEY, "1");
+    window.location.reload();
     return;
   }
   window.location.assign("/__catalyst/auth/login");
 }
 
 export function signOut(): void {
-  if (useStub) return;
+  if (useStub) {
+    sessionStorage.removeItem(DEV_SESSION_KEY);
+    window.location.reload();
+    return;
+  }
   window.catalyst!.auth.signOut("/app/index.html");
 }
