@@ -15,7 +15,11 @@ export interface Design {
   size: string;
   finish: string;
   brand: string;
+  category: string;
 }
+
+/** Item categories (shared by the quote/order item filters + Design master). */
+export const CATEGORIES = ["Marble", "Wood", "Stone", "Cement", "Concrete"];
 
 export interface Stage {
   id: string;
@@ -87,37 +91,37 @@ export const FINISHES = ["Glossy", "Matt", "Carving", "High Glossy", "Hard Matt"
 
 export const DESIGNS: Design[] = [
   // 600x1200 Glossy
-  { name: "Desert Beige", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Hawai Crema", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Hawai White", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Onyx Gris", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Onyx Prime", size: "600x1200", finish: "Matt", brand: "Bonza" },
-  { name: "Onyx Turquoise", size: "600x1200", finish: "High Glossy", brand: "Bonza" },
-  { name: "Pacyfic", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Pasionate", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Pietrasanta Legal", size: "600x1200", finish: "Matt", brand: "Bonza" },
-  { name: "Solace Beige", size: "600x1200", finish: "Glossy", brand: "Bonza" },
-  { name: "Streetline Antracyt", size: "600x1200", finish: "Matt", brand: "Bonza" },
-  { name: "Streetline Grey", size: "600x1200", finish: "Matt", brand: "Bonza" },
-  { name: "Etna Beige", size: "600x1200", finish: "Carving", brand: "Bonza" },
-  { name: "New Carrara", size: "600x1200", finish: "Glossy", brand: "Bonza" },
+  { name: "Desert Beige", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Hawai Crema", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Hawai White", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Onyx Gris", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Onyx Prime", size: "600x1200", finish: "Matt", brand: "Bonza", category: "Marble" },
+  { name: "Onyx Turquoise", size: "600x1200", finish: "High Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Pacyfic", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Pasionate", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Pietrasanta Legal", size: "600x1200", finish: "Matt", brand: "Bonza", category: "Marble" },
+  { name: "Solace Beige", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
+  { name: "Streetline Antracyt", size: "600x1200", finish: "Matt", brand: "Bonza", category: "Stone" },
+  { name: "Streetline Grey", size: "600x1200", finish: "Matt", brand: "Bonza", category: "Stone" },
+  { name: "Etna Beige", size: "600x1200", finish: "Carving", brand: "Bonza", category: "Stone" },
+  { name: "New Carrara", size: "600x1200", finish: "Glossy", brand: "Bonza", category: "Marble" },
   // 200x1200
-  { name: "Chester Wood Natural", size: "200x1200", finish: "Carving", brand: "BIG" },
-  { name: "Elmi Wood Ash", size: "200x1200", finish: "Carving", brand: "BIG" },
-  { name: "Benito Wood Choco", size: "200x1200", finish: "Carving", brand: "BIG" },
-  { name: "Lamer Wood Sand", size: "200x1200", finish: "Carving", brand: "BIG" },
-  { name: "Balmo Wood Pearl", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Burl Wood Honey", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Lorien Wood Miel", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Taptik Wood Honey", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Aspen Wood Bianco", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Axial Wood Grey", size: "200x1200", finish: "Matt", brand: "BIG" },
-  { name: "Axial Wood Natural", size: "200x1200", finish: "Matt", brand: "BIG" },
+  { name: "Chester Wood Natural", size: "200x1200", finish: "Carving", brand: "BIG", category: "Wood" },
+  { name: "Elmi Wood Ash", size: "200x1200", finish: "Carving", brand: "BIG", category: "Wood" },
+  { name: "Benito Wood Choco", size: "200x1200", finish: "Carving", brand: "BIG", category: "Wood" },
+  { name: "Lamer Wood Sand", size: "200x1200", finish: "Carving", brand: "BIG", category: "Wood" },
+  { name: "Balmo Wood Pearl", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Burl Wood Honey", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Lorien Wood Miel", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Taptik Wood Honey", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Aspen Wood Bianco", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Axial Wood Grey", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
+  { name: "Axial Wood Natural", size: "200x1200", finish: "Matt", brand: "BIG", category: "Wood" },
   // 75x600
-  { name: "Purl Marfil", size: "75x600", finish: "Glossy", brand: "Bonza" },
+  { name: "Purl Marfil", size: "75x600", finish: "Glossy", brand: "Bonza", category: "Marble" },
   // 600x600
-  { name: "Earth", size: "600x600", finish: "Carving", brand: "Bonza" },
-  { name: "Gres Pine Beige", size: "600x600", finish: "Matt", brand: "BIG" },
+  { name: "Earth", size: "600x600", finish: "Carving", brand: "Bonza", category: "Stone" },
+  { name: "Gres Pine Beige", size: "600x600", finish: "Matt", brand: "BIG", category: "Stone" },
 ];
 
 export const STAGES: Stage[] = [

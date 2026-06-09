@@ -167,12 +167,17 @@ export function QuotesTable() {
         </div>
       )}
 
-      <div className="tabs">
-        {TABS.map((t) => (
-          <div key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
-            {t.label} <span className="muted mono" style={{ marginLeft: 4 }}>{tabCount(t.id)}</span>
-          </div>
-        ))}
+      <div className="fbar" style={{ marginBottom: 12 }}>
+        <label className="form-field" style={{ width: 240 }}>
+          <span className="lbl">Filter by status</span>
+          <select value={tab} onChange={(e) => setTab(e.target.value)}>
+            {TABS.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label} ({tabCount(t.id)})
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <div className="card">

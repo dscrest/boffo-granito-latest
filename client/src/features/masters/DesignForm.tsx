@@ -9,7 +9,7 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
-import { SIZES, FINISHES } from "@/data";
+import { SIZES, FINISHES, CATEGORIES } from "@/data";
 
 export interface DesignDraft {
   _id: string;
@@ -32,11 +32,12 @@ export interface DesignDraft {
   rate_per_sqmt: string;
   status: string;
   image_url: string;
+  sku: string;
   unique_name: string;
 }
 
-/* Static lookup options (frontend-only). Mirror the Masters seeds. */
-const CATEGORIES = ["Wood", "Marble", "Stone", "Cement", "Concrete"];
+/* Static lookup options (frontend-only). Mirror the Masters seeds.
+   CATEGORIES is shared from @/data (also drives the quote/order item filters). */
 const GLAZES = ["Glossy", "Matt", "Carving"];
 const BRANDS = ["Bonza", "BIG"];
 const GRADES = ["1st"];
@@ -96,8 +97,8 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
 
 const ALL_FIELDS = SECTIONS.flatMap((s) => s.fields);
 
-function blank(): Omit<DesignDraft, "_id" | "unique_name"> {
-  return Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as Omit<DesignDraft, "_id" | "unique_name">;
+function blank(): Omit<DesignDraft, "_id" | "unique_name" | "sku"> {
+  return Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as Omit<DesignDraft, "_id" | "unique_name" | "sku">;
 }
 
 let _seq = 0;
@@ -120,11 +121,34 @@ export function DesignForm({
     return parts.join(" - ");
   }, [v.design_name, v.size, v.finish]);
 
+  // SKU generator: position codes of Size-Category-Finish-Glaze → NN-NN-NN-NN.
+  // 00 = lookup not yet selected. Mirrors the NumberMaster NN-NN-NN-NN format.
+  const sku = useMemo(() => {
+    const pad = (n: number) => (n <= 0 ? "00" : String(n).padStart(2, "0"));
+    return [
+      SIZES.indexOf(v.size) + 1,
+      CATEGORIES.indexOf(v.category) + 1,
+      FINISHES.indexOf(v.finish) + 1,
+      GLAZES.indexOf(v.glaze) + 1,
+    ]
+      .map(pad)
+      .join("-");
+  }, [v.size, v.category, v.finish, v.glaze]);
+
+  const onImage = (file?: File) => {
+    if (!file) return;
+    // Frontend-only: read as a data URL for inline preview. Swap to a Catalyst
+    // Stratus upload (returning a hosted URL) when Design is wired to the DB.
+    const reader = new FileReader();
+    reader.onload = () => set("image_url", String(reader.result));
+    reader.readAsDataURL(file);
+  };
+
   const missing = ALL_FIELDS.some((f) => f.required && !String(v[f.key as keyof typeof v]).trim());
 
   const submit = () => {
     if (missing) return;
-    onSave({ ...v, _id: newId(), unique_name: uniqueName });
+    onSave({ ...v, _id: newId(), unique_name: uniqueName, sku });
   };
 
   return (
@@ -150,7 +174,7 @@ export function DesignForm({
             <span className="chip">{uniqueName || "—"}</span>
             <div style={{ flex: 1 }} />
             <span className="k">sku</span>
-            <span className="chip dim">auto on save</span>
+            <span className="chip">{sku}</span>
           </div>
 
           {SECTIONS.map((sec) => (
@@ -164,7 +188,18 @@ export function DesignForm({
                       {f.suffix && <span className="hint"> ({f.suffix})</span>}
                       {f.required && <span className="req"> *</span>}
                     </span>
-                    {f.kind === "select" ? (
+                    {f.key === "image_url" ? (
+                      <>
+                        <input type="file" accept="image/*" onChange={(e) => onImage(e.target.files?.[0])} />
+                        {v.image_url && (
+                          <img
+                            src={v.image_url}
+                            alt="item preview"
+                            style={{ marginTop: 6, maxHeight: 90, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover" }}
+                          />
+                        )}
+                      </>
+                    ) : f.kind === "select" ? (
                       <select value={v[f.key as keyof typeof v]} onChange={(e) => set(f.key, e.target.value)}>
                         <option value="">—</option>
                         {f.options!.map((o) => (

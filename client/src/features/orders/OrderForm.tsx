@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
-import { DESIGNS, PARTIES, docTotals, type TaxType } from "@/data";
+import { CATEGORIES, DESIGNS, PARTIES, docTotals, type TaxType } from "@/data";
 import { fmt } from "@/lib/format";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
@@ -105,6 +105,11 @@ export function OrderForm({
     taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
+  const [cat, setCat] = useState("");
+  const itemOptions = useMemo(
+    () => (cat ? DESIGNS.filter((d) => d.category === cat) : DESIGNS),
+    [cat],
+  );
 
   const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
   const setLine = (i: number, k: keyof OrderLine, val: string) =>
@@ -216,6 +221,17 @@ export function OrderForm({
           <div className="form-section">
             <div className="form-section-title">
               Line Items
+              <select
+                value={cat}
+                onChange={(e) => setCat(e.target.value)}
+                title="Filter items by category"
+                style={{ marginLeft: 10, height: 28, width: 150, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
+              >
+                <option value="">All categories</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
                 {totalBoxes} boxes · {h.currency} {fmt(totals.net)}
               </span>
@@ -237,7 +253,7 @@ export function OrderForm({
                     <div className="form-field" style={{ gap: 2 }}>
                       <select value={l.design} onChange={(e) => setLine(i, "design", e.target.value)}>
                         <option value="">Select design…</option>
-                        {DESIGNS.map((x) => (
+                        {itemOptions.map((x) => (
                           <option key={x.name} value={x.name}>
                             {x.name}
                           </option>

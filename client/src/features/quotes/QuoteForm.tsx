@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import {
+  CATEGORIES,
   CURRENCIES,
   DESIGNS,
   PARTIES,
@@ -89,6 +90,11 @@ export function QuoteForm({
     terms: "",
   });
   const [lines, setLines] = useState<QuoteLine[]>([emptyLine()]);
+  const [cat, setCat] = useState("");
+  const itemOptions = useMemo(
+    () => (cat ? DESIGNS.filter((d) => d.category === cat) : DESIGNS),
+    [cat],
+  );
   const [charges, setCharges] = useState<Charges>({
     docDiscount: "",
     adjustment: "",
@@ -258,6 +264,17 @@ export function QuoteForm({
           <div className="form-section">
             <div className="form-section-title">
               Line Items
+              <select
+                value={cat}
+                onChange={(e) => setCat(e.target.value)}
+                title="Filter items by category"
+                style={{ marginLeft: 10, height: 28, width: 150, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
+              >
+                <option value="">All categories</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
               <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
                 {h.currency} {fmt(totals.final)} final
               </span>
@@ -280,7 +297,7 @@ export function QuoteForm({
                     <div className="form-field" style={{ gap: 2 }}>
                       <select value={l.item} onChange={(e) => setLine(i, "item", e.target.value)}>
                         <option value="">Select item…</option>
-                        {DESIGNS.map((x) => (
+                        {itemOptions.map((x) => (
                           <option key={x.name} value={x.name}>
                             {x.name}
                           </option>

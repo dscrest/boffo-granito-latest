@@ -8,6 +8,7 @@ import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
+import { checkSession, type SessionUser } from "@/lib/auth";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -48,57 +49,69 @@ interface NavNode {
   children?: NavNode[];
 }
 
-const NAV_TREE: NavNode[] = [
-  { id: "dashboard", label: "Dashboard", icon: "dashboard" },
-  {
-    label: "Items",
-    icon: "tile",
-    children: [
-      { id: "design", label: "Items", icon: "tile" },
-      { id: "masters", label: "Masters", icon: "settings" },
-      { id: "prod", label: "Production", icon: "factory" },
-      { id: "packing", label: "Pallets", icon: "palette" },
-    ],
-  },
-  {
-    label: "Sales",
-    icon: "orders",
-    children: [
-      { id: "quotes", label: "Quotes", icon: "quote" },
-      {
-        label: "Sales Orders",
-        icon: "docs",
-        children: [
-          { id: "kanban", label: "Pipeline", icon: "kanban" },
-          { id: "byorder", label: "By Order", icon: "orders" },
-          { id: "orders", label: "All Orders", icon: "docs" },
-        ],
-      },
-      { id: "parties", label: "Customers", icon: "flag" },
-    ],
-  },
-  {
-    label: "Stages",
-    icon: "truck",
-    children: [
-      { id: "po", label: "Purchase Orders", icon: "docs" },
-      { id: "qc", label: "Quality Control", icon: "shield-check" },
-      { id: "loading", label: "Loading", icon: "truck" },
-      { id: "final", label: "Final Loading", icon: "invoice" },
-    ],
-  },
-  {
-    label: "System",
-    icon: "settings",
-    children: [{ id: "ops", label: "Operations Log", icon: "clock" }],
-  },
-];
+/* Build the sidebar tree. `isAdmin` gates the Settings group (Masters), which is
+   admin-only — non-admins never see the lookup-table editors. Customers leads the
+   Sales group (Books-parity menu order). */
+function navTree(isAdmin: boolean): NavNode[] {
+  const tree: NavNode[] = [
+    { id: "dashboard", label: "Dashboard", icon: "dashboard" },
+    {
+      label: "Items",
+      icon: "tile",
+      children: [
+        { id: "design", label: "Items", icon: "tile" },
+        { id: "prod", label: "Production", icon: "factory" },
+        { id: "packing", label: "Pallets", icon: "palette" },
+      ],
+    },
+    {
+      label: "Sales",
+      icon: "orders",
+      children: [
+        { id: "parties", label: "Customers", icon: "flag" },
+        { id: "quotes", label: "Quotes", icon: "quote" },
+        {
+          label: "Sales Orders",
+          icon: "docs",
+          children: [
+            { id: "kanban", label: "Pipeline", icon: "kanban" },
+            { id: "byorder", label: "By Order", icon: "orders" },
+            { id: "orders", label: "All Orders", icon: "docs" },
+          ],
+        },
+      ],
+    },
+    {
+      label: "Stages",
+      icon: "truck",
+      children: [
+        { id: "po", label: "Purchase Orders", icon: "docs" },
+        { id: "qc", label: "Quality Control", icon: "shield-check" },
+        { id: "loading", label: "Loading", icon: "truck" },
+        { id: "final", label: "Final Loading", icon: "invoice" },
+      ],
+    },
+    {
+      label: "System",
+      icon: "settings",
+      children: [{ id: "ops", label: "Operations Log", icon: "clock" }],
+    },
+  ];
+  if (isAdmin) {
+    tree.push({
+      label: "Settings",
+      icon: "settings",
+      children: [{ id: "masters", label: "Masters", icon: "settings" }],
+    });
+  }
+  return tree;
+}
 
 /* breadcrumb [section, page] per route id, mirrors the tree hierarchy. */
 const VIEW_LABELS: Record<string, [string, string]> = {
   dashboard: ["Workspace", "Dashboard"],
   design: ["Items", "Items"],
-  masters: ["Items", "Masters"],
+  masters: ["Settings", "Masters"],
   prod: ["Items", "Production"],
   packing: ["Items", "Pallets"],
   quotes: ["Sales", "Quotes"],
@@ -114,7 +127,7 @@ const VIEW_LABELS: Record<string, [string, string]> = {
 };
 
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
-function ancestorsOf(id: string, nodes: NavNode[] = NAV_TREE, trail: string[] = []): string[] | null {
+function ancestorsOf(id: string, nodes: NavNode[] = navTree(true), trail: string[] = []): string[] | null {
   for (const n of nodes) {
     if (n.id === id) return trail;
     if (n.children) {
@@ -185,6 +198,14 @@ export default function App() {
   const location = useLocation();
   const currentId = location.pathname.replace(/^\//, "") || "dashboard";
 
+  // Session → admin gate for the Settings (Masters) group + route.
+  const [user, setUser] = useState<SessionUser | null>(null);
+  useEffect(() => {
+    void checkSession().then(setUser);
+  }, []);
+  const isAdmin = user?.role === "Admin";
+  const tree = useMemo(() => navTree(isAdmin), [isAdmin]);
+
   // Which parent groups are expanded. Active route's ancestors auto-open.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -227,7 +248,7 @@ export default function App() {
         </div>
 
         <nav className="group">
-          {NAV_TREE.map((n) => (
+          {tree.map((n) => (
             <NavNodeRow
               key={n.label}
               node={n}
@@ -293,7 +314,7 @@ export default function App() {
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/design" element={<DesignMaster />} />
-            <Route path="/masters" element={<Masters />} />
+            <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
