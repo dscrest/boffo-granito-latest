@@ -7,7 +7,10 @@
    from a handful of parallel list() calls.
    ============================================================ */
 import { list, remove, update, op, type DSRow } from "@/lib/dataOps";
-import type { Quote, QuoteLine, QuoteStatus } from "@/data";
+import type { Quote, QuoteLine, QuoteStatus, TaxType } from "@/data";
+
+const toTaxType = (v: unknown): TaxType =>
+  v === "TDS" || v === "TCS" ? v : "None";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -81,6 +84,11 @@ export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; erro
       referenceNo: str(r.reference_no),
       customerNotes: str(r.customer_notes),
       terms: str(r.terms),
+      docDiscount: num(r.discount),
+      adjustment: num(r.adjustment),
+      taxType: toTaxType(r.tax_type),
+      taxPct: num(r.tax_pct),
+      taxAmount: num(r.tax_amount),
       lines: linesByQuote.get(id) || [],
       soNumber: soByQuote.get(id) || null,
     };
@@ -104,6 +112,10 @@ export interface NewQuoteInput {
   reference_no: string;
   customer_notes: string;
   terms: string;
+  discount: number;
+  adjustment: number;
+  tax_type: string;
+  tax_pct: number;
   lines: { item: string; qty: number; rate: number; discount: number }[];
 }
 

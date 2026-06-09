@@ -222,6 +222,24 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/**
+ * Document-level charges (Books parity). Mirrors client docTotals() in data.ts.
+ * Takes the summed line subtotal + the request body (discount / adjustment /
+ * tax_type / tax_pct) and returns the persisted fields + net total.
+ * TDS reduces the net (withheld); TCS increases it (collected).
+ */
+function docCompute(lineSubtotal, body) {
+  const docDiscount = Number(body.discount) || 0;
+  const adjustment = Number(body.adjustment) || 0;
+  const taxable = round2((Number(lineSubtotal) || 0) - docDiscount + adjustment);
+  const taxPct = Number(body.tax_pct) || 0;
+  const taxType = body.tax_type === "TDS" || body.tax_type === "TCS" ? body.tax_type : "None";
+  const taxAmt = round2(taxable * (taxPct / 100));
+  const signedTax = taxType === "TDS" ? -taxAmt : taxType === "TCS" ? taxAmt : 0;
+  const net = round2(taxable + signedTax);
+  return { discount: docDiscount, adjustment, tax_pct: taxPct, tax_type: taxType, tax_amount: taxAmt, total_amount: net };
+}
+
 /* ----------------------------------------------------------------
    Health / root
    ---------------------------------------------------------------- */
@@ -259,6 +277,7 @@ app.post("/quote-with-items", async (req, res) => {
           return { line: l, sub };
         });
 
+        const doc = docCompute(total, body);
         const quoteRow = await ds.table("Quote").insertRow({
           quote_number: body.quote_number || "",
           customer: resolve(cMap, body.customer),
@@ -276,7 +295,12 @@ app.post("/quote-with-items", async (req, res) => {
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
           conversion_flag: "None",
-          total_amount: round2(total),
+          discount: doc.discount,
+          adjustment: doc.adjustment,
+          tax_type: doc.tax_type,
+          tax_pct: doc.tax_pct,
+          tax_amount: doc.tax_amount,
+          total_amount: doc.total_amount,
         });
         const quoteId = quoteRow.ROWID;
 
@@ -293,7 +317,7 @@ app.post("/quote-with-items", async (req, res) => {
             final_total: it.sub,
           });
         }
-        return { rowid: quoteId, data: { ROWID: quoteId, total_amount: round2(total) } };
+        return { rowid: quoteId, data: { ROWID: quoteId, total_amount: doc.total_amount } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -341,6 +365,7 @@ async function createSalesOrder(ds, body, maps) {
     return { line: l, sub };
   });
 
+  const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
     order_number: body.order_number || "",
     quote: body.quote_rowid || null,
@@ -359,7 +384,12 @@ async function createSalesOrder(ds, body, maps) {
     salesperson: body.salesperson || "",
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
-    total_amount: round2(total),
+    discount: doc.discount,
+    adjustment: doc.adjustment,
+    tax_type: doc.tax_type,
+    tax_pct: doc.tax_pct,
+    tax_amount: doc.tax_amount,
+    total_amount: doc.total_amount,
   });
   const soId = soRow.ROWID;
   for (const it of items) {
@@ -383,7 +413,7 @@ async function createSalesOrder(ds, body, maps) {
       final_total: it.sub,
     });
   }
-  return { rowid: soId, data: { ROWID: soId, total_amount: round2(total) } };
+  return { rowid: soId, data: { ROWID: soId, total_amount: doc.total_amount } };
 }
 
 /* ----------------------------------------------------------------
@@ -436,6 +466,11 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             salesperson: body.salesperson || q.salesperson || "",
             customer_notes: body.customer_notes || q.customer_notes || "",
             terms: body.terms || q.terms || "",
+            // Doc-level charges: inherit from the source quote unless overridden.
+            discount: body.discount != null ? body.discount : q.discount,
+            adjustment: body.adjustment != null ? body.adjustment : q.adjustment,
+            tax_type: body.tax_type || q.tax_type || "None",
+            tax_pct: body.tax_pct != null ? body.tax_pct : q.tax_pct,
             quote_rowid: quoteId,
             lines: Array.isArray(body.lines) ? body.lines : [],
           },

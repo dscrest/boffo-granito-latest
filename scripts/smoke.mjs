@@ -33,6 +33,11 @@ const main = async () => {
     reference_no: "REF-SMOKE-1",
     customer_notes: "smoke customer note",
     terms: "Net 30; smoke terms",
+    // Doc-level charges (gaps 6-7): subtotal 750 − 50 + 10 = 710; TCS 2% = +14.2 → net 724.2
+    discount: 50,
+    adjustment: 10,
+    tax_type: "TCS",
+    tax_pct: 2,
     lines: [
       { item: "Desert Beige", qty: 100, rate: 5, discount: 10 },
       { item: "Onyx Gris", qty: 50, rate: 6, discount: 0 },
@@ -46,8 +51,11 @@ const main = async () => {
   const qr = ql.d && ql.d.row;
   console.log("status", ql.status, "fields", JSON.stringify(qr && {
     expiry_date: qr.expiry_date, salesperson: qr.salesperson, reference_no: qr.reference_no,
-    customer_notes: qr.customer_notes, terms: qr.terms, total_amount: qr.total_amount,
+    customer_notes: qr.customer_notes, terms: qr.terms,
+    discount: qr.discount, adjustment: qr.adjustment, tax_type: qr.tax_type,
+    tax_pct: qr.tax_pct, tax_amount: qr.tax_amount, total_amount: qr.total_amount,
   }));
+  console.log("   expected: discount=50 adjustment=10 tax_type=TCS tax_amount=14.2 total_amount=724.2");
 
   if (quoteId) {
     console.log("3) convert quote (full)");
@@ -71,8 +79,11 @@ const main = async () => {
       const sr = so.d && so.d.row;
       console.log(" SO fields", JSON.stringify(sr && {
         shipment_date: sr.shipment_date, salesperson: sr.salesperson,
-        customer_notes: sr.customer_notes, terms: sr.terms, total_amount: sr.total_amount,
+        customer_notes: sr.customer_notes, terms: sr.terms,
+        discount: sr.discount, adjustment: sr.adjustment, tax_type: sr.tax_type,
+        tax_pct: sr.tax_pct, tax_amount: sr.tax_amount, total_amount: sr.total_amount,
       }));
+      console.log("   expected (inherited from quote): discount=50 adjustment=10 tax_type=TCS total_amount=724.2");
     }
   }
 

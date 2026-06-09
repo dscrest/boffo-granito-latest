@@ -5,11 +5,16 @@
    ============================================================ */
 import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
-import { DESIGNS, lineTotals, quoteTotals, type Quote } from "@/data";
+import { DESIGNS, docTotals, lineTotals, type Quote } from "@/data";
 import { fmt } from "@/lib/format";
 
 export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => void }) {
-  const totals = quoteTotals(quote);
+  const totals = docTotals(quote.lines, {
+    docDiscount: quote.docDiscount,
+    adjustment: quote.adjustment,
+    taxType: quote.taxType,
+    taxPct: quote.taxPct,
+  });
 
   return createPortal(
     <div className="qprint-overlay" onClick={onClose}>
@@ -95,8 +100,18 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
           </div>
           <div className="qp-sum">
             <div className="row"><span>Gross</span><b className="mono">{quote.currency} {fmt(totals.gross)}</b></div>
-            <div className="row"><span>Discount</span><b className="mono">− {quote.currency} {fmt(totals.discount)}</b></div>
-            <div className="row grand"><span>Final Total</span><b className="mono">{quote.currency} {fmt(totals.final)}</b></div>
+            <div className="row"><span>Line Discount</span><b className="mono">− {quote.currency} {fmt(totals.discount)}</b></div>
+            <div className="row"><span>Subtotal</span><b className="mono">{quote.currency} {fmt(totals.final)}</b></div>
+            {totals.docDiscount > 0 && (
+              <div className="row"><span>Discount</span><b className="mono">− {quote.currency} {fmt(totals.docDiscount)}</b></div>
+            )}
+            {totals.adjustment !== 0 && (
+              <div className="row"><span>Adjustment</span><b className="mono">{quote.currency} {fmt(totals.adjustment)}</b></div>
+            )}
+            {totals.taxType !== "None" && (
+              <div className="row"><span>{totals.taxType} ({totals.taxPct}%)</span><b className="mono">{totals.taxType === "TDS" ? "− " : "+ "}{quote.currency} {fmt(totals.taxAmt)}</b></div>
+            )}
+            <div className="row grand"><span>Net Total</span><b className="mono">{quote.currency} {fmt(totals.net)}</b></div>
           </div>
         </section>
 

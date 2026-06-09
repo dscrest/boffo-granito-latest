@@ -7,8 +7,11 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
-import { DESIGNS, PARTIES } from "@/data";
+import { Combobox } from "@/ui/Combobox";
+import { DESIGNS, PARTIES, docTotals, type TaxType } from "@/data";
 import { fmt } from "@/lib/format";
+
+const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
 
 export interface OrderLine {
   design: string;
@@ -31,6 +34,10 @@ export interface OrderDraft {
   salesperson: string;
   customer_notes: string;
   terms: string;
+  docDiscount: string;
+  adjustment: string;
+  taxType: TaxType;
+  taxPct: string;
   lines: OrderLine[];
 }
 
@@ -92,10 +99,14 @@ export function OrderForm({
     salesperson: "",
     customer_notes: "",
     terms: "",
+    docDiscount: "",
+    adjustment: "",
+    taxType: "None",
+    taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
 
-  const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }));
+  const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
   const setLine = (i: number, k: keyof OrderLine, val: string) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
@@ -105,7 +116,28 @@ export function OrderForm({
     () => lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0),
     [lines],
   );
-  const orderTotal = useMemo(() => lines.reduce((s, l) => s + orderLineSub(l), 0), [lines]);
+  const charge = useMemo(
+    () => ({
+      docDiscount: Number(h.docDiscount) || 0,
+      adjustment: Number(h.adjustment) || 0,
+      taxType: h.taxType,
+      taxPct: Number(h.taxPct) || 0,
+    }),
+    [h.docDiscount, h.adjustment, h.taxType, h.taxPct],
+  );
+  const totals = useMemo(
+    () =>
+      docTotals(
+        lines.map((l) => ({
+          item: l.design,
+          qty: parseInt(l.ordered_qty_boxes, 10) || 0,
+          rate: parseFloat(l.rate) || 0,
+          discount: parseFloat(l.discount) || 0,
+        })),
+        charge,
+      ),
+    [lines, charge],
+  );
   const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
   const missing = HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) || validLines.length === 0;
 
@@ -140,7 +172,14 @@ export function OrderForm({
                     {f.label}
                     {f.required && <span className="req"> *</span>}
                   </span>
-                  {f.kind === "select" ? (
+                  {f.key === "customer" ? (
+                    <Combobox
+                      value={h.customer}
+                      onChange={(v) => setHead("customer", v)}
+                      placeholder="Search customer…"
+                      options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                    />
+                  ) : f.kind === "select" ? (
                     <select value={h[f.key as keyof typeof h]} onChange={(e) => setHead(f.key, e.target.value)}>
                       <option value="">—</option>
                       {f.options!.map((o) => (
@@ -178,7 +217,7 @@ export function OrderForm({
             <div className="form-section-title">
               Line Items
               <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                {totalBoxes} boxes · {h.currency} {fmt(orderTotal)}
+                {totalBoxes} boxes · {h.currency} {fmt(totals.net)}
               </span>
             </div>
 
@@ -243,9 +282,36 @@ export function OrderForm({
             </button>
 
             <div className="qt-totals">
+              <div className="row">
+                <span className="dim">Subtotal</span>
+                <span className="mono">{h.currency} {fmt(totals.final)}</span>
+              </div>
+              <div className="row charge">
+                <span className="dim">Discount</span>
+                <input type="number" value={h.docDiscount} placeholder="0.00" onChange={(e) => setHead("docDiscount", e.target.value)} />
+              </div>
+              <div className="row charge">
+                <span className="dim">Adjustment</span>
+                <input type="number" value={h.adjustment} placeholder="0.00" onChange={(e) => setHead("adjustment", e.target.value)} />
+              </div>
+              <div className="row charge">
+                <span className="lbl-wrap">
+                  <select value={h.taxType} onChange={(e) => setHead("taxType", e.target.value)}>
+                    {TAX_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  {h.taxType !== "None" && (
+                    <input type="number" value={h.taxPct} placeholder="%" onChange={(e) => setHead("taxPct", e.target.value)} />
+                  )}
+                </span>
+                <span className="mono" style={{ color: h.taxType === "TDS" ? "var(--c-red)" : "var(--fg)" }}>
+                  {h.taxType === "TDS" ? "− " : h.taxType === "TCS" ? "+ " : ""}{h.currency} {fmt(totals.taxAmt)}
+                </span>
+              </div>
               <div className="row total">
                 <span>Order Total</span>
-                <span className="mono">{h.currency} {fmt(orderTotal)}</span>
+                <span className="mono">{h.currency} {fmt(totals.net)}</span>
               </div>
             </div>
           </div>

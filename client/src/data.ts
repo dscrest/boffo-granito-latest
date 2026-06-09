@@ -58,6 +58,12 @@ export interface Order {
   customerNotes?: string;
   terms?: string;
   totalAmount?: number;
+  /** Doc-level charges (SalesOrder header). */
+  docDiscount?: number;
+  adjustment?: number;
+  taxType?: TaxType;
+  taxPct?: number;
+  taxAmount?: number;
 }
 
 export interface Activity {
@@ -266,6 +272,9 @@ export type QuoteStatus =
   | "Converted"
   | "PartiallyConverted";
 
+/** Withholding-tax mode (Books parity). TDS subtracts, TCS adds. */
+export type TaxType = "None" | "TDS" | "TCS";
+
 export interface QuoteLine {
   /** Design/item name — resolves against DESIGNS for size/finish/brand. */
   item: string;
@@ -296,6 +305,16 @@ export interface Quote {
   customerNotes?: string;
   /** Terms & conditions text. */
   terms?: string;
+  /** Doc-level discount amount (off line subtotal). */
+  docDiscount?: number;
+  /** Manual +/- adjustment to the total. */
+  adjustment?: number;
+  /** Tax mode: None | TDS | TCS. */
+  taxType?: TaxType;
+  /** Tax percentage applied to the taxable amount. */
+  taxPct?: number;
+  /** Computed tax amount (positive). */
+  taxAmount?: number;
   lines: QuoteLine[];
   /** SO number once converted (full or partial). */
   soNumber: string | null;
@@ -328,6 +347,37 @@ export function quoteTotals(q: { lines: QuoteLine[] }) {
     },
     { gross: 0, discount: 0, final: 0 },
   );
+}
+
+const round2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
+
+export interface DocCharges {
+  /** Doc-level discount amount, off the line subtotal. */
+  docDiscount?: number;
+  /** Manual +/- adjustment. */
+  adjustment?: number;
+  /** Tax mode. */
+  taxType?: TaxType;
+  /** Tax percentage. */
+  taxPct?: number;
+}
+
+/**
+ * Full document totals: line subtotal → doc discount → adjustment → tax → net.
+ * TDS reduces the net (tax withheld); TCS increases it (tax collected).
+ * Single source of truth — backend `docCompute` in data-ops mirrors this.
+ */
+export function docTotals(lines: QuoteLine[], c: DocCharges = {}) {
+  const base = quoteTotals({ lines }); // gross, discount (line-level), final
+  const docDiscount = c.docDiscount || 0;
+  const adjustment = c.adjustment || 0;
+  const taxable = round2(base.final - docDiscount + adjustment);
+  const taxPct = c.taxPct || 0;
+  const taxType: TaxType = c.taxType || "None";
+  const taxAmt = round2(taxable * (taxPct / 100));
+  const signedTax = taxType === "TDS" ? -taxAmt : taxType === "TCS" ? taxAmt : 0;
+  const net = round2(taxable + signedTax);
+  return { ...base, docDiscount, adjustment, taxable, taxType, taxPct, taxAmt, signedTax, net };
 }
 
 const CUSTOMER_ADDR: Record<string, string> = {

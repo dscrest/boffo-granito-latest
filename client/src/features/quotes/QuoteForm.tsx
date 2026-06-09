@@ -7,20 +7,30 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { Combobox } from "@/ui/Combobox";
 import {
   CURRENCIES,
   DESIGNS,
   PARTIES,
   PAYMENT_TERMS,
   PORTS,
+  docTotals,
   lineTotals,
-  quoteTotals,
   type Quote,
   type QuoteLine,
+  type TaxType,
 } from "@/data";
 import { fmt } from "@/lib/format";
 
 const STATUSES = ["Draft", "Sent", "Accepted"] as const;
+const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
+
+interface Charges {
+  docDiscount: string;
+  adjustment: string;
+  taxType: TaxType;
+  taxPct: string;
+}
 
 const CUSTOMER_ADDR: Record<string, string> = {
   MRK: "ul. Czerwone Maki 65, 30-392 Kraków, Poland",
@@ -79,6 +89,14 @@ export function QuoteForm({
     terms: "",
   });
   const [lines, setLines] = useState<QuoteLine[]>([emptyLine()]);
+  const [charges, setCharges] = useState<Charges>({
+    docDiscount: "",
+    adjustment: "",
+    taxType: "None",
+    taxPct: "",
+  });
+  const setCharge = <K extends keyof Charges>(k: K, val: Charges[K]) =>
+    setCharges((p) => ({ ...p, [k]: val }));
 
   const setHead = (k: keyof Head, val: string) =>
     setH((p) => {
@@ -99,7 +117,16 @@ export function QuoteForm({
   const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
 
   const validLines = lines.filter((l) => l.item && l.qty > 0);
-  const totals = useMemo(() => quoteTotals({ lines: validLines }), [validLines]);
+  const charge = useMemo(
+    () => ({
+      docDiscount: Number(charges.docDiscount) || 0,
+      adjustment: Number(charges.adjustment) || 0,
+      taxType: charges.taxType,
+      taxPct: Number(charges.taxPct) || 0,
+    }),
+    [charges],
+  );
+  const totals = useMemo(() => docTotals(validLines, charge), [validLines, charge]);
   const missing = !h.customer.trim() || validLines.length === 0;
 
   const submit = () => {
@@ -111,6 +138,11 @@ export function QuoteForm({
       quoteNo: `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
       partyCode: party?.code ?? "",
       soNumber: null,
+      docDiscount: charge.docDiscount,
+      adjustment: charge.adjustment,
+      taxType: charge.taxType,
+      taxPct: charge.taxPct,
+      taxAmount: totals.taxAmt,
       lines: validLines,
     });
   };
@@ -139,14 +171,12 @@ export function QuoteForm({
                 <span className="lbl">
                   Customer<span className="req"> *</span>
                 </span>
-                <select value={h.customer} onChange={(e) => setHead("customer", e.target.value)}>
-                  <option value="">—</option>
-                  {PARTIES.map((p) => (
-                    <option key={p.code} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={h.customer}
+                  onChange={(v) => setHead("customer", v)}
+                  placeholder="Search customer…"
+                  options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Quote Date</span>
@@ -285,12 +315,39 @@ export function QuoteForm({
                 <span className="mono">{h.currency} {fmt(totals.gross)}</span>
               </div>
               <div className="row">
-                <span className="dim">Discount</span>
+                <span className="dim">Line Discount</span>
                 <span className="mono" style={{ color: "var(--c-red)" }}>− {h.currency} {fmt(totals.discount)}</span>
               </div>
-              <div className="row total">
-                <span>Final Total</span>
+              <div className="row">
+                <span className="dim">Subtotal</span>
                 <span className="mono">{h.currency} {fmt(totals.final)}</span>
+              </div>
+              <div className="row charge">
+                <span className="dim">Discount</span>
+                <input type="number" value={charges.docDiscount} placeholder="0.00" onChange={(e) => setCharge("docDiscount", e.target.value)} />
+              </div>
+              <div className="row charge">
+                <span className="dim">Adjustment</span>
+                <input type="number" value={charges.adjustment} placeholder="0.00" onChange={(e) => setCharge("adjustment", e.target.value)} />
+              </div>
+              <div className="row charge">
+                <span className="lbl-wrap">
+                  <select value={charges.taxType} onChange={(e) => setCharge("taxType", e.target.value as TaxType)}>
+                    {TAX_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  {charges.taxType !== "None" && (
+                    <input type="number" value={charges.taxPct} placeholder="%" onChange={(e) => setCharge("taxPct", e.target.value)} />
+                  )}
+                </span>
+                <span className="mono" style={{ color: charges.taxType === "TDS" ? "var(--c-red)" : "var(--fg)" }}>
+                  {charges.taxType === "TDS" ? "− " : charges.taxType === "TCS" ? "+ " : ""}{h.currency} {fmt(totals.taxAmt)}
+                </span>
+              </div>
+              <div className="row total">
+                <span>Net Total</span>
+                <span className="mono">{h.currency} {fmt(totals.net)}</span>
               </div>
             </div>
           </div>

@@ -6,7 +6,10 @@
    match the flat Order shape in client/src/data.ts.
    ============================================================ */
 import { list, remove, op, type DSRow } from "@/lib/dataOps";
-import type { Order } from "@/data";
+import type { Order, TaxType } from "@/data";
+
+const toTaxType = (v: unknown): TaxType =>
+  v === "TDS" || v === "TCS" ? v : "None";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -86,6 +89,11 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
       customerNotes: so ? str(so.customer_notes) : "",
       terms: so ? str(so.terms) : "",
       totalAmount: so ? num(so.total_amount) : 0,
+      docDiscount: so ? num(so.discount) : 0,
+      adjustment: so ? num(so.adjustment) : 0,
+      taxType: so ? toTaxType(so.tax_type) : "None",
+      taxPct: so ? num(so.tax_pct) : 0,
+      taxAmount: so ? num(so.tax_amount) : 0,
     };
   });
 
@@ -107,6 +115,10 @@ export interface NewSalesOrderInput {
   salesperson: string;
   customer_notes: string;
   terms: string;
+  discount: number;
+  adjustment: number;
+  tax_type: string;
+  tax_pct: number;
   lines: { item: string; qty: number; rate: number; discount?: number; stage?: string; priority?: string; due_date?: string }[];
 }
 

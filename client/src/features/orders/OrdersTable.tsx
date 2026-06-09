@@ -28,6 +28,10 @@ function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     salesperson: dr.salesperson,
     customer_notes: dr.customer_notes,
     terms: dr.terms,
+    discount: parseFloat(dr.docDiscount) || 0,
+    adjustment: parseFloat(dr.adjustment) || 0,
+    tax_type: dr.taxType,
+    tax_pct: parseFloat(dr.taxPct) || 0,
     lines: dr.lines.map((l) => ({
       item: l.design,
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,

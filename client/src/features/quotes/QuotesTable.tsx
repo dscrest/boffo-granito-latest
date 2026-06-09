@@ -54,6 +54,10 @@ function quoteToInput(q: Quote): NewQuoteInput {
     reference_no: q.referenceNo || "",
     customer_notes: q.customerNotes || "",
     terms: q.terms || "",
+    discount: q.docDiscount || 0,
+    adjustment: q.adjustment || 0,
+    tax_type: q.taxType || "None",
+    tax_pct: q.taxPct || 0,
     lines: q.lines.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount })),
   };
 }
