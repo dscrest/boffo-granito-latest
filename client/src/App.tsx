@@ -66,9 +66,9 @@ function navTree(isAdmin: boolean): NavNode[] {
     },
     {
       label: "Sales",
-      icon: "orders",
+      icon: "cart",
       children: [
-        { id: "parties", label: "Customers", icon: "flag" },
+        { id: "parties", label: "Customers", icon: "users" },
         { id: "quotes", label: "Quotes", icon: "quote" },
         {
           label: "Sales Orders",
