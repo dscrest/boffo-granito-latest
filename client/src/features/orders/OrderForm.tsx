@@ -8,11 +8,13 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, PARTIES } from "@/data";
+import { fmt } from "@/lib/format";
 
 export interface OrderLine {
   design: string;
   ordered_qty_boxes: string;
   rate: string;
+  discount: string;
 }
 
 export interface OrderDraft {
@@ -20,12 +22,23 @@ export interface OrderDraft {
   customer: string;
   po_number: string;
   order_date: string;
+  shipment_date: string;
   payment_term: string;
   port_of_discharge: string;
   status: string;
   currency: string;
   remarks: string;
+  salesperson: string;
+  customer_notes: string;
+  terms: string;
   lines: OrderLine[];
+}
+
+/** qty * rate, less discount %. Mirrors the server's per-line math. */
+function orderLineSub(l: OrderLine): number {
+  const gross = (parseInt(l.ordered_qty_boxes, 10) || 0) * (parseFloat(l.rate) || 0);
+  const disc = gross * ((parseFloat(l.discount) || 0) / 100);
+  return gross - disc;
 }
 
 const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
@@ -45,13 +58,15 @@ const HEADER: FieldSpec[] = [
   { key: "customer", label: "Customer", kind: "select", options: PARTIES.map((p) => p.name), required: true },
   { key: "po_number", label: "PO Number", required: true },
   { key: "order_date", label: "Order Date", kind: "date" },
+  { key: "shipment_date", label: "Shipment Date", kind: "date" },
   { key: "payment_term", label: "Payment Term", kind: "select", options: PAYMENT_TERMS },
   { key: "currency", label: "Currency", kind: "select", options: CURRENCIES },
   { key: "status", label: "Status", kind: "select", options: STATUSES },
+  { key: "salesperson", label: "Salesperson" },
   { key: "port_of_discharge", label: "Port of Discharge" },
 ];
 
-const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "" });
+const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "", discount: "" });
 
 let _seq = 0;
 const newId = () =>
@@ -68,11 +83,15 @@ export function OrderForm({
     customer: "",
     po_number: "",
     order_date: "",
+    shipment_date: "",
     payment_term: "",
     port_of_discharge: "",
     status: "Confirmed",
     currency: "EUR",
     remarks: "",
+    salesperson: "",
+    customer_notes: "",
+    terms: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
 
@@ -86,6 +105,7 @@ export function OrderForm({
     () => lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0),
     [lines],
   );
+  const orderTotal = useMemo(() => lines.reduce((s, l) => s + orderLineSub(l), 0), [lines]);
   const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
   const missing = HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) || validLines.length === 0;
 
@@ -139,6 +159,18 @@ export function OrderForm({
                   )}
                 </label>
               ))}
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Remarks</span>
+                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Customer Notes</span>
+                <textarea rows={2} value={h.customer_notes} onChange={(e) => setHead("customer_notes", e.target.value)} placeholder="Notes shown to the customer" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Terms &amp; Conditions</span>
+                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
+              </label>
             </div>
           </div>
 
@@ -146,21 +178,23 @@ export function OrderForm({
             <div className="form-section-title">
               Line Items
               <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                {totalBoxes} boxes
+                {totalBoxes} boxes · {h.currency} {fmt(orderTotal)}
               </span>
             </div>
 
             <div className="ord-lines">
-              <div className="ord-line ord-line-head">
+              <div className="ord-line ord-line-head qt-line">
                 <span>Design</span>
                 <span>Qty (boxes)</span>
                 <span>Rate</span>
+                <span>Disc %</span>
+                <span>Sub Total</span>
                 <span />
               </div>
               {lines.map((l, i) => {
                 const d = DESIGNS.find((x) => x.name === l.design);
                 return (
-                  <div className="ord-line" key={i}>
+                  <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
                       <select value={l.design} onChange={(e) => setLine(i, "design", e.target.value)}>
                         <option value="">Select design…</option>
@@ -188,6 +222,15 @@ export function OrderForm({
                       onChange={(e) => setLine(i, "rate", e.target.value)}
                       placeholder="0.00"
                     />
+                    <input
+                      type="number"
+                      value={l.discount}
+                      onChange={(e) => setLine(i, "discount", e.target.value)}
+                      placeholder="0"
+                    />
+                    <span className="mono" style={{ alignSelf: "center", color: "var(--fg)" }}>
+                      {fmt(orderLineSub(l))}
+                    </span>
                     <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
                       ✕
                     </button>
@@ -198,6 +241,13 @@ export function OrderForm({
             <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
               <Icon name="plus" size={12} /> Add line
             </button>
+
+            <div className="qt-totals">
+              <div className="row total">
+                <span>Order Total</span>
+                <span className="mono">{h.currency} {fmt(orderTotal)}</span>
+              </div>
+            </div>
           </div>
         </div>
 

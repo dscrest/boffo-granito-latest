@@ -35,9 +35,23 @@ let _seq = 0;
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `q${++_seq}`;
 
-type Head = Pick<
-  Quote,
-  "customer" | "address" | "quoteDate" | "paymentTerm" | "portOfDischarge" | "status" | "currency" | "remarks"
+type Head = Required<
+  Pick<
+    Quote,
+    | "customer"
+    | "address"
+    | "quoteDate"
+    | "expiryDate"
+    | "paymentTerm"
+    | "portOfDischarge"
+    | "status"
+    | "currency"
+    | "remarks"
+    | "salesperson"
+    | "referenceNo"
+    | "customerNotes"
+    | "terms"
+  >
 >;
 
 export function QuoteForm({
@@ -53,11 +67,16 @@ export function QuoteForm({
     customer: "",
     address: "",
     quoteDate: "",
+    expiryDate: "",
     paymentTerm: "",
     portOfDischarge: "",
     status: "Draft",
     currency: "EUR",
     remarks: "",
+    salesperson: "",
+    referenceNo: "",
+    customerNotes: "",
+    terms: "",
   });
   const [lines, setLines] = useState<QuoteLine[]>([emptyLine()]);
 
@@ -134,6 +153,18 @@ export function QuoteForm({
                 <input type="date" value={h.quoteDate} onChange={(e) => setHead("quoteDate", e.target.value)} />
               </label>
               <label className="form-field">
+                <span className="lbl">Expiry Date</span>
+                <input type="date" value={h.expiryDate} onChange={(e) => setHead("expiryDate", e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Reference No.</span>
+                <input value={h.referenceNo} onChange={(e) => setHead("referenceNo", e.target.value)} placeholder="Customer PO / ref" />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Salesperson</span>
+                <input value={h.salesperson} onChange={(e) => setHead("salesperson", e.target.value)} placeholder="Owner" />
+              </label>
+              <label className="form-field">
                 <span className="lbl">Payment Term</span>
                 <select value={h.paymentTerm} onChange={(e) => setHead("paymentTerm", e.target.value)}>
                   <option value="">—</option>
@@ -182,6 +213,14 @@ export function QuoteForm({
               <label className="form-field" style={{ gridColumn: "1 / -1" }}>
                 <span className="lbl">Remarks</span>
                 <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Customer Notes</span>
+                <textarea rows={2} value={h.customerNotes} onChange={(e) => setHead("customerNotes", e.target.value)} placeholder="Notes shown to the customer" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Terms &amp; Conditions</span>
+                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
               </label>
             </div>
           </div>

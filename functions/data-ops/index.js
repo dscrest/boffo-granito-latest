@@ -231,8 +231,9 @@ app.get("/", (_req, res) => {
 
 /* ----------------------------------------------------------------
    Business: Quote header + line items
-   body: { customer, quote_date, payment_term, port_of_discharge, status,
-           currency, remarks, address, quote_number,
+   body: { customer, quote_date, expiry_date, payment_term, port_of_discharge,
+           status, currency, remarks, address, quote_number, salesperson,
+           reference_no, customer_notes, terms,
            lines: [{ item, qty, rate, discount }] }
    ---------------------------------------------------------------- */
 app.post("/quote-with-items", async (req, res) => {
@@ -262,12 +263,18 @@ app.post("/quote-with-items", async (req, res) => {
           quote_number: body.quote_number || "",
           customer: resolve(cMap, body.customer),
           quote_date: body.quote_date || undefined,
+          // date column rejects "" → omit (undefined) when blank.
+          expiry_date: body.expiry_date || undefined,
           payment_term: resolve(pMap, body.payment_term),
           port_of_discharge: body.port_of_discharge || "",
           status: body.status || "Draft",
           currency: body.currency || "EUR",
           remarks: body.remarks || "",
           address: body.address || "",
+          salesperson: body.salesperson || "",
+          reference_no: body.reference_no || "",
+          customer_notes: body.customer_notes || "",
+          terms: body.terms || "",
           conversion_flag: "None",
           total_amount: round2(total),
         });
@@ -297,9 +304,10 @@ app.post("/quote-with-items", async (req, res) => {
 
 /* ----------------------------------------------------------------
    Business: SalesOrder header + line items
-   body: { customer, po_number, order_date, payment_term, port_of_discharge,
-           status, currency, remarks, address, order_number, quote_rowid?,
-           lines: [{ item, qty, rate, stage?, priority? , due_date? }] }
+   body: { customer, po_number, order_date, shipment_date, payment_term,
+           port_of_discharge, status, currency, remarks, address, order_number,
+           quote_rowid?, salesperson, customer_notes, terms,
+           lines: [{ item, qty, rate, discount?, stage?, priority?, due_date? }] }
    ---------------------------------------------------------------- */
 app.post("/so-with-items", async (req, res) => {
   try {
@@ -322,12 +330,25 @@ app.post("/so-with-items", async (req, res) => {
 });
 
 async function createSalesOrder(ds, body, maps) {
+  const lines = Array.isArray(body.lines) ? body.lines : [];
+  // Compute per-line + header amounts up front so the header carries the total.
+  let total = 0;
+  const items = lines.map((l) => {
+    const gross = (Number(l.qty) || 0) * (Number(l.rate) || 0);
+    const disc = gross * ((Number(l.discount) || 0) / 100);
+    const sub = round2(gross - disc);
+    total += sub;
+    return { line: l, sub };
+  });
+
   const soRow = await ds.table("SalesOrder").insertRow({
     order_number: body.order_number || "",
     quote: body.quote_rowid || null,
     customer: resolve(maps.cMap, body.customer),
     po_number: body.po_number || "",
     order_date: body.order_date || undefined,
+    // date column rejects "" → omit (undefined) when blank.
+    shipment_date: body.shipment_date || undefined,
     payment_term: resolve(maps.pMap, body.payment_term),
     port_of_discharge: body.port_of_discharge || "",
     status: body.status || "Confirmed",
@@ -335,10 +356,14 @@ async function createSalesOrder(ds, body, maps) {
     remarks: body.remarks || "",
     address: body.address || "",
     manual_so_number: body.manual_so_number || "",
+    salesperson: body.salesperson || "",
+    customer_notes: body.customer_notes || "",
+    terms: body.terms || "",
+    total_amount: round2(total),
   });
   const soId = soRow.ROWID;
-  const lines = Array.isArray(body.lines) ? body.lines : [];
-  for (const l of lines) {
+  for (const it of items) {
+    const l = it.line;
     await ds.table("OrderItem").insertRow({
       sales_order: soId,
       design: resolve(maps.dMap, l.item),
@@ -352,9 +377,13 @@ async function createSalesOrder(ds, body, maps) {
       stage: l.stage || "po",
       priority_level: l.priority || "normal",
       due_date: l.due_date || undefined,
+      rate: Number(l.rate) || 0,
+      discount_pct: Number(l.discount) || 0,
+      sub_total: it.sub,
+      final_total: it.sub,
     });
   }
-  return { rowid: soId, data: { ROWID: soId } };
+  return { rowid: soId, data: { ROWID: soId, total_amount: round2(total) } };
 }
 
 /* ----------------------------------------------------------------
@@ -395,12 +424,18 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             customer: body.customer, // name; resolved below
             customer_rowid: q.customer,
             order_date: body.order_date || "",
+            shipment_date: body.shipment_date || "",
             payment_term: body.payment_term,
             port_of_discharge: q.port_of_discharge,
             status: "Confirmed",
             currency: q.currency,
             remarks: `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
             address: q.address,
+            // Carry the quote's Books-parity header fields onto the SO, allowing
+            // the convert request to override per-field.
+            salesperson: body.salesperson || q.salesperson || "",
+            customer_notes: body.customer_notes || q.customer_notes || "",
+            terms: body.terms || q.terms || "",
             quote_rowid: quoteId,
             lines: Array.isArray(body.lines) ? body.lines : [],
           },

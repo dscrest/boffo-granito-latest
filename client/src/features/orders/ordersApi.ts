@@ -52,6 +52,8 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
     const custId = so ? str(so.customer) : "";
     const d = designRow.get(str(it.design));
     const iso = custIso.get(custId) || "";
+    const rate = num(it.rate);
+    const subTotal = num(it.sub_total);
     return {
       id: String(it.ROWID),
       poNumber: so ? str(so.po_number) || str(so.order_number) : "",
@@ -76,6 +78,14 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
       invoice: null,
       priority: (str(it.priority_level) as Order["priority"]) || "normal",
       daysFromPI: 0,
+      rate,
+      discount: num(it.discount_pct),
+      subTotal,
+      salesperson: so ? str(so.salesperson) : "",
+      shipmentDate: so ? str(so.shipment_date) : "",
+      customerNotes: so ? str(so.customer_notes) : "",
+      terms: so ? str(so.terms) : "",
+      totalAmount: so ? num(so.total_amount) : 0,
     };
   });
 
@@ -87,13 +97,17 @@ export interface NewSalesOrderInput {
   order_number: string;
   po_number: string;
   order_date: string;
+  shipment_date: string;
   payment_term: string;
   port_of_discharge: string;
   status: string;
   currency: string;
   remarks: string;
   address: string;
-  lines: { item: string; qty: number; rate: number; stage?: string; priority?: string; due_date?: string }[];
+  salesperson: string;
+  customer_notes: string;
+  terms: string;
+  lines: { item: string; qty: number; rate: number; discount?: number; stage?: string; priority?: string; due_date?: string }[];
 }
 
 export function createSalesOrder(input: NewSalesOrderInput) {

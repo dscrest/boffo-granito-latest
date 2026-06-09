@@ -71,11 +71,16 @@ export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; erro
       partyCode: custCode.get(str(r.customer)) || "",
       address: str(r.address),
       quoteDate: str(r.quote_date),
+      expiryDate: str(r.expiry_date),
       paymentTerm: termName.get(str(r.payment_term)) || str(r.payment_term),
       portOfDischarge: str(r.port_of_discharge),
       status: toStatus(str(r.status), str(r.conversion_flag)),
       currency: str(r.currency) || "EUR",
       remarks: str(r.remarks),
+      salesperson: str(r.salesperson),
+      referenceNo: str(r.reference_no),
+      customerNotes: str(r.customer_notes),
+      terms: str(r.terms),
       lines: linesByQuote.get(id) || [],
       soNumber: soByQuote.get(id) || null,
     };
@@ -88,12 +93,17 @@ export interface NewQuoteInput {
   customer: string;
   quote_number: string;
   quote_date: string;
+  expiry_date: string;
   payment_term: string;
   port_of_discharge: string;
   status: string;
   currency: string;
   remarks: string;
   address: string;
+  salesperson: string;
+  reference_no: string;
+  customer_notes: string;
+  terms: string;
   lines: { item: string; qty: number; rate: number; discount: number }[];
 }
 

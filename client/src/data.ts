@@ -48,6 +48,16 @@ export interface Order {
   invoice: string | null;
   priority: "high" | "normal" | "low";
   daysFromPI: number;
+  /** Per-line pricing (Data Store OrderItem). */
+  rate?: number;
+  discount?: number;
+  subTotal?: number;
+  /** SalesOrder header fields (repeated per line on hydrate). */
+  salesperson?: string;
+  shipmentDate?: string;
+  customerNotes?: string;
+  terms?: string;
+  totalAmount?: number;
 }
 
 export interface Activity {
@@ -271,11 +281,21 @@ export interface Quote {
   partyCode: string;
   address: string;
   quoteDate: string;
+  /** Quote validity / expiry date. */
+  expiryDate?: string;
   paymentTerm: string;
   portOfDischarge: string;
   status: QuoteStatus;
   currency: string;
   remarks: string;
+  /** Salesperson owning the quote. */
+  salesperson?: string;
+  /** Customer-facing reference / PO ref. */
+  referenceNo?: string;
+  /** Notes shown to the customer (on print). */
+  customerNotes?: string;
+  /** Terms & conditions text. */
+  terms?: string;
   lines: QuoteLine[];
   /** SO number once converted (full or partial). */
   soNumber: string | null;

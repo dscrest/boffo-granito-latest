@@ -43,12 +43,17 @@ function quoteToInput(q: Quote): NewQuoteInput {
     customer: q.customer,
     quote_number: q.quoteNo,
     quote_date: q.quoteDate,
+    expiry_date: q.expiryDate || "",
     payment_term: q.paymentTerm,
     port_of_discharge: q.portOfDischarge,
     status: q.status,
     currency: q.currency,
     remarks: q.remarks,
     address: q.address,
+    salesperson: q.salesperson || "",
+    reference_no: q.referenceNo || "",
+    customer_notes: q.customerNotes || "",
+    terms: q.terms || "",
     lines: q.lines.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount })),
   };
 }
