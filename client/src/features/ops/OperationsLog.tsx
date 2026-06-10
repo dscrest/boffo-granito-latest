@@ -39,7 +39,7 @@ export function OperationsLog() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Operations Log</div>
+          <div className="title">Audit Log</div>
           <div className="sub">
             {loading ? "Loading…" : `${rows.length} recent operations · ${okCount} ok · ${failCount} failed`}
           </div>

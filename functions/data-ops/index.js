@@ -222,6 +222,95 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+/* ----------------------------------------------------------------
+   Validation helpers — fail fast with HTTP 400/409 BEFORE any write,
+   instead of silently persisting bad data (null FKs, negatives, dup
+   natural keys, inverted date ranges).
+   ---------------------------------------------------------------- */
+function badRequest(msg, code = 400) {
+  const e = new Error(msg);
+  e.statusCode = code;
+  return e;
+}
+
+/** Resolve a REQUIRED FK name → ROWID; throw 400 if blank or unresolved. */
+function resolveOrThrow(map, name, label) {
+  if (name == null || String(name).trim() === "") throw badRequest(`${label} is required`);
+  const id = map.get(String(name).toLowerCase());
+  if (!id) throw badRequest(`${label} not found: "${name}"`);
+  return id;
+}
+
+/** Resolve an OPTIONAL FK name → ROWID or null; throw 400 only if a non-blank name fails to resolve. */
+function resolveOptional(map, name, label) {
+  if (name == null || String(name).trim() === "") return null;
+  const id = map.get(String(name).toLowerCase());
+  if (!id) throw badRequest(`${label} not found: "${name}"`);
+  return id;
+}
+
+/** Finite number ≥ 0. */
+function nonNeg(n, label) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) throw badRequest(`${label} must be a number ≥ 0`);
+  return v;
+}
+
+/** Percentage within [0, 100]. */
+function pctRange(n, label) {
+  const v = Number(n) || 0;
+  if (v < 0 || v > 100) throw badRequest(`${label} must be between 0 and 100`);
+  return v;
+}
+
+/** Validate + compute line items. Throws 400 on empty list or bad numbers. */
+function computeLines(lines) {
+  if (!Array.isArray(lines) || lines.length === 0) throw badRequest("At least one line item is required");
+  let total = 0;
+  const items = lines.map((l, i) => {
+    const qty = nonNeg(l.qty, `Line ${i + 1} qty`);
+    const rate = nonNeg(l.rate, `Line ${i + 1} rate`);
+    const disc = pctRange(l.discount, `Line ${i + 1} discount %`);
+    const gross = qty * rate;
+    const sub = round2(gross - gross * (disc / 100));
+    total += sub;
+    return { line: l, sub };
+  });
+  return { items, total };
+}
+
+/** ISO yyyy-MM-dd lexical compare; throw 400 if `end` precedes `start`. */
+function assertDateOrder(start, end, startLabel, endLabel) {
+  if (start && end && String(end) < String(start)) {
+    throw badRequest(`${endLabel} cannot be before ${startLabel}`);
+  }
+}
+
+/** Throw 409 if `value` already exists in table.field (optionally excluding one ROWID). */
+async function assertUnique(catalyst, table, field, value, excludeRowid) {
+  if (value == null || String(value).trim() === "") return;
+  const safe = String(value).replace(/'/g, "''"); // ZCQL string-literal escape
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ${field} = '${safe}'`),
+  );
+  if (rows.some((r) => String(r.ROWID) !== String(excludeRowid || ""))) {
+    throw badRequest(`${table} ${field} "${value}" already exists`, 409);
+  }
+}
+
+/** Natural (business) key per table — used to block duplicate inserts on the generic routes. */
+const NATURAL_KEY = {
+  Customer: "code",
+  Design: "unique_name",
+  Size: "code",
+  Finish: "name",
+  Brand: "name",
+  Category: "name",
+  Glaze: "name",
+  Grade: "name",
+  PaymentTerm: "name",
+};
+
 /**
  * Document-level charges (Books parity). Mirrors client docTotals() in data.ts.
  * Takes the summed line subtotal + the request body (discount / adjustment /
@@ -229,10 +318,10 @@ function round2(n) {
  * TDS reduces the net (withheld); TCS increases it (collected).
  */
 function docCompute(lineSubtotal, body) {
-  const docDiscount = Number(body.discount) || 0;
-  const adjustment = Number(body.adjustment) || 0;
+  const docDiscount = nonNeg(body.discount || 0, "Document discount");
+  const adjustment = Number(body.adjustment) || 0; // signed: +/- allowed
   const taxable = round2((Number(lineSubtotal) || 0) - docDiscount + adjustment);
-  const taxPct = Number(body.tax_pct) || 0;
+  const taxPct = pctRange(body.tax_pct || 0, "Tax %");
   const taxType = body.tax_type === "TDS" || body.tax_type === "TCS" ? body.tax_type : "None";
   const taxAmt = round2(taxable * (taxPct / 100));
   const signedTax = taxType === "TDS" ? -taxAmt : taxType === "TCS" ? taxAmt : 0;
@@ -267,24 +356,22 @@ app.post("/quote-with-items", async (req, res) => {
       catalyst,
       { table_name: "Quote", operation: "insert", payload: body },
       async () => {
-        const lines = Array.isArray(body.lines) ? body.lines : [];
-        let total = 0;
-        const items = lines.map((l) => {
-          const gross = (Number(l.qty) || 0) * (Number(l.rate) || 0);
-          const disc = gross * ((Number(l.discount) || 0) / 100);
-          const sub = round2(gross - disc);
-          total += sub;
-          return { line: l, sub };
-        });
+        // Validate everything up front — never write a header then fail on a line.
+        await assertUnique(catalyst, "Quote", "quote_number", body.quote_number);
+        assertDateOrder(body.quote_date, body.expiry_date, "quote date", "expiry date");
+        const customer = resolveOrThrow(cMap, body.customer, "Customer");
+        const paymentTerm = resolveOptional(pMap, body.payment_term, "Payment term");
+        const { items, total } = computeLines(body.lines);
+        const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
         const doc = docCompute(total, body);
         const quoteRow = await ds.table("Quote").insertRow({
           quote_number: body.quote_number || "",
-          customer: resolve(cMap, body.customer),
+          customer,
           quote_date: body.quote_date || undefined,
           // date column rejects "" → omit (undefined) when blank.
           expiry_date: body.expiry_date || undefined,
-          payment_term: resolve(pMap, body.payment_term),
+          payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
           status: body.status || "Draft",
           currency: body.currency || "EUR",
@@ -304,11 +391,91 @@ app.post("/quote-with-items", async (req, res) => {
         });
         const quoteId = quoteRow.ROWID;
 
-        for (const it of items) {
-          const gross = (Number(it.line.qty) || 0) * (Number(it.line.rate) || 0);
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
           await ds.table("QuoteItem").insertRow({
             quote: quoteId,
-            design: resolve(dMap, it.line.item),
+            design: designIds[i],
+            quantity_boxes: Number(it.line.qty) || 0,
+            rate: Number(it.line.rate) || 0,
+            rate_basis: it.line.rate_basis || "box",
+            discount_pct: Number(it.line.discount) || 0,
+            sub_total: it.sub,
+            final_total: it.sub,
+          });
+        }
+        return { rowid: quoteId, data: { ROWID: quoteId, total_amount: doc.total_amount } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Business: update an existing Quote header + REPLACE its line items.
+   Lines are replaced wholesale (delete old QuoteItem rows, re-insert) so
+   the client can edit/add/remove freely. body shape == quote-with-items.
+   ---------------------------------------------------------------- */
+app.post("/update-quote-with-items/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const quoteId = req.params.rowid;
+    const dMap = await designMap(catalyst);
+    const cMap = await customerMap(catalyst);
+    const pMap = await paymentTermMap(catalyst);
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "Quote", operation: "update", payload: { ROWID: quoteId, ...body } },
+      async () => {
+        // Validate everything up front — never write a header then fail on a line.
+        await assertUnique(catalyst, "Quote", "quote_number", body.quote_number, quoteId);
+        assertDateOrder(body.quote_date, body.expiry_date, "quote date", "expiry date");
+        const customer = resolveOrThrow(cMap, body.customer, "Customer");
+        const paymentTerm = resolveOptional(pMap, body.payment_term, "Payment term");
+        const { items, total } = computeLines(body.lines);
+        const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
+
+        const doc = docCompute(total, body);
+        await ds.table("Quote").updateRow({
+          ROWID: quoteId,
+          quote_number: body.quote_number || "",
+          customer,
+          quote_date: body.quote_date || undefined,
+          expiry_date: body.expiry_date || undefined,
+          payment_term: paymentTerm,
+          port_of_discharge: body.port_of_discharge || "",
+          status: body.status || "Draft",
+          currency: body.currency || "EUR",
+          remarks: body.remarks || "",
+          address: body.address || "",
+          salesperson: body.salesperson || "",
+          reference_no: body.reference_no || "",
+          customer_notes: body.customer_notes || "",
+          terms: body.terms || "",
+          discount: doc.discount,
+          adjustment: doc.adjustment,
+          tax_type: doc.tax_type,
+          tax_pct: doc.tax_pct,
+          tax_amount: doc.tax_amount,
+          total_amount: doc.total_amount,
+        });
+
+        // Replace lines: delete existing QuoteItem rows for this quote, re-insert.
+        const oldRows = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM QuoteItem WHERE quote = ${quoteId}`),
+        );
+        for (const r of oldRows) await ds.table("QuoteItem").deleteRow(r.ROWID);
+
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          await ds.table("QuoteItem").insertRow({
+            quote: quoteId,
+            design: designIds[i],
             quantity_boxes: Number(it.line.qty) || 0,
             rate: Number(it.line.rate) || 0,
             rate_basis: it.line.rate_basis || "box",
@@ -345,7 +512,7 @@ app.post("/so-with-items", async (req, res) => {
     const result = await withOpLog(
       catalyst,
       { table_name: "SalesOrder", operation: "insert", payload: body },
-      async () => createSalesOrder(ds, body, { dMap, cMap, pMap }),
+      async () => createSalesOrder(ds, body, { dMap, cMap, pMap, catalyst }),
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
   } catch (err) {
@@ -354,27 +521,26 @@ app.post("/so-with-items", async (req, res) => {
 });
 
 async function createSalesOrder(ds, body, maps) {
-  const lines = Array.isArray(body.lines) ? body.lines : [];
-  // Compute per-line + header amounts up front so the header carries the total.
-  let total = 0;
-  const items = lines.map((l) => {
-    const gross = (Number(l.qty) || 0) * (Number(l.rate) || 0);
-    const disc = gross * ((Number(l.discount) || 0) / 100);
-    const sub = round2(gross - disc);
-    total += sub;
-    return { line: l, sub };
-  });
+  // Validate everything up front — never write a header then fail on a line.
+  if (maps.catalyst) await assertUnique(maps.catalyst, "SalesOrder", "order_number", body.order_number);
+  assertDateOrder(body.order_date, body.shipment_date, "order date", "shipment date");
+  // Customer: convert-quote passes the source quote's customer ROWID directly
+  // (customer_rowid); direct SO creation passes a name to resolve strictly.
+  const customer = body.customer_rowid || resolveOrThrow(maps.cMap, body.customer, "Customer");
+  const paymentTerm = resolveOptional(maps.pMap, body.payment_term, "Payment term");
+  const { items, total } = computeLines(body.lines);
+  const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
     order_number: body.order_number || "",
     quote: body.quote_rowid || null,
-    customer: resolve(maps.cMap, body.customer),
+    customer,
     po_number: body.po_number || "",
     order_date: body.order_date || undefined,
     // date column rejects "" → omit (undefined) when blank.
     shipment_date: body.shipment_date || undefined,
-    payment_term: resolve(maps.pMap, body.payment_term),
+    payment_term: paymentTerm,
     port_of_discharge: body.port_of_discharge || "",
     status: body.status || "Confirmed",
     currency: body.currency || "EUR",
@@ -392,11 +558,12 @@ async function createSalesOrder(ds, body, maps) {
     total_amount: doc.total_amount,
   });
   const soId = soRow.ROWID;
-  for (const it of items) {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
     const l = it.line;
     await ds.table("OrderItem").insertRow({
       sales_order: soId,
-      design: resolve(maps.dMap, l.item),
+      design: designIds[i],
       ordered_qty_boxes: Number(l.qty) || 0,
       produced_qty_boxes: 0,
       purchased_qty_boxes: 0,
@@ -474,7 +641,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             quote_rowid: quoteId,
             lines: Array.isArray(body.lines) ? body.lines : [],
           },
-          { dMap, cMap, pMap },
+          { dMap, cMap, pMap, catalyst },
         );
 
         const flag = body.mode === "Partial" ? "Partial" : "Full";
@@ -545,6 +712,9 @@ app.post("/:table", async (req, res) => {
       catalyst,
       { table_name: table, operation: "insert", payload: body },
       async () => {
+        // Reject inserts that collide with an existing row on the table's natural key.
+        const nk = NATURAL_KEY[table];
+        if (nk) for (const r of rows) await assertUnique(catalyst, table, nk, r[nk]);
         const inserted = await ds.table(table).insertRows(rows);
         const ids = (Array.isArray(inserted) ? inserted : [inserted]).map((r) => r.ROWID);
         return { rowid: ids[0], data: { rowids: ids } };
@@ -570,6 +740,11 @@ app.patch("/:table/:rowid", async (req, res) => {
       catalyst,
       { table_name: table, operation: "update", payload: req.body },
       async () => {
+        // Reject natural-key changes that collide with a different existing row.
+        const nk = NATURAL_KEY[table];
+        if (nk && patch[nk] !== undefined) {
+          await assertUnique(catalyst, table, nk, patch[nk], req.params.rowid);
+        }
         const row = await ds.table(table).updateRow(patch);
         return { rowid: (row && row.ROWID) || req.params.rowid, data: row };
       },

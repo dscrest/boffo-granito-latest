@@ -46,6 +46,8 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "arrow-up": return <svg {...common}><path d="M12 19V5M5 12l7-7 7 7"/></svg>;
     case "arrow-down": return <svg {...common}><path d="M12 5v14M5 12l7 7 7-7"/></svg>;
     case "chev-r": return <svg {...common}><path d="m9 6 6 6-6 6"/></svg>;
+    case "chev-l": return <svg {...common}><path d="m15 6-6 6 6 6"/></svg>;
+    case "edit": return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
     case "check": return <svg {...common}><path d="M5 13l4 4L19 7"/></svg>;
     case "alert": return <svg {...common}><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>;
     case "clock": return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
@@ -61,6 +63,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "shield-check": return <svg {...common}><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>;
     case "printer": return <svg {...common}><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/></svg>;
     case "x": return <svg {...common}><path d="M6 6l12 12M18 6 6 18"/></svg>;
+    case "chart": return <svg {...common}><path d="M3 3v18h18"/><path d="M7 15l3-4 3 3 5-7"/></svg>;
     default: return null;
   }
 }

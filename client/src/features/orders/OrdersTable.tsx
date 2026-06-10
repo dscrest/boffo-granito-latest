@@ -2,6 +2,7 @@
    Each row is an OrderItem joined to its SalesOrder header. New Order writes
    a real SalesOrder + OrderItems; every write is recorded in OperationLog. */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass } from "@/lib/format";
@@ -43,6 +44,7 @@ function draftToInput(dr: OrderDraft): NewSalesOrderInput {
 }
 
 export function OrdersTable() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -155,7 +157,16 @@ export function OrdersTable() {
                 return (
                   <tr key={o.id}>
                     <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
-                    <td className="mono muted">{o.id}</td>
+                    <td className="mono">
+                      <button
+                        className="linkish"
+                        style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                        onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
+                        title="Open details"
+                      >
+                        {o.id}
+                      </button>
+                    </td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
                     <td>
                       <span style={{ marginRight: 6 }}>{o.flag}</span>

@@ -3,15 +3,14 @@
    function and refetch. Every write's outcome is recorded in OperationLog
    (see the /ops page). */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { fmt } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
-import { QuotePrint } from "./QuotePrint";
-import { ConvertDialog } from "./ConvertDialog";
-import { createQuote, deleteQuote, listQuotes, type NewQuoteInput } from "./quotesApi";
+import { cachedQuotes, createQuote, invalidateQuotes, listQuotes, type NewQuoteInput } from "./quotesApi";
 
-const STATUS_CHIP: Record<QuoteStatus, string> = {
+export const STATUS_CHIP: Record<QuoteStatus, string> = {
   Draft: "q-draft",
   Sent: "q-sent",
   Accepted: "q-accepted",
@@ -19,7 +18,7 @@ const STATUS_CHIP: Record<QuoteStatus, string> = {
   Converted: "q-converted",
   PartiallyConverted: "q-partial",
 };
-const STATUS_LABEL: Record<QuoteStatus, string> = {
+export const STATUS_LABEL: Record<QuoteStatus, string> = {
   Draft: "Draft",
   Sent: "Sent",
   Accepted: "Accepted",
@@ -36,9 +35,10 @@ const TABS: Array<{ id: string; label: string }> = [
   { id: "Converted", label: "Converted" },
 ];
 
-const convertible = (s: QuoteStatus) => s === "Draft" || s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
+export const convertible = (s: QuoteStatus) =>
+  s === "Draft" || s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
 
-function quoteToInput(q: Quote): NewQuoteInput {
+export function quoteToInput(q: Quote): NewQuoteInput {
   return {
     customer: q.customer,
     quote_number: q.quoteNo,
@@ -63,14 +63,14 @@ function quoteToInput(q: Quote): NewQuoteInput {
 }
 
 export function QuotesTable() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("all");
   const [showForm, setShowForm] = useState(false);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Paint the last cached snapshot instantly (stale-while-revalidate).
+  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [printQuote, setPrintQuote] = useState<Quote | null>(null);
-  const [convertQuoteRow, setConvertQuoteRow] = useState<Quote | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -98,23 +98,7 @@ export function QuotesTable() {
       return;
     }
     setNotice(`Quote saved (#${res.rowid}).`);
-    await load();
-  };
-
-  const onDelete = async (q: Quote) => {
-    setNotice(`Deleting ${q.quoteNo}…`);
-    const res = await deleteQuote(q.id);
-    if (!res.ok) {
-      setNotice(null);
-      setError(res.error || "Delete failed");
-      return;
-    }
-    setNotice(`${q.quoteNo} deleted.`);
-    await load();
-  };
-
-  const onConverted = async () => {
-    setConvertQuoteRow(null);
+    invalidateQuotes();
     await load();
   };
 
@@ -133,8 +117,6 @@ export function QuotesTable() {
   return (
     <div>
       {showForm && <QuoteForm nextSeq={nextSeq} onSave={onSave} onClose={() => setShowForm(false)} />}
-      {printQuote && <QuotePrint quote={printQuote} onClose={() => setPrintQuote(null)} />}
-      {convertQuoteRow && <ConvertDialog quote={convertQuoteRow} onClose={() => setConvertQuoteRow(null)} onConverted={onConverted} />}
 
       <div className="page-head">
         <div>
@@ -193,7 +175,6 @@ export function QuotesTable() {
                 <th>Terms</th>
                 <th>Status</th>
                 <th>SO</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -201,7 +182,16 @@ export function QuotesTable() {
                 const totals = quoteTotals(q);
                 return (
                   <tr key={q.id}>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{q.quoteNo}</td>
+                    <td className="mono">
+                      <button
+                        className="linkish"
+                        style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                        onClick={() => navigate(`/quotes/${q.id}`)}
+                        title="Open details"
+                      >
+                        {q.quoteNo}
+                      </button>
+                    </td>
                     <td>{q.customer}</td>
                     <td className="mono muted">{q.quoteDate || "—"}</td>
                     <td className="num mono">{q.lines.length}</td>
@@ -211,30 +201,12 @@ export function QuotesTable() {
                       <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>
                     </td>
                     <td className="mono muted">{q.soNumber || "—"}</td>
-                    <td>
-                      <div className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
-                        <button className="btn" onClick={() => setPrintQuote(q)} title="View / print">
-                          <Icon name="printer" size={12} />
-                        </button>
-                        <button
-                          className="btn"
-                          disabled={!convertible(q.status)}
-                          onClick={() => setConvertQuoteRow(q)}
-                          title={convertible(q.status) ? "Convert to Sales Order" : "Already converted"}
-                        >
-                          <Icon name="arrow-r" size={12} /> SO
-                        </button>
-                        <button className="btn ord-rm" onClick={() => void onDelete(q)} title="Delete quote">
-                          ✕
-                        </button>
-                      </div>
-                    </td>
                   </tr>
                 );
               })}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>
                     No quotes yet. Click <b>New Quote</b> to create one.
                   </td>
                 </tr>

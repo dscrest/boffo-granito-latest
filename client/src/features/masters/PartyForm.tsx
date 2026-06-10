@@ -76,7 +76,7 @@ export function PartyForm({
             <Icon name="flag" size={18} />
           </div>
           <div>
-            <div className="ttl">New Party</div>
+            <div className="ttl">New Customer</div>
             <div className="sub2">Customer · local draft — not yet saved to database</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
@@ -164,7 +164,7 @@ export function PartyForm({
           </button>
           <button className="hbtn primary" disabled={missing} onClick={submit}>
             <Icon name="check" size={13} />
-            Save party
+            Save customer
           </button>
         </div>
       </div>

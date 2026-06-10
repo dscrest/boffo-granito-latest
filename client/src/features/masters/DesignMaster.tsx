@@ -2,6 +2,7 @@
    Base rows come from mock DESIGNS; newly-entered designs are kept in local
    `drafts` state (frontend-only, not yet persisted) and shown first. */
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { fmt, finishClass } from "@/lib/format";
 import { DESIGNS, FINISHES, ORDERS, SIZES } from "@/data";
@@ -18,6 +19,7 @@ interface DesignRow {
 }
 
 export function DesignMaster() {
+  const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
   const [drafts, setDrafts] = useState<DesignDraft[]>([]);
 
@@ -116,7 +118,18 @@ export function DesignMaster() {
                     {i + 1}
                   </td>
                   <td>
-                    <span className="design-name">{d.name}</span>
+                    {d.isDraft ? (
+                      <span className="design-name">{d.name}</span>
+                    ) : (
+                      <button
+                        className="design-name"
+                        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", color: "var(--accent)" }}
+                        onClick={() => navigate(`/design/${encodeURIComponent(d.name)}`)}
+                        title="Open details"
+                      >
+                        {d.name}
+                      </button>
+                    )}
                     {d.isDraft && (
                       <span className="chip" style={{ marginLeft: 6, background: "var(--accent-soft)", color: "var(--accent)" }}>
                         draft

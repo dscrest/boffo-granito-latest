@@ -1,0 +1,203 @@
+/* ============================================================
+   RecordDetail — shared read-only record page (Books-parity).
+
+   Generic version of the Quotes detail page, reused by Customers,
+   Sales Orders, Purchase Orders and Items. Renders a back/title
+   toolbar, a Fields show/hide menu, and Details | Activity Log tabs.
+   `children` is the record's line-items / related table. Activity Log
+   reads OperationLog filtered by `activityTable` (+ optional entityId).
+   ============================================================ */
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { Icon } from "@/ui/Icon";
+import { list, type DSRow } from "@/lib/dataOps";
+
+const str = (v: unknown) => (v == null ? "" : String(v));
+
+export interface RecordField {
+  key: string;
+  label: string;
+  value: string;
+  wide?: boolean;
+}
+
+export function RecordDetail({
+  backTo,
+  title,
+  subtitle,
+  statusChip,
+  fields,
+  hiddenStorageKey,
+  activityTable,
+  entityId,
+  children,
+}: {
+  backTo: string;
+  title: string;
+  subtitle?: ReactNode;
+  statusChip?: { label: string; cls: string };
+  fields: RecordField[];
+  hiddenStorageKey: string;
+  activityTable?: string; // OperationLog table_name; omit → no Activity tab
+  entityId?: string; // when set, Activity also matches entity_rowid
+  children?: ReactNode;
+}) {
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<"details" | "activity">("details");
+  const [fieldsOpen, setFieldsOpen] = useState(false);
+  const [hidden, setHidden] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(hiddenStorageKey);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  const [acts, setActs] = useState<DSRow[]>([]);
+  const [actsLoading, setActsLoading] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "activity" || !activityTable) return;
+    let alive = true;
+    setActsLoading(true);
+    void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
+      if (!alive) return;
+      setActsLoading(false);
+      const rows = (res.rows || []).filter((r) => {
+        if (str(r.table_name) !== activityTable) return false;
+        return entityId ? str(r.entity_rowid) === entityId : true;
+      });
+      setActs(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [tab, activityTable, entityId]);
+
+  const toggleField = (key: string) => {
+    const next = new Set(hidden);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setHidden(next);
+    localStorage.setItem(hiddenStorageKey, JSON.stringify([...next]));
+  };
+
+  const visible = useMemo(() => fields.filter((f) => !hidden.has(f.key)), [fields, hidden]);
+
+  return (
+    <div>
+      <div className="page-head">
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <button className="hbtn" onClick={() => navigate(backTo)} title="Back">
+            <Icon name="chev-l" size={13} />
+          </button>
+          <div>
+            <div className="title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {title}
+              {statusChip && <span className={`chip qstatus ${statusChip.cls}`}>{statusChip.label}</span>}
+            </div>
+            {subtitle && <div className="sub">{subtitle}</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
+        <button onClick={() => setTab("details")} style={tabStyle(tab === "details")}>Details</button>
+        {activityTable && (
+          <button onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>Activity Log</button>
+        )}
+        <div style={{ marginLeft: "auto", position: "relative" }}>
+          {tab === "details" && (
+            <>
+              <button className="hbtn" onClick={() => setFieldsOpen((v) => !v)} title="Show / hide fields">
+                <Icon name="settings" size={13} /> Fields
+              </button>
+              {fieldsOpen && (
+                <div className="card" style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 30, padding: 8, width: 220, maxHeight: 320, overflow: "auto" }}>
+                  {fields.map((f) => (
+                    <label key={f.key} className="row" style={{ gap: 8, padding: "4px 6px", cursor: "pointer" }}>
+                      <input type="checkbox" checked={!hidden.has(f.key)} onChange={() => toggleField(f.key)} />
+                      <span>{f.label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {tab === "details" && (
+        <>
+          <div className="card" style={{ padding: 18, marginBottom: 12 }}>
+            <div className="form-grid">
+              {visible.map((f) => (
+                <div className="form-field" key={f.key} style={f.wide ? { gridColumn: "1 / -1" } : undefined}>
+                  <span className="lbl">{f.label}</span>
+                  <span style={{ color: "var(--fg)" }}>{f.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {children}
+        </>
+      )}
+
+      {tab === "activity" && activityTable && (
+        <div className="card">
+          <div style={{ overflow: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Operation</th>
+                  <th>Status</th>
+                  <th>Actor</th>
+                  <th>Detail / Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {acts.map((r) => {
+                  const ok = str(r.status) === "success";
+                  return (
+                    <tr key={String(r.ROWID)}>
+                      <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
+                      <td>{str(r.operation)}</td>
+                      <td>
+                        <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{str(r.status) || "—"}</span>
+                      </td>
+                      <td className="muted">{str(r.actor)}</td>
+                      <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!actsLoading && acts.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                      No activity recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function tabStyle(active: boolean) {
+  return {
+    background: "none",
+    border: 0,
+    borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+    color: active ? "var(--fg)" : "var(--muted)",
+    fontWeight: active ? 600 : 400,
+    padding: "8px 12px",
+    cursor: "pointer",
+    font: "inherit",
+  } as const;
+}

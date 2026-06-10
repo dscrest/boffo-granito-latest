@@ -12,6 +12,7 @@
   --border:       #e6e8ec;
   --border-2:     #d7dbe1;
   --hover:        #f0f2f5;
+  --sidebar-bg:   #eef0f3;   /* left panel — light gray, distinct from white content */
 
   /* Text */
   --fg:           #0f1419;
@@ -65,6 +66,34 @@ body {
   letter-spacing: -0.005em;
 }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+
+/* ---------- buttons (global base) ----------
+   The `button` reset above strips all chrome, so `.btn` / `.hbtn` used
+   outside the header or page-head (e.g. modal `.df-foot` footers) would
+   render as bare link-like text. These give them real button chrome
+   everywhere; more specific scoped rules (.header, .page-head, .fbar…)
+   still override. */
+.btn {
+  height: 28px; padding: 0 11px;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border-2); border-radius: 6px;
+  background: var(--panel-2); color: var(--fg-2);
+  font-size: var(--t-md); white-space: nowrap;
+}
+.btn:hover { background: var(--hover); color: var(--fg); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+
+.hbtn {
+  height: 30px; padding: 0 12px;
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-2); border-radius: 6px;
+  background: var(--panel-2); color: var(--fg-2);
+  font-size: var(--t-md); white-space: nowrap; flex-shrink: 0;
+}
+.hbtn:hover { background: var(--hover); color: var(--fg); }
+.hbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.hbtn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
 input { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -90,6 +119,11 @@ a { color: inherit; text-decoration: none; }
   color: var(--muted);
 }
 .header .crumbs .cur { color: var(--fg); }
+.header .crumbs .crumb-link {
+  color: var(--muted); text-decoration: none; cursor: pointer;
+}
+.header .crumbs .crumb-link:hover { color: var(--fg); text-decoration: underline; }
+.header .crumbs .crumb-link.cur { color: var(--fg); }
 .header .search {
   position: relative;
   flex: 1; max-width: 460px; margin-left: auto;
@@ -132,7 +166,7 @@ a { color: inherit; text-decoration: none; }
 
 /* ---------- sidebar ---------- */
 .sidebar {
-  background: var(--panel);
+  background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   font-size: var(--t-md);
@@ -175,9 +209,10 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   position: relative;
 }
-.sidebar .item:hover { background: var(--hover); color: var(--fg); }
+.sidebar .item:hover { background: #e3e6ea; color: var(--fg); }
 .sidebar .item.active {
-  background: var(--elevated); color: var(--fg);
+  background: #ffffff; color: var(--fg);
+  box-shadow: 0 1px 2px rgba(15, 20, 25, 0.06);
 }
 .sidebar .item.active::before {
   content: ''; position: absolute; left: -10px; top: 6px; bottom: 6px; width: 2px;
@@ -224,6 +259,36 @@ a { color: inherit; text-decoration: none; }
 }
 .sidebar .foot .row { display: flex; align-items: center; gap: 8px; }
 .sidebar .foot .row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-green); box-shadow: 0 0 0 3px oklch(0.55 0.16 150 / 0.15); }
+
+/* ---------- collapsible sidebar (icon rail) ---------- */
+.sidebar .brand .collapse-btn {
+  margin-left: auto;
+  display: grid; place-items: center;
+  width: 24px; height: 24px;
+  border: 1px solid var(--border-2); border-radius: 5px;
+  background: none; color: var(--muted); cursor: pointer;
+}
+.sidebar .brand .collapse-btn:hover { background: var(--hover); color: var(--fg); }
+
+.app.collapsed { grid-template-columns: 60px 1fr; }
+.app.collapsed .sidebar .brand {
+  flex-direction: column; gap: 8px; height: auto; padding: 12px 8px;
+}
+.app.collapsed .sidebar .brand .name,
+.app.collapsed .sidebar .brand .ver { display: none; }
+.app.collapsed .sidebar .brand .collapse-btn { margin-left: 0; }
+
+.app.collapsed .sidebar .group { padding: 14px 8px 6px; }
+.app.collapsed .sidebar .item { justify-content: center; gap: 0; padding-left: 0 !important; padding-right: 0; }
+.app.collapsed .sidebar .item > span,
+.app.collapsed .sidebar .item .count,
+.app.collapsed .sidebar .item.parent .chev { display: none; }
+.app.collapsed .sidebar .subnav { display: none; }
+.app.collapsed .sidebar .item.active::before { left: 0; }
+
+.app.collapsed .sidebar .foot { display: flex; justify-content: center; }
+.app.collapsed .sidebar .foot .row span:not(.dot) { display: none; }
+.app.collapsed .sidebar .foot .row { gap: 0; }
 
 /* ---------- generic ---------- */
 .main { padding: 14px 18px 32px; overflow: auto; }

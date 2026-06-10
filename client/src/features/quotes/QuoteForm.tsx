@@ -67,39 +67,45 @@ type Head = Required<
 
 export function QuoteForm({
   nextSeq,
+  initial,
   onSave,
   onClose,
 }: {
   nextSeq: number;
+  initial?: Quote;
   onSave: (q: Quote) => void;
   onClose: () => void;
 }) {
+  const editing = !!initial;
   const [h, setH] = useState<Head>({
-    customer: "",
-    address: "",
-    quoteDate: "",
-    expiryDate: "",
-    paymentTerm: "",
-    portOfDischarge: "",
-    status: "Draft",
-    currency: "EUR",
-    remarks: "",
-    salesperson: "",
-    referenceNo: "",
-    customerNotes: "",
-    terms: "",
+    customer: initial?.customer ?? "",
+    address: initial?.address ?? "",
+    quoteDate: initial?.quoteDate ?? "",
+    expiryDate: initial?.expiryDate ?? "",
+    paymentTerm: initial?.paymentTerm ?? "",
+    portOfDischarge: initial?.portOfDischarge ?? "",
+    status: initial?.status ?? "Draft",
+    currency: initial?.currency ?? "EUR",
+    remarks: initial?.remarks ?? "",
+    salesperson: initial?.salesperson ?? "",
+    referenceNo: initial?.referenceNo ?? "",
+    customerNotes: initial?.customerNotes ?? "",
+    terms: initial?.terms ?? "",
   });
-  const [lines, setLines] = useState<QuoteLine[]>([emptyLine()]);
+  const [lines, setLines] = useState<QuoteLine[]>(
+    initial && initial.lines.length ? initial.lines.map((l) => ({ ...l })) : [emptyLine()],
+  );
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
     () => (cat ? DESIGNS.filter((d) => d.category === cat) : DESIGNS),
     [cat],
   );
+  const num2str = (n: number | undefined) => (n ? String(n) : "");
   const [charges, setCharges] = useState<Charges>({
-    docDiscount: "",
-    adjustment: "",
-    taxType: "None",
-    taxPct: "",
+    docDiscount: num2str(initial?.docDiscount),
+    adjustment: num2str(initial?.adjustment),
+    taxType: initial?.taxType ?? "None",
+    taxPct: num2str(initial?.taxPct),
   });
   const setCharge = <K extends keyof Charges>(k: K, val: Charges[K]) =>
     setCharges((p) => ({ ...p, [k]: val }));
@@ -140,10 +146,10 @@ export function QuoteForm({
     const party = PARTIES.find((x) => x.name === h.customer);
     onSave({
       ...h,
-      id: newId().slice(0, 6).toUpperCase(),
-      quoteNo: `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
-      partyCode: party?.code ?? "",
-      soNumber: null,
+      id: initial?.id ?? newId().slice(0, 6).toUpperCase(),
+      quoteNo: initial?.quoteNo ?? `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
+      partyCode: party?.code ?? initial?.partyCode ?? "",
+      soNumber: initial?.soNumber ?? null,
       docDiscount: charge.docDiscount,
       adjustment: charge.adjustment,
       taxType: charge.taxType,
@@ -161,8 +167,10 @@ export function QuoteForm({
             <Icon name="quote" size={18} />
           </div>
           <div>
-            <div className="ttl">New Quote</div>
-            <div className="sub2">Sales quote · local draft — not yet saved to database</div>
+            <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : "New Quote"}</div>
+            <div className="sub2">
+              {editing ? "Editing saved quote — changes overwrite the database record" : "Sales quote · local draft — not yet saved to database"}
+            </div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕
@@ -377,7 +385,7 @@ export function QuoteForm({
           </button>
           <button className="hbtn primary" disabled={missing} onClick={submit}>
             <Icon name="check" size={13} />
-            Save quote
+            {editing ? "Update quote" : "Save quote"}
           </button>
         </div>
       </div>

@@ -5,7 +5,7 @@
    chunk (code-splitting). Route path === the prototype's view id.
    ============================================================ */
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
@@ -13,6 +13,7 @@ import { checkSession, type SessionUser } from "@/lib/auth";
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({ default: m.QuotesTable })));
+const QuoteDetail = lazy(() => import("@/features/quotes/QuoteDetail").then((m) => ({ default: m.QuoteDetail })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
 const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
@@ -25,6 +26,10 @@ const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ de
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
+const CustomerDetail = lazy(() => import("@/features/masters/CustomerDetail").then((m) => ({ default: m.CustomerDetail })));
+const ItemDetail = lazy(() => import("@/features/masters/ItemDetail").then((m) => ({ default: m.ItemDetail })));
+const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
+const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
 
 const TWEAK_DEFAULTS = {
@@ -49,10 +54,9 @@ interface NavNode {
   children?: NavNode[];
 }
 
-/* Build the sidebar tree. `isAdmin` gates the Settings group (Masters), which is
-   admin-only — non-admins never see the lookup-table editors. Customers leads the
-   Sales group (Books-parity menu order). */
-function navTree(isAdmin: boolean): NavNode[] {
+/* Build the sidebar tree. Settings/Masters lives in the top-right header gear
+   (not the left panel). Customers leads the Sales group (Books-parity order). */
+function navTree(): NavNode[] {
   const tree: NavNode[] = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard" },
     {
@@ -92,18 +96,11 @@ function navTree(isAdmin: boolean): NavNode[] {
       ],
     },
     {
-      label: "System",
-      icon: "settings",
-      children: [{ id: "ops", label: "Operations Log", icon: "clock" }],
+      label: "Reports",
+      icon: "chart",
+      children: [{ id: "ops", label: "Audit Log", icon: "clock" }],
     },
   ];
-  if (isAdmin) {
-    tree.push({
-      label: "Settings",
-      icon: "settings",
-      children: [{ id: "masters", label: "Masters", icon: "settings" }],
-    });
-  }
   return tree;
 }
 
@@ -123,16 +120,29 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   qc: ["Stages", "Quality Control"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
-  ops: ["System", "Operations Log"],
+  ops: ["Reports", "Audit Log"],
 };
 
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
-function ancestorsOf(id: string, nodes: NavNode[] = navTree(true), trail: string[] = []): string[] | null {
+function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] = []): string[] | null {
   for (const n of nodes) {
     if (n.id === id) return trail;
     if (n.children) {
       const found = ancestorsOf(id, n.children, [...trail, n.label]);
       if (found) return found;
+    }
+  }
+  return null;
+}
+
+/* First navigable leaf route id under a top-level section label — used so the
+   section breadcrumb links somewhere sensible (e.g. "Sales" → /parties). */
+function firstLeafOf(label: string, nodes: NavNode[] = navTree()): string | null {
+  for (const n of nodes) {
+    if (n.label === label) {
+      const dive = (x: NavNode): string | null =>
+        x.id ? x.id : x.children?.map(dive).find(Boolean) ?? null;
+      return dive(n);
     }
   }
   return null;
@@ -197,6 +207,8 @@ function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowPro
 export default function App() {
   const location = useLocation();
   const currentId = location.pathname.replace(/^\//, "") || "dashboard";
+  // Detail routes like /quotes/:id share the parent's breadcrumb/menu state.
+  const baseId = currentId.split("/")[0];
 
   // Session → admin gate for the Settings (Masters) group + route.
   const [user, setUser] = useState<SessionUser | null>(null);
@@ -204,18 +216,25 @@ export default function App() {
     void checkSession().then(setUser);
   }, []);
   const isAdmin = user?.role === "Admin";
-  const tree = useMemo(() => navTree(isAdmin), [isAdmin]);
+  const navigate = useNavigate();
+  const tree = useMemo(() => navTree(), []);
+
+  // Whole-sidebar collapse (icon rail ↔ full). Persisted across sessions.
+  const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem("sidebar-collapsed") === "1");
+  useEffect(() => {
+    localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
 
   // Which parent groups are expanded. Active route's ancestors auto-open.
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
-    (ancestorsOf(currentId) || []).forEach((l) => (init[l] = true));
+    (ancestorsOf(baseId) || []).forEach((l) => (init[l] = true));
     return init;
   });
   useEffect(() => {
-    const anc = ancestorsOf(currentId);
+    const anc = ancestorsOf(baseId);
     if (anc?.length) setOpenGroups((p) => ({ ...p, ...Object.fromEntries(anc.map((l) => [l, true])) }));
-  }, [currentId]);
+  }, [baseId]);
   const toggleGroup = (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] }));
 
   useEffect(() => {
@@ -236,15 +255,26 @@ export default function App() {
     return c;
   }, []);
 
-  const crumbs = VIEW_LABELS[currentId] || ["", ""];
+  const crumbs = VIEW_LABELS[baseId] || ["", ""];
+  const sectionHref = firstLeafOf(crumbs[0]);
 
   return (
-    <div className="app">
+    <div className={`app ${collapsed ? "collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="mark">B</div>
           <div className="name">BOFFO</div>
           <div className="ver">v4.0</div>
+          <button
+            type="button"
+            className="collapse-btn"
+            aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+            title={collapsed ? "Expand menu" : "Collapse menu"}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((v) => !v)}
+          >
+            <Icon name={collapsed ? "chev-r" : "chev-l"} size={14} />
+          </button>
         </div>
 
         <nav className="group">
@@ -278,9 +308,17 @@ export default function App() {
       <header className="header">
         <div className="crumbs">
           <Icon name="chev-r" size={12} style={{ opacity: 0.4 }} />
-          <span>{crumbs[0]}</span>
+          {sectionHref ? (
+            <NavLink to={`/${sectionHref}`} className="crumb-link">{crumbs[0]}</NavLink>
+          ) : (
+            <span>{crumbs[0]}</span>
+          )}
           <Icon name="chev-r" size={12} style={{ opacity: 0.4 }} />
-          <span className="cur">{crumbs[1]}</span>
+          {baseId ? (
+            <NavLink to={`/${baseId}`} className="crumb-link cur">{crumbs[1]}</NavLink>
+          ) : (
+            <span className="cur">{crumbs[1]}</span>
+          )}
         </div>
         <div className="search">
           <Icon name="search" size={13} className="icon" />
@@ -291,7 +329,7 @@ export default function App() {
           <Icon name="bell" size={13} />
           <span className="dot red" style={{ width: 5, height: 5, marginLeft: -3 }} />
         </button>
-        <button className="hbtn">
+        <button className="hbtn" title="Settings" onClick={() => navigate("/masters")}>
           <Icon name="settings" size={13} />
         </button>
         <div className="avatar">BG</div>
@@ -303,9 +341,14 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/quotes" element={<Quotes />} />
+            <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
             <Route path="/orders" element={<OrdersTable />} />
+            <Route path="/orders/:id" element={<OrderDetail />} />
+            <Route path="/po/:id" element={<PurchaseOrderDetail />} />
+            <Route path="/design/:id" element={<ItemDetail />} />
+            <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
             <Route path="/qc" element={<QC />} />

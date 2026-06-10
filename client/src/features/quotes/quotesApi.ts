@@ -28,7 +28,28 @@ function toStatus(s: string, flag: string): QuoteStatus {
   return (allowed as string[]).includes(s) ? (s as QuoteStatus) : "Draft";
 }
 
-/** Fetch all quotes, fully hydrated to the UI Quote shape. */
+/* ---------------------------------------------------------------
+   Module-level cache (stale-while-revalidate). listQuotes() refetches
+   6 full tables every call; consumers (QuotesTable, QuoteDetail) paint
+   the last snapshot instantly while a fresh fetch runs in the
+   background — kills the multi-second blank load on revisit. */
+let _cache: { quotes: Quote[]; ts: number } | null = null;
+const QUOTES_TTL = 30_000;
+
+/** Last fetched quotes, or null if never fetched this session. */
+export function cachedQuotes(): Quote[] | null {
+  return _cache ? _cache.quotes : null;
+}
+/** True if the cache exists and is younger than the TTL. */
+export function quotesAreFresh(): boolean {
+  return !!_cache && Date.now() - _cache.ts < QUOTES_TTL;
+}
+/** Drop the cache so the next listQuotes() hits the network. */
+export function invalidateQuotes(): void {
+  _cache = null;
+}
+
+/** Fetch all quotes, fully hydrated to the UI Quote shape. Caches the result. */
 export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
   // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
   const [q, items, customers, terms, designs, sos] = await Promise.all([
@@ -94,6 +115,7 @@ export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; erro
     };
   });
 
+  _cache = { quotes, ts: Date.now() };
   return { ok: true, quotes };
 }
 
@@ -126,6 +148,11 @@ export function createQuote(input: NewQuoteInput) {
 
 export function updateQuote(rowid: string, patch: Record<string, unknown>) {
   return update("Quote", rowid, patch);
+}
+
+/** Update a Quote header + replace all its line items (full edit). */
+export function updateQuoteWithItems(rowid: string, input: NewQuoteInput) {
+  return op<{ ROWID: string; total_amount: number }>(`update-quote-with-items/${rowid}`, input);
 }
 
 export function deleteQuote(rowid: string) {

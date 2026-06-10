@@ -1,10 +1,12 @@
 /* Purchase Orders — ported verbatim from prototype/views2.jsx. */
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt, pct } from "@/lib/format";
 import { ORDERS, type Order } from "@/data";
 
 export function PurchaseOrders() {
+  const navigate = useNavigate();
   const groups: Record<string, Order[]> = {};
   ORDERS.forEach((o) => (groups[o.poNumber] ||= []).push(o));
   const pos = Object.entries(groups)
@@ -90,8 +92,15 @@ export function PurchaseOrders() {
                 <td className="muted mono" style={{ textAlign: "center" }}>
                   {i + 1}
                 </td>
-                <td className="mono" style={{ color: "var(--fg)" }}>
-                  {p.po}
+                <td className="mono">
+                  <button
+                    className="linkish"
+                    style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                    onClick={() => navigate(`/po/${encodeURIComponent(p.po)}`)}
+                    title="Open details"
+                  >
+                    {p.po}
+                  </button>
                 </td>
                 <td>
                   {p.flag} {p.party}{" "}
