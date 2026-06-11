@@ -36,6 +36,19 @@ function toStatus(s: string, flag: string): QuoteStatus {
 let _cache: { quotes: Quote[]; ts: number } | null = null;
 const QUOTES_TTL = 30_000;
 
+/* Subscribers (e.g. the sidebar badge) notified whenever the cache changes,
+   so live counts stay in sync with writes instead of showing seed data. */
+type Listener = () => void;
+const listeners = new Set<Listener>();
+function notify(): void {
+  listeners.forEach((l) => l());
+}
+/** Subscribe to cache changes. Returns an unsubscribe fn. */
+export function subscribeQuotes(cb: Listener): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
 /** Last fetched quotes, or null if never fetched this session. */
 export function cachedQuotes(): Quote[] | null {
   return _cache ? _cache.quotes : null;
@@ -47,6 +60,7 @@ export function quotesAreFresh(): boolean {
 /** Drop the cache so the next listQuotes() hits the network. */
 export function invalidateQuotes(): void {
   _cache = null;
+  notify();
 }
 
 /** Fetch all quotes, fully hydrated to the UI Quote shape. Caches the result. */
@@ -116,6 +130,7 @@ export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; erro
   });
 
   _cache = { quotes, ts: Date.now() };
+  notify();
   return { ok: true, quotes };
 }
 

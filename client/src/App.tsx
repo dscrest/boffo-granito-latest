@@ -9,6 +9,7 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
+import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -244,8 +245,19 @@ export default function App() {
     document.documentElement.style.setProperty("--t-sm", d === "spacious" ? "12px" : "11.5px");
   }, []);
 
+  // Live quote count for the sidebar badge — seed length is only the fallback
+  // until the Data Store cache hydrates. Stays in sync with creates/deletes
+  // via the quotesApi subscription.
+  const [liveQuoteCount, setLiveQuoteCount] = useState<number | null>(() => cachedQuotes()?.length ?? null);
+  useEffect(() => {
+    const sync = () => setLiveQuoteCount(cachedQuotes()?.length ?? null);
+    const unsub = subscribeQuotes(sync);
+    void listQuotes(); // warm the cache so the badge is live before visiting Quotes
+    return unsub;
+  }, []);
+
   const counts = useMemo<Record<string, number | string>>(() => {
-    const c: Record<string, number | string> = { dashboard: "", quotes: QUOTES.length, kanban: ORDERS.length, orders: ORDERS.length };
+    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? QUOTES.length, kanban: ORDERS.length, orders: ORDERS.length };
     const distinctPOs = new Set<string>();
     ORDERS.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
     c.byorder = distinctPOs.size;
@@ -253,7 +265,7 @@ export default function App() {
     c.design = DESIGNS.length;
     c.parties = PARTIES.length;
     return c;
-  }, []);
+  }, [liveQuoteCount]);
 
   const crumbs = VIEW_LABELS[baseId] || ["", ""];
   const sectionHref = firstLeafOf(crumbs[0]);
