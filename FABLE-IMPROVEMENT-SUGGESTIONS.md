@@ -181,4 +181,20 @@ The build is healthy. The performance problems are **runtime data-loading patter
 
 ---
 
+## Fix Tracker
+
+Baseline commit: `1cf6c00` — "FABLE CHANGES Started" (pushed 2026-06-11).
+
+- [x] **Group A** — Stale-while-revalidate cache for all API modules + request dedupe in `lib/api.ts` (§1.1, §1.2) ✅ new `lib/cache.ts`; all 5 API modules cached, mutations auto-invalidate; GET dedupe in `lib/api.ts`
+- [ ] **Group B** — `React.memo` Nav/Kanban rows + memoize PurchaseOrders grouping (§2.2, §2.3)
+- [ ] **Group C** — Form validation messages + saving states + toasts (§3.1, §3.5)
+- [ ] **Group D** — Empty states + Retry + skeleton loaders (§3.3, §3.4)
+- [ ] **Group E** — Responsive viewport + sidebar auto-collapse breakpoint (§3.2)
+- [ ] **Group F** — Column projection in `dataOps.list()` + offset pagination, kill 300-row cap (§1.3, §1.4)
+- [ ] **Group G** — A11y pass: Combobox ARIA, modal focus trap, keyboard rows (§3.6)
+- [ ] **Big #1** — Mock→live migration: Dashboard, Kanban, Production, QC, Parties… (§0)
+- [ ] **Big #2** — Virtualization (deferred until rows > ~200) (§2.1)
+
+---
+
 *Assessment only — no code, data, or files were modified or deleted. One agent finding was verified false and excluded (ByOrderView `useMemo` empty deps is currently correct; noted as a future-migration risk in §2.3).*

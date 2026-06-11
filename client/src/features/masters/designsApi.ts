@@ -8,6 +8,7 @@
    the rest (Finish/Category/Glaze/Brand/Grade) key on `name`.
    ============================================================ */
 import { list, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -81,8 +82,29 @@ function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-/** Fetch all designs (FK labels hydrated) + the six lookup option lists. */
-export async function listDesigns(): Promise<{
+/* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
+const cache = createListCache(fetchDesigns);
+
+/** Last fetched designs, or null if never fetched this session. */
+export function cachedDesigns(): DesignRow[] | null {
+  return cache.cached()?.designs ?? null;
+}
+/** Drop the cache so the next listDesigns() hits the network. */
+export function invalidateDesigns(): void {
+  cache.invalidate();
+}
+
+/** All designs (FK labels hydrated) + six lookup lists. Cached + deduped. */
+export function listDesigns(): Promise<{
+  ok: boolean;
+  designs: DesignRow[];
+  lookups: DesignLookups;
+  error?: string;
+}> {
+  return cache.load();
+}
+
+async function fetchDesigns(): Promise<{
   ok: boolean;
   designs: DesignRow[];
   lookups: DesignLookups;
@@ -218,19 +240,27 @@ function toPayload(input: DesignInput): Record<string, unknown> {
   return p;
 }
 
+/* Mutations invalidate the cache so the next listDesigns() refetches. */
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    cache.invalidate();
+    return r;
+  });
+}
+
 export function createDesign(input: DesignInput) {
-  return insert("Design", toPayload(input));
+  return bust(insert("Design", toPayload(input)));
 }
 
 export function updateDesign(rowid: string, input: DesignInput) {
   // On edit, send every FK so a cleared picker unsets the column (null).
   const patch = toPayload(input);
   for (const k of FK_KEYS) if (!input[k]) patch[k] = null;
-  return update("Design", rowid, patch);
+  return bust(update("Design", rowid, patch));
 }
 
 export function deleteDesign(rowid: string) {
-  return remove("Design", rowid);
+  return bust(remove("Design", rowid));
 }
 
 /* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
@@ -255,9 +285,9 @@ async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): 
 
 /** Apply a partial patch (already column-named) to every selected design. */
 export function bulkUpdateDesigns(rowids: string[], patch: Record<string, unknown>): Promise<BulkResult> {
-  return fanOut(rowids, (id) => update("Design", id, patch));
+  return bust(fanOut(rowids, (id) => update("Design", id, patch)));
 }
 
 export function bulkDeleteDesigns(rowids: string[]): Promise<BulkResult> {
-  return fanOut(rowids, (id) => remove("Design", id));
+  return bust(fanOut(rowids, (id) => remove("Design", id)));
 }

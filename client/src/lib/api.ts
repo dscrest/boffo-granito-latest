@@ -27,9 +27,20 @@ async function parse<T>(res: Response): Promise<T> {
   return json as T;
 }
 
-export async function apiGet<T = unknown>(path: string): Promise<T> {
-  const res = await fetch(buildUrl(path), { headers: { Accept: "application/json" } });
-  return parse<T>(res);
+/* In-flight GET dedupe: concurrent requests for the same URL share one
+   fetch (e.g. ordersApi + quotesApi both listing Customer on mount, or
+   rapid sidebar navigation re-firing a list that's already loading). */
+const inflightGets = new Map<string, Promise<unknown>>();
+
+export function apiGet<T = unknown>(path: string): Promise<T> {
+  const url = buildUrl(path);
+  const existing = inflightGets.get(url);
+  if (existing) return existing as Promise<T>;
+  const p = fetch(url, { headers: { Accept: "application/json" } })
+    .then((res) => parse<T>(res))
+    .finally(() => inflightGets.delete(url));
+  inflightGets.set(url, p);
+  return p;
 }
 
 async function apiSend<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {

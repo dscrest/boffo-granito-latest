@@ -7,6 +7,9 @@
    masters/containersApi.ts (it's read-only and container-centric).
    ============================================================ */
 import { list, op, type DSRow } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
+import { invalidateOrders } from "@/features/orders/ordersApi";
+import { invalidateContainers } from "@/features/masters/containersApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -37,7 +40,20 @@ export interface PalletizableOrder {
  * stage) so the form can scope to a confirmed Master Order and surface lines
  * that still need production. In preset mode ONLY that order is returned.
  */
-export async function listPalletizable(opts?: { includeOrderId?: string }): Promise<{
+export function listPalletizable(opts?: { includeOrderId?: string }): Promise<{
+  ok: boolean;
+  orders: PalletizableOrder[];
+  error?: string;
+}> {
+  // Preset mode is parameterized — bypass the cache; the global work
+  // list (no opts) is cached + deduped like every other list.
+  if (opts?.includeOrderId) return fetchPalletizable(opts);
+  return palletizableCache.load();
+}
+
+const palletizableCache = createListCache(() => fetchPalletizable());
+
+async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   ok: boolean;
   orders: PalletizableOrder[];
   error?: string;
@@ -100,8 +116,19 @@ export interface LoadableBatch {
   boxes: number; // boxes_packed
 }
 
-/** Closed pallet batches with no ContainerLoading row — ready to load. */
-export async function listLoadableBatches(): Promise<{
+/** Closed pallet batches with no ContainerLoading row — ready to load.
+    Cached + deduped; sagas below invalidate. */
+export function listLoadableBatches(): Promise<{
+  ok: boolean;
+  batches: LoadableBatch[];
+  error?: string;
+}> {
+  return loadableCache.load();
+}
+
+const loadableCache = createListCache(fetchLoadableBatches);
+
+async function fetchLoadableBatches(): Promise<{
   ok: boolean;
   batches: LoadableBatch[];
   error?: string;
@@ -142,8 +169,23 @@ export interface ClosePalletInput {
   lines: ClosePalletLine[];
 }
 
+/* Sagas move boxes across stage counters, so every cache built on
+   OrderItem / PalletisedBatch / Container is stale after one runs. */
+function bustStageCaches(): void {
+  palletizableCache.invalidate();
+  loadableCache.invalidate();
+  invalidateOrders();
+  invalidateContainers();
+}
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    bustStageCaches();
+    return r;
+  });
+}
+
 export function closePallet(input: ClosePalletInput) {
-  return op<{ ROWID: string; boxes_packed: number; lines: number }>("close-pallet", input);
+  return bust(op<{ ROWID: string; boxes_packed: number; lines: number }>("close-pallet", input));
 }
 
 /* ---- load-container: palletized → loaded ---- */
@@ -154,10 +196,12 @@ export interface LoadContainerInput {
 }
 
 export function loadContainer(input: LoadContainerInput) {
-  return op<{ container: string; loaded_batches: number; loading_ids: string[] }>("load-container", input);
+  return bust(
+    op<{ container: string; loaded_batches: number; loading_ids: string[] }>("load-container", input),
+  );
 }
 
 /* ---- dispatch: loaded → dispatched (whole container) ---- */
 export function dispatchContainer(containerId: string, performed_by?: string) {
-  return op<{ container: string; batches: number }>(`dispatch/${containerId}`, { performed_by });
+  return bust(op<{ container: string; batches: number }>(`dispatch/${containerId}`, { performed_by }));
 }

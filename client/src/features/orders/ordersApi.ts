@@ -6,6 +6,7 @@
    match the flat Order shape in client/src/data.ts.
    ============================================================ */
 import { list, remove, op, type DSRow } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
 import type { Order, TaxType } from "@/data";
 
 const toTaxType = (v: unknown): TaxType =>
@@ -23,8 +24,30 @@ function mapBy(rows: DSRow[] | undefined, field: string): Map<string, string> {
   return m;
 }
 
-/** Fetch all sales-order line items, hydrated to the UI Order shape. */
-export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
+/* Stale-while-revalidate cache (lib/cache): repeat visits inside the TTL
+   paint instantly without refetching 7 tables; concurrent mounts share
+   one fetch. Mutations (here and in palletisation sagas) invalidate. */
+const cache = createListCache(fetchOrders);
+
+/** Last fetched orders, or null if never fetched this session. */
+export function cachedOrders(): Order[] | null {
+  return cache.cached()?.orders ?? null;
+}
+/** Subscribe to order-cache changes. Returns an unsubscribe fn. */
+export function subscribeOrders(cb: () => void): () => void {
+  return cache.subscribe(cb);
+}
+/** Drop the cache so the next listOrders() hits the network. */
+export function invalidateOrders(): void {
+  cache.invalidate();
+}
+
+/** All sales-order line items, hydrated to the UI Order shape. Cached + deduped. */
+export function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
+  return cache.load();
+}
+
+async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
   // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
   const [sos, items, customers, designs, sizes, finishes, brands] = await Promise.all([
     list("SalesOrder", { order: "ROWID desc", limit: 300 }),
@@ -128,10 +151,18 @@ export interface NewSalesOrderInput {
   lines: { item: string; qty: number; rate: number; discount?: number; stage?: string; priority?: string; due_date?: string }[];
 }
 
+/* Mutations invalidate the cache so the next listOrders() refetches. */
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    cache.invalidate();
+    return r;
+  });
+}
+
 export function createSalesOrder(input: NewSalesOrderInput) {
-  return op<{ ROWID: string }>("so-with-items", input);
+  return bust(op<{ ROWID: string }>("so-with-items", input));
 }
 
 export function deleteSalesOrder(rowid: string) {
-  return remove("SalesOrder", rowid);
+  return bust(remove("SalesOrder", rowid));
 }

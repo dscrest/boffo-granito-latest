@@ -8,6 +8,7 @@
    OperationLog. See palletsApi.ts for the sibling pattern.
    ============================================================ */
 import { list, insert, update, remove, op } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -32,8 +33,30 @@ export interface ContainerRow {
   status: string;
 }
 
-/** Fetch all containers (newest first). */
-export async function listContainers(): Promise<{
+/* Stale-while-revalidate cache (lib/cache); mutations below invalidate.
+   load-container / dispatch sagas (palletisationApi) also invalidate
+   this cache since they change container status. */
+const cache = createListCache(fetchContainers);
+
+/** Last fetched containers, or null if never fetched this session. */
+export function cachedContainers(): ContainerRow[] | null {
+  return cache.cached()?.containers ?? null;
+}
+/** Drop the cache so the next listContainers() hits the network. */
+export function invalidateContainers(): void {
+  cache.invalidate();
+}
+
+/** All containers (newest first). Cached + deduped. */
+export function listContainers(): Promise<{
+  ok: boolean;
+  containers: ContainerRow[];
+  error?: string;
+}> {
+  return cache.load();
+}
+
+async function fetchContainers(): Promise<{
   ok: boolean;
   containers: ContainerRow[];
   error?: string;
@@ -96,8 +119,16 @@ function toPayload(input: ContainerInput): Record<string, unknown> {
   return p;
 }
 
+/* Mutations invalidate the cache so the next listContainers() refetches. */
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    cache.invalidate();
+    return r;
+  });
+}
+
 export function createContainer(input: ContainerInput) {
-  return insert("Container", toPayload(input));
+  return bust(insert("Container", toPayload(input)));
 }
 
 export function updateContainer(rowid: string, input: ContainerInput) {
@@ -108,11 +139,11 @@ export function updateContainer(rowid: string, input: ContainerInput) {
   // Allow clearing area/weight back to unconstrained.
   if (!(input.capacity_area_sqm > 0)) patch.capacity_area_sqm = null;
   if (!(input.max_weight_kg > 0)) patch.max_weight_kg = null;
-  return update("Container", rowid, patch);
+  return bust(update("Container", rowid, patch));
 }
 
 export function deleteContainer(rowid: string) {
-  return remove("Container", rowid);
+  return bust(remove("Container", rowid));
 }
 
 /* ---- Container-fit suggester (read-only, multi-constraint, POST /fit-suggest) ----

@@ -7,6 +7,7 @@
    server-side in OperationLog.
    ============================================================ */
 import { list, insert, update, remove, type DSRow } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -49,8 +50,29 @@ function sizeLabelOf(r: DSRow): string {
   return str(r.code) || str(r.name) || str(r.ROWID);
 }
 
-/** Fetch all pallets (hydrated with size label) + the Size options for the picker. */
-export async function listPallets(): Promise<{
+/* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
+const cache = createListCache(fetchPallets);
+
+/** Last fetched pallets, or null if never fetched this session. */
+export function cachedPallets(): PalletRow[] | null {
+  return cache.cached()?.pallets ?? null;
+}
+/** Drop the cache so the next listPallets() hits the network. */
+export function invalidatePallets(): void {
+  cache.invalidate();
+}
+
+/** All pallets (size label hydrated) + Size options. Cached + deduped. */
+export function listPallets(): Promise<{
+  ok: boolean;
+  pallets: PalletRow[];
+  sizes: SizeOption[];
+  error?: string;
+}> {
+  return cache.load();
+}
+
+async function fetchPallets(): Promise<{
   ok: boolean;
   pallets: PalletRow[];
   sizes: SizeOption[];
@@ -153,17 +175,25 @@ function toPayload(input: PalletInput): Record<string, unknown> {
   return p;
 }
 
+/* Mutations invalidate the cache so the next listPallets() refetches. */
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    cache.invalidate();
+    return r;
+  });
+}
+
 export function createPallet(input: PalletInput) {
-  return insert("Pallet", toPayload(input));
+  return bust(insert("Pallet", toPayload(input)));
 }
 
 export function updatePallet(rowid: string, input: PalletInput) {
   // On edit, always send size (allow clearing → null) so the FK can be unset.
   const patch = toPayload(input);
   if (!input.size) patch.size = null;
-  return update("Pallet", rowid, patch);
+  return bust(update("Pallet", rowid, patch));
 }
 
 export function deletePallet(rowid: string) {
-  return remove("Pallet", rowid);
+  return bust(remove("Pallet", rowid));
 }

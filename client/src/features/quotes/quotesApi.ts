@@ -7,6 +7,7 @@
    from a handful of parallel list() calls.
    ============================================================ */
 import { list, remove, update, op, type DSRow } from "@/lib/dataOps";
+import { createListCache } from "@/lib/cache";
 import type { Quote, QuoteLine, QuoteStatus, TaxType } from "@/data";
 
 const toTaxType = (v: unknown): TaxType =>
@@ -29,42 +30,36 @@ function toStatus(s: string, flag: string): QuoteStatus {
 }
 
 /* ---------------------------------------------------------------
-   Module-level cache (stale-while-revalidate). listQuotes() refetches
-   6 full tables every call; consumers (QuotesTable, QuoteDetail) paint
-   the last snapshot instantly while a fresh fetch runs in the
-   background — kills the multi-second blank load on revisit. */
-let _cache: { quotes: Quote[]; ts: number } | null = null;
-const QUOTES_TTL = 30_000;
+   Stale-while-revalidate cache (lib/cache). Consumers (QuotesTable,
+   QuoteDetail, sidebar badge) paint the last snapshot instantly;
+   loads inside the TTL skip the network, concurrent loads share one
+   fetch. Mutations below auto-invalidate. */
+const cache = createListCache(fetchQuotes);
 
-/* Subscribers (e.g. the sidebar badge) notified whenever the cache changes,
-   so live counts stay in sync with writes instead of showing seed data. */
-type Listener = () => void;
-const listeners = new Set<Listener>();
-function notify(): void {
-  listeners.forEach((l) => l());
-}
-/** Subscribe to cache changes. Returns an unsubscribe fn. */
-export function subscribeQuotes(cb: Listener): () => void {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
+/** Subscribe to cache changes (e.g. the sidebar badge). Returns an unsubscribe fn. */
+export function subscribeQuotes(cb: () => void): () => void {
+  return cache.subscribe(cb);
 }
 
 /** Last fetched quotes, or null if never fetched this session. */
 export function cachedQuotes(): Quote[] | null {
-  return _cache ? _cache.quotes : null;
+  return cache.cached()?.quotes ?? null;
 }
 /** True if the cache exists and is younger than the TTL. */
 export function quotesAreFresh(): boolean {
-  return !!_cache && Date.now() - _cache.ts < QUOTES_TTL;
+  return cache.isFresh();
 }
 /** Drop the cache so the next listQuotes() hits the network. */
 export function invalidateQuotes(): void {
-  _cache = null;
-  notify();
+  cache.invalidate();
 }
 
-/** Fetch all quotes, fully hydrated to the UI Quote shape. Caches the result. */
-export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
+/** All quotes, hydrated to the UI Quote shape. Cached + deduped (lib/cache). */
+export function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
+  return cache.load();
+}
+
+async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
   // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
   const [q, items, customers, terms, designs, sos] = await Promise.all([
     list("Quote", { order: "ROWID desc", limit: 300 }),
@@ -129,8 +124,6 @@ export async function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; erro
     };
   });
 
-  _cache = { quotes, ts: Date.now() };
-  notify();
   return { ok: true, quotes };
 }
 
@@ -156,22 +149,31 @@ export interface NewQuoteInput {
   lines: { item: string; qty: number; rate: number; discount: number }[];
 }
 
+/* Mutations invalidate the cache so the next listQuotes() refetches.
+   (Callers' explicit invalidateQuotes() remains harmless/idempotent.) */
+function bust<T>(p: Promise<T>): Promise<T> {
+  return p.then((r) => {
+    cache.invalidate();
+    return r;
+  });
+}
+
 /** Create a Quote header + line items (server resolves FK names → ROWID). */
 export function createQuote(input: NewQuoteInput) {
-  return op<{ ROWID: string; total_amount: number }>("quote-with-items", input);
+  return bust(op<{ ROWID: string; total_amount: number }>("quote-with-items", input));
 }
 
 export function updateQuote(rowid: string, patch: Record<string, unknown>) {
-  return update("Quote", rowid, patch);
+  return bust(update("Quote", rowid, patch));
 }
 
 /** Update a Quote header + replace all its line items (full edit). */
 export function updateQuoteWithItems(rowid: string, input: NewQuoteInput) {
-  return op<{ ROWID: string; total_amount: number }>(`update-quote-with-items/${rowid}`, input);
+  return bust(op<{ ROWID: string; total_amount: number }>(`update-quote-with-items/${rowid}`, input));
 }
 
 export function deleteQuote(rowid: string) {
-  return remove("Quote", rowid);
+  return bust(remove("Quote", rowid));
 }
 
 /** Convert a quote → Sales Order (Full | Partial). */
@@ -181,8 +183,10 @@ export function convertQuote(
   lines: { item: string; qty: number; rate: number }[],
   extra: { order_number: string; po_number?: string; payment_term?: string },
 ) {
-  return op<{ so_rowid: string; quote_rowid: string; conversion_flag: string }>(
-    `convert-quote/${rowid}`,
-    { mode, lines, ...extra },
+  return bust(
+    op<{ so_rowid: string; quote_rowid: string; conversion_flag: string }>(
+      `convert-quote/${rowid}`,
+      { mode, lines, ...extra },
+    ),
   );
 }
