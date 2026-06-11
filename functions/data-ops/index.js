@@ -804,52 +804,86 @@ async function loadContainer(catalyst, ds, body) {
   const batchIds = raw.map((b) => (b && typeof b === "object" ? b.batch : b)).map(String).filter(Boolean);
   if (!batchIds.length) throw badRequest("At least one batch is required");
 
-  // Container + capacity.
+  // Container + capacity (boxes/pallets legacy; area_sqm/max_weight nullable — Q1).
   const cRows = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, capacity_boxes, capacity_pallets, status FROM Container WHERE ROWID = ${containerId}`,
+      `SELECT ROWID, capacity_boxes, capacity_pallets, capacity_area_sqm, max_weight_kg, status FROM Container WHERE ROWID = ${containerId}`,
     ),
   );
   if (!cRows.length) throw badRequest(`Container not found: ${containerId}`, 404);
   const container = cRows[0];
   const capBoxes = Number(container.capacity_boxes) || 0;
   const capPallets = Number(container.capacity_pallets) || 0;
+  const capArea = Number(container.capacity_area_sqm) || 0; // 0 = unconstrained
+  const maxWeight = Number(container.max_weight_kg) || 0; // 0 = unconstrained
 
-  // Existing loadings on this container (count + boxes already loaded).
+  // Per-batch area/weight derivation — same contract as fit.js/fitSuggest:
+  // area = boxes × design.coverage_sqm; weight = boxes × design.box_weight_kg
+  // + pallet.empty_pallet_weight_kg, or null when per-box weight uncalibrated.
+  const designs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`));
+  const dMap = new Map(designs.map((d) => [String(d.ROWID), { cov: Number(d.coverage_sqm) || 0, bw: Number(d.box_weight_kg) || 0 }]));
+  const pals = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, empty_pallet_weight_kg FROM Pallet`));
+  const pMap = new Map(pals.map((p) => [String(p.ROWID), Number(p.empty_pallet_weight_kg) || 0]));
+  const derive = (b) => {
+    const d = dMap.get(String(b.design)) || { cov: 0, bw: 0 };
+    const emptyW = pMap.get(String(b.pallet)) || 0;
+    const boxes = Number(b.boxes_packed) || 0;
+    return { boxes, areaSqm: boxes * d.cov, weightKg: d.bw > 0 ? boxes * d.bw + emptyW : null };
+  };
+
+  // Existing loadings on this container (count + boxes/area/weight already loaded).
   const existing = rowList(
     await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
   );
   const existingSet = new Set(existing.map((r) => String(r.batch)));
   let loadedBoxes = 0;
+  let loadedArea = 0;
+  let loadedWeight = 0; // uncalibrated batches contribute nothing (null-skip)
   if (existing.length) {
     const exBatches = rowList(
       await catalyst.zcql().executeZCQLQuery(
-        `SELECT boxes_packed FROM PalletisedBatch WHERE ROWID IN (${existing.map((r) => String(r.batch)).join(",")})`,
+        `SELECT design, pallet, boxes_packed FROM PalletisedBatch WHERE ROWID IN (${existing.map((r) => String(r.batch)).join(",")})`,
       ),
     );
-    loadedBoxes = exBatches.reduce((s, b) => s + (Number(b.boxes_packed) || 0), 0);
+    for (const b of exBatches) {
+      const der = derive(b);
+      loadedBoxes += der.boxes;
+      loadedArea += der.areaSqm;
+      if (der.weightKg != null) loadedWeight += der.weightKg;
+    }
   }
   const palletCount = existing.length;
 
   // New batches: exist, not already loaded.
   const nb = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, boxes_packed, status FROM PalletisedBatch WHERE ROWID IN (${batchIds.join(",")})`,
+      `SELECT ROWID, design, pallet, boxes_packed, status FROM PalletisedBatch WHERE ROWID IN (${batchIds.join(",")})`,
     ),
   );
   const nbMap = new Map(nb.map((b) => [String(b.ROWID), b]));
   let addBoxes = 0;
+  let addArea = 0;
+  let addWeight = 0;
   for (const bid of batchIds) {
     const b = nbMap.get(bid);
     if (!b) throw badRequest(`Batch not found: ${bid}`, 404);
     if (existingSet.has(bid) || String(b.status) === "loaded") throw badRequest(`Batch ${bid} already loaded`, 409);
-    addBoxes += Number(b.boxes_packed) || 0;
+    const der = derive(b);
+    addBoxes += der.boxes;
+    addArea += der.areaSqm;
+    if (der.weightKg != null) addWeight += der.weightKg;
   }
   if (capBoxes && loadedBoxes + addBoxes > capBoxes) {
     throw badRequest(`Capacity exceeded: ${loadedBoxes}+${addBoxes} > ${capBoxes} boxes`, 409);
   }
   if (capPallets && palletCount + batchIds.length > capPallets) {
     throw badRequest(`Pallet capacity exceeded: ${palletCount}+${batchIds.length} > ${capPallets}`, 409);
+  }
+  if (capArea && loadedArea + addArea > capArea + 1e-9) {
+    throw badRequest(`Area capacity exceeded: ${round2(loadedArea)}+${round2(addArea)} > ${capArea} m²`, 409);
+  }
+  if (maxWeight && loadedWeight + addWeight > maxWeight + 1e-9) {
+    throw badRequest(`Weight capacity exceeded: ${round2(loadedWeight)}+${round2(addWeight)} > ${maxWeight} kg`, 409);
   }
 
   // --- writes (idempotency-guarded; double-load already rejected above) ---
