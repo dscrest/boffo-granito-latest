@@ -146,8 +146,16 @@ export function OrderForm({
   const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
   const missing = HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) || validLines.length === 0;
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const fieldError = (f: FieldSpec): string | null =>
+    showErrors && f.required && !String(h[f.key as keyof typeof h]).trim() ? `${f.label} is required` : null;
+
   const submit = () => {
-    if (missing) return;
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
     onSave({ ...h, _id: newId(), lines: validLines });
   };
 
@@ -171,38 +179,47 @@ export function OrderForm({
           <div className="form-section">
             <div className="form-section-title">Order Details</div>
             <div className="form-grid">
-              {HEADER.map((f) => (
-                <label key={f.key} className="form-field">
-                  <span className="lbl">
-                    {f.label}
-                    {f.required && <span className="req"> *</span>}
-                  </span>
-                  {f.key === "customer" ? (
-                    <Combobox
-                      value={h.customer}
-                      onChange={(v) => setHead("customer", v)}
-                      placeholder="Search customer…"
-                      options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
-                    />
-                  ) : f.kind === "select" ? (
-                    <select value={h[f.key as keyof typeof h]} onChange={(e) => setHead(f.key, e.target.value)}>
-                      <option value="">—</option>
-                      {f.options!.map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={f.kind === "date" ? "date" : "text"}
-                      value={h[f.key as keyof typeof h]}
-                      onChange={(e) => setHead(f.key, e.target.value)}
-                      placeholder={f.label}
-                    />
-                  )}
-                </label>
-              ))}
+              {HEADER.map((f) => {
+                const err = fieldError(f);
+                return (
+                  <label key={f.key} className="form-field">
+                    <span className="lbl">
+                      {f.label}
+                      {f.required && <span className="req"> *</span>}
+                    </span>
+                    {f.key === "customer" ? (
+                      <Combobox
+                        value={h.customer}
+                        onChange={(v) => setHead("customer", v)}
+                        placeholder="Search customer…"
+                        options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                      />
+                    ) : f.kind === "select" ? (
+                      <select
+                        className={err ? "error" : ""}
+                        value={h[f.key as keyof typeof h]}
+                        onChange={(e) => setHead(f.key, e.target.value)}
+                      >
+                        <option value="">—</option>
+                        {f.options!.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className={err ? "error" : ""}
+                        type={f.kind === "date" ? "date" : "text"}
+                        value={h[f.key as keyof typeof h]}
+                        onChange={(e) => setHead(f.key, e.target.value)}
+                        placeholder={f.label}
+                      />
+                    )}
+                    {err && <span className="field-err">{err}</span>}
+                  </label>
+                );
+              })}
               <label className="form-field" style={{ gridColumn: "1 / -1" }}>
                 <span className="lbl">Remarks</span>
                 <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
@@ -334,11 +351,19 @@ export function OrderForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required · ≥1 line item</span>
+          <span className="df-req-note">
+            {showErrors && missing ? (
+              <span className="field-err">
+                {validLines.length === 0 ? "Add at least one line with a design + quantity" : "Fill the required fields above"}
+              </span>
+            ) : (
+              "* required · ≥1 line item"
+            )}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
             Save order
           </button>

@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
@@ -71,6 +72,7 @@ export function QuotesTable() {
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -90,14 +92,18 @@ export function QuotesTable() {
 
   const onSave = async (q: Quote) => {
     setShowForm(false);
+    setSaving(true);
     setNotice("Saving quote…");
     const res = await createQuote(quoteToInput(q));
+    setSaving(false);
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Save failed");
+      toast.error(res.error || "Save failed");
       return;
     }
     setNotice(`Quote saved (#${res.rowid}).`);
+    toast.success(`Quote saved (#${res.rowid})`);
     invalidateQuotes();
     await load();
   };
@@ -136,9 +142,9 @@ export function QuotesTable() {
             <Icon name="clock" size={13} />
             Refresh
           </button>
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+          <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
-            New Quote
+            {saving ? "Saving…" : "New Quote"}
           </button>
         </div>
       </div>

@@ -9,6 +9,7 @@ import { fmt, finishClass } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { createSalesOrder, listOrders, type NewSalesOrderInput } from "./ordersApi";
+import { toast } from "@/ui/Toast";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
 import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
 
@@ -78,9 +79,11 @@ export function OrdersTable() {
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Save failed");
+      toast.error(res.error || "Save failed");
       return;
     }
     setNotice(`Master order saved (#${res.rowid}).`);
+    toast.success(`Master order saved (#${res.rowid})`);
     await load();
   };
 
@@ -91,9 +94,11 @@ export function OrdersTable() {
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Close-pallet failed");
+      toast.error(res.error || "Close-pallet failed");
       return;
     }
     setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    toast.success(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes`);
     await load();
   };
 

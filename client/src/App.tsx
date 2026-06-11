@@ -7,6 +7,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { ToastHost } from "@/ui/Toast";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
@@ -395,6 +396,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </main>
+      <ToastHost />
     </div>
   );
 }

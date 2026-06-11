@@ -4,6 +4,7 @@
    reloads on success. */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
@@ -31,17 +32,21 @@ export function Loading() {
 
   const items = orders.filter((o) => o.stage === "loading" || o.stage === "packing");
 
+  // Form stays open (showing "Loading…") until the saga resolves; closes on success.
   const onSave = async (input: LoadContainerInput) => {
-    setShowForm(false);
     setError(null);
     setNotice("Loading container…");
     const res = await loadContainer(input);
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Load-container failed");
+      toast.error(res.error || "Load-container failed");
       return;
     }
-    setNotice(`Container loaded — ${res.data?.loaded_batches ?? input.batches.length} pallet(s) on container #${res.rowid}.`);
+    const msg = `Container loaded — ${res.data?.loaded_batches ?? input.batches.length} pallet(s) on container #${res.rowid}.`;
+    setShowForm(false);
+    setNotice(msg);
+    toast.success(msg);
     void load();
   };
 

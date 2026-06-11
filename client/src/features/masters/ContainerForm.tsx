@@ -41,8 +41,16 @@ export function ContainerForm({
 
   const missing = !v.container_number.trim() || v.capacity_boxes <= 0;
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const numberErr = showErrors && !v.container_number.trim() ? "Container No. is required" : null;
+  const boxesErr = showErrors && v.capacity_boxes <= 0 ? "Capacity (boxes) is required" : null;
+
   const submit = () => {
-    if (missing) return;
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
     onSave({ ...v, container_number: v.container_number.trim() });
   };
 
@@ -71,10 +79,12 @@ export function ContainerForm({
                   Container No.<span className="req"> *</span>
                 </span>
                 <input
+                  className={numberErr ? "error" : ""}
                   value={v.container_number}
                   onChange={(e) => setStr("container_number", e.target.value)}
                   placeholder="e.g. MSKU-1234567"
                 />
+                {numberErr && <span className="field-err">{numberErr}</span>}
               </label>
               <label className="form-field">
                 <span className="lbl">Type</span>
@@ -112,12 +122,14 @@ export function ContainerForm({
                   Capacity (boxes)<span className="req"> *</span>
                 </span>
                 <input
+                  className={boxesErr ? "error" : ""}
                   type="number"
                   min={0}
                   value={v.capacity_boxes || ""}
                   onChange={(e) => setNum("capacity_boxes", e.target.value)}
                   placeholder="e.g. 1200"
                 />
+                {boxesErr && <span className="field-err">{boxesErr}</span>}
               </label>
               <label className="form-field">
                 <span className="lbl">Capacity (pallets)</span>
@@ -190,11 +202,13 @@ export function ContainerForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required</span>
+          <span className="df-req-note">
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
             {isEdit ? "Save changes" : "Save container"}
           </button>

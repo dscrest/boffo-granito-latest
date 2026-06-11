@@ -60,8 +60,15 @@ export function PalletForm({
     v.boxes_per_pallet * v.pallets_per_container + v.b_boxes_per_pallet * v.b_pallets_per_container;
   const totalPallets = v.pallets_per_container + v.b_pallets_per_container;
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const nameErr = showErrors && !v.name.trim() ? "Name is required" : null;
+
   const submit = () => {
-    if (missing) return;
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
     onSave({ ...v, name: v.name.trim() });
   };
 
@@ -90,10 +97,12 @@ export function PalletForm({
                   Name<span className="req"> *</span>
                 </span>
                 <input
+                  className={nameErr ? "error" : ""}
                   value={v.name}
                   onChange={(e) => setStr("name", e.target.value)}
                   placeholder="e.g. 600x1200 - [32 * 30] = 960 - Pine Euro"
                 />
+                {nameErr && <span className="field-err">{nameErr}</span>}
               </label>
               <label className="form-field">
                 <span className="lbl">Packing Details</span>
@@ -290,11 +299,13 @@ export function PalletForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required</span>
+          <span className="df-req-note">
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
             {isEdit ? "Save changes" : "Save pallet"}
           </button>

@@ -141,8 +141,15 @@ export function QuoteForm({
   const totals = useMemo(() => docTotals(validLines, charge), [validLines, charge]);
   const missing = !h.customer.trim() || validLines.length === 0;
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const customerErr = showErrors && !h.customer.trim() ? "Customer is required" : null;
+
   const submit = () => {
-    if (missing) return;
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
     const party = PARTIES.find((x) => x.name === h.customer);
     onSave({
       ...h,
@@ -191,6 +198,7 @@ export function QuoteForm({
                   placeholder="Search customer…"
                   options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
                 />
+                {customerErr && <span className="field-err">{customerErr}</span>}
               </label>
               <label className="form-field">
                 <span className="lbl">Quote Date</span>
@@ -379,11 +387,19 @@ export function QuoteForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required · ≥1 line item</span>
+          <span className="df-req-note">
+            {showErrors && missing ? (
+              <span className="field-err">
+                {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
+              </span>
+            ) : (
+              "* required · ≥1 line item"
+            )}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
             {editing ? "Update quote" : "Save quote"}
           </button>

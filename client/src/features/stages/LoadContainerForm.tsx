@@ -13,7 +13,7 @@ export function LoadContainerForm({
   onSave,
   onClose,
 }: {
-  onSave: (input: LoadContainerInput) => void;
+  onSave: (input: LoadContainerInput) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [containers, setContainers] = useState<ContainerRow[]>([]);
@@ -48,9 +48,24 @@ export function LoadContainerForm({
   const overCap = !!container && container.capacityBoxes > 0 && pickedBoxes > container.capacityBoxes;
   const missing = !containerId || pickedIds.length === 0;
 
-  const submit = () => {
-    if (missing || overCap) return;
-    onSave({ container: containerId, batches: pickedIds });
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const containerErr = showErrors && !containerId ? "Container is required" : null;
+  const batchErr = showErrors && pickedIds.length === 0 ? "Select at least one pallet to load" : null;
+
+  const submit = async () => {
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
+    if (overCap) return;
+    setSaving(true);
+    try {
+      await onSave({ container: containerId, batches: pickedIds });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -93,7 +108,7 @@ export function LoadContainerForm({
                     <span className="lbl">
                       Container<span className="req"> *</span>
                     </span>
-                    <select value={containerId} onChange={(e) => setContainerId(e.target.value)}>
+                    <select className={containerErr ? "error" : ""} value={containerId} onChange={(e) => setContainerId(e.target.value)}>
                       <option value="">— select —</option>
                       {containers.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -102,6 +117,7 @@ export function LoadContainerForm({
                         </option>
                       ))}
                     </select>
+                    {containerErr && <span className="field-err">{containerErr}</span>}
                   </label>
                 </div>
               </div>
@@ -134,6 +150,7 @@ export function LoadContainerForm({
                     ))}
                   </tbody>
                 </table>
+                {batchErr && <span className="field-err">{batchErr}</span>}
                 {overCap && (
                   <div style={{ color: "var(--c-red)", fontSize: 11, marginTop: 6 }}>
                     Selected {pickedBoxes} boxes exceed container capacity ({container?.capacityBoxes}).
@@ -146,14 +163,23 @@ export function LoadContainerForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {pickedIds.length > 0 ? `${pickedIds.length} pallet${pickedIds.length > 1 ? "s" : ""} · ${pickedBoxes} boxes` : "* required"}
+            {showErrors && missing ? (
+              <span className="field-err">Fill the required fields above</span>
+            ) : overCap ? (
+              <span className="field-err">Selection exceeds container capacity — remove pallets</span>
+            ) : pickedIds.length > 0 ? (
+              `${pickedIds.length} pallet${pickedIds.length > 1 ? "s" : ""} · ${pickedBoxes} boxes`
+            ) : (
+              "* required"
+            )}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing || overCap} onClick={submit}>
+          {/* overCap stays disabled-gated: a capacity-busting write must never reach the saga. */}
+          <button className="hbtn primary" disabled={overCap || saving} onClick={submit}>
             <Icon name="check" size={13} />
-            Load container
+            {saving ? "Loading…" : "Load container"}
           </button>
         </div>
       </div>

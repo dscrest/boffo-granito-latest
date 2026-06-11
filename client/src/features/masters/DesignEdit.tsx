@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import {
   DesignFields,
   blankDesign,
@@ -67,16 +68,24 @@ export function DesignEdit() {
   const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
   const missing = missingRequired(v);
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+
   const onSave = async () => {
-    if (missing) return;
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
     setBusy(true);
     setError(null);
     const res = await updateDesign(id, toDesignInput(v, lookups));
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Save failed");
+      toast.error(res.error || "Save failed");
       return;
     }
+    toast.success("Design updated");
     navigate("/design");
   };
 
@@ -89,8 +98,10 @@ export function DesignEdit() {
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Delete failed");
+      toast.error(res.error || "Delete failed");
       return;
     }
+    toast.success("Design deleted");
     navigate("/design");
   };
 
@@ -126,18 +137,20 @@ export function DesignEdit() {
       {row && (
         <div className="card df-modal" style={{ padding: 16 }}>
           <div className="df-body" style={{ padding: 0 }}>
-            <DesignFields value={v} onChange={set} lookups={lookups} />
+            <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} />
           </div>
           <div className="df-foot" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy} onClick={() => void onDelete()} title="Delete design">
               Delete
             </button>
             <div style={{ flex: 1 }} />
-            <span className="df-req-note">* required</span>
+            <span className="df-req-note">
+              {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
+            </span>
             <button className="btn" disabled={busy} onClick={() => navigate("/design")}>
               Cancel
             </button>
-            <button className="hbtn primary" disabled={missing || busy} onClick={() => void onSave()}>
+            <button className="hbtn primary" disabled={busy} onClick={() => void onSave()}>
               <Icon name="check" size={13} />
               {busy ? "Saving…" : "Save changes"}
             </button>

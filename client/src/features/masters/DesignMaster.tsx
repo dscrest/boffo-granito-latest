@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { finishClass } from "@/lib/format";
 import { DesignForm } from "./DesignForm";
 import {
@@ -194,9 +195,11 @@ export function DesignMaster() {
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Save failed");
+      toast.error(res.error || "Save failed");
       return;
     }
     setNotice(`Design saved (#${res.rowid}).`);
+    toast.success("Design saved");
     await load();
   };
 
@@ -210,6 +213,9 @@ export function DesignMaster() {
     setShowBulk(false);
     if (!res.ok) {
       setError(`${res.failed} update(s) failed: ${res.firstError || "unknown error"}`);
+      toast.error(`${res.done} updated, ${res.failed} failed`);
+    } else {
+      toast.success(`${res.done} design${res.done === 1 ? "" : "s"} updated`);
     }
     setNotice(`Updated ${res.done} item${res.done === 1 ? "" : "s"}.`);
     await load();
@@ -224,6 +230,9 @@ export function DesignMaster() {
     setBusy(false);
     if (!res.ok) {
       setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);
+      toast.error(`${res.done} deleted, ${res.failed} failed`);
+    } else {
+      toast.success(`${res.done} design${res.done === 1 ? "" : "s"} deleted`);
     }
     setNotice(`Deleted ${res.done} item${res.done === 1 ? "" : "s"}.`);
     await load();

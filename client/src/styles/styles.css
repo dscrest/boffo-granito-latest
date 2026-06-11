@@ -1392,3 +1392,31 @@ a { color: inherit; text-decoration: none; }
   .qprint-bar { display: none !important; }
   .qprint-sheet { box-shadow: none; max-width: none; border-radius: 0; padding: 0; }
 }
+
+/* ---------- toasts (ui/Toast.tsx) ---------- */
+.toast-host {
+  position: fixed; right: 16px; bottom: 16px; z-index: 1200;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  background: var(--panel); color: var(--fg);
+  border: 1px solid var(--border); border-left: 3px solid var(--c-green);
+  border-radius: 8px; padding: 10px 14px; max-width: 380px;
+  font-size: var(--t-md); box-shadow: 0 8px 28px rgba(15, 20, 25, 0.16);
+  cursor: pointer; animation: toast-in 0.18s ease-out;
+}
+.toast.error { border-left-color: var(--c-red); }
+.toast.info { border-left-color: var(--c-blue); }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- form validation states ---------- */
+.form-field input.error,
+.form-field select.error,
+.form-field textarea.error { border-color: var(--c-red); }
+.form-field input.error:focus,
+.form-field select.error:focus,
+.form-field textarea.error:focus { box-shadow: 0 0 0 3px oklch(0.58 0.2 25 / 0.12); }
+.field-err { color: var(--c-red); font-size: var(--t-sm); margin-top: 2px; }

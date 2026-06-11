@@ -187,7 +187,7 @@ Baseline commit: `1cf6c00` — "FABLE CHANGES Started" (pushed 2026-06-11).
 
 - [x] **Group A** — Stale-while-revalidate cache for all API modules + request dedupe in `lib/api.ts` (§1.1, §1.2) ✅ new `lib/cache.ts`; all 5 API modules cached, mutations auto-invalidate; GET dedupe in `lib/api.ts`
 - [x] **Group B** — `React.memo` Nav/Kanban rows + memoize PurchaseOrders grouping (§2.2, §2.3) ✅ NavNodeRow/KanbanColumn/KanbanCard memoized, toggleGroup useCallback, PurchaseOrders grouping in useMemo
-- [ ] **Group C** — Form validation messages + saving states + toasts (§3.1, §3.5)
+- [x] **Group C** — Form validation messages + saving states + toasts (§3.1, §3.5) ✅ new `ui/Toast.tsx` + host in App; `.error`/`.field-err` CSS; validation on submit-attempt + saving states across Order/Quote/Pallet/Design/Container/PalletPack/LoadContainer/Dispatch forms; success/error toasts on all live save paths
 - [ ] **Group D** — Empty states + Retry + skeleton loaders (§3.3, §3.4)
 - [ ] **Group E** — Responsive viewport + sidebar auto-collapse breakpoint (§3.2)
 - [ ] **Group F** — Column projection in `dataOps.list()` + offset pagination, kill 300-row cap (§1.3, §1.4)

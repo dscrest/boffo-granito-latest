@@ -6,6 +6,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { PalletForm } from "./PalletForm";
 import {
@@ -64,9 +65,11 @@ export function Pallets() {
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Save failed");
+      toast.error(res.error || "Save failed");
       return;
     }
     setNotice(`Pallet saved (#${res.rowid}).`);
+    toast.success(target ? "Pallet updated" : "Pallet saved");
     await load();
   };
 
@@ -77,9 +80,11 @@ export function Pallets() {
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Delete failed");
+      toast.error(res.error || "Delete failed");
       return;
     }
     setNotice("Pallet deleted.");
+    toast.success("Pallet deleted");
     await load();
   };
 

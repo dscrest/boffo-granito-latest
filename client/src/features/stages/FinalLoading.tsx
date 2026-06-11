@@ -4,6 +4,7 @@
    KPI tiles above remain static prototype figures. */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { KPI } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
@@ -31,17 +32,21 @@ export function FinalLoading() {
 
   const finals = orders.filter((o) => o.stage === "final");
 
+  // Form stays open (showing "Dispatching…") until the saga resolves; closes on success.
   const onConfirm = async (containerId: string) => {
-    setShowForm(false);
     setError(null);
     setNotice("Dispatching…");
     const res = await dispatchContainer(containerId);
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Dispatch failed");
+      toast.error(res.error || "Dispatch failed");
       return;
     }
-    setNotice(`Container #${res.rowid} dispatched — ${res.data?.batches ?? 0} batch(es) closed out.`);
+    const msg = `Container #${res.rowid} dispatched — ${res.data?.batches ?? 0} batch(es) closed out.`;
+    setShowForm(false);
+    setNotice(msg);
+    toast.success(msg);
     void load();
   };
   // Until the invoicing saga (Phase 5) stamps invoice numbers, dispatched

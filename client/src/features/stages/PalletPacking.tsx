@@ -4,6 +4,7 @@
    KPI tiles above remain static prototype figures. */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { KPI, StageBadge } from "@/ui/primitives";
 import { finishClass } from "@/lib/format";
 import { type Order } from "@/data";
@@ -31,17 +32,21 @@ export function PalletPacking() {
 
   const items = orders.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
 
+  // Form stays open (showing "Saving…") until the saga resolves; closes on success.
   const onSave = async (input: ClosePalletInput) => {
-    setShowForm(false);
     setError(null);
     setNotice("Closing pallet…");
     const res = await closePallet(input);
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Close-pallet failed");
+      toast.error(res.error || "Close-pallet failed");
       return;
     }
-    setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    const msg = `Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`;
+    setShowForm(false);
+    setNotice(msg);
+    toast.success(msg);
     void load();
   };
 

@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import { DESIGNS, docTotals, lineTotals, type Quote } from "@/data";
@@ -139,9 +140,11 @@ export function QuoteDetail() {
     if (!res.ok) {
       setBusy(null);
       setError(res.error || "Update failed");
+      toast.error(res.error || "Update failed");
       return;
     }
     setBusy(null);
+    toast.success(`Quote ${q.quoteNo} updated`);
     invalidateQuotes();
     await load();
   };
@@ -154,8 +157,10 @@ export function QuoteDetail() {
     if (!res.ok) {
       setBusy(null);
       setError(res.error || "Delete failed");
+      toast.error(res.error || "Delete failed");
       return;
     }
+    toast.success(`Quote ${quote.quoteNo} deleted`);
     invalidateQuotes();
     navigate("/quotes");
   };
@@ -229,12 +234,12 @@ export function QuoteDetail() {
           </div>
         </div>
         <div className="right">
-          <button className="hbtn" onClick={() => setEditing(true)} title="Edit quote">
+          <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">
             <Icon name="edit" size={13} /> Edit
           </button>
           <button
             className="hbtn"
-            disabled={!canConvert}
+            disabled={!canConvert || !!busy}
             onClick={() => setConverting(true)}
             title={canConvert ? "Convert to Master Order" : "Already converted"}
           >
@@ -243,7 +248,7 @@ export function QuoteDetail() {
           <button className="hbtn" onClick={() => setPrinting(true)} title="Print / PDF">
             <Icon name="printer" size={13} /> Print Quote
           </button>
-          <button className="hbtn" onClick={() => void onDelete()} title="Delete quote" style={{ color: "var(--c-red)" }}>
+          <button className="hbtn" disabled={!!busy} onClick={() => void onDelete()} title="Delete quote" style={{ color: "var(--c-red)" }}>
             <Icon name="x" size={13} /> Delete
           </button>
         </div>

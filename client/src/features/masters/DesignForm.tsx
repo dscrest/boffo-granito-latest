@@ -192,10 +192,12 @@ export function DesignFields({
   value,
   onChange,
   lookups,
+  showErrors,
 }: {
   value: DesignValues;
   onChange: (k: keyof DesignValues, v: string) => void;
   lookups: DesignLookups;
+  showErrors?: boolean;
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
@@ -224,6 +226,7 @@ export function DesignFields({
           <div className="form-grid">
             {sec.fields.map((f) => {
               const opts = f.lookup ? lookups[f.lookup] : null;
+              const err = showErrors && f.required && !value[f.key].trim() ? `${f.label} is required` : null;
               return (
                 <label key={f.key} className="form-field">
                   <span className="lbl">
@@ -243,7 +246,7 @@ export function DesignFields({
                       )}
                     </>
                   ) : f.kind === "select" ? (
-                    <select value={value[f.key]} onChange={(e) => onChange(f.key, e.target.value)}>
+                    <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => onChange(f.key, e.target.value)}>
                       <option value="">—</option>
                       {opts
                         ? opts.map((o) => (
@@ -259,12 +262,14 @@ export function DesignFields({
                     </select>
                   ) : (
                     <input
+                      className={err ? "error" : ""}
                       type={f.kind === "number" ? "number" : "text"}
                       value={value[f.key]}
                       onChange={(e) => onChange(f.key, e.target.value)}
                       placeholder={f.label}
                     />
                   )}
+                  {err && <span className="field-err">{err}</span>}
                 </label>
               );
             })}
@@ -289,6 +294,16 @@ export function DesignForm({
   const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
   const missing = missingRequired(v);
 
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const submit = () => {
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
+    onSave(toDesignInput(v, lookups));
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
@@ -306,15 +321,17 @@ export function DesignForm({
         </div>
 
         <div className="df-body">
-          <DesignFields value={v} onChange={set} lookups={lookups} />
+          <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} />
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required</span>
+          <span className="df-req-note">
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={() => onSave(toDesignInput(v, lookups))}>
+          <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
             Save design
           </button>

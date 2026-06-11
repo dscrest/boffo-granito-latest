@@ -13,6 +13,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { lineTotals, type Quote } from "@/data";
 import { fmt } from "@/lib/format";
 import { convertQuote } from "./quotesApi";
@@ -33,6 +34,8 @@ export function ConvertDialog({
   const [qty, setQty] = useState<number[]>(() => quote.lines.map((l) => l.qty));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Errors stay hidden until the first convert attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
 
   const setLineQty = (i: number, v: string) =>
     setQty((s) => s.map((x, j) => (j === i ? Math.max(0, Number(v) || 0) : x)));
@@ -42,10 +45,13 @@ export function ConvertDialog({
   // Full only when every line is included at its exact quoted qty.
   const isFull = included.length === quote.lines.length && quote.lines.every((l, i) => qty[i] === l.qty);
   const mode: "Full" | "Partial" = isFull ? "Full" : "Partial";
-  const canConvert = included.length > 0 && !overQty && !busy;
 
   const convert = async () => {
-    if (!canConvert) return;
+    if (busy) return;
+    if (included.length === 0 || overQty) {
+      setShowErrors(true);
+      return;
+    }
     setBusy(true);
     setError(null);
     const soNumber = nextSoNumber();
@@ -57,8 +63,10 @@ export function ConvertDialog({
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Convert failed");
+      toast.error(res.error || "Convert failed");
       return;
     }
+    toast.success(`Quote converted to ${soNumber}`);
     onConverted(quote.id, soNumber);
     location.hash = "#/orders";
   };
@@ -130,6 +138,11 @@ export function ConvertDialog({
               Convert Qty is mandatory. Leave every line at its full quoted qty for a <b>Full</b> conversion;
               reduce a line or set it to 0 (excluded) for a <b>Partial</b> conversion. Quote line quantities are not reduced.
             </div>
+            {showErrors && included.length === 0 && (
+              <div className="field-err" style={{ marginTop: 10 }}>
+                Include at least one line with a Convert Qty greater than 0
+              </div>
+            )}
             {overQty && (
               <div className="card" style={{ marginTop: 10, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "8px 12px" }}>
                 Convert Qty cannot exceed the quoted qty.
@@ -147,7 +160,7 @@ export function ConvertDialog({
           <button className="btn" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={!canConvert} onClick={convert}>
+          <button className="hbtn primary" disabled={busy} onClick={convert}>
             <Icon name="arrow-r" size={13} />
             {busy ? "Converting…" : `Convert (${mode}) & open SO`}
           </button>

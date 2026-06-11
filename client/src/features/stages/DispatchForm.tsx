@@ -12,13 +12,16 @@ export function DispatchForm({
   onConfirm,
   onClose,
 }: {
-  onConfirm: (containerId: string) => void;
+  onConfirm: (containerId: string) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [containers, setContainers] = useState<ContainerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [containerId, setContainerId] = useState("");
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -34,6 +37,20 @@ export function DispatchForm({
   }, []);
 
   const container = useMemo(() => containers.find((c) => c.id === containerId) || null, [containers, containerId]);
+  const containerErr = showErrors && !containerId ? "Container is required" : null;
+
+  const submit = async () => {
+    if (!containerId) {
+      setShowErrors(true);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onConfirm(containerId);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -71,7 +88,7 @@ export function DispatchForm({
                   <span className="lbl">
                     Container<span className="req"> *</span>
                   </span>
-                  <select value={containerId} onChange={(e) => setContainerId(e.target.value)}>
+                  <select className={containerErr ? "error" : ""} value={containerId} onChange={(e) => setContainerId(e.target.value)}>
                     <option value="">— select —</option>
                     {containers.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -80,6 +97,7 @@ export function DispatchForm({
                       </option>
                     ))}
                   </select>
+                  {containerErr && <span className="field-err">{containerErr}</span>}
                 </label>
               </div>
               {container && (
@@ -92,13 +110,15 @@ export function DispatchForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required</span>
+          <span className="df-req-note">
+            {showErrors && !containerId ? <span className="field-err">Select a container to dispatch</span> : "* required"}
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={!containerId} onClick={() => containerId && onConfirm(containerId)}>
+          <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            Dispatch
+            {saving ? "Dispatching…" : "Dispatch"}
           </button>
         </div>
       </div>

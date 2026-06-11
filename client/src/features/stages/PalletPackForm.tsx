@@ -18,7 +18,7 @@ export function PalletPackForm({
   preselectItemIds,
   autoFillAll,
 }: {
-  onSave: (input: ClosePalletInput) => void;
+  onSave: (input: ClosePalletInput) => void | Promise<void>;
   onClose: () => void;
   /** When set, scope the form to one confirmed Master Order (locked select). */
   presetOrderId?: string;
@@ -108,15 +108,29 @@ export function PalletPackForm({
   );
   const missing = !orderId || !palletId || lines.length === 0;
 
-  const submit = () => {
-    if (missing) return;
-    onSave({
-      sales_order: orderId,
-      pallet: palletId,
-      delivery_date: deliveryDate || undefined,
-      remarks: remarks.trim() || undefined,
-      lines,
-    });
+  // Errors stay hidden until the first submit attempt, then update live.
+  const [showErrors, setShowErrors] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const orderErr = showErrors && !orderId ? "Master Order is required" : null;
+  const palletErr = showErrors && !palletId ? "Pallet is required" : null;
+
+  const submit = async () => {
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave({
+        sales_order: orderId,
+        pallet: palletId,
+        delivery_date: deliveryDate || undefined,
+        remarks: remarks.trim() || undefined,
+        lines,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -160,7 +174,7 @@ export function PalletPackForm({
                     {presetOrderId ? (
                       <input value={order?.label || presetOrderId} readOnly disabled />
                     ) : (
-                      <select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+                      <select className={orderErr ? "error" : ""} value={orderId} onChange={(e) => setOrderId(e.target.value)}>
                         <option value="">— select —</option>
                         {orders.map((o) => (
                           <option key={o.salesOrderId} value={o.salesOrderId}>
@@ -169,12 +183,13 @@ export function PalletPackForm({
                         ))}
                       </select>
                     )}
+                    {orderErr && <span className="field-err">{orderErr}</span>}
                   </label>
                   <label className="form-field">
                     <span className="lbl">
                       Pallet<span className="req"> *</span>
                     </span>
-                    <select value={palletId} onChange={(e) => setPalletId(e.target.value)}>
+                    <select className={palletErr ? "error" : ""} value={palletId} onChange={(e) => setPalletId(e.target.value)}>
                       <option value="">— select —</option>
                       {pallets.map((p) => (
                         <option key={p.id} value={p.id}>
@@ -183,6 +198,7 @@ export function PalletPackForm({
                         </option>
                       ))}
                     </select>
+                    {palletErr && <span className="field-err">{palletErr}</span>}
                   </label>
                   <label className="form-field">
                     <span className="lbl">Delivery Date</span>
@@ -298,14 +314,22 @@ export function PalletPackForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {totalBoxes > 0 ? `${totalBoxes} boxes · ${lines.length} item${lines.length > 1 ? "s" : ""}` : "* required"}
+            {showErrors && missing ? (
+              <span className="field-err">
+                {lines.length === 0 ? "Enter boxes for at least one item" : "Fill the required fields above"}
+              </span>
+            ) : totalBoxes > 0 ? (
+              `${totalBoxes} boxes · ${lines.length} item${lines.length > 1 ? "s" : ""}`
+            ) : (
+              "* required"
+            )}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            Close pallet
+            {saving ? "Saving…" : "Close pallet"}
           </button>
         </div>
       </div>
