@@ -1,4 +1,5 @@
 /* Purchase Orders — ported verbatim from prototype/views2.jsx. */
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
@@ -7,27 +8,31 @@ import { ORDERS, type Order } from "@/data";
 
 export function PurchaseOrders() {
   const navigate = useNavigate();
-  const groups: Record<string, Order[]> = {};
-  ORDERS.forEach((o) => (groups[o.poNumber] ||= []).push(o));
-  const pos = Object.entries(groups)
-    .map(([po, items]) => ({
-      po,
-      items,
-      party: items[0].party,
-      flag: items[0].flag,
-      country: items[0].country,
-      totalQty: items.reduce((s, o) => s + o.orderQty, 0),
-      skus: items.length,
-      date: items[0].orderDate,
-      dueDate: items[0].dueDate,
-      daysFromPI: items[0].daysFromPI,
-      stage: items[0].stage,
-      progress: pct(
-        items.reduce((s, o) => s + o.producedQty, 0),
-        items.reduce((s, o) => s + o.orderQty, 0),
-      ),
-    }))
-    .sort((a, b) => b.totalQty - a.totalQty);
+  // Group + sort once, not on every render. ORDERS is a module constant
+  // today; when live data lands, it becomes state and joins the deps.
+  const pos = useMemo(() => {
+    const groups: Record<string, Order[]> = {};
+    ORDERS.forEach((o) => (groups[o.poNumber] ||= []).push(o));
+    return Object.entries(groups)
+      .map(([po, items]) => ({
+        po,
+        items,
+        party: items[0].party,
+        flag: items[0].flag,
+        country: items[0].country,
+        totalQty: items.reduce((s, o) => s + o.orderQty, 0),
+        skus: items.length,
+        date: items[0].orderDate,
+        dueDate: items[0].dueDate,
+        daysFromPI: items[0].daysFromPI,
+        stage: items[0].stage,
+        progress: pct(
+          items.reduce((s, o) => s + o.producedQty, 0),
+          items.reduce((s, o) => s + o.orderQty, 0),
+        ),
+      }))
+      .sort((a, b) => b.totalQty - a.totalQty);
+  }, []);
 
   return (
     <div>

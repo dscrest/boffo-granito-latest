@@ -4,7 +4,7 @@
    Navigation is HashRouter-based; each page is lazy-loaded into its own
    chunk (code-splitting). Route path === the prototype's view id.
    ============================================================ */
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
@@ -168,8 +168,10 @@ interface NavNodeRowProps {
 }
 
 /* Renders one tree node: a NavLink leaf, or a collapsible parent that
-   recurses into its children when open. `depth` drives the indent. */
-function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowProps) {
+   recurses into its children when open. `depth` drives the indent.
+   Memoized: count-badge updates (e.g. live quote count) re-render only
+   rows whose props changed, not the whole tree. */
+const NavNodeRow = memo(function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowProps) {
   const pad = { paddingLeft: 8 + depth * 14 } as const;
 
   if (!node.children) {
@@ -213,7 +215,7 @@ function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowPro
       )}
     </>
   );
-}
+});
 
 export default function App() {
   const location = useLocation();
@@ -246,7 +248,11 @@ export default function App() {
     const anc = ancestorsOf(baseId);
     if (anc?.length) setOpenGroups((p) => ({ ...p, ...Object.fromEntries(anc.map((l) => [l, true])) }));
   }, [baseId]);
-  const toggleGroup = (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] }));
+  // Stable ref so memoized NavNodeRow doesn't re-render on unrelated state.
+  const toggleGroup = useCallback(
+    (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] })),
+    [],
+  );
 
   useEffect(() => {
     applyAccent(TWEAK_DEFAULTS.accent);

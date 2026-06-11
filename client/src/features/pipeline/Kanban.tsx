@@ -1,5 +1,5 @@
 /* Orders Pipeline (Kanban) — ported verbatim from prototype/views.jsx. */
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
@@ -92,7 +92,9 @@ export function Kanban() {
   );
 }
 
-function KanbanColumn({
+/* Memoized: filter/quick-view state changes re-render only affected
+   columns (setState setters passed as onOpen/onQuickView are stable). */
+const KanbanColumn = memo(function KanbanColumn({
   stage,
   orders,
   onOpen,
@@ -138,9 +140,9 @@ function KanbanColumn({
       </div>
     </div>
   );
-}
+});
 
-function KanbanCard({
+const KanbanCard = memo(function KanbanCard({
   order,
   onOpen,
   onQuickView,
@@ -224,4 +226,4 @@ function KanbanCard({
       </div>
     </div>
   );
-}
+});
