@@ -6,7 +6,7 @@
    OperationLog; callers branch on `ok`. The fit-suggester lives in
    masters/containersApi.ts (it's read-only and container-centric).
    ============================================================ */
-import { list, op, type DSRow } from "@/lib/dataOps";
+import { list, listAll, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import { invalidateContainers } from "@/features/masters/containersApi";
@@ -59,10 +59,10 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   error?: string;
 }> {
   const [items, sos, customers, designs] = await Promise.all([
-    list("OrderItem", { limit: 300 }),
-    list("SalesOrder", { order: "ROWID desc", limit: 300 }),
-    list("Customer", { limit: 300 }),
-    list("Design", { limit: 300 }),
+    listAll("OrderItem"),
+    listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer"] }),
+    listAll("Customer", { columns: ["name"] }),
+    listAll("Design", { columns: ["design_name"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 
@@ -134,9 +134,9 @@ async function fetchLoadableBatches(): Promise<{
   error?: string;
 }> {
   const [batches, loadings, designs] = await Promise.all([
-    list("PalletisedBatch", { order: "ROWID desc", limit: 300 }),
-    list("ContainerLoading", { limit: 300 }),
-    list("Design", { limit: 300 }),
+    listAll("PalletisedBatch", { order: "ROWID desc" }),
+    listAll("ContainerLoading", { columns: ["batch"] }),
+    listAll("Design", { columns: ["design_name"] }),
   ]);
   if (!batches.ok) return { ok: false, batches: [], error: batches.error };
 

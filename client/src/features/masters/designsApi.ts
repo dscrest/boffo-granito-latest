@@ -7,7 +7,7 @@
    OperationLog. Lookup key columns are NOT uniform: Size keys on `code`,
    the rest (Finish/Category/Glaze/Brand/Grade) key on `name`.
    ============================================================ */
-import { list, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
+import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -110,15 +110,15 @@ async function fetchDesigns(): Promise<{
   lookups: DesignLookups;
   error?: string;
 }> {
-  // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO past 300.)
+  // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
   const [designs, size, finish, category, glaze, brand, grade] = await Promise.all([
-    list("Design", { order: "ROWID desc", limit: 300 }),
-    list("Size", { limit: 300 }),
-    list("Finish", { limit: 300 }),
-    list("Category", { limit: 300 }),
-    list("Glaze", { limit: 300 }),
-    list("Brand", { limit: 300 }),
-    list("Grade", { limit: 300 }),
+    listAll("Design", { order: "ROWID desc" }),
+    list("Size", { limit: 300, columns: ["code", "name"] }),
+    list("Finish", { limit: 300, columns: ["name"] }),
+    list("Category", { limit: 300, columns: ["name"] }),
+    list("Glaze", { limit: 300, columns: ["name"] }),
+    list("Brand", { limit: 300, columns: ["name"] }),
+    list("Grade", { limit: 300, columns: ["name"] }),
   ]);
 
   const lookups: DesignLookups = {

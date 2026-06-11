@@ -6,7 +6,7 @@
    by joining Customer / PaymentTerm / Design / SalesOrder client-side
    from a handful of parallel list() calls.
    ============================================================ */
-import { list, remove, update, op, type DSRow } from "@/lib/dataOps";
+import { list, listAll, remove, update, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import type { Quote, QuoteLine, QuoteStatus, TaxType } from "@/data";
 
@@ -60,14 +60,15 @@ export function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
 }
 
 async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
-  // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
+  // listAll pages past ZCQL's 300-row cap; lookups project only the
+  // columns this join actually reads (ROWID is always included).
   const [q, items, customers, terms, designs, sos] = await Promise.all([
-    list("Quote", { order: "ROWID desc", limit: 300 }),
-    list("QuoteItem", { limit: 300 }),
-    list("Customer", { limit: 300 }),
-    list("PaymentTerm", { limit: 300 }),
-    list("Design", { limit: 300 }),
-    list("SalesOrder", { limit: 300 }),
+    listAll("Quote", { order: "ROWID desc" }),
+    listAll("QuoteItem"),
+    listAll("Customer", { columns: ["name", "code"] }),
+    list("PaymentTerm", { limit: 300, columns: ["name"] }),
+    listAll("Design", { columns: ["design_name"] }),
+    listAll("SalesOrder", { columns: ["quote", "order_number"] }),
   ]);
   if (!q.ok) return { ok: false, quotes: [], error: q.error };
 

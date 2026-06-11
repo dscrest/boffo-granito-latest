@@ -5,7 +5,7 @@
    header, Customer, and Design (+ Size/Finish/Brand lookups), to
    match the flat Order shape in client/src/data.ts.
    ============================================================ */
-import { list, remove, op, type DSRow } from "@/lib/dataOps";
+import { list, listAll, remove, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import type { Order, TaxType } from "@/data";
 
@@ -48,15 +48,16 @@ export function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
 }
 
 async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
-  // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
+  // listAll pages past ZCQL's 300-row cap; lookups project only the
+  // columns this join actually reads (ROWID is always included).
   const [sos, items, customers, designs, sizes, finishes, brands] = await Promise.all([
-    list("SalesOrder", { order: "ROWID desc", limit: 300 }),
-    list("OrderItem", { limit: 300 }),
-    list("Customer", { limit: 300 }),
-    list("Design", { limit: 300 }),
-    list("Size", { limit: 300 }),
-    list("Finish", { limit: 300 }),
-    list("Brand", { limit: 300 }),
+    listAll("SalesOrder", { order: "ROWID desc" }),
+    listAll("OrderItem"),
+    listAll("Customer", { columns: ["name", "code", "country_code"] }),
+    listAll("Design", { columns: ["design_name", "size", "finish", "brand"] }),
+    list("Size", { limit: 300, columns: ["name"] }),
+    list("Finish", { limit: 300, columns: ["name"] }),
+    list("Brand", { limit: 300, columns: ["name"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 

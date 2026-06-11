@@ -1109,11 +1109,26 @@ app.get("/:table", async (req, res) => {
   try {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
-    // ZCQL hard-caps LIMIT at 300 rows per query.
+    // ZCQL hard-caps LIMIT at 300 rows per query; paginate via "LIMIT offset, count".
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 300);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const where = req.query.where ? ` WHERE ${req.query.where}` : "";
     const order = req.query.order ? ` ORDER BY ${req.query.order}` : "";
-    const sql = `SELECT * FROM ${table}${where}${order} LIMIT ${limit}`;
+    // Optional column projection (?columns=a,b,c). Identifiers only — anything
+    // else falls back to SELECT *. ROWID is always included so joins keep working.
+    let cols = "*";
+    if (req.query.columns) {
+      const ids = String(req.query.columns)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (ids.length && ids.every((c) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(c))) {
+        if (!ids.includes("ROWID")) ids.unshift("ROWID");
+        cols = ids.join(", ");
+      }
+    }
+    const lim = offset > 0 ? `${offset}, ${limit}` : `${limit}`;
+    const sql = `SELECT ${cols} FROM ${table}${where}${order} LIMIT ${lim}`;
     const rows = rowList(await catalyst.zcql().executeZCQLQuery(sql));
     res.json({ ok: true, rows });
   } catch (err) {

@@ -7,7 +7,7 @@
    omit them when blank. Every write is recorded server-side in
    OperationLog. See palletsApi.ts for the sibling pattern.
    ============================================================ */
-import { list, insert, update, remove, op } from "@/lib/dataOps";
+import { listAll, insert, update, remove, op } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -61,8 +61,8 @@ async function fetchContainers(): Promise<{
   containers: ContainerRow[];
   error?: string;
 }> {
-  // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when the table grows past 300.)
-  const res = await list("Container", { order: "ROWID desc", limit: 300 });
+  // listAll pages past ZCQL's 300-row cap.
+  const res = await listAll("Container", { order: "ROWID desc" });
   if (!res.ok) return { ok: false, containers: [], error: res.error };
 
   const rows: ContainerRow[] = (res.rows || []).map((c) => ({

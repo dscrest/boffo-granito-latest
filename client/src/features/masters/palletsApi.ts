@@ -6,7 +6,7 @@
    ForeignKey → Size (stores the Size ROWID). Every write is recorded
    server-side in OperationLog.
    ============================================================ */
-import { list, insert, update, remove, type DSRow } from "@/lib/dataOps";
+import { list, listAll, insert, update, remove, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -78,10 +78,10 @@ async function fetchPallets(): Promise<{
   sizes: SizeOption[];
   error?: string;
 }> {
-  // ZCQL caps LIMIT at 300 rows/query. (Pagination TODO when any table grows past 300.)
+  // listAll pages past ZCQL's 300-row cap; Size projects its label columns.
   const [pallets, sizes] = await Promise.all([
-    list("Pallet", { order: "ROWID desc", limit: 300 }),
-    list("Size", { limit: 300 }),
+    listAll("Pallet", { order: "ROWID desc" }),
+    list("Size", { limit: 300, columns: ["code", "name"] }),
   ]);
   if (!pallets.ok) return { ok: false, pallets: [], sizes: [], error: pallets.error };
 
