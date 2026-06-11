@@ -1,161 +1,396 @@
-/* Design Master — table of designs (Items) with a New Design entry form.
-   Base rows come from mock DESIGNS; newly-entered designs are kept in local
-   `drafts` state (frontend-only, not yet persisted) and shown first. */
-import { useMemo, useState } from "react";
+/* ============================================================
+   Design Master (Items) — master-page UI convention reference impl.
+
+   Convention (applies to every master list):
+   • NO inline row actions — the row itself is the action.
+   • Row-click → the dedicated edit page (/design/:id/edit).
+   • Bulk select (checkboxes) → bulk update + bulk delete on selection.
+
+   Data is live from the Catalyst Data Store via designsApi. "New design"
+   opens the create modal; edits happen on the edit page.
+   ============================================================ */
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { fmt, finishClass } from "@/lib/format";
-import { DESIGNS, FINISHES, ORDERS, SIZES } from "@/data";
-import { DesignForm, type DesignDraft } from "./DesignForm";
+import { finishClass } from "@/lib/format";
+import { DesignForm } from "./DesignForm";
+import {
+  bulkDeleteDesigns,
+  bulkUpdateDesigns,
+  createDesign,
+  listDesigns,
+  type DesignInput,
+  type DesignLookups,
+  type DesignRow,
+} from "./designsApi";
 
-interface DesignRow {
-  name: string;
-  base: string;
-  size: string;
-  finish: string;
-  brand: string;
-  glaze: string;
-  isDraft: boolean;
+const EMPTY_LOOKUPS: DesignLookups = {
+  sizes: [],
+  finishes: [],
+  categories: [],
+  glazes: [],
+  brands: [],
+  grades: [],
+};
+
+/* Bulk-edit is restricted to fields that don't feed the computed
+   unique_name (design_name/size/finish) or sku (size/category/finish/glaze),
+   so a bulk reclassification can't silently desync those keys. */
+function BulkEditModal({
+  count,
+  lookups,
+  busy,
+  onApply,
+  onClose,
+}: {
+  count: number;
+  lookups: DesignLookups;
+  busy: boolean;
+  onApply: (patch: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  const [status, setStatus] = useState("");
+  const [brand, setBrand] = useState("");
+  const [grade, setGrade] = useState("");
+
+  const patch: Record<string, unknown> = {};
+  if (status) patch.status = status;
+  if (brand) patch.brand = brand;
+  if (grade) patch.grade = grade;
+  const nothing = Object.keys(patch).length === 0;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel card df-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico">
+            <Icon name="settings" size={18} />
+          </div>
+          <div>
+            <div className="ttl">Bulk edit {count} item{count > 1 ? "s" : ""}</div>
+            <div className="sub2">Only the fields you set are changed. Blank = leave unchanged.</div>
+          </div>
+          <button className="btn x" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+        <div className="df-body">
+          <div className="form-section">
+            <div className="form-grid">
+              <label className="form-field">
+                <span className="lbl">Status</span>
+                <select value={status} onChange={(e) => setStatus(e.target.value)}>
+                  <option value="">— leave unchanged —</option>
+                  <option value="Continue">Continue</option>
+                  <option value="Discontinued">Discontinued</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Brand</span>
+                <select value={brand} onChange={(e) => setBrand(e.target.value)}>
+                  <option value="">— leave unchanged —</option>
+                  {lookups.brands.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Grade</span>
+                <select value={grade} onChange={(e) => setGrade(e.target.value)}>
+                  <option value="">— leave unchanged —</option>
+                  {lookups.grades.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="df-foot">
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="hbtn primary" disabled={nothing || busy} onClick={() => onApply(patch)}>
+            <Icon name="check" size={13} />
+            {busy ? "Applying…" : `Apply to ${count}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function DesignMaster() {
   const navigate = useNavigate();
-  const [showForm, setShowForm] = useState(false);
-  const [drafts, setDrafts] = useState<DesignDraft[]>([]);
+  const [rows, setRows] = useState<DesignRow[]>([]);
+  const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showNew, setShowNew] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const addDraft = (d: DesignDraft) => {
-    setDrafts((p) => [d, ...p]);
-    setShowForm(false);
+  const load = async () => {
+    setLoading(true);
+    const res = await listDesigns();
+    setLoading(false);
+    if (!res.ok) {
+      setError(res.error || "Failed to load designs");
+      return;
+    }
+    setError(null);
+    setRows(res.designs);
+    setLookups(res.lookups);
+    setSelected(new Set());
   };
 
-  const rows = useMemo<DesignRow[]>(() => {
-    const draftRows: DesignRow[] = drafts.map((d) => ({
-      name: d.design_name,
-      base: d.base_design_name || d.design_name,
-      size: d.size,
-      finish: d.finish,
-      brand: d.brand,
-      glaze: d.glaze || d.finish,
-      isDraft: true,
-    }));
-    const baseRows: DesignRow[] = DESIGNS.map((d) => ({
-      name: d.name,
-      base: d.name,
-      size: d.size,
-      finish: d.finish,
-      brand: d.brand,
-      glaze: d.finish,
-      isDraft: false,
-    }));
-    return [...draftRows, ...baseRows];
-  }, [drafts]);
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.designName, r.uniqueName, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [rows, query]);
+
+  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const next = new Set(p);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelected((p) => {
+      if (allShownSelected) {
+        const next = new Set(p);
+        filtered.forEach((r) => next.delete(r.id));
+        return next;
+      }
+      const next = new Set(p);
+      filtered.forEach((r) => next.add(r.id));
+      return next;
+    });
+
+  const onCreate = async (input: DesignInput) => {
+    setShowNew(false);
+    setNotice("Saving design…");
+    const res = await createDesign(input);
+    if (!res.ok) {
+      setNotice(null);
+      setError(res.error || "Save failed");
+      return;
+    }
+    setNotice(`Design saved (#${res.rowid}).`);
+    await load();
+  };
+
+  const ids = useMemo(() => [...selected], [selected]);
+
+  const onBulkApply = async (patch: Record<string, unknown>) => {
+    setBusy(true);
+    setNotice(`Updating ${ids.length} item${ids.length > 1 ? "s" : ""}…`);
+    const res = await bulkUpdateDesigns(ids, patch);
+    setBusy(false);
+    setShowBulk(false);
+    if (!res.ok) {
+      setError(`${res.failed} update(s) failed: ${res.firstError || "unknown error"}`);
+    }
+    setNotice(`Updated ${res.done} item${res.done === 1 ? "" : "s"}.`);
+    await load();
+  };
+
+  const onBulkDelete = async () => {
+    if (!window.confirm(`Delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`))
+      return;
+    setBusy(true);
+    setNotice(`Deleting ${ids.length} item${ids.length > 1 ? "s" : ""}…`);
+    const res = await bulkDeleteDesigns(ids);
+    setBusy(false);
+    if (!res.ok) {
+      setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);
+    }
+    setNotice(`Deleted ${res.done} item${res.done === 1 ? "" : "s"}.`);
+    await load();
+  };
 
   return (
     <div>
-      {showForm && <DesignForm onSave={addDraft} onClose={() => setShowForm(false)} />}
+      {showNew && <DesignForm lookups={lookups} onSave={onCreate} onClose={() => setShowNew(false)} />}
+      {showBulk && (
+        <BulkEditModal
+          count={ids.length}
+          lookups={lookups}
+          busy={busy}
+          onApply={onBulkApply}
+          onClose={() => setShowBulk(false)}
+        />
+      )}
+
       <div className="page-head">
         <div>
           <div className="title">Design Master</div>
           <div className="sub">
-            {rows.length} designs · {SIZES.length} sizes · {FINISHES.length} finishes
-            {drafts.length > 0 && (
+            {loading ? "Loading…" : `${filtered.length} of ${rows.length} items`}
+            {notice && (
               <>
                 {" · "}
-                <span className="dim">{drafts.length} unsaved draft{drafts.length > 1 ? "s" : ""}</span>
+                <span className="dim">{notice}</span>
               </>
             )}
           </div>
         </div>
         <div className="right">
-          <button className="hbtn">
-            <Icon name="download" size={13} />
-            Export
+          <button className="hbtn" onClick={() => void load()} title="Refresh">
+            <Icon name="clock" size={13} />
+            Refresh
           </button>
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+          <button className="hbtn primary" onClick={() => setShowNew(true)}>
             <Icon name="plus" size={13} />
             New design
           </button>
         </div>
       </div>
 
-      <div className="fbar">
-        <button className="btn active">All</button>
-        <button className="btn">600x1200</button>
-        <button className="btn">200x1200</button>
-        <button className="btn">600x600</button>
-        <button className="btn">75x600</button>
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Search design…" />
-        <button className="btn">Group by Brand</button>
-      </div>
+      {error && (
+        <div
+          className="card"
+          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
+        >
+          {error} — check the <a href="#/ops">Operations log</a>.
+        </div>
+      )}
+
+      {/* Bulk action bar replaces the filter bar while a selection is active. */}
+      {ids.length > 0 ? (
+        <div className="fbar" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {ids.length} selected
+          </span>
+          <button className="btn" onClick={() => setShowBulk(true)} disabled={busy}>
+            <Icon name="settings" size={12} className="ic" /> Bulk edit
+          </button>
+          <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
+            Delete
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : (
+        <div className="fbar">
+          <span className="muted mono">{filtered.length} rows</span>
+          <div style={{ flex: 1 }} />
+          <input type="text" placeholder="Search design…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+      )}
 
       <div className="card">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: 36, textAlign: "center" }}>#</th>
-              <th>Design Name</th>
-              <th>Base Design</th>
-              <th>Size</th>
-              <th>Finish</th>
-              <th>Brand</th>
-              <th>Glaze</th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Active POs
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Open Qty
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((d, i) => {
-              const open = ORDERS.filter((o) => o.design === d.name).reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
-              const pos = ORDERS.filter((o) => o.design === d.name).length;
-              return (
-                <tr key={`${d.name}-${i}`}>
-                  <td className="muted mono" style={{ textAlign: "center" }}>
-                    {i + 1}
+        <div style={{ overflow: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width: 34, textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={allShownSelected}
+                    onChange={toggleAll}
+                    title={allShownSelected ? "Deselect all" : "Select all"}
+                  />
+                </th>
+                <th style={{ width: 36, textAlign: "center" }}>#</th>
+                <th>Design Name</th>
+                <th>Size</th>
+                <th>Finish</th>
+                <th>Brand</th>
+                <th>Category</th>
+                <th>Glaze</th>
+                <th>Status</th>
+                <th>SKU</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((d, i) => {
+                const sel = selected.has(d.id);
+                return (
+                  <tr
+                    key={d.id}
+                    onClick={() => navigate(`/design/${d.id}/edit`)}
+                    style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
+                    title="Edit item"
+                  >
+                    {/* checkbox cell stops propagation so toggling never navigates */}
+                    <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleOne(d.id)} />
+                    </td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>
+                      {i + 1}
+                    </td>
+                    <td>
+                      <span className="design-name">{d.designName}</span>
+                    </td>
+                    <td>
+                      {d.sizeLabel ? (
+                        <span className={`chip size ${d.sizeLabel.startsWith("200") || d.sizeLabel.startsWith("75") ? "b" : ""}`}>
+                          {d.sizeLabel}
+                        </span>
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {d.finishLabel ? (
+                        <span className={`chip finish ${finishClass(d.finishLabel)}`}>{d.finishLabel}</span>
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {d.brandLabel ? (
+                        <span className={`chip brand ${d.brandLabel === "BIG" ? "big" : ""}`}>{d.brandLabel}</span>
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                    <td className="muted">{d.categoryLabel || <span className="dim">—</span>}</td>
+                    <td>
+                      {d.glazeLabel ? (
+                        <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span>
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                    <td className="muted">{d.status || <span className="dim">—</span>}</td>
+                    <td className="muted mono">{d.sku || <span className="dim">—</span>}</td>
+                  </tr>
+                );
+              })}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                    No items yet. Click <b>New design</b> to add one.
                   </td>
-                  <td>
-                    {d.isDraft ? (
-                      <span className="design-name">{d.name}</span>
-                    ) : (
-                      <button
-                        className="design-name"
-                        style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", color: "var(--accent)" }}
-                        onClick={() => navigate(`/design/${encodeURIComponent(d.name)}`)}
-                        title="Open details"
-                      >
-                        {d.name}
-                      </button>
-                    )}
-                    {d.isDraft && (
-                      <span className="chip" style={{ marginLeft: 6, background: "var(--accent-soft)", color: "var(--accent)" }}>
-                        draft
-                      </span>
-                    )}
-                  </td>
-                  <td className="muted">{d.base}</td>
-                  <td>
-                    <span className={`chip size ${d.size.startsWith("200") || d.size.startsWith("75") ? "b" : ""}`}>{d.size}</span>
-                  </td>
-                  <td>
-                    <span className={`chip finish ${finishClass(d.finish)}`}>{d.finish}</span>
-                  </td>
-                  <td>
-                    <span className={`chip brand ${d.brand === "BIG" ? "big" : ""}`}>{d.brand}</span>
-                  </td>
-                  <td>
-                    <span className={`chip finish ${finishClass(d.glaze)}`}>{d.glaze}</span>
-                  </td>
-                  <td className="num">{pos}</td>
-                  <td className="num">{open > 0 ? fmt(open) : <span className="dim">—</span>}</td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

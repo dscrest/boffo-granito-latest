@@ -64,6 +64,7 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
     const totalBoxes = Math.ceil(orderQty / 60);
     return {
       id: String(it.ROWID),
+      salesOrderId: str(it.sales_order),
       poNumber: so ? str(so.po_number) || str(so.order_number) : "",
       partyCode: custCode.get(custId) || "",
       party: custName.get(custId) || "",

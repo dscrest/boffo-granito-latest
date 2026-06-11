@@ -51,7 +51,8 @@ export function Pallets() {
       (r) =>
         r.name.toLowerCase().includes(q) ||
         r.sizeLabel.toLowerCase().includes(q) ||
-        r.palletType.toLowerCase().includes(q),
+        r.palletType.toLowerCase().includes(q) ||
+        r.packingDetails.toLowerCase().includes(q),
     );
   }, [rows, query]);
 
@@ -85,12 +86,19 @@ export function Pallets() {
   const initial: Partial<PalletInput> | undefined = editing?.row
     ? {
         name: editing.row.name,
+        packing_details: editing.row.packingDetails,
         size: editing.row.sizeId,
         pallet_type: editing.row.palletType,
         pallet_size_label: editing.row.palletSizeLabel,
+        coverage_sqm: editing.row.coverageSqm,
+        coverage_sqft: editing.row.coverageSqft,
+        box_weight_kg: editing.row.boxWeightKg,
         boxes_per_pallet: editing.row.boxesPerPallet,
         pallets_per_container: editing.row.palletsPerContainer,
         empty_pallet_weight_kg: editing.row.emptyWeightKg,
+        b_boxes_per_pallet: editing.row.bBoxesPerPallet,
+        b_pallets_per_container: editing.row.bPalletsPerContainer,
+        b_pallet_weight: editing.row.bPalletWeightKg,
         remarks: editing.row.remarks,
       }
     : undefined;
@@ -154,12 +162,12 @@ export function Pallets() {
               <tr>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>Name</th>
+                <th>Packing</th>
                 <th>Size</th>
                 <th>Type</th>
-                <th className="num" style={{ textAlign: "right" }}>Boxes / Pallet</th>
-                <th className="num" style={{ textAlign: "right" }}>Pallets / Container</th>
-                <th className="num" style={{ textAlign: "right" }}>Boxes / Container</th>
-                <th className="num" style={{ textAlign: "right" }}>Empty Wt (kg)</th>
+                <th className="num" style={{ textAlign: "right" }}>Coverage (m² / ft²)</th>
+                <th className="num" style={{ textAlign: "right" }}>Boxes / Cont.</th>
+                <th className="num" style={{ textAlign: "right" }}>Pallets / Cont.</th>
                 <th style={{ width: 90, textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
@@ -168,14 +176,16 @@ export function Pallets() {
                 <tr key={r.id}>
                   <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
                   <td><span className="chip">{r.name}</span></td>
+                  <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>
                   <td>{r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : <span className="dim">—</span>}</td>
                   <td className="muted">{r.palletType || <span className="dim">—</span>}</td>
-                  <td className="num mono">{r.boxesPerPallet > 0 ? fmt(r.boxesPerPallet) : <span className="dim">—</span>}</td>
-                  <td className="num mono">{r.palletsPerContainer > 0 ? fmt(r.palletsPerContainer) : <span className="dim">—</span>}</td>
-                  <td className="num mono" style={{ color: "var(--fg)" }}>
-                    {r.boxesPerContainer > 0 ? fmt(r.boxesPerContainer) : <span className="dim">—</span>}
+                  <td className="num mono">
+                    {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}
                   </td>
-                  <td className="num mono">{r.emptyWeightKg > 0 ? r.emptyWeightKg : <span className="dim">—</span>}</td>
+                  <td className="num mono" style={{ color: "var(--fg)" }}>
+                    {r.totalBoxesPerContainer > 0 ? fmt(r.totalBoxesPerContainer) : <span className="dim">—</span>}
+                  </td>
+                  <td className="num mono">{r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : <span className="dim">—</span>}</td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     <button className="btn" title="Edit" onClick={() => setEditing({ row: r })}>
                       Edit

@@ -19,15 +19,30 @@ export interface SizeOption {
 export interface PalletRow {
   id: string; // ROWID
   name: string;
+  packingDetails: string; // e.g. "[32 * 30] = 960"
   sizeId: string; // Size ROWID ("" if unset)
   sizeLabel: string;
   palletType: string;
   palletSizeLabel: string;
+  coverageSqm: number; // per box
+  coverageSqft: number; // per box
+  boxWeightKg: number; // per box
+  // Arrangement A
   boxesPerPallet: number;
   palletsPerContainer: number;
-  emptyWeightKg: number;
+  emptyWeightKg: number; // A pallet weight
+  // Arrangement B (mixed loads; 0 when single-arrangement)
+  bBoxesPerPallet: number;
+  bPalletsPerContainer: number;
+  bPalletWeightKg: number;
   remarks: string;
-  boxesPerContainer: number; // computed: boxesPerPallet * palletsPerContainer
+  boxesPerContainer: number; // computed: boxesPerPallet * palletsPerContainer (arrangement A)
+  // Computed per-container totals (A + B), not stored
+  totalBoxesPerContainer: number;
+  totalPalletsPerContainer: number;
+  totalSqmPerContainer: number;
+  totalSqftPerContainer: number;
+  totalBoxWeightPerContainer: number;
 }
 
 function sizeLabelOf(r: DSRow): string {
@@ -58,19 +73,40 @@ export async function listPallets(): Promise<{
   const rows: PalletRow[] = (pallets.rows || []).map((p) => {
     const boxesPerPallet = num(p.boxes_per_pallet);
     const palletsPerContainer = num(p.pallets_per_container);
+    const bBoxesPerPallet = num(p.b_boxes_per_pallet);
+    const bPalletsPerContainer = num(p.b_pallets_per_container);
+    const coverageSqm = num(p.coverage_sqm);
+    const coverageSqft = num(p.coverage_sqft);
+    const boxWeightKg = num(p.box_weight_kg);
     const sizeId = str(p.size);
+    // Per-container totals sum both arrangements (A + B); coverage/weight are per box.
+    const totalBoxesPerContainer =
+      boxesPerPallet * palletsPerContainer + bBoxesPerPallet * bPalletsPerContainer;
+    const totalPalletsPerContainer = palletsPerContainer + bPalletsPerContainer;
     return {
       id: String(p.ROWID),
       name: str(p.name),
+      packingDetails: str(p.packing_details),
       sizeId,
       sizeLabel: sizeLabel.get(sizeId) || "",
       palletType: str(p.pallet_type),
       palletSizeLabel: str(p.pallet_size_label),
+      coverageSqm,
+      coverageSqft,
+      boxWeightKg,
       boxesPerPallet,
       palletsPerContainer,
       emptyWeightKg: num(p.empty_pallet_weight_kg),
+      bBoxesPerPallet,
+      bPalletsPerContainer,
+      bPalletWeightKg: num(p.b_pallet_weight),
       remarks: str(p.remarks),
       boxesPerContainer: boxesPerPallet * palletsPerContainer,
+      totalBoxesPerContainer,
+      totalPalletsPerContainer,
+      totalSqmPerContainer: totalBoxesPerContainer * coverageSqm,
+      totalSqftPerContainer: totalBoxesPerContainer * coverageSqft,
+      totalBoxWeightPerContainer: totalBoxesPerContainer * boxWeightKg,
     };
   });
 
@@ -79,12 +115,19 @@ export async function listPallets(): Promise<{
 
 export interface PalletInput {
   name: string;
+  packing_details: string;
   size: string; // Size ROWID ("" = leave unset)
   pallet_type: string;
   pallet_size_label: string;
-  boxes_per_pallet: number;
-  pallets_per_container: number;
-  empty_pallet_weight_kg: number;
+  coverage_sqm: number;
+  coverage_sqft: number;
+  box_weight_kg: number;
+  boxes_per_pallet: number; // arrangement A
+  pallets_per_container: number; // arrangement A
+  empty_pallet_weight_kg: number; // arrangement A pallet weight
+  b_boxes_per_pallet: number; // arrangement B
+  b_pallets_per_container: number; // arrangement B
+  b_pallet_weight: number; // arrangement B pallet weight
   remarks: string;
 }
 
@@ -92,11 +135,18 @@ export interface PalletInput {
 function toPayload(input: PalletInput): Record<string, unknown> {
   const p: Record<string, unknown> = {
     name: input.name.trim(),
+    packing_details: input.packing_details.trim(),
     pallet_type: input.pallet_type.trim(),
     pallet_size_label: input.pallet_size_label.trim(),
+    coverage_sqm: input.coverage_sqm,
+    coverage_sqft: input.coverage_sqft,
+    box_weight_kg: input.box_weight_kg,
     boxes_per_pallet: input.boxes_per_pallet,
     pallets_per_container: input.pallets_per_container,
     empty_pallet_weight_kg: input.empty_pallet_weight_kg,
+    b_boxes_per_pallet: input.b_boxes_per_pallet,
+    b_pallets_per_container: input.b_pallets_per_container,
+    b_pallet_weight: input.b_pallet_weight,
     remarks: input.remarks.trim(),
   };
   if (input.size) p.size = input.size; // FK only when chosen

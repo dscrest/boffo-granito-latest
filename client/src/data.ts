@@ -30,6 +30,7 @@ export interface Stage {
 
 export interface Order {
   id: string;
+  salesOrderId?: string; // SalesOrder ROWID (real data); used to scope palletization
   poNumber: string;
   partyCode: string;
   party: string;

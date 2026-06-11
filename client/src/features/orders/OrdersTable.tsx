@@ -9,6 +9,8 @@ import { fmt, finishClass } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { createSalesOrder, listOrders, type NewSalesOrderInput } from "./ordersApi";
+import { PalletPackForm } from "@/features/stages/PalletPackForm";
+import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
 
 let _soSeq = 100;
 const genOrderNumber = () => `SO/2026-27/${++_soSeq}`;
@@ -51,6 +53,7 @@ export function OrdersTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [packOrderId, setPackOrderId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -81,6 +84,19 @@ export function OrdersTable() {
     await load();
   };
 
+  const onPalletSave = async (input: ClosePalletInput) => {
+    setPackOrderId(null);
+    setNotice("Closing pallet…");
+    const res = await closePallet(input);
+    if (!res.ok) {
+      setNotice(null);
+      setError(res.error || "Close-pallet failed");
+      return;
+    }
+    setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    await load();
+  };
+
   const filtered = useMemo(() => {
     if (tab === "all") return orders;
     return orders.filter((o) => o.stage === tab);
@@ -89,6 +105,9 @@ export function OrdersTable() {
   return (
     <div>
       {showForm && <OrderForm onSave={onSave} onClose={() => setShowForm(false)} />}
+      {packOrderId && (
+        <PalletPackForm presetOrderId={packOrderId} onSave={onPalletSave} onClose={() => setPackOrderId(null)} />
+      )}
       <div className="page-head">
         <div>
           <div className="title">All Master Orders</div>
@@ -149,6 +168,7 @@ export function OrdersTable() {
                 <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                 <th>Stage</th>
                 <th>Due</th>
+                <th style={{ width: 90 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -185,12 +205,25 @@ export function OrdersTable() {
                     <td className="num">{fmt(remaining)}</td>
                     <td><StageBadge stage={o.stage} /></td>
                     <td className="mono muted">{o.dueDate}</td>
+                    <td>
+                      {o.salesOrderId && (
+                        <button
+                          className="btn"
+                          title="Send items to palletization"
+                          onClick={() => setPackOrderId(o.salesOrderId!)}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px" }}
+                        >
+                          <Icon name="palette" size={12} />
+                          Palletize
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                  <td colSpan={14} className="muted" style={{ textAlign: "center", padding: 18 }}>
                     No master orders yet. Create one from a Quote (Convert) or via <b>New Order</b>.
                   </td>
                 </tr>

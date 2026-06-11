@@ -29,6 +29,7 @@ const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
 const CustomerDetail = lazy(() => import("@/features/masters/CustomerDetail").then((m) => ({ default: m.CustomerDetail })));
 const ItemDetail = lazy(() => import("@/features/masters/ItemDetail").then((m) => ({ default: m.ItemDetail })));
+const DesignEdit = lazy(() => import("@/features/masters/DesignEdit").then((m) => ({ default: m.DesignEdit })));
 const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
@@ -368,6 +369,7 @@ export default function App() {
             <Route path="/orders" element={<OrdersTable />} />
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
+            <Route path="/design/:id/edit" element={<DesignEdit />} />
             <Route path="/design/:id" element={<ItemDetail />} />
             <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />

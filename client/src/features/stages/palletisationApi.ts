@@ -16,9 +16,11 @@ export interface PalletizableItem {
   orderItemId: string; // OrderItem ROWID → close-pallet line.order_item
   designId: string; // Design ROWID
   designLabel: string;
-  available: number; // produced − palletized (boxes free to palletize)
+  ordered: number; // ordered_qty_boxes (confirmed demand)
+  available: number; // produced − palletized (boxes free to palletize NOW)
   produced: number;
   palletized: number;
+  toProduce: number; // ordered − produced (boxes still to make → production)
 }
 export interface PalletizableOrder {
   salesOrderId: string; // SalesOrder ROWID → close-pallet sales_order
@@ -26,8 +28,16 @@ export interface PalletizableOrder {
   items: PalletizableItem[];
 }
 
-/** OrderItems with produced > palletized, grouped by their SalesOrder. */
-export async function listPalletizable(): Promise<{
+/**
+ * OrderItems grouped by their SalesOrder.
+ *
+ * Default (no opts): only items with available > 0 (produced − palletized) —
+ * the global "Pallet Packing" work list. With `includeOrderId`, that one order
+ * is returned in full (every line item, even available ≤ 0 and regardless of
+ * stage) so the form can scope to a confirmed Master Order and surface lines
+ * that still need production. In preset mode ONLY that order is returned.
+ */
+export async function listPalletizable(opts?: { includeOrderId?: string }): Promise<{
   ok: boolean;
   orders: PalletizableOrder[];
   error?: string;
@@ -47,14 +57,20 @@ export async function listPalletizable(): Promise<{
   const designName = new Map<string, string>();
   (designs.rows || []).forEach((d) => designName.set(String(d.ROWID), str(d.design_name)));
 
+  const preset = opts?.includeOrderId;
   const byOrder = new Map<string, PalletizableOrder>();
   for (const it of items.rows || []) {
+    const soId = str(it.sales_order);
+    if (!soId) continue;
+    const isPreset = preset === soId;
+    const ordered = num(it.ordered_qty_boxes);
     const produced = num(it.produced_qty_boxes);
     const palletized = num(it.palletized_qty_boxes);
     const available = produced - palletized;
-    if (available <= 0) continue; // nothing left to palletize
-    const soId = str(it.sales_order);
-    if (!soId) continue;
+    // Global list: skip lines with nothing ready to palletize. Preset order:
+    // keep every line so the form can show "needs production" rows too.
+    if (available <= 0 && !isPreset) continue;
+    if (preset && !isPreset) continue; // preset mode returns only the chosen order
     if (!byOrder.has(soId)) {
       const so = soById.get(soId);
       const po = so ? str(so.po_number) || str(so.order_number) : soId;
@@ -66,9 +82,11 @@ export async function listPalletizable(): Promise<{
       orderItemId: String(it.ROWID),
       designId,
       designLabel: designName.get(designId) || designId,
+      ordered,
       available,
       produced,
       palletized,
+      toProduce: Math.max(0, ordered - produced),
     });
   }
 
