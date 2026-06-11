@@ -6,6 +6,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 
@@ -52,14 +53,13 @@ export function OperationsLog() {
         </div>
       </div>
 
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}>
-          {error}
-        </div>
-      )}
+      {error && <ErrorCard message={error} onRetry={() => void load()} />}
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && rows.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -94,15 +94,20 @@ export function OperationsLog() {
                   </tr>
                 );
               })}
-              {!loading && rows.length === 0 && (
+              {!loading && !error && rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No operations logged yet.
+                  <td colSpan={8}>
+                    <EmptyState
+                      icon="docs"
+                      title="No operations logged yet"
+                      hint="Writes performed through the app are recorded here"
+                    />
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

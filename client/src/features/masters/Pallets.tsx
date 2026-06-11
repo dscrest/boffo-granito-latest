@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { PalletForm } from "./PalletForm";
 import {
@@ -145,14 +146,7 @@ export function Pallets() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar">
         <span className="muted mono">{filtered.length} rows</span>
@@ -162,6 +156,9 @@ export function Pallets() {
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && rows.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -201,15 +198,29 @@ export function Pallets() {
                   </td>
                 </tr>
               ))}
-              {!loading && filtered.length === 0 && (
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No pallets yet. Click <b>New pallet</b> to add one.
+                  <td colSpan={9}>
+                    {rows.length > 0 ? (
+                      <EmptyState title="No matching results" hint="Try a different filter" />
+                    ) : (
+                      <EmptyState
+                        icon="package"
+                        title="No pallets yet"
+                        hint="Add your first pallet spec with New pallet"
+                        action={
+                          <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
+                            New pallet
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

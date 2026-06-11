@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { finishClass } from "@/lib/format";
 import { DesignForm } from "./DesignForm";
 import {
@@ -276,14 +277,7 @@ export function DesignMaster() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
       {ids.length > 0 ? (
@@ -312,6 +306,9 @@ export function DesignMaster() {
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && rows.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -390,15 +387,29 @@ export function DesignMaster() {
                   </tr>
                 );
               })}
-              {!loading && filtered.length === 0 && (
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No items yet. Click <b>New design</b> to add one.
+                  <td colSpan={10}>
+                    {rows.length > 0 ? (
+                      <EmptyState title="No matching results" hint="Try a different filter" />
+                    ) : (
+                      <EmptyState
+                        icon="tile"
+                        title="No items yet"
+                        hint="Add your first item with New design"
+                        action={
+                          <button className="hbtn primary" onClick={() => setShowNew(true)}>
+                            New design
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

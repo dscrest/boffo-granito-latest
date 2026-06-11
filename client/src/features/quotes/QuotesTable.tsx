@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
@@ -149,11 +150,7 @@ export function QuotesTable() {
         </div>
       </div>
 
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}>
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar" style={{ marginBottom: 12 }}>
         <label className="form-field" style={{ width: 240 }}>
@@ -170,6 +167,9 @@ export function QuotesTable() {
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && quotes.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -210,15 +210,29 @@ export function QuotesTable() {
                   </tr>
                 );
               })}
-              {!loading && filtered.length === 0 && (
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No quotes yet. Click <b>New Quote</b> to create one.
+                  <td colSpan={8}>
+                    {quotes.length > 0 ? (
+                      <EmptyState title="No matching results" hint="Try a different filter" />
+                    ) : (
+                      <EmptyState
+                        icon="quote"
+                        title="No quotes yet"
+                        hint="Create your first quote with New Quote"
+                        action={
+                          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                            New Quote
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

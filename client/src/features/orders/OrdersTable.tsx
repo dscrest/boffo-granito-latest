@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
@@ -138,11 +139,7 @@ export function OrdersTable() {
         </div>
       </div>
 
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}>
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="tabs">
         <div className={`tab ${tab === "all" ? "active" : ""}`} onClick={() => setTab("all")}>
@@ -157,6 +154,9 @@ export function OrdersTable() {
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && orders.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -226,15 +226,29 @@ export function OrdersTable() {
                   </tr>
                 );
               })}
-              {!loading && filtered.length === 0 && (
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No master orders yet. Create one from a Quote (Convert) or via <b>New Order</b>.
+                  <td colSpan={14}>
+                    {orders.length > 0 ? (
+                      <EmptyState title="No matching results" hint="Try a different filter" />
+                    ) : (
+                      <EmptyState
+                        icon="orders"
+                        title="No master orders yet"
+                        hint="Create one from a Quote (Convert) or via New Order"
+                        action={
+                          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                            New Order
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

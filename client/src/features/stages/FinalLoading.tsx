@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { KPI } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
@@ -14,12 +15,14 @@ import { dispatchContainer } from "./palletisationApi";
 
 export function FinalLoading() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     const res = await listOrders();
+    setLoading(false);
     if (!res.ok) {
       setError(res.error || "Failed to load orders");
       return;
@@ -93,14 +96,7 @@ export function FinalLoading() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Invoices (May)" value="22" delta="+4 vs April" trend="up" spark={[3, 4, 5, 4, 6, 7, 8]} color="var(--c-green)" />
@@ -118,6 +114,9 @@ export function FinalLoading() {
       </div>
 
       <div className="card">
+        {loading && orders.length === 0 ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <table className="tbl">
           <thead>
             <tr>
@@ -163,8 +162,20 @@ export function FinalLoading() {
                 </td>
               </tr>
             ))}
+            {!loading && !error && inv.length === 0 && (
+              <tr>
+                <td colSpan={9}>
+                  <EmptyState
+                    icon="invoice"
+                    title="No active invoices"
+                    hint="Orders appear here once they reach final loading"
+                  />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        )}
       </div>
 
       <div className="sec-title">

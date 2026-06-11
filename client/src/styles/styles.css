@@ -1412,6 +1412,39 @@ a { color: inherit; text-decoration: none; }
   to { opacity: 1; transform: none; }
 }
 
+/* ---------- feedback states (ui/States.tsx) ---------- */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 42px 20px; text-align: center; color: var(--muted);
+}
+.empty-state .es-ico {
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel-2); color: var(--dim); margin-bottom: 4px;
+}
+.empty-state .es-title { font-size: var(--t-lg); color: var(--fg-2); font-weight: 600; }
+.empty-state .es-hint { font-size: var(--t-sm); color: var(--dim); max-width: 360px; }
+.empty-state .es-action { margin-top: 8px; }
+
+.error-card {
+  display: flex; align-items: center; gap: 12px; justify-content: space-between;
+  padding: 14px 16px; border-left: 3px solid var(--c-red);
+}
+.error-card .ec-msg { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: var(--t-md); }
+.error-card .ec-msg svg { color: var(--c-red); flex: none; }
+
+.skel-rows { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.skel {
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--elevated) 37%, var(--panel-2) 63%);
+  background-size: 400% 100%;
+  animation: skel-shimmer 1.3s ease infinite;
+}
+@keyframes skel-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
 /* ---------- form validation states ---------- */
 .form-field input.error,
 .form-field select.error,

@@ -10,6 +10,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ProgressBar } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
 import {
@@ -110,21 +111,16 @@ export function FitSuggest() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
+
+      {loading && !data && <SkeletonRows rows={6} />}
 
       {!loading && !error && perContainer.length === 0 && unassigned.length === 0 && (
-        <div className="card" style={{ padding: 18 }}>
-          <span className="muted">
-            Nothing to plan. Close some pallets (Pallet Packing) and add planned containers (Container Master) first.
-          </span>
-        </div>
+        <EmptyState
+          icon="package"
+          title="Nothing to plan"
+          hint="Close some pallets (Pallet Packing) and add planned containers (Container Master) first"
+        />
       )}
 
       {underfilled > 0 && (

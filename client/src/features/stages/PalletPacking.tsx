@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { KPI, StageBadge } from "@/ui/primitives";
 import { finishClass } from "@/lib/format";
 import { type Order } from "@/data";
@@ -14,12 +15,14 @@ import { closePallet, type ClosePalletInput } from "./palletisationApi";
 
 export function PalletPacking() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     const res = await listOrders();
+    setLoading(false);
     if (!res.ok) {
       setError(res.error || "Failed to load orders");
       return;
@@ -78,14 +81,7 @@ export function PalletPacking() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Pallets In Progress" value="3,142" unit="pallets" delta="+128 today" trend="up" spark={[5, 6, 7, 8, 9, 10, 11]} color="var(--c-violet)" />
@@ -106,6 +102,9 @@ export function PalletPacking() {
       </div>
 
       <div className="card">
+        {loading && orders.length === 0 ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <table className="tbl">
           <thead>
             <tr>
@@ -166,8 +165,25 @@ export function PalletPacking() {
                 </tr>
               );
             })}
+            {!loading && !error && items.length === 0 && (
+              <tr>
+                <td colSpan={10}>
+                  <EmptyState
+                    icon="package"
+                    title="No packing jobs"
+                    hint="Orders appear here once they reach the packing stage"
+                    action={
+                      <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                        New Pallet
+                      </button>
+                    }
+                  />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );

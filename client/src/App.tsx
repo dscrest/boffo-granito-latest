@@ -8,6 +8,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from 
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ToastHost } from "@/ui/Toast";
+import { SkeletonRows } from "@/ui/States";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
@@ -365,7 +366,7 @@ export default function App() {
       </header>
 
       <main className="main">
-        <Suspense fallback={<div className="muted mono" style={{ padding: 24 }}>Loading…</div>}>
+        <Suspense fallback={<div style={{ padding: 24 }}><SkeletonRows rows={8} /></div>}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />

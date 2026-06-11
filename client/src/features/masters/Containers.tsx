@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { ContainerForm } from "./ContainerForm";
 import {
@@ -145,14 +146,7 @@ export function Containers() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar">
         <span className="muted mono">{filtered.length} rows</span>
@@ -162,6 +156,9 @@ export function Containers() {
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
+          {loading && rows.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <table className="tbl">
             <thead>
               <tr>
@@ -201,15 +198,29 @@ export function Containers() {
                   </td>
                 </tr>
               ))}
-              {!loading && filtered.length === 0 && (
+              {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No containers yet. Click <b>New container</b> to add one.
+                  <td colSpan={10}>
+                    {rows.length > 0 ? (
+                      <EmptyState title="No matching results" hint="Try a different filter" />
+                    ) : (
+                      <EmptyState
+                        icon="truck"
+                        title="No containers yet"
+                        hint="Add your first container spec with New container"
+                        action={
+                          <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
+                            New container
+                          </button>
+                        }
+                      />
+                    )}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
@@ -14,12 +15,14 @@ import { loadContainer, type LoadContainerInput } from "./palletisationApi";
 
 export function Loading() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     const res = await listOrders();
+    setLoading(false);
     if (!res.ok) {
       setError(res.error || "Failed to load orders");
       return;
@@ -78,14 +81,7 @@ export function Loading() {
         </div>
       </div>
 
-      {error && (
-        <div
-          className="card"
-          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
-        >
-          {error} — check the <a href="#/ops">Operations log</a>.
-        </div>
-      )}
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="split" style={{ gridTemplateColumns: "1fr 1fr 1fr", display: "grid", gap: 10 }}>
         {["Dock 1", "Dock 2", "Dock 3"].map((dock, i) => (
@@ -135,6 +131,9 @@ export function Loading() {
       </div>
 
       <div className="card">
+        {loading && orders.length === 0 ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <table className="tbl">
           <thead>
             <tr>
@@ -185,8 +184,20 @@ export function Loading() {
                 </tr>
               );
             })}
+            {!loading && !error && items.length === 0 && (
+              <tr>
+                <td colSpan={9}>
+                  <EmptyState
+                    icon="truck"
+                    title="Loading queue is empty"
+                    hint="Orders appear here once they are palletized and ready to load"
+                  />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );
