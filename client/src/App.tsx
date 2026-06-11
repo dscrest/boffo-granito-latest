@@ -12,6 +12,7 @@ import { SkeletonRows } from "@/ui/States";
 import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
+import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -284,16 +285,29 @@ export default function App() {
     return unsub;
   }, []);
 
+  // Live order counts: subscribe-only (no warm fetch — the first orders
+  // screen visited hydrates the cache); mock seeds until then.
+  const [liveOrders, setLiveOrders] = useState<typeof ORDERS | null>(() => cachedOrders());
+  useEffect(
+    () =>
+      subscribeOrders(() => {
+        const c = cachedOrders();
+        if (c) setLiveOrders(c);
+      }),
+    [],
+  );
+
   const counts = useMemo<Record<string, number | string>>(() => {
-    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? QUOTES.length, kanban: ORDERS.length, orders: ORDERS.length };
+    const ords = liveOrders ?? ORDERS;
+    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? QUOTES.length, kanban: ords.length, orders: ords.length };
     const distinctPOs = new Set<string>();
-    ORDERS.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
+    ords.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
     c.byorder = distinctPOs.size;
-    STAGES.forEach((s) => (c[s.id] = ORDERS.filter((o) => o.stage === s.id).length));
+    STAGES.forEach((s) => (c[s.id] = ords.filter((o) => o.stage === s.id).length));
     c.design = DESIGNS.length;
     c.parties = PARTIES.length;
     return c;
-  }, [liveQuoteCount]);
+  }, [liveQuoteCount, liveOrders]);
 
   const crumbs = VIEW_LABELS[baseId] || ["", ""];
   const sectionHref = firstLeafOf(crumbs[0]);

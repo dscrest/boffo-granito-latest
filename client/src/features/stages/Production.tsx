@@ -1,13 +1,16 @@
 /* Production — active jobs + Log Production entry form. Logged
    entries kept in local `logs` state (frontend-only, not persisted). */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar } from "@/ui/primitives";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { ORDERS, type Order } from "@/data";
+import { type Order } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
 import { ProductionForm, type ProductionLog } from "./ProductionForm";
 
 export function Production() {
+  const { orders, loading, error, reload } = useOrders();
   const [showForm, setShowForm] = useState(false);
   const [logs, setLogs] = useState<ProductionLog[]>([]);
   const addLog = (l: ProductionLog) => {
@@ -15,17 +18,25 @@ export function Production() {
     setShowForm(false);
   };
 
-  const prodOrders = ORDERS.filter((o) => o.stage === "prod" || o.stage === "packing");
-  const grouped: Record<string, Order[]> = {};
-  prodOrders.forEach((o) => (grouped[o.size] ||= []).push(o));
+  const prodOrders = useMemo(
+    () => orders.filter((o) => o.stage === "prod" || o.stage === "packing"),
+    [orders],
+  );
+  const grouped = useMemo(() => {
+    const g: Record<string, Order[]> = {};
+    prodOrders.forEach((o) => (g[o.size] ||= []).push(o));
+    return g;
+  }, [prodOrders]);
   const sizes = Object.keys(grouped);
 
   const totalProd = prodOrders.reduce((s, o) => s + o.producedQty, 0);
   const totalRem = prodOrders.reduce((s, o) => s + (o.orderQty - o.producedQty), 0);
 
+  const showSkeleton = loading && orders.length === 0;
+
   return (
     <div>
-      {showForm && <ProductionForm onSave={addLog} onClose={() => setShowForm(false)} />}
+      {showForm && <ProductionForm jobs={prodOrders} onSave={addLog} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Production</div>
@@ -50,6 +61,8 @@ export function Production() {
           </button>
         </div>
       </div>
+
+      {error && <ErrorCard message={error} onRetry={reload} />}
 
       {logs.length > 0 && (
         <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
@@ -105,7 +118,17 @@ export function Production() {
         <span className="meta">Grouped by size</span>
       </div>
 
-      {sizes.map((size) => (
+      {showSkeleton && <SkeletonRows rows={8} />}
+
+      {!showSkeleton && sizes.length === 0 && (
+        <EmptyState
+          icon="factory"
+          title="No production jobs"
+          hint="Orders in the Production or Packing stage will appear here."
+        />
+      )}
+
+      {!showSkeleton && sizes.map((size) => (
         <div key={size} className="card" style={{ marginBottom: 12 }}>
           <div className="card-head">
             <span className={`chip size ${size.startsWith("200") || size.startsWith("75") ? "b" : ""}`}>{size}</span>

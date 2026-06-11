@@ -9,8 +9,10 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, StageBadge } from "@/ui/primitives";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { finishClass } from "@/lib/format";
-import { ORDERS, type Order } from "@/data";
+import { type Order } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
 
 /* QC checklist templates — the per-pass set of checks each line runs through. */
 const PRE_CHECKS = ["Shade Match", "Size Calibration", "Surface Defects", "Thickness"];
@@ -113,6 +115,7 @@ function QCSection({
 }
 
 export function QC() {
+  const { orders, loading, error, reload } = useOrders();
   const [results, setResults] = useState<ResultMap>({});
   const cycle = (orderId: string, check: string) =>
     setResults((p) => {
@@ -122,9 +125,11 @@ export function QC() {
     });
 
   // Pre-pallet: produced, awaiting QC before packing. Post-pallet: palletized.
-  const preItems = useMemo(() => ORDERS.filter((o) => o.stage === "qc"), []);
-  const postItems = useMemo(() => ORDERS.filter((o) => o.stage === "packing").slice(0, 8), []);
+  const preItems = useMemo(() => orders.filter((o) => o.stage === "qc"), [orders]);
+  const postItems = useMemo(() => orders.filter((o) => o.stage === "packing").slice(0, 8), [orders]);
   const allItems = [...preItems, ...postItems];
+
+  const showSkeleton = loading && orders.length === 0;
 
   const passed = allItems.filter(
     (o) =>
@@ -153,6 +158,8 @@ export function QC() {
         </div>
       </div>
 
+      {error && <ErrorCard message={error} onRetry={reload} />}
+
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Pass Rate" value={String(passRate)} unit="%" delta={`${passed} cleared`} trend="up" spark={[6, 7, 8, 8, 9, 9, 10]} color="var(--c-green)" />
         <KPI label="Pending" value={String(pending)} delta="awaiting inspection" spark={[10, 9, 9, 8, 7, 7, 6]} color="var(--c-amber)" />
@@ -165,22 +172,34 @@ export function QC() {
         <span className="meta">Click a cell to cycle pending → pass → fail</span>
       </div>
 
-      <QCSection
-        title="Pre-Pallet QC"
-        hint="produced, before palletizing"
-        items={preItems}
-        checks={PRE_CHECKS}
-        results={results}
-        onCycle={cycle}
-      />
-      <QCSection
-        title="Post-Pallet QC"
-        hint="palletized, before loading"
-        items={postItems}
-        checks={POST_CHECKS}
-        results={results}
-        onCycle={cycle}
-      />
+      {showSkeleton ? (
+        <SkeletonRows rows={8} />
+      ) : allItems.length === 0 ? (
+        <EmptyState
+          icon="shield-check"
+          title="No line items in QC queue"
+          hint="Orders awaiting pre- or post-pallet inspection will appear here."
+        />
+      ) : (
+        <>
+          <QCSection
+            title="Pre-Pallet QC"
+            hint="produced, before palletizing"
+            items={preItems}
+            checks={PRE_CHECKS}
+            results={results}
+            onCycle={cycle}
+          />
+          <QCSection
+            title="Post-Pallet QC"
+            hint="palletized, before loading"
+            items={postItems}
+            checks={POST_CHECKS}
+            results={results}
+            onCycle={cycle}
+          />
+        </>
+      )}
     </div>
   );
 }

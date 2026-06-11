@@ -3,7 +3,9 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { ORDERS, PARTIES, STAGES, type Order } from "@/data";
+import { STAGES, type Order } from "@/data";
+import { useOrders } from "./useOrders";
+import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
 
 interface Totals {
@@ -29,15 +31,25 @@ interface Group {
 }
 
 export function ByOrderView() {
+  const { orders, loading, error, reload } = useOrders();
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [partyFilter, setPartyFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [sortBy, setSortBy] = useState("progress");
 
+  // Distinct parties from live orders (replaces the PARTIES mock).
+  const parties = useMemo(() => {
+    const m = new Map<string, { code: string; name: string }>();
+    orders.forEach((o) => {
+      if (!m.has(o.partyCode)) m.set(o.partyCode, { code: o.partyCode, name: o.party });
+    });
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [orders]);
+
   const groups = useMemo<Group[]>(() => {
     const m: Record<string, Omit<Group, "totals" | "stageDist" | "minStageIdx" | "progress">> = {};
-    ORDERS.forEach((o) => {
+    orders.forEach((o) => {
       const key = `${o.poNumber}__${o.partyCode}`;
       if (!m[key]) {
         m[key] = {
@@ -73,7 +85,7 @@ export function ByOrderView() {
 
       return { ...g, totals, stageDist, minStageIdx, progress: pct(totals.loaded, totals.qty) };
     });
-  }, []);
+  }, [orders]);
 
   const visible = useMemo(() => {
     let arr = groups;
@@ -125,7 +137,7 @@ export function ByOrderView() {
         <button className={`btn ${partyFilter === "all" ? "active" : ""}`} onClick={() => setPartyFilter("all")}>
           All parties
         </button>
-        {PARTIES.map((p) => (
+        {parties.map((p) => (
           <button key={p.code} className={`btn ${partyFilter === p.code ? "active" : ""}`} onClick={() => setPartyFilter(p.code)}>
             {p.name}
           </button>
@@ -161,11 +173,17 @@ export function ByOrderView() {
         </select>
       </div>
 
-      <div className="bypo-list">
-        {visible.map((g) => (
-          <ByOrderGroup key={g.key} group={g} collapsed={!!collapsed[g.key]} onToggle={() => toggle(g.key)} onOpenLineItem={setOpenDrawer} />
-        ))}
-      </div>
+      {loading && orders.length === 0 ? (
+        <SkeletonRows />
+      ) : error && orders.length === 0 ? (
+        <ErrorCard message={error} onRetry={reload} />
+      ) : (
+        <div className="bypo-list">
+          {visible.map((g) => (
+            <ByOrderGroup key={g.key} group={g} collapsed={!!collapsed[g.key]} onToggle={() => toggle(g.key)} onOpenLineItem={setOpenDrawer} />
+          ))}
+        </div>
+      )}
 
       {openDrawer && <OrderDrawer order={openDrawer} onClose={() => setOpenDrawer(null)} />}
     </div>

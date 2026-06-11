@@ -1,17 +1,25 @@
-/* Purchase Order detail — read-only record page for a PO (grouped ORDERS). */
+/* Purchase Order detail — read-only record page for a PO (grouped live orders). */
 import { useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
-import { ORDERS } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 
 export function PurchaseOrderDetail() {
   const { id = "" } = useParams();
   const poNumber = decodeURIComponent(id);
-  const items = ORDERS.filter((o) => o.poNumber === poNumber);
+  const { orders, loading, error, reload } = useOrders();
+  const items = orders.filter((o) => o.poNumber === poNumber);
   const head = items[0] ?? null;
 
   if (!head) {
-    return <RecordDetail backTo="/po" title="PO not found" fields={[]} hiddenStorageKey="poDetailFields" />;
+    if (loading && orders.length === 0) return <SkeletonRows />;
+    if (error && orders.length === 0) return <ErrorCard message={error} onRetry={reload} />;
+    return (
+      <RecordDetail backTo="/po" title="PO not found" fields={[]} hiddenStorageKey="poDetailFields">
+        <EmptyState title="PO not found" hint={`No order lines match ${poNumber || "this PO"}.`} />
+      </RecordDetail>
+    );
   }
 
   const totalQty = items.reduce((s, o) => s + o.orderQty, 0);

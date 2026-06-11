@@ -8,7 +8,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
-import { ORDERS } from "@/data";
+import type { Order } from "@/data";
 
 export interface ProductionLog {
   _id: string;
@@ -28,12 +28,13 @@ let _seq = 0;
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `pl${++_seq}`;
 
-const JOBS = ORDERS.filter((o) => o.stage === "prod" || o.stage === "packing");
-
 export function ProductionForm({
+  jobs,
   onSave,
   onClose,
 }: {
+  /** Live active jobs (stage prod/packing) passed down from Production. */
+  jobs: Order[];
   onSave: (l: ProductionLog) => void;
   onClose: () => void;
 }) {
@@ -47,7 +48,7 @@ export function ProductionForm({
   });
   const set = (k: string, val: string) => setV((p) => ({ ...p, [k]: val }));
 
-  const job = JOBS.find((o) => o.id === v.order);
+  const job = jobs.find((o) => o.id === v.order);
   const missing = !v.order || !v.qty_delta.trim() || (parseInt(v.qty_delta, 10) || 0) <= 0;
 
   const submit = () => {
@@ -86,7 +87,7 @@ export function ProductionForm({
                 </span>
                 <select value={v.order} onChange={(e) => set("order", e.target.value)}>
                   <option value="">Select active job…</option>
-                  {JOBS.map((o) => (
+                  {jobs.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.poNumber} · {o.design} · {o.party}
                     </option>

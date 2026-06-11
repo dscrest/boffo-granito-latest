@@ -3,23 +3,45 @@ import { memo, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { ORDERS, PARTIES, STAGES, type Order, type Stage } from "@/data";
+import { STAGES, type Order, type Stage } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
+import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { QuickView } from "./QuickView";
 import { OrderDrawer } from "@/features/orders/OrderDrawer";
 
 export function Kanban() {
+  const { orders, loading, error, reload } = useOrders();
   const [filter, setFilter] = useState("all");
   const [openOrder, setOpenOrder] = useState<Order | null>(null);
   const [quickView, setQuickView] = useState<{ order: Order; rect: DOMRect } | null>(null);
 
+  // Distinct parties from live orders (replaces the PARTIES mock).
+  const parties = useMemo(() => {
+    const m = new Map<string, { code: string; name: string }>();
+    orders.forEach((o) => {
+      if (!m.has(o.partyCode)) m.set(o.partyCode, { code: o.partyCode, name: o.party });
+    });
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [orders]);
+
   const byStage = useMemo(() => {
     const m: Record<string, Order[]> = {};
     STAGES.forEach((s) => (m[s.id] = []));
-    ORDERS.forEach((o) => {
+    orders.forEach((o) => {
       if (filter === "all" || o.partyCode === filter) m[o.stage].push(o);
     });
     return m;
-  }, [filter]);
+  }, [filter, orders]);
+
+  // PO-sibling counts (poNumber + partyCode) for the "N items" badge on cards.
+  const siblingCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    orders.forEach((o) => {
+      const k = `${o.poNumber}__${o.partyCode}`;
+      m[k] = (m[k] || 0) + 1;
+    });
+    return m;
+  }, [orders]);
 
   const handleOpenFull = (order: Order) => {
     setQuickView(null);
@@ -33,7 +55,7 @@ export function Kanban() {
           <div className="title">Orders Pipeline</div>
           <div className="sub">
             Click the <Icon name="chev-r" size={11} style={{ verticalAlign: "middle" }} /> arrow on a card for quick line-items view ·
-            click the card for full details. {ORDERS.length} orders in flight.
+            click the card for full details. {orders.length} orders in flight.
           </div>
         </div>
         <div className="right">
@@ -52,7 +74,7 @@ export function Kanban() {
         <button className={`btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
           All parties
         </button>
-        {PARTIES.map((p) => (
+        {parties.map((p) => (
           <button key={p.code} className={`btn ${filter === p.code ? "active" : ""}`} onClick={() => setFilter(p.code)}>
             {p.name}
           </button>
@@ -65,18 +87,25 @@ export function Kanban() {
         </button>
       </div>
 
-      <div className="kanban-grid">
-        {STAGES.map((s) => (
-          <KanbanColumn
-            key={s.id}
-            stage={s}
-            orders={byStage[s.id]}
-            onOpen={setOpenOrder}
-            onQuickView={setQuickView}
-            quickViewId={quickView?.order?.id}
-          />
-        ))}
-      </div>
+      {loading && orders.length === 0 ? (
+        <SkeletonRows />
+      ) : error && orders.length === 0 ? (
+        <ErrorCard message={error} onRetry={reload} />
+      ) : (
+        <div className="kanban-grid">
+          {STAGES.map((s) => (
+            <KanbanColumn
+              key={s.id}
+              stage={s}
+              orders={byStage[s.id]}
+              siblingCounts={siblingCounts}
+              onOpen={setOpenOrder}
+              onQuickView={setQuickView}
+              quickViewId={quickView?.order?.id}
+            />
+          ))}
+        </div>
+      )}
 
       {quickView && (
         <QuickView
@@ -97,12 +126,14 @@ export function Kanban() {
 const KanbanColumn = memo(function KanbanColumn({
   stage,
   orders,
+  siblingCounts,
   onOpen,
   onQuickView,
   quickViewId,
 }: {
   stage: Stage;
   orders: Order[];
+  siblingCounts: Record<string, number>;
   onOpen: (o: Order) => void;
   onQuickView: (v: { order: Order; rect: DOMRect } | null) => void;
   quickViewId?: string;
@@ -130,7 +161,14 @@ const KanbanColumn = memo(function KanbanColumn({
       </div>
       <div className="col-list">
         {orders.map((o) => (
-          <KanbanCard key={o.id} order={o} onOpen={onOpen} onQuickView={onQuickView} quickViewActive={quickViewId === o.id} />
+          <KanbanCard
+            key={o.id}
+            order={o}
+            siblingCount={siblingCounts[`${o.poNumber}__${o.partyCode}`] ?? 1}
+            onOpen={onOpen}
+            onQuickView={onQuickView}
+            quickViewActive={quickViewId === o.id}
+          />
         ))}
         {orders.length === 0 && (
           <div className="muted" style={{ padding: 16, textAlign: "center", fontSize: 11.5 }}>
@@ -144,11 +182,13 @@ const KanbanColumn = memo(function KanbanColumn({
 
 const KanbanCard = memo(function KanbanCard({
   order,
+  siblingCount,
   onOpen,
   onQuickView,
   quickViewActive,
 }: {
   order: Order;
+  siblingCount: number;
   onOpen: (o: Order) => void;
   onQuickView: (v: { order: Order; rect: DOMRect } | null) => void;
   quickViewActive: boolean;
@@ -164,8 +204,7 @@ const KanbanCard = memo(function KanbanCard({
             ? pct(order.loadedQty, order.orderQty)
             : 100;
 
-  const siblings = ORDERS.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
-  const isMulti = siblings.length > 1;
+  const isMulti = siblingCount > 1;
 
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -185,7 +224,7 @@ const KanbanCard = memo(function KanbanCard({
       <button
         className={`quick-btn ${quickViewActive ? "open" : ""}`}
         onClick={handleQuickView}
-        title={`Quick view${isMulti ? ` · ${siblings.length} items` : ""}`}
+        title={`Quick view${isMulti ? ` · ${siblingCount} items` : ""}`}
       >
         <Icon name="chev-r" size={13} />
       </button>
@@ -195,8 +234,8 @@ const KanbanCard = memo(function KanbanCard({
         <span>·</span>
         <span>{order.flag}</span>
         {isMulti && (
-          <span className="li-badge" title={`${siblings.length} line items in this PO`}>
-            {siblings.length} items
+          <span className="li-badge" title={`${siblingCount} line items in this PO`}>
+            {siblingCount} items
           </span>
         )}
         <span className={`pri-dot pri ${order.priority}`} title={order.priority} style={{ marginLeft: "auto", marginRight: 26 }} />

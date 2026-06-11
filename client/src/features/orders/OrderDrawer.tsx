@@ -3,13 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { ORDERS, STAGES, type Order } from "@/data";
+import { STAGES, type Order } from "@/data";
+import { useOrders } from "./useOrders";
 
 export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => void }) {
-  const lineItems = useMemo(
-    () => ORDERS.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode),
-    [order.poNumber, order.partyCode],
-  );
+  // Live orders (cache-first, so opening the drawer costs no extra fetch).
+  const { orders } = useOrders();
+  const lineItems = useMemo(() => {
+    const list = orders.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
+    return list.length > 0 ? list : [order];
+  }, [orders, order]);
 
   const totals = useMemo(
     () =>

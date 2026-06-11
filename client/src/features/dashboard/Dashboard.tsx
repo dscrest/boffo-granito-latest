@@ -2,27 +2,32 @@
 import { useMemo } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
+import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, pct } from "@/lib/format";
-import { ACTIVITY, ORDERS, READY_TO_LOAD, STAGES } from "@/data";
+import { ACTIVITY, READY_TO_LOAD, STAGES } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
 
 export function Dashboard() {
+  const { orders, loading, error, reload } = useOrders();
+  const showSkeleton = loading && orders.length === 0;
+
   const byStage = useMemo(() => {
     const m: Record<string, { count: number; qty: number }> = {};
     STAGES.forEach((s) => (m[s.id] = { count: 0, qty: 0 }));
-    ORDERS.forEach((o) => {
+    orders.forEach((o) => {
       m[o.stage].count++;
       m[o.stage].qty += o.orderQty;
     });
     return m;
-  }, []);
+  }, [orders]);
 
-  const totalQty = ORDERS.reduce((s, o) => s + o.orderQty, 0);
-  const totalProd = ORDERS.reduce((s, o) => s + o.producedQty, 0);
-  const totalPal = ORDERS.reduce((s, o) => s + o.palletizedQty, 0);
+  const totalQty = orders.reduce((s, o) => s + o.orderQty, 0);
+  const totalProd = orders.reduce((s, o) => s + o.producedQty, 0);
+  const totalPal = orders.reduce((s, o) => s + o.palletizedQty, 0);
 
   const byDesign = useMemo(() => {
     const m: Record<string, { design: string; size: string; finish: string; ordered: number; produced: number }> = {};
-    ORDERS.forEach((o) => {
+    orders.forEach((o) => {
       const k = o.design;
       if (!m[k]) m[k] = { design: k, size: o.size, finish: o.finish, ordered: 0, produced: 0 };
       m[k].ordered += o.orderQty;
@@ -32,11 +37,11 @@ export function Dashboard() {
       .map((d) => ({ ...d, remaining: d.ordered - d.produced }))
       .sort((a, b) => b.remaining - a.remaining)
       .slice(0, 7);
-  }, []);
+  }, [orders]);
 
   const todayProd = useMemo(
-    () => ORDERS.filter((o) => o.stage === "prod" || o.stage === "packing").slice(0, 6),
-    [],
+    () => orders.filter((o) => o.stage === "prod" || o.stage === "packing").slice(0, 6),
+    [orders],
   );
 
   return (
@@ -69,6 +74,11 @@ export function Dashboard() {
         </div>
       </div>
 
+      {error && <ErrorCard message={error} onRetry={reload} />}
+
+      {showSkeleton ? (
+        <SkeletonRows rows={1} height={88} />
+      ) : (
       <div className="kpi-grid">
         <KPI label="Total Order Qty" value={fmt(totalQty)} unit="sqm" delta="+12,724 this week" trend="up" spark={[6, 8, 7, 10, 9, 11, 12]} />
         <KPI label="In Production" value={fmt(totalProd)} unit="sqm" delta="60.4k of 170.6k target" spark={[3, 4, 5, 7, 8, 9, 11]} color="var(--c-blue)" />
@@ -77,11 +87,12 @@ export function Dashboard() {
         <KPI label="Loaded Today" value="347" unit="pallets" delta="EX-14/2026-27 · 8 trucks" spark={[5, 6, 4, 9, 8, 11, 12]} color="var(--c-green)" />
         <KPI label="Invoiced (May)" value="22" unit="invoices" delta="₹4.62 Cr · +18% MoM" trend="up" spark={[3, 5, 4, 6, 7, 8, 9]} color="var(--c-amber)" />
       </div>
+      )}
 
       <div className="sec-title">
         <h2>Pipeline</h2>
         <span className="meta">
-          {ORDERS.length} active orders · {fmt(totalQty)} sqm in flight
+          {orders.length} active orders · {fmt(totalQty)} sqm in flight
         </span>
         <div className="right row" style={{ gap: 14 }}>
           <span className="row">
@@ -99,6 +110,9 @@ export function Dashboard() {
         </div>
       </div>
 
+      {showSkeleton ? (
+        <SkeletonRows rows={1} height={72} />
+      ) : (
       <div className="stage-strip">
         {STAGES.map((s, i) => (
           <div className="stage-tile" key={s.id}>
@@ -112,8 +126,10 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+      )}
 
       <div className="split" style={{ marginTop: 16 }}>
+        {/* still mock — migrate with Activity/loading tables */}
         <div className="card">
           <div className="card-head">
             <Icon name="truck" size={13} />
@@ -191,6 +207,9 @@ export function Dashboard() {
               <span className="muted">Today · Plant Morbi</span>
             </div>
           </div>
+          {showSkeleton ? (
+            <SkeletonRows rows={6} />
+          ) : (
           <div>
             {todayProd.map((o) => {
               const p = pct(o.producedQty, o.orderQty);
@@ -210,6 +229,7 @@ export function Dashboard() {
               );
             })}
           </div>
+          )}
         </div>
       </div>
 
@@ -231,6 +251,9 @@ export function Dashboard() {
               </button>
             </div>
           </div>
+          {showSkeleton ? (
+            <SkeletonRows rows={7} />
+          ) : (
           <div>
             {byDesign.map((d) => {
               const p = pct(d.produced, d.ordered);
@@ -258,8 +281,10 @@ export function Dashboard() {
               );
             })}
           </div>
+          )}
         </div>
 
+        {/* still mock — migrate with Activity/loading tables */}
         <div className="card">
           <div className="card-head">
             <Icon name="bell" size={13} />

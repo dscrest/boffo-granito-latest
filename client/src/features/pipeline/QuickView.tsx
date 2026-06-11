@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { ORDERS, stageOf, type Order } from "@/data";
+import { stageOf, type Order } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
 
 export function QuickView({
   order,
@@ -16,10 +17,12 @@ export function QuickView({
   onClose: () => void;
   onOpenFull: (order: Order) => void;
 }) {
-  const lineItems = useMemo(
-    () => ORDERS.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode),
-    [order.poNumber, order.partyCode],
-  );
+  // Live orders (cache-first, so no extra fetch when opened from Kanban).
+  const { orders } = useOrders();
+  const lineItems = useMemo(() => {
+    const list = orders.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
+    return list.length > 0 ? list : [order];
+  }, [orders, order]);
 
   const popRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: -9999, left: -9999 });

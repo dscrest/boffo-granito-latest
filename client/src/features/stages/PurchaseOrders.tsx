@@ -4,15 +4,17 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt, pct } from "@/lib/format";
-import { ORDERS, type Order } from "@/data";
+import { type Order } from "@/data";
+import { useOrders } from "@/features/orders/useOrders";
+import { ErrorCard, SkeletonRows } from "@/ui/States";
 
 export function PurchaseOrders() {
   const navigate = useNavigate();
-  // Group + sort once, not on every render. ORDERS is a module constant
-  // today; when live data lands, it becomes state and joins the deps.
+  const { orders, loading, error, reload } = useOrders();
+  // Group + sort only when the live orders snapshot changes.
   const pos = useMemo(() => {
     const groups: Record<string, Order[]> = {};
-    ORDERS.forEach((o) => (groups[o.poNumber] ||= []).push(o));
+    orders.forEach((o) => (groups[o.poNumber] ||= []).push(o));
     return Object.entries(groups)
       .map(([po, items]) => ({
         po,
@@ -32,7 +34,7 @@ export function PurchaseOrders() {
         ),
       }))
       .sort((a, b) => b.totalQty - a.totalQty);
-  }, []);
+  }, [orders]);
 
   return (
     <div>
@@ -68,6 +70,11 @@ export function PurchaseOrders() {
         </button>
       </div>
 
+      {loading && orders.length === 0 ? (
+        <SkeletonRows />
+      ) : error && orders.length === 0 ? (
+        <ErrorCard message={error} onRetry={reload} />
+      ) : (
       <div className="card">
         <table className="tbl">
           <thead>
@@ -158,6 +165,7 @@ export function PurchaseOrders() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }
