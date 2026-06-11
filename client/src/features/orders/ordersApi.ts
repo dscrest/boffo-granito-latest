@@ -57,6 +57,11 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
     const iso = custIso.get(custId) || "";
     const rate = num(it.rate);
     const subTotal = num(it.sub_total);
+    const sizeStr = d ? sizeName.get(str(d.size)) || "" : "";
+    const orderQty = num(it.ordered_qty_boxes);
+    // Boxes/pallet by size (mirrors prototype: wide 200x1200 fits 38, else 32).
+    const boxesPerPallet = sizeStr === "200x1200" ? 38 : 32;
+    const totalBoxes = Math.ceil(orderQty / 60);
     return {
       id: String(it.ROWID),
       poNumber: so ? str(so.po_number) || str(so.order_number) : "",
@@ -65,16 +70,16 @@ export async function listOrders(): Promise<{ ok: boolean; orders: Order[]; erro
       country: iso,
       flag: ISO_FLAG[iso] || "",
       design: designName.get(str(it.design)) || str(it.design),
-      size: d ? sizeName.get(str(d.size)) || "" : "",
+      size: sizeStr,
       finish: d ? finishName.get(str(d.finish)) || "" : "",
       brand: d ? brandName.get(str(d.brand)) || "" : "",
-      orderQty: num(it.ordered_qty_boxes),
+      orderQty,
       producedQty: num(it.produced_qty_boxes),
       palletizedQty: num(it.palletized_qty_boxes),
       loadedQty: num(it.loaded_qty_boxes),
-      boxesPerPallet: 0,
-      totalBoxes: num(it.ordered_qty_boxes),
-      pallets: 0,
+      boxesPerPallet,
+      totalBoxes,
+      pallets: Math.ceil(totalBoxes / boxesPerPallet),
       stage: str(it.stage) || "po",
       orderDate: so ? str(so.order_date) : "",
       dueDate: str(it.due_date) || "—",

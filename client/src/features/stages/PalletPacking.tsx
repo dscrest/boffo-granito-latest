@@ -1,30 +1,86 @@
-/* Pallet Packing — ported verbatim from prototype/views2.jsx. */
+/* Pallet Packing — table is live (listOrders, Data Store). The "New
+   Pallet" action opens the close-pallet saga form which commits a real
+   PalletisedBatch (produced → palletized); table reloads on success.
+   KPI tiles above remain static prototype figures. */
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, StageBadge } from "@/ui/primitives";
 import { finishClass } from "@/lib/format";
-import { ORDERS } from "@/data";
+import { type Order } from "@/data";
+import { listOrders } from "@/features/orders/ordersApi";
+import { PalletPackForm } from "./PalletPackForm";
+import { closePallet, type ClosePalletInput } from "./palletisationApi";
 
 export function PalletPacking() {
-  const items = ORDERS.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await listOrders();
+    if (!res.ok) {
+      setError(res.error || "Failed to load orders");
+      return;
+    }
+    setOrders(res.orders);
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const items = orders.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
+
+  const onSave = async (input: ClosePalletInput) => {
+    setShowForm(false);
+    setError(null);
+    setNotice("Closing pallet…");
+    const res = await closePallet(input);
+    if (!res.ok) {
+      setNotice(null);
+      setError(res.error || "Close-pallet failed");
+      return;
+    }
+    setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    void load();
+  };
 
   return (
     <div>
+      {showForm && <PalletPackForm onSave={onSave} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Pallet Packing</div>
-          <div className="sub">{items.length} active packing jobs · 6,284 boxes total · 173 updates today</div>
+          <div className="sub">
+            {items.length} active packing jobs · 6,284 boxes total · 173 updates today
+            {notice && (
+              <>
+                {" · "}
+                <span className="dim">{notice}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="right">
           <button className="hbtn">
             <Icon name="download" size={13} />
             Print labels
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New Pallet
           </button>
         </div>
       </div>
+
+      {error && (
+        <div
+          className="card"
+          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
+        >
+          {error} — check the <a href="#/ops">Operations log</a>.
+        </div>
+      )}
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Pallets In Progress" value="3,142" unit="pallets" delta="+128 today" trend="up" spark={[5, 6, 7, 8, 9, 10, 11]} color="var(--c-violet)" />

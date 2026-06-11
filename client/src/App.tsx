@@ -32,6 +32,9 @@ const ItemDetail = lazy(() => import("@/features/masters/ItemDetail").then((m) =
 const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
+const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
+const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
+const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 
 const TWEAK_DEFAULTS = {
   accent: "oklch(0.55 0.16 150)",
@@ -65,6 +68,7 @@ function navTree(): NavNode[] {
       icon: "tile",
       children: [
         { id: "design", label: "Items", icon: "tile" },
+        { id: "pallets", label: "Pallet Master", icon: "palette" },
         { id: "prod", label: "Production", icon: "factory" },
         { id: "packing", label: "Pallets", icon: "palette" },
       ],
@@ -92,6 +96,8 @@ function navTree(): NavNode[] {
       children: [
         { id: "po", label: "Purchase Orders", icon: "docs" },
         { id: "qc", label: "Quality Control", icon: "shield-check" },
+        { id: "containers", label: "Containers", icon: "truck" },
+        { id: "fit", label: "Fit Suggester", icon: "kanban" },
         { id: "loading", label: "Loading", icon: "truck" },
         { id: "final", label: "Final Loading", icon: "invoice" },
       ],
@@ -111,6 +117,7 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   design: ["Items", "Items"],
   masters: ["Settings", "Masters"],
   prod: ["Items", "Production"],
+  pallets: ["Items", "Pallet Master"],
   packing: ["Items", "Pallets"],
   quotes: ["Sales", "Quotes"],
   parties: ["Sales", "Customers"],
@@ -119,6 +126,8 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   orders: ["Sales Orders", "All Orders"],
   po: ["Stages", "Purchase Orders"],
   qc: ["Stages", "Quality Control"],
+  containers: ["Stages", "Containers"],
+  fit: ["Stages", "Fit Suggester"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
   ops: ["Reports", "Audit Log"],
@@ -364,11 +373,14 @@ export default function App() {
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
             <Route path="/qc" element={<QC />} />
+            <Route path="/containers" element={<Containers />} />
+            <Route path="/fit" element={<FitSuggest />} />
             <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalletPacking />} />
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/design" element={<DesignMaster />} />
+            <Route path="/pallets" element={<Pallets />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

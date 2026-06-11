@@ -58,6 +58,13 @@ const ALLOWED = new Set([
   "Glaze",
   "Brand",
   "Grade",
+  "Pallet",
+  "DesignPallet",
+  "PalletisedBatch",
+  "PalletisedBatchLine",
+  "Container",
+  "ContainerLoading",
+  "OrderItemEvent",
   "Activity",
   "OperationLog",
 ]);
@@ -309,6 +316,7 @@ const NATURAL_KEY = {
   Glaze: "name",
   Grade: "name",
   PaymentTerm: "name",
+  Pallet: "name",
 };
 
 /**
@@ -658,6 +666,387 @@ app.post("/convert-quote/:rowid", async (req, res) => {
     sendErr(res, err);
   }
 });
+
+/* ================================================================
+   PHASE 4 — Palletisation, Container Loading, Dispatch (sagas)
+
+   No DB transactions in Catalyst → each flow validates everything up
+   front (so we never write a header then fail on a child), then writes
+   in an ordered sequence. close-pallet compensates on mid-write failure.
+   Invariants enforced in code (no DB checks):
+     loaded ≤ palletized ≤ produced ≤ ordered ; dispatched ≤ loaded.
+   ================================================================ */
+
+/** Load OrderItems by ROWID into a Map<id,row>. Returns empty Map for []. */
+async function loadOrderItems(catalyst, ids, cols) {
+  const uniq = [...new Set(ids.map(String))].filter(Boolean);
+  if (!uniq.length) return new Map();
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT ${cols} FROM OrderItem WHERE ROWID IN (${uniq.join(",")})`),
+  );
+  return new Map(rows.map((r) => [String(r.ROWID), r]));
+}
+
+/* 3b. Close a pallet — PalletisedBatch + lines + OrderItem.palletized + events. */
+app.post("/close-pallet", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletisedBatch", operation: "close-pallet", payload: body },
+      async () => closePallet(catalyst, ds, body),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function closePallet(catalyst, ds, body) {
+  // --- validate up front ---
+  if (!body.sales_order) throw badRequest("sales_order is required");
+  if (!body.pallet) throw badRequest("pallet is required");
+  const rawLines = Array.isArray(body.lines) ? body.lines : [];
+  if (!rawLines.length) throw badRequest("At least one pallet line is required");
+  const lines = rawLines.map((l, i) => {
+    if (!l.order_item) throw badRequest(`Line ${i + 1}: order_item is required`);
+    const boxes = nonNeg(l.boxes, `Line ${i + 1} boxes`);
+    if (boxes <= 0) throw badRequest(`Line ${i + 1}: boxes must be > 0`);
+    return { order_item: String(l.order_item), boxes };
+  });
+  const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+
+  // Aggregate per order item, then check palletized + new ≤ produced.
+  const reqByOi = new Map();
+  for (const l of lines) reqByOi.set(l.order_item, (reqByOi.get(l.order_item) || 0) + l.boxes);
+  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID, produced_qty_boxes, palletized_qty_boxes");
+  for (const [oiId, reqBoxes] of reqByOi) {
+    const oi = oiMap.get(oiId);
+    if (!oi) throw badRequest(`OrderItem not found: ${oiId}`, 404);
+    const produced = Number(oi.produced_qty_boxes) || 0;
+    const palletized = Number(oi.palletized_qty_boxes) || 0;
+    if (palletized + reqBoxes > produced) {
+      throw badRequest(
+        `OrderItem ${oiId}: palletizing ${reqBoxes} exceeds produced (${palletized}+${reqBoxes} > ${produced})`,
+        409,
+      );
+    }
+  }
+
+  // --- writes (compensate on failure) ---
+  const batchRow = await ds.table("PalletisedBatch").insertRow({
+    sales_order: body.sales_order,
+    pallet: body.pallet,
+    design: body.design || null,
+    boxes_packed: totalBoxes,
+    delivery_date: body.delivery_date || undefined, // date col rejects "" → omit
+    status: "closed",
+    remarks: body.remarks || "",
+  });
+  const batchId = batchRow.ROWID;
+  const insertedLines = [];
+  const updatedOi = []; // { id, prev }
+  try {
+    for (const l of lines) {
+      const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes });
+      insertedLines.push(lr.ROWID);
+    }
+    for (const [oiId, reqBoxes] of reqByOi) {
+      const prev = Number(oiMap.get(oiId).palletized_qty_boxes) || 0;
+      await ds.table("OrderItem").updateRow({ ROWID: oiId, palletized_qty_boxes: prev + reqBoxes, stage: "packing" });
+      updatedOi.push({ id: oiId, prev });
+      await ds.table("OrderItemEvent").insertRow({
+        order_item: oiId,
+        event_type: "packed",
+        qty_delta: reqBoxes,
+        performed_by: String(body.performed_by || ""),
+        note: `Pallet batch #${batchId}`,
+      });
+    }
+  } catch (e) {
+    // Compensate: restore counters, delete lines + batch. Best-effort; events left as audit.
+    for (const u of updatedOi) {
+      try { await ds.table("OrderItem").updateRow({ ROWID: u.id, palletized_qty_boxes: u.prev }); } catch (_) {}
+    }
+    for (const id of insertedLines) {
+      try { await ds.table("PalletisedBatchLine").deleteRow(id); } catch (_) {}
+    }
+    try { await ds.table("PalletisedBatch").deleteRow(batchId); } catch (_) {}
+    throw e;
+  }
+  return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
+}
+
+/* 3c. Load container — ContainerLoading + batch status + OrderItem.loaded + events.
+   body: { container, batches: [batchId | {batch, position}], loaded_by? } */
+app.post("/load-container", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ContainerLoading", operation: "load-container", payload: body },
+      async () => loadContainer(catalyst, ds, body),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function loadContainer(catalyst, ds, body) {
+  const containerId = body.container;
+  if (!containerId) throw badRequest("container is required");
+  const raw = Array.isArray(body.batches) ? body.batches : [];
+  const batchIds = raw.map((b) => (b && typeof b === "object" ? b.batch : b)).map(String).filter(Boolean);
+  if (!batchIds.length) throw badRequest("At least one batch is required");
+
+  // Container + capacity.
+  const cRows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, capacity_boxes, capacity_pallets, status FROM Container WHERE ROWID = ${containerId}`,
+    ),
+  );
+  if (!cRows.length) throw badRequest(`Container not found: ${containerId}`, 404);
+  const container = cRows[0];
+  const capBoxes = Number(container.capacity_boxes) || 0;
+  const capPallets = Number(container.capacity_pallets) || 0;
+
+  // Existing loadings on this container (count + boxes already loaded).
+  const existing = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+  );
+  const existingSet = new Set(existing.map((r) => String(r.batch)));
+  let loadedBoxes = 0;
+  if (existing.length) {
+    const exBatches = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT boxes_packed FROM PalletisedBatch WHERE ROWID IN (${existing.map((r) => String(r.batch)).join(",")})`,
+      ),
+    );
+    loadedBoxes = exBatches.reduce((s, b) => s + (Number(b.boxes_packed) || 0), 0);
+  }
+  const palletCount = existing.length;
+
+  // New batches: exist, not already loaded.
+  const nb = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, boxes_packed, status FROM PalletisedBatch WHERE ROWID IN (${batchIds.join(",")})`,
+    ),
+  );
+  const nbMap = new Map(nb.map((b) => [String(b.ROWID), b]));
+  let addBoxes = 0;
+  for (const bid of batchIds) {
+    const b = nbMap.get(bid);
+    if (!b) throw badRequest(`Batch not found: ${bid}`, 404);
+    if (existingSet.has(bid) || String(b.status) === "loaded") throw badRequest(`Batch ${bid} already loaded`, 409);
+    addBoxes += Number(b.boxes_packed) || 0;
+  }
+  if (capBoxes && loadedBoxes + addBoxes > capBoxes) {
+    throw badRequest(`Capacity exceeded: ${loadedBoxes}+${addBoxes} > ${capBoxes} boxes`, 409);
+  }
+  if (capPallets && palletCount + batchIds.length > capPallets) {
+    throw badRequest(`Pallet capacity exceeded: ${palletCount}+${batchIds.length} > ${capPallets}`, 409);
+  }
+
+  // --- writes (idempotency-guarded; double-load already rejected above) ---
+  const loadingIds = [];
+  for (let i = 0; i < batchIds.length; i++) {
+    const bid = batchIds[i];
+    const posSpec = raw[i] && typeof raw[i] === "object" && raw[i].position != null ? Number(raw[i].position) : palletCount + i + 1;
+    const lr = await ds.table("ContainerLoading").insertRow({ container: containerId, batch: bid, position: posSpec });
+    loadingIds.push(lr.ROWID);
+    await ds.table("PalletisedBatch").updateRow({ ROWID: bid, status: "loaded" });
+    // Bump loaded_qty_boxes per order item from this batch's lines (clamp ≤ palletized).
+    const lineRows = rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${bid}`),
+    );
+    for (const ln of lineRows) {
+      const oiRows = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID, palletized_qty_boxes, loaded_qty_boxes FROM OrderItem WHERE ROWID = ${ln.order_item}`,
+        ),
+      );
+      if (!oiRows.length) continue;
+      const oi = oiRows[0];
+      const addQty = Number(ln.boxes) || 0;
+      const next = Math.min((Number(oi.loaded_qty_boxes) || 0) + addQty, Number(oi.palletized_qty_boxes) || 0);
+      await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, loaded_qty_boxes: next, stage: "loading" });
+      await ds.table("OrderItemEvent").insertRow({
+        order_item: ln.order_item,
+        event_type: "loaded",
+        qty_delta: addQty,
+        performed_by: String(body.loaded_by || ""),
+        note: `Container #${containerId}`,
+      });
+    }
+  }
+  if (!container.status || String(container.status) === "planned") {
+    await ds.table("Container").updateRow({ ROWID: containerId, status: "loading" });
+  }
+  return { rowid: containerId, data: { container: containerId, loaded_batches: batchIds.length, loading_ids: loadingIds } };
+}
+
+/* Dispatch a container — cascade dispatched_qty_boxes + close out the container. */
+app.post("/dispatch/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const containerId = req.params.rowid;
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "Container", operation: "dispatch", payload: { containerId, ...body } },
+      async () => dispatchContainer(catalyst, ds, containerId, body),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function dispatchContainer(catalyst, ds, containerId, body) {
+  const cRows = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status FROM Container WHERE ROWID = ${containerId}`),
+  );
+  if (!cRows.length) throw badRequest(`Container not found: ${containerId}`, 404);
+  if (String(cRows[0].status) === "dispatched") throw badRequest("Container already dispatched", 409); // idempotent
+  const loadings = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+  );
+  if (!loadings.length) throw badRequest("Container has no loaded pallets", 409);
+
+  for (const ld of loadings) {
+    const lineRows = rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${ld.batch}`),
+    );
+    for (const ln of lineRows) {
+      const oiRows = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID, loaded_qty_boxes, dispatched_qty_boxes FROM OrderItem WHERE ROWID = ${ln.order_item}`,
+        ),
+      );
+      if (!oiRows.length) continue;
+      const oi = oiRows[0];
+      const addQty = Number(ln.boxes) || 0;
+      const next = Math.min((Number(oi.dispatched_qty_boxes) || 0) + addQty, Number(oi.loaded_qty_boxes) || 0);
+      await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, dispatched_qty_boxes: next, stage: "final" });
+      await ds.table("OrderItemEvent").insertRow({
+        order_item: ln.order_item,
+        event_type: "dispatched",
+        qty_delta: addQty,
+        performed_by: String(body.performed_by || ""),
+        note: `Container #${containerId} dispatched`,
+      });
+    }
+    await ds.table("PalletisedBatch").updateRow({ ROWID: ld.batch, status: "dispatched" });
+  }
+  await ds.table("Container").updateRow({ ROWID: containerId, status: "dispatched" });
+  return { rowid: containerId, data: { container: containerId, batches: loadings.length } };
+}
+
+const { computeFit } = require("./lib/fit");
+
+/* Container-fit suggester (greedy v2, read-only). "Containers shall not go
+   empty": pack pending pallets into earliest-ETD containers under all active
+   caps (slots / area / weight / boxes) simultaneously. Per-batch area+weight
+   are derived from the batch's design+pallet, so mixed pallet types pack
+   naturally. body: {} (no input needed). Returns { perContainer, unassigned }. */
+app.post("/fit-suggest", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const data = await fitSuggest(catalyst);
+    res.json({ ok: true, data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function fitSuggest(catalyst) {
+  const zcql = catalyst.zcql();
+
+  // Per-batch derivation lookups: design coverage + per-box weight; pallet empty weight.
+  const designs = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`));
+  const dMap = new Map(designs.map((d) => [String(d.ROWID), { cov: Number(d.coverage_sqm) || 0, bw: Number(d.box_weight_kg) || 0 }]));
+  const pals = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, empty_pallet_weight_kg FROM Pallet`));
+  const pMap = new Map(pals.map((p) => [String(p.ROWID), Number(p.empty_pallet_weight_kg) || 0]));
+
+  // areaSqm = boxes × coverage. weightKg null when per-box weight uncalibrated (Q1 deferred).
+  const derive = (b) => {
+    const d = dMap.get(String(b.design)) || { cov: 0, bw: 0 };
+    const emptyW = pMap.get(String(b.pallet)) || 0;
+    const boxes = Number(b.boxes_packed) || 0;
+    return { boxes, areaSqm: boxes * d.cov, weightKg: d.bw > 0 ? boxes * d.bw + emptyW : null };
+  };
+
+  // Pending = closed batches not yet loaded into any container.
+  const closed = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed, is_demo FROM PalletisedBatch WHERE status = 'closed'`));
+  const allLoadings = rowList(await zcql.executeZCQLQuery(`SELECT container, batch FROM ContainerLoading`));
+  const loadedSet = new Set(allLoadings.map((r) => String(r.batch)));
+
+  const batches = closed
+    .filter((b) => !loadedSet.has(String(b.ROWID)))
+    .map((b) => {
+      const der = derive(b);
+      const demo = b.is_demo === true || String(b.is_demo) === "true";
+      return {
+        batch: String(b.ROWID),
+        design: String(b.design || ""),
+        boxes: der.boxes,
+        areaSqm: der.areaSqm,
+        weightKg: der.weightKg,
+        tier: demo ? 3 : 0, // 0 = current pending order; 3 = demo. Customer tiers (1/2) = §7.5 (later).
+      };
+    });
+
+  // Available containers: loading + planned. capacity_area_sqm / max_weight_kg are nullable.
+  const cRows = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT ROWID, container_number, capacity_boxes, capacity_pallets, capacity_area_sqm, max_weight_kg, status, etd FROM Container WHERE status = 'loading' OR status = 'planned'`,
+    ),
+  );
+
+  // Seed: load already committed to each container (derive area/weight from those batches too).
+  const seedByC = new Map();
+  if (loadedSet.size) {
+    const loaded = rowList(
+      await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed FROM PalletisedBatch WHERE ROWID IN (${[...loadedSet].join(",")})`),
+    );
+    const lbMap = new Map(loaded.map((b) => [String(b.ROWID), b]));
+    for (const l of allLoadings) {
+      const lb = lbMap.get(String(l.batch));
+      if (!lb) continue;
+      const der = derive(lb);
+      const cid = String(l.container);
+      const u = seedByC.get(cid) || { slots: 0, area: 0, weight: 0, boxes: 0 };
+      u.slots += 1;
+      u.area += der.areaSqm;
+      u.weight += der.weightKg || 0;
+      u.boxes += der.boxes;
+      seedByC.set(cid, u);
+    }
+  }
+
+  const containers = cRows.map((c) => {
+    const cid = String(c.ROWID);
+    return {
+      container: cid,
+      container_number: c.container_number || "",
+      capPallets: Number(c.capacity_pallets) || 0,
+      capAreaSqm: Number(c.capacity_area_sqm) || 0,
+      maxWeightKg: Number(c.max_weight_kg) || 0,
+      capBoxes: Number(c.capacity_boxes) || 0,
+      status: String(c.status || ""),
+      etd: String(c.etd || ""),
+      seed: seedByC.get(cid),
+    };
+  });
+
+  return computeFit(batches, containers);
+}
 
 /* ----------------------------------------------------------------
    Generic: list

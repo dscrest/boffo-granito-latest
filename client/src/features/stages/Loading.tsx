@@ -1,30 +1,86 @@
-/* Loading — ported verbatim from prototype/views2.jsx. */
+/* Loading — queue table is live (listOrders, Data Store); dock cards
+   above remain static prototype figures. The "Schedule truck" action
+   opens the load-container saga form (palletized → loaded); table
+   reloads on success. */
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
-import { fmt, finishClass } from "@/lib/format";
-import { ORDERS } from "@/data";
+import { fmt } from "@/lib/format";
+import { type Order } from "@/data";
+import { listOrders } from "@/features/orders/ordersApi";
+import { LoadContainerForm } from "./LoadContainerForm";
+import { loadContainer, type LoadContainerInput } from "./palletisationApi";
 
 export function Loading() {
-  const items = ORDERS.filter((o) => o.stage === "loading" || o.stage === "packing");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await listOrders();
+    if (!res.ok) {
+      setError(res.error || "Failed to load orders");
+      return;
+    }
+    setOrders(res.orders);
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const items = orders.filter((o) => o.stage === "loading" || o.stage === "packing");
+
+  const onSave = async (input: LoadContainerInput) => {
+    setShowForm(false);
+    setError(null);
+    setNotice("Loading container…");
+    const res = await loadContainer(input);
+    if (!res.ok) {
+      setNotice(null);
+      setError(res.error || "Load-container failed");
+      return;
+    }
+    setNotice(`Container loaded — ${res.data?.loaded_batches ?? input.batches.length} pallet(s) on container #${res.rowid}.`);
+    void load();
+  };
 
   return (
     <div>
+      {showForm && <LoadContainerForm onSave={onSave} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Loading</div>
-          <div className="sub">4 trucks at dock · 7 shipments queued · next loading 14:30</div>
+          <div className="sub">
+            4 trucks at dock · 7 shipments queued · next loading 14:30
+            {notice && (
+              <>
+                {" · "}
+                <span className="dim">{notice}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="right">
           <button className="hbtn">
             <Icon name="docs" size={13} />
             Loading list
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="truck" size={13} />
             Schedule truck
           </button>
         </div>
       </div>
+
+      {error && (
+        <div
+          className="card"
+          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
+        >
+          {error} — check the <a href="#/ops">Operations log</a>.
+        </div>
+      )}
 
       <div className="split" style={{ gridTemplateColumns: "1fr 1fr 1fr", display: "grid", gap: 10 }}>
         {["Dock 1", "Dock 2", "Dock 3"].map((dock, i) => (

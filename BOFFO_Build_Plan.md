@@ -527,3 +527,76 @@ Don't move to the next phase without my "go".
 5. Drop `BoffoExport_Tracker.md`, this file (`BOFFO_Build_Plan.md`), and the `prototype/` folder containing your existing `.jsx` and `.html` files into the same directory, then run Claude Code from that directory with the prompt above.
 
 If you want me to also produce: (a) the Zod schemas as actual code, (b) the seed-data SQL/ZCQL, or (c) a more detailed container-fit algorithm spec, say which and I'll do it.
+
+---
+
+## 7. ADDENDUM — Container Optimization v2 (3-Constraint Fit)
+
+> **Why this addendum:** Sections 3 and Phase 4 above already describe a **single-constraint greedy** fit (boxes/pallet slots only), and that version is **already built** (see "Already built" below). This addendum captures **only the net-new work** that the original v1 plan deferred to "v2 later": weight and area as **hard, co-equal constraints**, mixed pallet types, cross-order fill suggestions, and 3-dimension utilization reporting. Nothing here restates §3/Phase 4 — it extends them.
+
+### 7.1 What is already built (do not re-do)
+- `Container` master: `capacity_boxes`, `capacity_pallets`, type/ETD/ports/status. **(no area, no max weight)**
+- `Pallet` master: `boxes_per_pallet`, `pallets_per_container`, `empty_pallet_weight_kg`, computed `boxes_per_container`. **(no per-box weight, no area)**
+- `fitSuggest()` in `functions/data-ops/index.js` — greedy, **slots only** (boxes + pallet count), earliest-ETD first, flags `<95%` underfilled, returns `{ suggestions, unassigned }`. Read-only (no persist).
+- `FitSuggest.tsx` UI — per-container cards, box fill %, underfill warning, recompute button.
+- Sagas: `/close-pallet`, `/load-container` (validates boxes + pallet count only), `/dispatch/:rowid`.
+
+### 7.2 Net-new schema changes
+1. **Design master — add `box_weight_kg`** (per-box weight). *Note:* §2.2 already lists `box_weight_kg`, but the built Design form/API does not expose it. Surface it in the form and persist it. This is the single source for weight; do **not** store weight on the pallet line.
+2. **Pallet master — add area fields:**
+   - `area_sqm_per_pallet`, `area_sqft_per_pallet` — either entered, or derived from `boxes_per_pallet × design coverage`. Decide per the open question below (pallet area is design-dependent when heterogeneous, so prefer **derive at fit time** from the actual design on each batch rather than storing a flat per-pallet area).
+3. **Container master — add two hard-limit columns:**
+   - `capacity_area_sqm` (total area limit)
+   - `max_weight_kg` (total load limit — **hard limit; tiles are heavy**)
+4. **Demo/Sample pool** — a source of fill boxes not tied to a customer order. Either a flag on existing batches (`is_demo`) or a small `DemoStock` table (`design_id`, `boxes_available`, `area`, `weight`). Decide per open question.
+
+### 7.3 Derived quantities (computed at fit time, not stored)
+Per palletised batch `b` carrying design `d` on pallet `p`:
+- `weight(b) = b.boxes_packed × d.box_weight_kg + p.empty_pallet_weight_kg`
+- `area_sqm(b) = b.boxes_packed × d.coverage_sqm`
+- `slots(b) = 1` pallet position
+
+Per container `c` after loading set `S`:
+- `used_slots = |S|`, `used_area = Σ area(b)`, `used_weight = Σ weight(b)`
+- `remaining = { slots, area, weight }` against `capacity_pallets`, `capacity_area_sqm`, `max_weight_kg`
+- **binding constraint** = the dimension with the lowest remaining ratio (the one that capped the container)
+- **utilization** = `{ slots_pct, area_pct, weight_pct }` — report all three.
+
+### 7.4 Fit algorithm v2 (extends §3 greedy)
+Keep greedy (First-Fit-Decreasing) per the recommendation — **do not** jump to a full optimizer in v1. Changes vs the built version:
+1. A batch **fits** only if it satisfies **all three** simultaneously: `used_slots+1 ≤ capacity_pallets` AND `used_area+area(b) ≤ capacity_area_sqm` AND `used_weight+weight(b) ≤ max_weight_kg`.
+2. **Mixed/heterogeneous pallets:** the loop already treats batches individually — because weight/area are now computed per-batch from its own design, mixed pallet sizes/designs in one container fall out naturally. No special case needed beyond per-batch derivation.
+3. **Surface the binding constraint** on each container result (`binding: 'slots'|'area'|'weight'`) and stop-reason for unassigned batches.
+4. **Underfill** is now "no constraint near full" — flag only when **all three** dims are `<95%` (a container capped on weight at 70% slots is *full*, not underfilled). This corrects the current box-only `<95%` flag.
+
+### 7.5 Cross-order fill suggestions (new capability)
+When a container has room after the current Master Order's batches are placed, generate **actionable, non-auto-applied** suggestions in strict priority order:
+1. **Same customer — confirmed Master Orders:** unfulfilled/remaining palletisable boxes from another confirmed order of the same customer.
+2. **Same customer — new / estimate-stage orders:** remaining boxes from a draft/pending quote/order (user calls customer to confirm live).
+3. **Demo / sample boxes:** from the demo pool (last resort).
+
+Each suggestion shows what it adds across all 3 dims and the resulting utilization. **Never auto-commit** — render as "Suggest / Accept / Adjust"; the existing `/load-container` saga commits only on explicit accept.
+
+### 7.6 Master Order context (this branch: `feature/master-order-forms`)
+**RESOLVED:** "Master Order" is a **rename of the existing `SalesOrder`** (not a new entity). Mapping: **Estimate = `Quote`**, **Master Order = `SalesOrder`** (a Master Order is a `SalesOrder` with status Confirmed). Keep the DB table name `SalesOrder`; change the **UI label** to "Master Order". No schema migration needed for this rename.
+
+Flow is **Estimate/Quote → Master Order (`SalesOrder`, on customer confirmation) → partial or complete fulfillment → Palletisation**. The fit suggester operates on a **Master Order's** palletised batches; the cross-order tiers (7.5) pull from **other confirmed `SalesOrder`s of the same customer**.
+
+### 7.7 Isolate the packing logic (testable module)
+Extract the bin-packing out of the `data-ops` request handler into a **pure module** `functions/lib/fit.js` (no Catalyst/DS calls inside): `computeFit(batches, containers, demoPool, opts) → { suggestions, unassigned, perContainer:{utilization, binding} }`. The endpoint loads rows, calls the pure function, returns JSON. Unit-test `fit.js` with the "Junglee" fixture and edge cases (weight-binding, area-binding, slot-binding, mixed designs) — **do not hardcode fixture values** in the module.
+
+### 7.8 UI changes (extend `FitSuggest.tsx`)
+- Per-container card shows **three** bars (slots %, area %, weight %) and a **"capped by: weight"** badge.
+- Underfill warning keyed off all-three-dims rule (7.4).
+- New **"Fill suggestions"** panel listing tiered recommendations (7.5) with Accept/Adjust actions.
+- Container & Pallet master forms get the new fields (7.2); Design form gets `box_weight_kg`.
+
+### 7.9 Open questions to resolve before building
+1. **Weight calibration — STILL OPEN (deferred by decision):** per-box weight (Design) and container `max_weight_kg` not yet provided. **Build the fields nullable and the constraint code now, but enforce weight only when both values are populated** (a batch/container with null weight is treated as weight-unconstrained). No calibration until numbers arrive.
+2. **"900 pallets" = 900 boxes (~21 pallets)?** Confirm this reading (26 pallets/container, 43 boxes/pallet ⇒ 900 boxes ≈ 21 pallets).
+3. **Packing approach:** confirm **greedy extended to 3 constraints + tiered fill** for v1 (documented simplification), revisit FFD/optimizer only if pack quality is insufficient. *(Recommended.)*
+4. **Pallet area:** derive per-batch from design coverage (preferred, handles heterogeneous), or store a flat `area_per_pallet` on the Pallet master?
+5. **Demo pool:** `is_demo` flag on batches, or a dedicated `DemoStock` table?
+6. **Master Order:** ~~rename of `SalesOrder`, or a new parent entity?~~ **RESOLVED — rename of `SalesOrder` (UI label only, no new table). See §7.6.**
+
+**Wait for approval on §7 before implementing — same stop-gate as the rest of this plan.**

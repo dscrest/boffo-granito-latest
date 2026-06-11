@@ -1,0 +1,107 @@
+/* ============================================================
+   Dispatch form — closes out a loaded container via the dispatch saga
+   (loaded → dispatched). Cascades dispatched_qty_boxes across every
+   order item on the container and marks it dispatched (idempotent
+   server-side). Reuses the shared form/modal CSS (df-*, form-*).
+   ============================================================ */
+import { useEffect, useMemo, useState } from "react";
+import { Icon } from "@/ui/Icon";
+import { listContainers, type ContainerRow } from "@/features/masters/containersApi";
+
+export function DispatchForm({
+  onConfirm,
+  onClose,
+}: {
+  onConfirm: (containerId: string) => void;
+  onClose: () => void;
+}) {
+  const [containers, setContainers] = useState<ContainerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [containerId, setContainerId] = useState("");
+
+  useEffect(() => {
+    void (async () => {
+      const c = await listContainers();
+      setLoading(false);
+      if (!c.ok) {
+        setError(c.error || "Failed to load containers");
+        return;
+      }
+      // Only loaded (not yet dispatched) containers can dispatch.
+      setContainers(c.containers.filter((x) => x.status === "loading" || x.status === "sealed"));
+    })();
+  }, []);
+
+  const container = useMemo(() => containers.find((c) => c.id === containerId) || null, [containers, containerId]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico">
+            <Icon name="invoice" size={18} />
+          </div>
+          <div>
+            <div className="ttl">Dispatch Container</div>
+            <div className="sub2">Closes out a loaded container · loaded → dispatched</div>
+          </div>
+          <button className="btn x" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="df-body">
+          {loading && <div className="muted" style={{ padding: 8 }}>Loading containers…</div>}
+          {error && (
+            <div style={{ borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "8px 12px", marginBottom: 10 }}>
+              {error}
+            </div>
+          )}
+          {!loading && !error && containers.length === 0 && (
+            <div className="muted" style={{ padding: 8 }}>
+              No loaded containers ready to dispatch. Load a container first.
+            </div>
+          )}
+
+          {!loading && containers.length > 0 && (
+            <div className="form-section">
+              <div className="form-grid">
+                <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="lbl">
+                    Container<span className="req"> *</span>
+                  </span>
+                  <select value={containerId} onChange={(e) => setContainerId(e.target.value)}>
+                    <option value="">— select —</option>
+                    {containers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.containerNumber} · {c.status}
+                        {c.vesselName ? ` · ${c.vesselName}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {container && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                  Dispatching is final — every pallet on {container.containerNumber} will be marked dispatched.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="df-foot">
+          <span className="df-req-note">* required</span>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="hbtn primary" disabled={!containerId} onClick={() => containerId && onConfirm(containerId)}>
+            <Icon name="check" size={13} />
+            Dispatch
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

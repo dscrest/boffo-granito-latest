@@ -1,15 +1,55 @@
-/* Final Loading & Invoicing — ported verbatim from prototype/views2.jsx. */
+/* Final Loading & Invoicing — invoice tables are live (listOrders, Data
+   Store), grouped by invoice number. The "Dispatch" action opens the
+   dispatch saga form (loaded → dispatched); tables reload on success.
+   KPI tiles above remain static prototype figures. */
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI } from "@/ui/primitives";
 import { fmt } from "@/lib/format";
-import { ORDERS, type Order } from "@/data";
+import { type Order } from "@/data";
+import { listOrders } from "@/features/orders/ordersApi";
+import { DispatchForm } from "./DispatchForm";
+import { dispatchContainer } from "./palletisationApi";
 
 export function FinalLoading() {
-  const finals = ORDERS.filter((o) => o.stage === "final");
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    const res = await listOrders();
+    if (!res.ok) {
+      setError(res.error || "Failed to load orders");
+      return;
+    }
+    setOrders(res.orders);
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const finals = orders.filter((o) => o.stage === "final");
+
+  const onConfirm = async (containerId: string) => {
+    setShowForm(false);
+    setError(null);
+    setNotice("Dispatching…");
+    const res = await dispatchContainer(containerId);
+    if (!res.ok) {
+      setNotice(null);
+      setError(res.error || "Dispatch failed");
+      return;
+    }
+    setNotice(`Container #${res.rowid} dispatched — ${res.data?.batches ?? 0} batch(es) closed out.`);
+    void load();
+  };
+  // Until the invoicing saga (Phase 5) stamps invoice numbers, dispatched
+  // finals carry no invoice — group by PO so each shows as its own row.
   const invoices: Record<string, Order[]> = {};
-  finals.forEach((o) => (invoices[o.invoice!] ||= []).push(o));
-  const inv = Object.entries(invoices).map(([invoice, list]) => ({
-    invoice,
+  finals.forEach((o) => (invoices[o.invoice || o.poNumber] ||= []).push(o));
+  const inv = Object.entries(invoices).map(([key, list]) => ({
+    invoice: list[0].invoice || `${key} · pending`,
     party: list[0].party,
     flag: list[0].flag,
     country: list[0].country,
@@ -22,22 +62,40 @@ export function FinalLoading() {
 
   return (
     <div>
+      {showForm && <DispatchForm onConfirm={onConfirm} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Final Loading &amp; Invoicing</div>
-          <div className="sub">{inv.length} active invoices · 22 issued this month · ₹4.62 Cr</div>
+          <div className="sub">
+            {inv.length} active invoices · 22 issued this month · ₹4.62 Cr
+            {notice && (
+              <>
+                {" · "}
+                <span className="dim">{notice}</span>
+              </>
+            )}
+          </div>
         </div>
         <div className="right">
           <button className="hbtn">
             <Icon name="invoice" size={13} />
             Generate invoice
           </button>
-          <button className="hbtn primary">
-            <Icon name="download" size={13} />
-            Export packing list
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+            <Icon name="truck" size={13} />
+            Dispatch
           </button>
         </div>
       </div>
+
+      {error && (
+        <div
+          className="card"
+          style={{ marginBottom: 12, borderLeft: "3px solid var(--c-red)", color: "var(--c-red)", padding: "10px 14px" }}
+        >
+          {error} — check the <a href="#/ops">Operations log</a>.
+        </div>
+      )}
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Invoices (May)" value="22" delta="+4 vs April" trend="up" spark={[3, 4, 5, 4, 6, 7, 8]} color="var(--c-green)" />
