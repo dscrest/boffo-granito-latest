@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableOrder } from "./palletisationApi";
 
@@ -133,9 +134,11 @@ export function PalletPackForm({
     }
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="palette" size={18} />

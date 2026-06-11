@@ -191,7 +191,7 @@ Baseline commit: `1cf6c00` — "FABLE CHANGES Started" (pushed 2026-06-11).
 - [x] **Group D** — Empty states + Retry + skeleton loaders (§3.3, §3.4) ✅ new `ui/States.tsx` (EmptyState/ErrorCard/SkeletonRows) applied to 10 list pages + App Suspense fallback
 - [x] **Group E** — Responsive viewport + sidebar auto-collapse breakpoint (§3.2) ✅ `device-width` viewport; breakpoints at 1280/1100/768px (kanban/kpi grids wrap, split views stack); sidebar auto-collapses ≤1100px via matchMedia
 - [x] **Group F** — Column projection in `dataOps.list()` + offset pagination, kill 300-row cap (§1.3, §1.4) ✅ server `?columns=`/`?offset=` (LIMIT offset,count); client `listAll()` pager + lookup projections in all 5 API modules. ⚠️ needs `catalyst deploy --only functions:data-ops` to activate server-side (client degrades gracefully until then)
-- [ ] **Group G** — A11y pass: Combobox ARIA, modal focus trap, keyboard rows (§3.6)
+- [x] **Group G** — A11y pass: Combobox ARIA, modal focus trap, keyboard rows (§3.6) ✅ new `ui/useModalA11y.ts` (focus trap + Esc + restore) on 9 modals; Combobox full ARIA combobox/listbox + arrow-key nav; keyboard row activation; header aria-labels
 - [ ] **Big #1** — Mock→live migration: Dashboard, Kanban, Production, QC, Parties… (§0)
 - [ ] **Big #2** — Virtualization (deferred until rows > ~200) (§2.1)
 

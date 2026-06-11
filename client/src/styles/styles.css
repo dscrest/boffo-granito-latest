@@ -1185,6 +1185,7 @@ a { color: inherit; text-decoration: none; }
   padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: var(--t-md);
 }
 .combo-opt:hover { background: var(--accent-soft); }
+.combo-opt.active { background: var(--accent-soft); } /* keyboard-active option */
 .combo-opt.sel { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .combo-hint { font-size: var(--t-sm); color: var(--dim); font-family: var(--mono, monospace); }
 .combo-empty { padding: 8px 10px; color: var(--dim); font-size: var(--t-sm); }

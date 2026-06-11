@@ -5,6 +5,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
 import type { PalletInput, SizeOption } from "./palletsApi";
 
 // Known pallet types (datalist suggestions; field stays free text).
@@ -72,9 +73,11 @@ export function PalletForm({
     onSave({ ...v, name: v.name.trim() });
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="palette" size={18} />

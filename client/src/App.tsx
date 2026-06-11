@@ -365,11 +365,11 @@ export default function App() {
           <input placeholder="Search PO, design, party, invoice…" />
           <span className="kbd">⌘K</span>
         </div>
-        <button className="hbtn" title="Notifications">
+        <button className="hbtn" title="Notifications" aria-label="Notifications">
           <Icon name="bell" size={13} />
           <span className="dot red" style={{ width: 5, height: 5, marginLeft: -3 }} />
         </button>
-        <button className="hbtn" title="Settings" onClick={() => navigate("/masters")}>
+        <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/masters")}>
           <Icon name="settings" size={13} />
         </button>
         <div className="avatar">BG</div>

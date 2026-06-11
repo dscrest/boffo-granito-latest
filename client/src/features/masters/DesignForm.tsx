@@ -11,6 +11,7 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID. */
@@ -304,9 +305,11 @@ export function DesignForm({
     onSave(toDesignInput(v, lookups));
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="tile" size={18} />

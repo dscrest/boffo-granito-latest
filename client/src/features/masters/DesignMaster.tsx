@@ -337,7 +337,11 @@ export function DesignMaster() {
                 return (
                   <tr
                     key={d.id}
+                    tabIndex={0}
                     onClick={() => navigate(`/design/${d.id}/edit`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/design/${d.id}/edit`);
+                    }}
                     style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
                     title="Edit item"
                   >

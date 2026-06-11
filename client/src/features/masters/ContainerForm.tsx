@@ -5,6 +5,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { CONTAINER_STATUSES, CONTAINER_TYPES, type ContainerInput } from "./containersApi";
 
 export interface ContainerFormInitial extends Partial<ContainerInput> {}
@@ -54,9 +55,11 @@ export function ContainerForm({
     onSave({ ...v, container_number: v.container_number.trim() });
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="truck" size={18} />

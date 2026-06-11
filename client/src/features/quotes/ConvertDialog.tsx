@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { lineTotals, type Quote } from "@/data";
 import { fmt } from "@/lib/format";
 import { convertQuote } from "./quotesApi";
@@ -36,6 +37,7 @@ export function ConvertDialog({
   const [error, setError] = useState<string | null>(null);
   // Errors stay hidden until the first convert attempt, then update live.
   const [showErrors, setShowErrors] = useState(false);
+  const panelRef = useModalA11y(onClose);
 
   const setLineQty = (i: number, v: string) =>
     setQty((s) => s.map((x, j) => (j === i ? Math.max(0, Number(v) || 0) : x)));
@@ -73,7 +75,7 @@ export function ConvertDialog({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="arrow-r" size={18} />

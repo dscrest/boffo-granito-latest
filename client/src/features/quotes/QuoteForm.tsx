@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
+import { useModalA11y } from "@/ui/useModalA11y";
 import {
   CATEGORIES,
   CURRENCIES,
@@ -166,9 +167,11 @@ export function QuoteForm({
     });
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="quote" size={18} />
