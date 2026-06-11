@@ -1017,22 +1017,42 @@ async function fitSuggest(catalyst) {
   };
 
   // Pending = closed batches not yet loaded into any container.
-  const closed = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed, is_demo FROM PalletisedBatch WHERE status = 'closed'`));
+  const closed = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed, is_demo, sales_order FROM PalletisedBatch WHERE status = 'closed'`));
   const allLoadings = rowList(await zcql.executeZCQLQuery(`SELECT container, batch FROM ContainerLoading`));
   const loadedSet = new Set(allLoadings.map((r) => String(r.batch)));
+
+  // Cross-order tiers (§7.5, #10/#11): join batch → SalesOrder for customer + status.
+  // A confirmed order ships first (tier 0); any non-confirmed order (draft/estimate)
+  // only fills leftover space (tier 2); demo pallets are last (tier 3). A batch with
+  // no linked order keeps legacy tier 0. NOTE: tier 1 ("same-customer secondary
+  // confirmed" relative to a chosen focus order) needs focus-order mode — globally
+  // every confirmed order is tier 0; tier 1 stays for the focus-order slice.
+  const soIds = [...new Set(closed.map((b) => String(b.sales_order || "")).filter(Boolean))];
+  const soMap = new Map();
+  if (soIds.length) {
+    const sos = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, customer, status FROM SalesOrder WHERE ROWID IN (${soIds.join(",")})`));
+    for (const s of sos) soMap.set(String(s.ROWID), { customer: String(s.customer || ""), status: String(s.status || "") });
+  }
+  const tierFor = (demo, soStatus) => {
+    if (demo) return 3;
+    if (!soStatus) return 0; // unlinked / legacy → current
+    return soStatus.toLowerCase() === "confirmed" ? 0 : 2;
+  };
 
   const batches = closed
     .filter((b) => !loadedSet.has(String(b.ROWID)))
     .map((b) => {
       const der = derive(b);
       const demo = b.is_demo === true || String(b.is_demo) === "true";
+      const so = soMap.get(String(b.sales_order || "")) || { customer: "", status: "" };
       return {
         batch: String(b.ROWID),
         design: String(b.design || ""),
+        customer: so.customer, // for §7.5 grouping / display
         boxes: der.boxes,
         areaSqm: der.areaSqm,
         weightKg: der.weightKg,
-        tier: demo ? 3 : 0, // 0 = current pending order; 3 = demo. Customer tiers (1/2) = §7.5 (later).
+        tier: tierFor(demo, so.status),
       };
     });
 
