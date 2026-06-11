@@ -70,14 +70,14 @@ export function OrdersTable() {
 
   const onSave = async (dr: OrderDraft) => {
     setShowForm(false);
-    setNotice("Saving sales order…");
+    setNotice("Saving master order…");
     const res = await createSalesOrder(draftToInput(dr));
     if (!res.ok) {
       setNotice(null);
       setError(res.error || "Save failed");
       return;
     }
-    setNotice(`Sales order saved (#${res.rowid}).`);
+    setNotice(`Master order saved (#${res.rowid}).`);
     await load();
   };
 
@@ -91,7 +91,7 @@ export function OrdersTable() {
       {showForm && <OrderForm onSave={onSave} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
-          <div className="title">All Sales Orders</div>
+          <div className="title">All Master Orders</div>
           <div className="sub">
             {loading ? "Loading…" : `${filtered.length} of ${orders.length} order lines`} · grouped by stage
             {notice && (
@@ -191,7 +191,7 @@ export function OrdersTable() {
               {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={13} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No sales orders yet. Create one from a Quote (Convert) or via <b>New Order</b>.
+                    No master orders yet. Create one from a Quote (Convert) or via <b>New Order</b>.
                   </td>
                 </tr>
               )}

@@ -122,7 +122,7 @@ export function QuotesTable() {
         <div>
           <div className="title">Quotes</div>
           <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${quotes.length} quotes`} · raised → shared → converted to Sales Order
+            {loading ? "Loading…" : `${filtered.length} of ${quotes.length} quotes`} · raised → shared → converted to Master Order
             {notice && (
               <>
                 {" · "}

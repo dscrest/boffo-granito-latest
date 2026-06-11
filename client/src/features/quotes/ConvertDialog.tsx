@@ -71,7 +71,7 @@ export function ConvertDialog({
             <Icon name="arrow-r" size={18} />
           </div>
           <div>
-            <div className="ttl">Convert to Sales Order</div>
+            <div className="ttl">Convert to Master Order</div>
             <div className="sub2">
               {quote.quoteNo} · {quote.customer}
             </div>

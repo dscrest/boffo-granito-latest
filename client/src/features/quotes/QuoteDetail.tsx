@@ -48,7 +48,7 @@ const FIELDS: FieldDef[] = [
   { key: "paymentTerm", label: "Payment Term", value: (q) => q.paymentTerm || "—" },
   { key: "portOfDischarge", label: "Port of Discharge", value: (q) => q.portOfDischarge || "—" },
   { key: "currency", label: "Currency", value: (q) => q.currency },
-  { key: "soNumber", label: "Sales Order", value: (q) => q.soNumber || "—" },
+  { key: "soNumber", label: "Master Order", value: (q) => q.soNumber || "—" },
   { key: "customer", label: "Customer", value: (q) => q.customer || "—" },
   { key: "address", label: "Billing Address", value: (q) => q.address || "—", wide: true },
   { key: "remarks", label: "Remarks", value: (q) => q.remarks || "—", wide: true },
@@ -236,9 +236,9 @@ export function QuoteDetail() {
             className="hbtn"
             disabled={!canConvert}
             onClick={() => setConverting(true)}
-            title={canConvert ? "Convert to Sales Order" : "Already converted"}
+            title={canConvert ? "Convert to Master Order" : "Already converted"}
           >
-            <Icon name="arrow-r" size={13} /> Convert to Sales Order
+            <Icon name="arrow-r" size={13} /> Convert to Master Order
           </button>
           <button className="hbtn" onClick={() => setPrinting(true)} title="Print / PDF">
             <Icon name="printer" size={13} /> Print Quote

@@ -80,7 +80,7 @@ function navTree(): NavNode[] {
         { id: "parties", label: "Customers", icon: "users" },
         { id: "quotes", label: "Quotes", icon: "quote" },
         {
-          label: "Sales Orders",
+          label: "Master Orders",
           icon: "docs",
           children: [
             { id: "kanban", label: "Pipeline", icon: "kanban" },
@@ -121,9 +121,9 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   packing: ["Items", "Pallets"],
   quotes: ["Sales", "Quotes"],
   parties: ["Sales", "Customers"],
-  kanban: ["Sales Orders", "Pipeline"],
-  byorder: ["Sales Orders", "By Order"],
-  orders: ["Sales Orders", "All Orders"],
+  kanban: ["Master Orders", "Pipeline"],
+  byorder: ["Master Orders", "By Order"],
+  orders: ["Master Orders", "All Orders"],
   po: ["Stages", "Purchase Orders"],
   qc: ["Stages", "Quality Control"],
   containers: ["Stages", "Containers"],

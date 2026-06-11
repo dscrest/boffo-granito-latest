@@ -111,7 +111,7 @@ export function PalletPackForm({
                 <div className="form-grid">
                   <label className="form-field">
                     <span className="lbl">
-                      Sales Order<span className="req"> *</span>
+                      Master Order<span className="req"> *</span>
                     </span>
                     <select value={orderId} onChange={(e) => setOrderId(e.target.value)}>
                       <option value="">— select —</option>
