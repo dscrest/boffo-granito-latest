@@ -28,7 +28,8 @@ export function Kanban() {
     const m: Record<string, Order[]> = {};
     STAGES.forEach((s) => (m[s.id] = []));
     orders.forEach((o) => {
-      if (filter === "all" || o.partyCode === filter) m[o.stage].push(o);
+      // Live rows can carry stage values outside STAGES — bucket them on the fly.
+      if (filter === "all" || o.partyCode === filter) (m[o.stage] ??= []).push(o);
     });
     return m;
   }, [filter, orders]);

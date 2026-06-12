@@ -7,7 +7,7 @@
    omit them when blank. Every write is recorded server-side in
    OperationLog. See palletsApi.ts for the sibling pattern.
    ============================================================ */
-import { listAll, insert, update, remove, op } from "@/lib/dataOps";
+import { listAll, insert, update, remove, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -144,6 +144,30 @@ export function updateContainer(rowid: string, input: ContainerInput) {
 
 export function deleteContainer(rowid: string) {
   return bust(remove("Container", rowid));
+}
+
+/* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
+
+export interface BulkResult {
+  ok: boolean;
+  done: number;
+  failed: number;
+  firstError?: string;
+}
+
+async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): Promise<BulkResult> {
+  const results = await Promise.all(rowids.map(fn));
+  const failed = results.filter((r) => !r.ok);
+  return {
+    ok: failed.length === 0,
+    done: results.length - failed.length,
+    failed: failed.length,
+    firstError: failed[0]?.error,
+  };
+}
+
+export function bulkDeleteContainers(rowids: string[]): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Container", id)));
 }
 
 /* ---- Container-fit suggester (read-only, multi-constraint, POST /fit-suggest) ----

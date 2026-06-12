@@ -1,5 +1,5 @@
 /* By Order — grouped view. Ported verbatim from prototype/by-order.jsx. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
@@ -30,6 +30,10 @@ interface Group {
   progress: number;
 }
 
+/** Groups rendered per "page" — each group is a heavy card, so cap the
+    initial render and reveal more on demand. */
+const PAGE_SIZE = 5;
+
 export function ByOrderView() {
   const { orders, loading, error, reload } = useOrders();
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
@@ -37,6 +41,7 @@ export function ByOrderView() {
   const [partyFilter, setPartyFilter] = useState("all");
   const [stageFilter, setStageFilter] = useState("all");
   const [sortBy, setSortBy] = useState("progress");
+  const [limit, setLimit] = useState(PAGE_SIZE);
 
   // Distinct parties from live orders (replaces the PARTIES mock).
   const parties = useMemo(() => {
@@ -79,9 +84,13 @@ export function ByOrderView() {
 
       const stageDist: Record<string, number> = {};
       STAGES.forEach((s) => (stageDist[s.id] = 0));
-      g.items.forEach((o) => stageDist[o.stage]++);
+      g.items.forEach((o) => (stageDist[o.stage] = (stageDist[o.stage] || 0) + 1));
 
-      const minStageIdx = Math.min(...g.items.map((o) => STAGES.findIndex((s) => s.id === o.stage)));
+      // Unknown stage values (legacy/seed rows) index as 0 instead of -1 so
+      // STAGES[minStageIdx] below stays defined.
+      const minStageIdx = Math.min(
+        ...g.items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))),
+      );
 
       return { ...g, totals, stageDist, minStageIdx, progress: pct(totals.loaded, totals.qty) };
     });
@@ -99,6 +108,13 @@ export function ByOrderView() {
     });
     return arr;
   }, [groups, partyFilter, stageFilter, sortBy]);
+
+  // Filter/sort change → start from the first page again.
+  useEffect(() => {
+    setLimit(PAGE_SIZE);
+  }, [partyFilter, stageFilter, sortBy]);
+
+  const shown = visible.slice(0, limit);
 
   const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
   const allCollapsed = visible.every((g) => collapsed[g.key]);
@@ -179,9 +195,14 @@ export function ByOrderView() {
         <ErrorCard message={error} onRetry={reload} />
       ) : (
         <div className="bypo-list">
-          {visible.map((g) => (
+          {shown.map((g) => (
             <ByOrderGroup key={g.key} group={g} collapsed={!!collapsed[g.key]} onToggle={() => toggle(g.key)} onOpenLineItem={setOpenDrawer} />
           ))}
+          {visible.length > limit && (
+            <button className="hbtn" style={{ justifySelf: "center", margin: "4px auto" }} onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+              Show {Math.min(PAGE_SIZE, visible.length - limit)} more ({visible.length - limit} remaining)
+            </button>
+          )}
         </div>
       )}
 

@@ -258,18 +258,6 @@ export function QuoteForm({
                 <span className="lbl">Address</span>
                 <input value={h.address} onChange={(e) => setHead("address", e.target.value)} placeholder="Customer address" />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Remarks</span>
-                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Customer Notes</span>
-                <textarea rows={2} value={h.customerNotes} onChange={(e) => setHead("customerNotes", e.target.value)} placeholder="Notes shown to the customer" />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Terms &amp; Conditions</span>
-                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
-              </label>
             </div>
           </div>
 
@@ -307,14 +295,16 @@ export function QuoteForm({
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <select value={l.item} onChange={(e) => setLine(i, "item", e.target.value)}>
-                        <option value="">Select item…</option>
-                        {itemOptions.map((x) => (
-                          <option key={x.name} value={x.name}>
-                            {x.name}
-                          </option>
-                        ))}
-                      </select>
+                      <Combobox
+                        value={l.item}
+                        onChange={(v) => setLine(i, "item", v)}
+                        placeholder="Search item…"
+                        options={itemOptions.map((x) => ({
+                          value: x.name,
+                          label: x.name,
+                          hint: [x.size, x.finish].filter(Boolean).join(" · "),
+                        }))}
+                      />
                       {d && (
                         <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
                           {d.size} · {d.finish} · {d.brand}
@@ -378,6 +368,24 @@ export function QuoteForm({
                 <span>Net Total</span>
                 <span className="mono">{h.currency} {fmt(totals.net)}</span>
               </div>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section-title">Remarks &amp; Notes</div>
+            <div className="form-grid">
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Remarks</span>
+                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Customer Notes</span>
+                <textarea rows={2} value={h.customerNotes} onChange={(e) => setHead("customerNotes", e.target.value)} placeholder="Notes shown to the customer" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Terms &amp; Conditions</span>
+                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
+              </label>
             </div>
           </div>
         </div>

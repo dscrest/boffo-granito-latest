@@ -173,6 +173,9 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
           Line items
           <span className="right">Click a row to drill into the SKU</span>
         </div>
+        {/* .dpanel clips overflow — without this wrapper the Progress/Stage
+            columns get cut off in the narrow drawer grid. */}
+        <div style={{ overflow: "auto" }}>
         <table className="tbl">
           <thead>
             <tr>
@@ -207,7 +210,7 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
                 </td>
                 <td className="num">{fmt(li.orderQty)}</td>
                 <td className="num">{fmt(li.producedQty)}</td>
-                <td style={{ width: 130 }}>
+                <td style={{ width: 90 }}>
                   <SplitBar produced={li.producedQty} palletized={li.palletizedQty} loaded={li.loadedQty} total={li.orderQty} />
                 </td>
                 <td>
@@ -217,6 +220,7 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="dpanel">

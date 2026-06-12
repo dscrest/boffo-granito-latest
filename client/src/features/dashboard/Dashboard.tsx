@@ -124,8 +124,10 @@ export function Dashboard() {
     const m: Record<string, { count: number; qty: number }> = {};
     STAGES.forEach((s) => (m[s.id] = { count: 0, qty: 0 }));
     orders.forEach((o) => {
-      m[o.stage].count++;
-      m[o.stage].qty += o.orderQty;
+      // Live rows can carry stage values outside STAGES — bucket them on the fly.
+      const b = (m[o.stage] ??= { count: 0, qty: 0 });
+      b.count++;
+      b.qty += o.orderQty;
     });
     return m;
   }, [orders]);

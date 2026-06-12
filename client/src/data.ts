@@ -94,9 +94,18 @@ export const STAGES: Stage[] = [
   { id: "final", label: "Final Loading", short: "Final", color: "green" },
 ];
 
-/** STAGES lookup that the prototype did inline via STAGES.find(...). */
+/** STAGES lookup that the prototype did inline via STAGES.find(...).
+    Total: live rows can carry stage values outside STAGES (legacy/seed data),
+    so unknown ids fall back to a neutral badge instead of crashing the page. */
 export function stageOf(id: string): Stage {
-  return STAGES.find((s) => s.id === id)!;
+  return (
+    STAGES.find((s) => s.id === id) ?? {
+      id,
+      label: id || "Unknown",
+      short: id ? id.charAt(0).toUpperCase() + id.slice(1) : "—",
+      color: "amber",
+    }
+  );
 }
 
 /* ============================================================

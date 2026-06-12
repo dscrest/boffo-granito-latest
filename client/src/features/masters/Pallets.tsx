@@ -3,6 +3,10 @@
    Data Store via palletsApi. Create / edit / delete write real rows;
    every mutation is recorded in OperationLog (see /ops). Phase 4
    (palletisation + container fit) reads these specs.
+
+   Follows the master-page UI convention (see DesignMaster):
+   • NO inline row actions — row-click opens the edit form.
+   • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -11,8 +15,8 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { PalletForm } from "./PalletForm";
 import {
+  bulkDeletePallets,
   createPallet,
-  deletePallet,
   listPallets,
   updatePallet,
   type PalletInput,
@@ -27,6 +31,8 @@ export function Pallets() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ row: PalletRow | null } | null>(null); // null=closed, {row:null}=new
 
   const load = async () => {
@@ -40,6 +46,7 @@ export function Pallets() {
     setError(null);
     setRows(res.pallets);
     setSizes(res.sizes);
+    setSelected(new Set());
   };
 
   useEffect(() => {
@@ -74,18 +81,39 @@ export function Pallets() {
     await load();
   };
 
-  const onDelete = async (row: PalletRow) => {
-    if (!window.confirm(`Delete pallet "${row.name}"? This cannot be undone.`)) return;
-    setNotice("Deleting…");
-    const res = await deletePallet(row.id);
-    if (!res.ok) {
-      setNotice(null);
-      setError(res.error || "Delete failed");
-      toast.error(res.error || "Delete failed");
+  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const next = new Set(p);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelected((p) => {
+      const next = new Set(p);
+      if (allShownSelected) filtered.forEach((r) => next.delete(r.id));
+      else filtered.forEach((r) => next.add(r.id));
+      return next;
+    });
+
+  const ids = useMemo(() => [...selected], [selected]);
+
+  const onBulkDelete = async () => {
+    if (!window.confirm(`Delete ${ids.length} selected pallet${ids.length > 1 ? "s" : ""}? This cannot be undone.`))
       return;
+    setBusy(true);
+    setNotice(`Deleting ${ids.length} pallet${ids.length > 1 ? "s" : ""}…`);
+    const res = await bulkDeletePallets(ids);
+    setBusy(false);
+    if (!res.ok) {
+      setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);
+      toast.error(`${res.done} deleted, ${res.failed} failed`);
+    } else {
+      toast.success(`${res.done} pallet${res.done === 1 ? "" : "s"} deleted`);
     }
-    setNotice("Pallet deleted.");
-    toast.success("Pallet deleted");
+    setNotice(`Deleted ${res.done} pallet${res.done === 1 ? "" : "s"}.`);
     await load();
   };
 
@@ -148,11 +176,27 @@ export function Pallets() {
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
-      <div className="fbar">
-        <span className="muted mono">{filtered.length} rows</span>
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </div>
+      {/* Bulk action bar replaces the filter bar while a selection is active. */}
+      {ids.length > 0 ? (
+        <div className="fbar" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {ids.length} selected
+          </span>
+          <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
+            Delete
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : (
+        <div className="fbar">
+          <span className="muted mono">{filtered.length} rows</span>
+          <div style={{ flex: 1 }} />
+          <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+      )}
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
@@ -162,6 +206,14 @@ export function Pallets() {
           <table className="tbl">
             <thead>
               <tr>
+                <th style={{ width: 34, textAlign: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={allShownSelected}
+                    onChange={toggleAll}
+                    title={allShownSelected ? "Deselect all" : "Select all"}
+                  />
+                </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>Name</th>
                 <th>Packing</th>
@@ -170,34 +222,41 @@ export function Pallets() {
                 <th className="num" style={{ textAlign: "right" }}>Coverage (m² / ft²)</th>
                 <th className="num" style={{ textAlign: "right" }}>Boxes / Cont.</th>
                 <th className="num" style={{ textAlign: "right" }}>Pallets / Cont.</th>
-                <th style={{ width: 90, textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => (
-                <tr key={r.id}>
-                  <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
-                  <td><span className="chip">{r.name}</span></td>
-                  <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>
-                  <td>{r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : <span className="dim">—</span>}</td>
-                  <td className="muted">{r.palletType || <span className="dim">—</span>}</td>
-                  <td className="num mono">
-                    {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}
-                  </td>
-                  <td className="num mono" style={{ color: "var(--fg)" }}>
-                    {r.totalBoxesPerContainer > 0 ? fmt(r.totalBoxesPerContainer) : <span className="dim">—</span>}
-                  </td>
-                  <td className="num mono">{r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : <span className="dim">—</span>}</td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    <button className="btn" title="Edit" onClick={() => setEditing({ row: r })}>
-                      Edit
-                    </button>{" "}
-                    <button className="btn" title="Delete" onClick={() => void onDelete(r)}>
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((r, i) => {
+                const sel = selected.has(r.id);
+                return (
+                  <tr
+                    key={r.id}
+                    tabIndex={0}
+                    onClick={() => setEditing({ row: r })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target === e.currentTarget) setEditing({ row: r });
+                    }}
+                    style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
+                    title="Edit pallet"
+                  >
+                    {/* checkbox cell stops propagation so toggling never opens the form */}
+                    <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
+                    </td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td><span className="chip">{r.name}</span></td>
+                    <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>
+                    <td>{r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : <span className="dim">—</span>}</td>
+                    <td className="muted">{r.palletType || <span className="dim">—</span>}</td>
+                    <td className="num mono">
+                      {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}
+                    </td>
+                    <td className="num mono" style={{ color: "var(--fg)" }}>
+                      {r.totalBoxesPerContainer > 0 ? fmt(r.totalBoxesPerContainer) : <span className="dim">—</span>}
+                    </td>
+                    <td className="num mono">{r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : <span className="dim">—</span>}</td>
+                  </tr>
+                );
+              })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
                   <td colSpan={9}>

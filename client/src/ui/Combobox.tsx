@@ -7,6 +7,9 @@
    ============================================================ */
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
+/** Max options rendered in the popup; the rest hide behind "keep typing". */
+const MAX_VISIBLE = 50;
+
 export interface ComboOption {
   value: string;
   label: string;
@@ -41,13 +44,16 @@ export function Combobox({
 
   const selected = options.find((o) => o.value === value);
   const needle = q.trim().toLowerCase();
-  const filtered = needle
-    ? options.filter(
-        (o) =>
-          o.label.toLowerCase().includes(needle) ||
-          (o.hint || "").toLowerCase().includes(needle),
-      )
-    : options;
+  // Searches label, hint AND value (value will carry the SKU for item pickers).
+  const hay = (o: ComboOption) => `${o.label} ${o.hint || ""} ${o.value}`.toLowerCase();
+  const matches = needle ? options.filter((o) => hay(o).includes(needle)) : options;
+  if (needle) {
+    // Prefix matches first, so the list narrows toward what's being typed.
+    matches.sort((a, b) => Number(hay(b).startsWith(needle)) - Number(hay(a).startsWith(needle)));
+  }
+  // Cap the popup — huge lists are unusable and slow; typing narrows further.
+  const filtered = matches.slice(0, MAX_VISIBLE);
+  const hidden = matches.length - filtered.length;
 
   const pick = (v: string) => {
     onChange(v);
@@ -120,6 +126,9 @@ export function Combobox({
               {o.hint && <span className="combo-hint">{o.hint}</span>}
             </div>
           ))}
+          {hidden > 0 && (
+            <div className="combo-empty">{hidden} more match{hidden > 1 ? "es" : ""} — keep typing to narrow</div>
+          )}
         </div>
       )}
     </div>

@@ -104,7 +104,7 @@ async function designMap(catalyst) {
   if (!_cache.Design)
     _cache.Design = await buildMap(
       catalyst,
-      "SELECT ROWID, design_name, unique_name FROM Design",
+      "SELECT ROWID, design_name, unique_name FROM Design WHERE deleted_at is null",
       ["design_name", "unique_name"],
       "ROWID",
     );
@@ -114,7 +114,7 @@ async function customerMap(catalyst) {
   if (!_cache.Customer)
     _cache.Customer = await buildMap(
       catalyst,
-      "SELECT ROWID, name, code FROM Customer",
+      "SELECT ROWID, name, code FROM Customer WHERE deleted_at is null",
       ["name", "code"],
       "ROWID",
     );
@@ -124,7 +124,7 @@ async function paymentTermMap(catalyst) {
   if (!_cache.PaymentTerm)
     _cache.PaymentTerm = await buildMap(
       catalyst,
-      "SELECT ROWID, name FROM PaymentTerm",
+      "SELECT ROWID, name FROM PaymentTerm WHERE deleted_at is null",
       ["name"],
       "ROWID",
     );
@@ -839,7 +839,7 @@ async function loadContainer(catalyst, ds, body) {
 
   // Existing loadings on this container (count + boxes/area/weight already loaded).
   const existing = rowList(
-    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId} AND deleted_at is null`),
   );
   const existingSet = new Set(existing.map((r) => String(r.batch)));
   let loadedBoxes = 0;
@@ -955,7 +955,7 @@ async function dispatchContainer(catalyst, ds, containerId, body) {
   if (!cRows.length) throw badRequest(`Container not found: ${containerId}`, 404);
   if (String(cRows[0].status) === "dispatched") throw badRequest("Container already dispatched", 409); // idempotent
   const loadings = rowList(
-    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId} AND deleted_at is null`),
   );
   if (!loadings.length) throw badRequest("Container has no loaded pallets", 409);
 
@@ -1064,7 +1064,7 @@ async function invoiceForContainer(catalyst, ds, containerId, body) {
   // One invoice per container (idempotent).
   const existing = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, invoice_number FROM Invoice WHERE container = ${containerId}`,
+      `SELECT ROWID, invoice_number FROM Invoice WHERE container = ${containerId} AND deleted_at is null`,
     ),
   );
   if (existing.length) {
@@ -1072,7 +1072,7 @@ async function invoiceForContainer(catalyst, ds, containerId, body) {
   }
 
   const loadings = rowList(
-    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId} AND deleted_at is null`),
   );
   if (!loadings.length) throw badRequest("Container has no loaded pallets", 409);
 
@@ -1172,8 +1172,8 @@ async function fitSuggest(catalyst) {
   };
 
   // Pending = closed batches not yet loaded into any container.
-  const closed = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed, is_demo, sales_order FROM PalletisedBatch WHERE status = 'closed'`));
-  const allLoadings = rowList(await zcql.executeZCQLQuery(`SELECT container, batch FROM ContainerLoading`));
+  const closed = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, design, pallet, boxes_packed, is_demo, sales_order FROM PalletisedBatch WHERE status = 'closed' AND deleted_at is null`));
+  const allLoadings = rowList(await zcql.executeZCQLQuery(`SELECT container, batch FROM ContainerLoading WHERE deleted_at is null`));
   const loadedSet = new Set(allLoadings.map((r) => String(r.batch)));
 
   // Cross-order tiers (§7.5, #10/#11): join batch → SalesOrder for customer + status.
@@ -1214,7 +1214,7 @@ async function fitSuggest(catalyst) {
   // Available containers: loading + planned. capacity_area_sqm / max_weight_kg are nullable.
   const cRows = rowList(
     await zcql.executeZCQLQuery(
-      `SELECT ROWID, container_number, capacity_boxes, capacity_pallets, capacity_area_sqm, max_weight_kg, status, etd FROM Container WHERE status = 'loading' OR status = 'planned'`,
+      `SELECT ROWID, container_number, capacity_boxes, capacity_pallets, capacity_area_sqm, max_weight_kg, status, etd FROM Container WHERE (status = 'loading' OR status = 'planned') AND deleted_at is null`,
     ),
   );
 
@@ -1267,7 +1267,13 @@ app.get("/:table", async (req, res) => {
     // ZCQL hard-caps LIMIT at 300 rows per query; paginate via "LIMIT offset, count".
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 300);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-    const where = req.query.where ? ` WHERE ${req.query.where}` : "";
+    // Soft-deleted rows are hidden unless ?include_deleted=1 (OperationLog
+    // has no deleted_at column, so it is never filtered).
+    const clauses = [];
+    if (req.query.where) clauses.push(`(${req.query.where})`);
+    if (req.query.include_deleted !== "1" && table !== "OperationLog")
+      clauses.push("deleted_at is null");
+    const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
     const order = req.query.order ? ` ORDER BY ${req.query.order}` : "";
     // Optional column projection (?columns=a,b,c). Identifiers only — anything
     // else falls back to SELECT *. ROWID is always included so joins keep working.
@@ -1369,9 +1375,47 @@ app.patch("/:table/:rowid", async (req, res) => {
 });
 
 /* ----------------------------------------------------------------
-   Generic: delete
+   Generic: delete (soft). Sets deleted_at instead of removing the row,
+   so FK CASCADE/SET-NULL never fires and the row stays restorable.
+   ?hard=1 forces a real deleteRow. OperationLog has no deleted_at
+   (append-only log) so it always hard-deletes.
    ---------------------------------------------------------------- */
 app.delete("/:table/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const table = assertTable(req.params.table);
+    const ds = catalyst.datastore();
+    const hard = req.query.hard === "1" || table === "OperationLog";
+
+    const result = await withOpLog(
+      catalyst,
+      {
+        table_name: table,
+        operation: hard ? "delete" : "soft-delete",
+        payload: { rowid: req.params.rowid },
+      },
+      async () => {
+        if (hard) {
+          await ds.table(table).deleteRow(req.params.rowid);
+        } else {
+          await ds.table(table).updateRow({
+            ROWID: req.params.rowid,
+            deleted_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+          });
+        }
+        return { rowid: req.params.rowid };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Generic: restore a soft-deleted row.
+   ---------------------------------------------------------------- */
+app.post("/:table/:rowid/restore", async (req, res) => {
   try {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
@@ -1379,9 +1423,9 @@ app.delete("/:table/:rowid", async (req, res) => {
 
     const result = await withOpLog(
       catalyst,
-      { table_name: table, operation: "delete", payload: { rowid: req.params.rowid } },
+      { table_name: table, operation: "restore", payload: { rowid: req.params.rowid } },
       async () => {
-        await ds.table(table).deleteRow(req.params.rowid);
+        await ds.table(table).updateRow({ ROWID: req.params.rowid, deleted_at: null });
         return { rowid: req.params.rowid };
       },
     );

@@ -249,18 +249,6 @@ export function OrderForm({
                   </label>
                 );
               })}
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Remarks</span>
-                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Customer Notes</span>
-                <textarea rows={2} value={h.customer_notes} onChange={(e) => setHead("customer_notes", e.target.value)} placeholder="Notes shown to the customer" />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Terms &amp; Conditions</span>
-                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
-              </label>
             </div>
           </div>
 
@@ -297,14 +285,16 @@ export function OrderForm({
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <select value={l.design} onChange={(e) => setLine(i, "design", e.target.value)}>
-                        <option value="">Select design…</option>
-                        {itemOptions.map((x) => (
-                          <option key={x.name} value={x.name}>
-                            {x.name}
-                          </option>
-                        ))}
-                      </select>
+                      <Combobox
+                        value={l.design}
+                        onChange={(v) => setLine(i, "design", v)}
+                        placeholder="Search design…"
+                        options={itemOptions.map((x) => ({
+                          value: x.name,
+                          label: x.name,
+                          hint: [x.size, x.finish].filter(Boolean).join(" · "),
+                        }))}
+                      />
                       {d && (
                         <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
                           {d.size} · {d.finish} · {d.brand}
@@ -375,6 +365,24 @@ export function OrderForm({
                 <span>Order Total</span>
                 <span className="mono">{h.currency} {fmt(totals.net)}</span>
               </div>
+            </div>
+          </div>
+
+          <div className="form-section">
+            <div className="form-section-title">Remarks &amp; Notes</div>
+            <div className="form-grid">
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Remarks</span>
+                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Customer Notes</span>
+                <textarea rows={2} value={h.customer_notes} onChange={(e) => setHead("customer_notes", e.target.value)} placeholder="Notes shown to the customer" />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Terms &amp; Conditions</span>
+                <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
+              </label>
             </div>
           </div>
         </div>

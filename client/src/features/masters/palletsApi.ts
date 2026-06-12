@@ -6,7 +6,7 @@
    ForeignKey → Size (stores the Size ROWID). Every write is recorded
    server-side in OperationLog.
    ============================================================ */
-import { list, listAll, insert, update, remove, type DSRow } from "@/lib/dataOps";
+import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -196,4 +196,28 @@ export function updatePallet(rowid: string, input: PalletInput) {
 
 export function deletePallet(rowid: string) {
   return bust(remove("Pallet", rowid));
+}
+
+/* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
+
+export interface BulkResult {
+  ok: boolean;
+  done: number;
+  failed: number;
+  firstError?: string;
+}
+
+async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): Promise<BulkResult> {
+  const results = await Promise.all(rowids.map(fn));
+  const failed = results.filter((r) => !r.ok);
+  return {
+    ok: failed.length === 0,
+    done: results.length - failed.length,
+    failed: failed.length,
+    firstError: failed[0]?.error,
+  };
+}
+
+export function bulkDeletePallets(rowids: string[]): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Pallet", id)));
 }

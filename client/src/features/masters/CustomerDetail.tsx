@@ -1,7 +1,7 @@
 /* Customer detail — read-only record page for a Party (Customer),
    hydrated from the live Customer master + live orders. */
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
 import { SkeletonRows } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
@@ -11,6 +11,7 @@ import { composeAddress, contactName, listCustomers, type CustomerRow } from "./
 export function CustomerDetail() {
   const { id = "" } = useParams();
   const code = decodeURIComponent(id);
+  const navigate = useNavigate();
   const { orders: allOrders } = useOrders();
   const [customers, setCustomers] = useState<CustomerRow[] | null>(null);
 
@@ -78,8 +79,13 @@ export function CustomerDetail() {
             </thead>
             <tbody>
               {orders.map((o) => (
-                <tr key={o.id}>
-                  <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
+                <tr
+                  key={o.id}
+                  style={{ cursor: "pointer" }}
+                  title="Open order details"
+                  onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
+                >
+                  <td className="mono" style={{ color: "var(--accent)" }}>{o.poNumber}</td>
                   <td>{o.design}</td>
                   <td className="num mono">{fmt(o.orderQty)}</td>
                   <td>{o.stage}</td>

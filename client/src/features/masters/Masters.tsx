@@ -207,6 +207,7 @@ function MasterEditor({
 function MasterTable({ def }: { def: MasterDef }) {
   const [rows, setRows] = useState<Row[]>(def.seed);
   const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ id: string | null } | null>(null); // null = closed, {id:null} = new
 
   const filtered = useMemo(() => {
@@ -227,19 +228,56 @@ function MasterTable({ def }: { def: MasterDef }) {
     setEditing(null);
   };
 
-  const remove = (id: string) => setRows((rs) => rs.filter((r) => r._id !== id));
+  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r._id));
+
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const next = new Set(p);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelected((p) => {
+      const next = new Set(p);
+      if (allShownSelected) filtered.forEach((r) => next.delete(r._id));
+      else filtered.forEach((r) => next.add(r._id));
+      return next;
+    });
+
+  const removeSelected = () => {
+    if (!window.confirm(`Delete ${selected.size} selected row${selected.size > 1 ? "s" : ""}?`)) return;
+    setRows((rs) => rs.filter((r) => !selected.has(r._id)));
+    setSelected(new Set());
+  };
 
   return (
     <div>
-      <div className="fbar">
-        <span className="muted mono">{filtered.length} rows</span>
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder={`Search ${def.label.toLowerCase()}…`} value={query} onChange={(e) => setQuery(e.target.value)} />
-        <button className="hbtn primary" onClick={() => setEditing({ id: null })}>
-          <Icon name="plus" size={13} />
-          New {def.label.toLowerCase()}
-        </button>
-      </div>
+      {/* Bulk action bar replaces the filter bar while a selection is active. */}
+      {selected.size > 0 ? (
+        <div className="fbar" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {selected.size} selected
+          </span>
+          <button className="btn" onClick={removeSelected}>
+            Delete
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : (
+        <div className="fbar">
+          <span className="muted mono">{filtered.length} rows</span>
+          <div style={{ flex: 1 }} />
+          <input type="text" placeholder={`Search ${def.label.toLowerCase()}…`} value={query} onChange={(e) => setQuery(e.target.value)} />
+          <button className="hbtn primary" onClick={() => setEditing({ id: null })}>
+            <Icon name="plus" size={13} />
+            New {def.label.toLowerCase()}
+          </button>
+        </div>
+      )}
 
       {editing && <MasterEditor def={def} initial={initialForm} onSave={save} onCancel={() => setEditing(null)} />}
 
@@ -247,13 +285,20 @@ function MasterTable({ def }: { def: MasterDef }) {
         <table className="tbl">
           <thead>
             <tr>
+              <th style={{ width: 34, textAlign: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={allShownSelected}
+                  onChange={toggleAll}
+                  title={allShownSelected ? "Deselect all" : "Select all"}
+                />
+              </th>
               <th style={{ width: 36, textAlign: "center" }}>#</th>
               {def.fields.map((f) => (
                 <th key={f.key} className={f.type === "number" ? "num" : ""} style={f.type === "number" ? { textAlign: "right" } : undefined}>
                   {f.label}
                 </th>
               ))}
-              <th style={{ width: 80, textAlign: "right" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -264,32 +309,40 @@ function MasterTable({ def }: { def: MasterDef }) {
                 </td>
               </tr>
             )}
-            {filtered.map((r, i) => (
-              <tr key={r._id}>
-                <td className="muted mono" style={{ textAlign: "center" }}>
-                  {i + 1}
-                </td>
-                {def.fields.map((f) => (
-                  <td key={f.key} className={f.type === "number" ? "num" : ""}>
-                    {f.key === def.lead && r[f.key] ? (
-                      <span className="chip">{r[f.key]}</span>
-                    ) : r[f.key] ? (
-                      r[f.key]
-                    ) : (
-                      <span className="dim">—</span>
-                    )}
+            {filtered.map((r, i) => {
+              const sel = selected.has(r._id);
+              return (
+                <tr
+                  key={r._id}
+                  tabIndex={0}
+                  onClick={() => setEditing({ id: r._id })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) setEditing({ id: r._id });
+                  }}
+                  style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
+                  title={`Edit ${def.label.toLowerCase()}`}
+                >
+                  {/* checkbox cell stops propagation so toggling never opens the editor */}
+                  <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={sel} onChange={() => toggleOne(r._id)} />
                   </td>
-                ))}
-                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  <button className="btn" title="Edit" onClick={() => setEditing({ id: r._id })}>
-                    Edit
-                  </button>{" "}
-                  <button className="btn" title="Delete" onClick={() => remove(r._id)}>
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  <td className="muted mono" style={{ textAlign: "center" }}>
+                    {i + 1}
+                  </td>
+                  {def.fields.map((f) => (
+                    <td key={f.key} className={f.type === "number" ? "num" : ""}>
+                      {f.key === def.lead && r[f.key] ? (
+                        <span className="chip">{r[f.key]}</span>
+                      ) : r[f.key] ? (
+                        r[f.key]
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

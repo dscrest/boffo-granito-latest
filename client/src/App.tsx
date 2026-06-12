@@ -9,6 +9,7 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { Icon } from "@/ui/Icon";
 import { ToastHost } from "@/ui/Toast";
 import { SkeletonRows } from "@/ui/States";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
@@ -418,6 +419,7 @@ export default function App() {
       </header>
 
       <main className="main">
+        <ErrorBoundary key={location.pathname}>
         <Suspense fallback={<div style={{ padding: 24 }}><SkeletonRows rows={8} /></div>}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -450,6 +452,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </main>
       <ToastHost />
     </div>
