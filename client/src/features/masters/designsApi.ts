@@ -117,7 +117,7 @@ async function fetchDesigns(): Promise<{
   // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
   const [designs, size, finish, category, glaze, brand, grade] = await Promise.all([
     listAll("Design", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code", "name"] }),
+    list("Size", { limit: 300, columns: ["code"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Category", { limit: 300, columns: ["name"] }),
     list("Glaze", { limit: 300, columns: ["name"] }),

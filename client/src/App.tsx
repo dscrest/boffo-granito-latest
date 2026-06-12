@@ -378,10 +378,7 @@ export default function App() {
         <div className="foot">
           <div className="row" style={{ marginBottom: 6 }}>
             <span className="dot" />
-            <span style={{ color: "var(--fg-2)" }}>Synced</span>
-            <span style={{ marginLeft: "auto", color: "var(--dim)" }} className="mono">
-              3s ago
-            </span>
+            <span style={{ color: "var(--fg-2)" }}>Live data</span>
           </div>
           <div className="row" style={{ color: "var(--dim)" }}>
             <Icon name="clock" size={11} />

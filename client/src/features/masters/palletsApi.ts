@@ -81,7 +81,7 @@ async function fetchPallets(): Promise<{
   // listAll pages past ZCQL's 300-row cap; Size projects its label columns.
   const [pallets, sizes] = await Promise.all([
     listAll("Pallet", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code", "name"] }),
+    list("Size", { limit: 300, columns: ["code"] }),
   ]);
   if (!pallets.ok) return { ok: false, pallets: [], sizes: [], error: pallets.error };
 

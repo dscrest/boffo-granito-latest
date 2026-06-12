@@ -55,7 +55,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     listAll("OrderItem"),
     listAll("Customer", { columns: ["name", "code", "country_code"] }),
     listAll("Design", { columns: ["design_name", "size", "finish", "brand"] }),
-    list("Size", { limit: 300, columns: ["name"] }),
+    list("Size", { limit: 300, columns: ["code"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Brand", { limit: 300, columns: ["name"] }),
   ]);
@@ -67,7 +67,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
   const custCode = mapBy(customers.rows, "code");
   const custIso = mapBy(customers.rows, "country_code");
   const designName = mapBy(designs.rows, "design_name");
-  const sizeName = mapBy(sizes.rows, "name");
+  const sizeName = mapBy(sizes.rows, "code");
   const finishName = mapBy(finishes.rows, "name");
   const brandName = mapBy(brands.rows, "name");
   // Design row's own lookup FKs (size/finish/brand) → names.

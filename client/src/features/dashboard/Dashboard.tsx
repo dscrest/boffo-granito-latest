@@ -8,6 +8,7 @@ import { fmt, pct } from "@/lib/format";
 import { STAGES } from "@/data";
 import { list } from "@/lib/dataOps";
 import { useOrders } from "@/features/orders/useOrders";
+import { cachedInvoices, listInvoices, type InvoiceRow } from "@/features/invoices/invoicesApi";
 
 interface FeedItem {
   time: string;
@@ -87,9 +88,25 @@ function useActivityFeed(): { feed: FeedItem[]; loading: boolean } {
   return { feed, loading };
 }
 
+/** Live invoices for the KPI strip (cache-first, refreshed on mount). */
+function useInvoiceKpi(): InvoiceRow[] {
+  const [invoices, setInvoices] = useState<InvoiceRow[]>(() => cachedInvoices() ?? []);
+  useEffect(() => {
+    let alive = true;
+    void listInvoices().then((r) => {
+      if (alive && r.ok) setInvoices(r.invoices);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return invoices;
+}
+
 export function Dashboard() {
   const { orders, loading, error, reload } = useOrders();
   const { feed, loading: feedLoading } = useActivityFeed();
+  const invoices = useInvoiceKpi();
   const showSkeleton = loading && orders.length === 0;
 
   // Same rule as the old mock READY_TO_LOAD, over live orders.
@@ -116,6 +133,33 @@ export function Dashboard() {
   const totalQty = orders.reduce((s, o) => s + o.orderQty, 0);
   const totalProd = orders.reduce((s, o) => s + o.producedQty, 0);
   const totalPal = orders.reduce((s, o) => s + o.palletizedQty, 0);
+  const packedPallets = orders.reduce(
+    (s, o) => s + (o.boxesPerPallet > 0 ? Math.ceil(o.palletizedQty / o.boxesPerPallet) : 0),
+    0,
+  );
+  const loadedBoxes = orders.reduce((s, o) => s + o.loadedQty, 0);
+  const loadedPallets = orders.reduce(
+    (s, o) => s + (o.boxesPerPallet > 0 ? Math.ceil(o.loadedQty / o.boxesPerPallet) : 0),
+    0,
+  );
+
+  // Invoiced this month, summed only when every invoice shares one currency.
+  const now = new Date();
+  const monthInvoices = invoices.filter((i) => {
+    const d = new Date(i.invoiceDate.replace(" ", "T"));
+    return !isNaN(d.getTime()) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const invCurrencies = new Set(monthInvoices.map((i) => i.currency).filter(Boolean));
+  const invTotal = monthInvoices.reduce((s, i) => s + i.totalAmount, 0);
+  const invDelta =
+    monthInvoices.length === 0
+      ? "no invoices yet"
+      : invCurrencies.size === 1
+        ? `${[...invCurrencies][0]} ${fmt(invTotal)} total`
+        : `${fmt(invTotal)} total (mixed currency)`;
+  const monthLabel = now.toLocaleDateString("en-GB", { month: "short" });
+
+  const dateLabel = `Today, ${now.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · ${now.toLocaleDateString("en-GB", { weekday: "long" })}`;
 
   const byDesign = useMemo(() => {
     const m: Record<string, { design: string; size: string; finish: string; ordered: number; produced: number }> = {};
@@ -140,12 +184,10 @@ export function Dashboard() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Today, 26 May 2026 · Tuesday</div>
+          <div className="title">{dateLabel}</div>
           <div className="sub row">
             <span className="live-dot" />
             Live
-            <span className="dim">·</span>
-            <span>Last refresh 3s ago</span>
             <span className="dim">·</span>
             <span>Plant: Morbi · Shift A</span>
           </div>
@@ -172,12 +214,12 @@ export function Dashboard() {
         <SkeletonRows rows={1} height={88} />
       ) : (
       <div className="kpi-grid">
-        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="sqm" delta="+12,724 this week" trend="up" spark={[6, 8, 7, 10, 9, 11, 12]} />
-        <KPI label="In Production" value={fmt(totalProd)} unit="sqm" delta="60.4k of 170.6k target" spark={[3, 4, 5, 7, 8, 9, 11]} color="var(--c-blue)" />
-        <KPI label="Pallets Packed" value={fmt(totalPal / 60)} unit="pallets" delta="6,284 boxes total" spark={[2, 4, 5, 8, 9, 10, 12]} color="var(--c-violet)" />
-        <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} spark={[7, 9, 10, 12, 11, 13, 14]} color="var(--c-cyan)" />
-        <KPI label="Loaded Today" value="347" unit="pallets" delta="EX-14/2026-27 · 8 trucks" spark={[5, 6, 4, 9, 8, 11, 12]} color="var(--c-green)" />
-        <KPI label="Invoiced (May)" value="22" unit="invoices" delta="₹4.62 Cr · +18% MoM" trend="up" spark={[3, 5, 4, 6, 7, 8, 9]} color="var(--c-amber)" />
+        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="sqm" delta={`${orders.length} active orders`} />
+        <KPI label="In Production" value={fmt(totalProd)} unit="sqm" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
+        <KPI label="Pallets Packed" value={fmt(packedPallets)} unit="pallets" delta={`${fmt(totalPal)} boxes total`} color="var(--c-violet)" />
+        <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} color="var(--c-cyan)" />
+        <KPI label="Loaded" value={fmt(loadedPallets)} unit="pallets" delta={`${fmt(loadedBoxes)} boxes loaded`} color="var(--c-green)" />
+        <KPI label={`Invoiced (${monthLabel})`} value={String(monthInvoices.length)} unit="invoices" delta={invDelta} color="var(--c-amber)" />
       </div>
       )}
 

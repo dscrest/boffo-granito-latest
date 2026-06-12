@@ -101,7 +101,7 @@ export function KPI({
   unit?: string;
   delta?: string;
   trend?: "up" | "down";
-  spark: number[];
+  spark?: number[];
   color?: string;
 }) {
   return (
@@ -116,9 +116,11 @@ export function KPI({
         {trend === "down" && <Icon name="arrow-down" size={11} style={{ color: "var(--c-red)" }} />}
         <span>{delta}</span>
       </div>
-      <div className="spark">
-        <Spark points={spark} color={color} w={62} h={20} />
-      </div>
+      {spark && (
+        <div className="spark">
+          <Spark points={spark} color={color} w={62} h={20} />
+        </div>
+      )}
     </div>
   );
 }
