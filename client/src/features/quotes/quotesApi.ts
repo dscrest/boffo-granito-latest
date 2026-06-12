@@ -122,6 +122,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       taxAmount: num(r.tax_amount),
       lines: linesByQuote.get(id) || [],
       soNumber: soByQuote.get(id) || null,
+      shareToken: str(r.share_token),
     };
   });
 
@@ -175,6 +176,14 @@ export function updateQuoteWithItems(rowid: string, input: NewQuoteInput) {
 
 export function deleteQuote(rowid: string) {
   return bust(remove("Quote", rowid));
+}
+
+/** Return the quote's share token, minting + persisting one on first use. */
+export async function ensureShareToken(quote: Quote): Promise<{ ok: boolean; token?: string; error?: string }> {
+  if (quote.shareToken) return { ok: true, token: quote.shareToken };
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const res = await bust(update("Quote", quote.id, { share_token: token }));
+  return res.ok ? { ok: true, token } : { ok: false, error: res.error };
 }
 
 /** Convert a quote → Sales Order (Full | Partial). */

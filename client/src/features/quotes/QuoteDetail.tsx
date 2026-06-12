@@ -31,6 +31,7 @@ import {
 import {
   cachedQuotes,
   deleteQuote,
+  ensureShareToken,
   invalidateQuotes,
   listQuotes,
   updateQuoteWithItems,
@@ -100,6 +101,25 @@ export function QuoteDetail() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "PDF generation failed");
     }
+  };
+
+  const onShare = async () => {
+    if (!quote) return;
+    setBusy("share");
+    const res = await ensureShareToken(quote);
+    setBusy(null);
+    if (!res.ok || !res.token) {
+      toast.error(res.error || "Could not create share link");
+      return;
+    }
+    const url = `${location.origin}${location.pathname}#/share/quote/${res.token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Share link copied to clipboard");
+    } catch {
+      toast.info(url); // clipboard blocked — surface the URL instead
+    }
+    void load();
   };
 
   const load = async () => {
@@ -262,6 +282,9 @@ export function QuoteDetail() {
           </button>
           <button className="hbtn" onClick={() => void onPdf()} title="Download PDF">
             <Icon name="download" size={13} /> PDF
+          </button>
+          <button className="hbtn" disabled={!!busy} onClick={() => void onShare()} title="Copy public share link">
+            <Icon name="docs" size={13} /> Share
           </button>
           <button className="hbtn" disabled={!!busy} onClick={() => void onDelete()} title="Delete quote" style={{ color: "var(--c-red)" }}>
             <Icon name="x" size={13} /> Delete

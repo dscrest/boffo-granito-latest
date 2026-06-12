@@ -158,6 +158,8 @@ export interface Quote {
   lines: QuoteLine[];
   /** SO number once converted (full or partial). */
   soNumber: string | null;
+  /** Public share-link token ("" until first shared). */
+  shareToken?: string;
 }
 
 export const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
