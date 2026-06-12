@@ -17,7 +17,8 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
-import { DESIGNS, docTotals, lineTotals, type Quote } from "@/data";
+import { docTotals, lineTotals, type Quote } from "@/data";
+import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
 import { ConvertDialog } from "./ConvertDialog";
@@ -71,6 +72,7 @@ function loadHidden(): Set<string> {
 export function QuoteDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const { designs } = useMasters();
 
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
@@ -330,7 +332,7 @@ export function QuoteDetail() {
                 </thead>
                 <tbody>
                   {quote.lines.map((l, i) => {
-                    const d = DESIGNS.find((x) => x.name === l.item);
+                    const d = designs.find((x) => x.name === l.item);
                     const t = lineTotals(l);
                     return (
                       <tr key={i}>

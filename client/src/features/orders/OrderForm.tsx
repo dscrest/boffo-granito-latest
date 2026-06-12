@@ -9,7 +9,8 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { CATEGORIES, DESIGNS, PARTIES, docTotals, type TaxType } from "@/data";
+import { CATEGORIES, docTotals, type TaxType } from "@/data";
+import { useMasters } from "@/features/masters/useMasters";
 import { fmt } from "@/lib/format";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
@@ -63,7 +64,8 @@ interface FieldSpec {
 }
 
 const HEADER: FieldSpec[] = [
-  { key: "customer", label: "Customer", kind: "select", options: PARTIES.map((p) => p.name), required: true },
+  // customer renders as a Combobox over the live Customer master (options unused)
+  { key: "customer", label: "Customer", kind: "select", options: [], required: true },
   { key: "po_number", label: "PO Number", required: true },
   { key: "order_date", label: "Order Date", kind: "date" },
   { key: "shipment_date", label: "Shipment Date", kind: "date" },
@@ -106,10 +108,11 @@ export function OrderForm({
     taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
+  const { parties, designs } = useMasters();
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
-    () => (cat ? DESIGNS.filter((d) => d.category === cat) : DESIGNS),
-    [cat],
+    () => (cat ? designs.filter((d) => d.category === cat) : designs),
+    [cat, designs],
   );
 
   const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
@@ -195,7 +198,7 @@ export function OrderForm({
                         value={h.customer}
                         onChange={(v) => setHead("customer", v)}
                         placeholder="Search customer…"
-                        options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                        options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
                       />
                     ) : f.kind === "select" ? (
                       <select
@@ -267,7 +270,7 @@ export function OrderForm({
                 <span />
               </div>
               {lines.map((l, i) => {
-                const d = DESIGNS.find((x) => x.name === l.design);
+                const d = designs.find((x) => x.name === l.design);
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>

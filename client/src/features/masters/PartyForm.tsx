@@ -1,83 +1,89 @@
 /* ============================================================
    New Party (Customer) form — captures the Catalyst `Customer`
-   schema. FRONTEND-ONLY: emits a PartyDraft to Parties' local
-   state (no DB writes yet). Field keys match the Data Store
-   column names for 1:1 API wiring later. Reuses shared form/modal
-   CSS (df-*, form-*).
+   schema and emits a CustomerInput for a real Data Store insert
+   (Parties owns the createCustomer call). payment_term is a real
+   ForeignKey → PaymentTerm, picked from live options. Reuses
+   shared form/modal CSS (df-*, form-*).
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
-
-export interface PartyDraft {
-  _id: string;
-  code: string;
-  name: string;
-  country: string;
-  flag: string;
-  country_code: string;
-  currency: string;
-  payment_term: string;
-  port_of_discharge: string;
-  address: string;
-  active: string;
-}
+import { useModalA11y } from "@/ui/useModalA11y";
+import type { CustomerInput, PaymentTermOption } from "./customersApi";
 
 /* country → ISO code + flag (Data Store stores ISO, not emoji). */
 const COUNTRIES: Record<string, { iso: string; flag: string }> = {
   Poland: { iso: "PL", flag: "🇵🇱" },
   Lithuania: { iso: "LT", flag: "🇱🇹" },
   Romania: { iso: "RO", flag: "🇷🇴" },
+  Croatia: { iso: "HR", flag: "🇭🇷" },
   Greece: { iso: "GR", flag: "🇬🇷" },
   India: { iso: "IN", flag: "🇮🇳" },
 };
 const CURRENCIES = ["EUR", "USD", "INR"];
-const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
-
-let _seq = 0;
-const newId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `p${++_seq}`;
 
 export function PartyForm({
+  paymentTerms,
+  initial,
+  isEdit,
   onSave,
   onClose,
 }: {
-  onSave: (p: PartyDraft) => void;
+  paymentTerms: PaymentTermOption[];
+  initial?: Partial<CustomerInput>;
+  isEdit?: boolean;
+  onSave: (c: CustomerInput) => void;
   onClose: () => void;
 }) {
+  const initialCountry =
+    Object.keys(COUNTRIES).find((c) => COUNTRIES[c].iso === initial?.country_code) ?? "";
+  const [country, setCountry] = useState(initialCountry);
   const [v, setV] = useState({
-    name: "",
-    code: "",
-    country: "",
-    currency: "EUR",
-    payment_term: "",
-    port_of_discharge: "",
-    address: "",
-    active: "Yes",
+    name: initial?.name ?? "",
+    code: initial?.code ?? "",
+    currency: initial?.currency ?? "EUR",
+    payment_term: initial?.payment_term ?? "",
+    port_of_discharge: initial?.port_of_discharge ?? "",
+    address: initial?.address ?? "",
+    active: initial?.active ?? true,
   });
-  const set = (k: string, val: string) => setV((p) => ({ ...p, [k]: val }));
+  const set = (k: string, val: string | boolean) => setV((p) => ({ ...p, [k]: val }));
   const missing = !v.name.trim() || !v.code.trim();
 
   const submit = () => {
     if (missing) return;
-    const c = COUNTRIES[v.country];
     onSave({
-      ...v,
-      _id: newId(),
-      flag: c?.flag ?? "",
-      country_code: c?.iso ?? "",
+      name: v.name,
+      code: v.code,
+      country_code: COUNTRIES[country]?.iso ?? "",
+      currency: v.currency,
+      payment_term: v.payment_term,
+      port_of_discharge: v.port_of_discharge,
+      address: v.address,
+      active: v.active,
     });
   };
 
+  const panelRef = useModalA11y(onClose);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel card df-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        className="modal-panel card df-modal"
+        style={{ maxWidth: 620 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="df-head">
           <div className="ico">
             <Icon name="flag" size={18} />
           </div>
           <div>
-            <div className="ttl">New Customer</div>
-            <div className="sub2">Customer · local draft — not yet saved to database</div>
+            <div className="ttl">{isEdit ? "Edit Customer" : "New Customer"}</div>
+            <div className="sub2">
+              {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
+            </div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕
@@ -102,7 +108,7 @@ export function PartyForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Country</span>
-                <select value={v.country} onChange={(e) => set("country", e.target.value)}>
+                <select value={country} onChange={(e) => setCountry(e.target.value)}>
                   <option value="">—</option>
                   {Object.keys(COUNTRIES).map((c) => (
                     <option key={c} value={c}>
@@ -131,16 +137,16 @@ export function PartyForm({
                 <span className="lbl">Payment Term</span>
                 <select value={v.payment_term} onChange={(e) => set("payment_term", e.target.value)}>
                   <option value="">—</option>
-                  {PAYMENT_TERMS.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
+                  {paymentTerms.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="form-field">
                 <span className="lbl">Active</span>
-                <select value={v.active} onChange={(e) => set("active", e.target.value)}>
+                <select value={v.active ? "Yes" : "No"} onChange={(e) => set("active", e.target.value === "Yes")}>
                   <option value="Yes">Yes</option>
                   <option value="No">No</option>
                 </select>
@@ -164,7 +170,7 @@ export function PartyForm({
           </button>
           <button className="hbtn primary" disabled={missing} onClick={submit}>
             <Icon name="check" size={13} />
-            Save customer
+            {isEdit ? "Update customer" : "Save customer"}
           </button>
         </div>
       </div>

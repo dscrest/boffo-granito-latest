@@ -1,15 +1,107 @@
-/* Dashboard — ported verbatim from prototype/views.jsx. Markup unchanged. */
-import { useMemo } from "react";
+/* Dashboard — live orders (useOrders) + live activity feed
+   (OperationLog). Ready-to-Load is derived from the live pipeline. */
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, pct } from "@/lib/format";
-import { ACTIVITY, READY_TO_LOAD, STAGES } from "@/data";
+import { STAGES } from "@/data";
+import { list } from "@/lib/dataOps";
 import { useOrders } from "@/features/orders/useOrders";
+
+interface FeedItem {
+  time: string;
+  who: string;
+  action: string;
+  detail: string;
+  tag: string;
+}
+
+const str = (v: unknown) => (v == null ? "" : String(v));
+
+const OP_VERB: Record<string, string> = { INSERT: "created", UPDATE: "updated", DELETE: "deleted" };
+const TABLE_LABEL: Record<string, string> = {
+  Quote: "quote",
+  SalesOrder: "order",
+  OrderItem: "order line",
+  Customer: "customer",
+  Design: "design",
+  Pallet: "pallet",
+  PalletisedBatch: "pallet batch",
+  PalletisedBatchLine: "batch line",
+  Container: "container",
+  ContainerLoading: "container load",
+};
+const TABLE_TAG: Record<string, string> = {
+  Quote: "po",
+  SalesOrder: "po",
+  OrderItem: "po",
+  PalletisedBatch: "packing",
+  PalletisedBatchLine: "packing",
+  Container: "loading",
+  ContainerLoading: "loading",
+};
+
+/** "yyyy-MM-dd HH:mm:ss" (OperationLog.occurred_at) → relative label. */
+function feedTime(occurredAt: string): string {
+  const d = new Date(occurredAt.replace(" ", "T"));
+  if (isNaN(d.getTime())) return "—";
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days <= 0)
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (days === 1) return "Yest.";
+  return `${days}d`;
+}
+
+/** Latest successful operations, shaped for the activity feed. */
+function useActivityFeed(): { feed: FeedItem[]; loading: boolean } {
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    void list("OperationLog", { order: "ROWID desc", limit: 50 }).then((res) => {
+      if (!alive) return;
+      setLoading(false);
+      const items = (res.rows || [])
+        .filter((r) => str(r.status) === "success")
+        .slice(0, 10)
+        .map((r) => {
+          const table = str(r.table_name);
+          const op = str(r.operation).toUpperCase();
+          return {
+            time: feedTime(str(r.occurred_at)),
+            who: str(r.actor) || "system",
+            action: `${OP_VERB[op] || op.toLowerCase()} ${TABLE_LABEL[table] || table}`,
+            detail: str(r.payload_summary) || (r.entity_rowid ? `#${str(r.entity_rowid)}` : "—"),
+            tag: TABLE_TAG[table] || "production",
+          };
+        });
+      setFeed(items);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return { feed, loading };
+}
 
 export function Dashboard() {
   const { orders, loading, error, reload } = useOrders();
+  const { feed, loading: feedLoading } = useActivityFeed();
   const showSkeleton = loading && orders.length === 0;
+
+  // Same rule as the old mock READY_TO_LOAD, over live orders.
+  const readyToLoad = useMemo(
+    () =>
+      orders
+        .filter((o) => o.stage === "loading" || (o.stage === "packing" && o.palletizedQty >= o.orderQty * 0.85))
+        .slice(0, 7),
+    [orders],
+  );
+  const readyPallets = readyToLoad.reduce((s, o) => s + Math.ceil(o.palletizedQty / o.boxesPerPallet), 0);
+  const readyBoxes = readyToLoad.reduce((s, o) => s + o.palletizedQty, 0);
 
   const byStage = useMemo(() => {
     const m: Record<string, { count: number; qty: number }> = {};
@@ -83,7 +175,7 @@ export function Dashboard() {
         <KPI label="Total Order Qty" value={fmt(totalQty)} unit="sqm" delta="+12,724 this week" trend="up" spark={[6, 8, 7, 10, 9, 11, 12]} />
         <KPI label="In Production" value={fmt(totalProd)} unit="sqm" delta="60.4k of 170.6k target" spark={[3, 4, 5, 7, 8, 9, 11]} color="var(--c-blue)" />
         <KPI label="Pallets Packed" value={fmt(totalPal / 60)} unit="pallets" delta="6,284 boxes total" spark={[2, 4, 5, 8, 9, 10, 12]} color="var(--c-violet)" />
-        <KPI label="Ready to Load" value="1,625" unit="pallets" delta="58,140 boxes ready" spark={[7, 9, 10, 12, 11, 13, 14]} color="var(--c-cyan)" />
+        <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} spark={[7, 9, 10, 12, 11, 13, 14]} color="var(--c-cyan)" />
         <KPI label="Loaded Today" value="347" unit="pallets" delta="EX-14/2026-27 · 8 trucks" spark={[5, 6, 4, 9, 8, 11, 12]} color="var(--c-green)" />
         <KPI label="Invoiced (May)" value="22" unit="invoices" delta="₹4.62 Cr · +18% MoM" trend="up" spark={[3, 5, 4, 6, 7, 8, 9]} color="var(--c-amber)" />
       </div>
@@ -129,12 +221,11 @@ export function Dashboard() {
       )}
 
       <div className="split" style={{ marginTop: 16 }}>
-        {/* still mock — migrate with Activity/loading tables */}
         <div className="card">
           <div className="card-head">
             <Icon name="truck" size={13} />
             <span className="title">Ready to Load Today</span>
-            <span className="muted">· 7 shipments · 4 trucks at dock</span>
+            <span className="muted">· {readyToLoad.length} shipment{readyToLoad.length === 1 ? "" : "s"}</span>
             <div className="right">
               <span className="pill">
                 <span className="dot green" />
@@ -163,7 +254,14 @@ export function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {READY_TO_LOAD.map((o) => (
+                {readyToLoad.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                      Nothing ready to load yet.
+                    </td>
+                  </tr>
+                )}
+                {readyToLoad.map((o) => (
                   <tr key={o.id}>
                     <td>
                       <div className="mono" style={{ color: "var(--fg)" }}>
@@ -284,7 +382,6 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* still mock — migrate with Activity/loading tables */}
         <div className="card">
           <div className="card-head">
             <Icon name="bell" size={13} />
@@ -295,7 +392,13 @@ export function Dashboard() {
             </div>
           </div>
           <div className="activity">
-            {ACTIVITY.map((a, i) => {
+            {feedLoading && feed.length === 0 && <SkeletonRows rows={6} />}
+            {!feedLoading && feed.length === 0 && (
+              <div className="muted" style={{ textAlign: "center", padding: 18 }}>
+                No activity yet.
+              </div>
+            )}
+            {feed.map((a, i) => {
               const stageColor =
                 ({ production: "blue", packing: "violet", loading: "cyan", po: "amber", final: "green" } as Record<string, string>)[
                   a.tag

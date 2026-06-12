@@ -1,27 +1,46 @@
-/* Customer detail — read-only record page for a Party (Customer). */
+/* Customer detail — read-only record page for a Party (Customer),
+   hydrated from the live Customer master + live orders. */
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
-import { ORDERS, PARTIES } from "@/data";
+import { SkeletonRows } from "@/ui/States";
+import { useOrders } from "@/features/orders/useOrders";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
+import { listCustomers, type CustomerRow } from "./customersApi";
 
 export function CustomerDetail() {
   const { id = "" } = useParams();
   const code = decodeURIComponent(id);
-  const party = PARTIES.find((p) => p.code === code) ?? null;
+  const { orders: allOrders } = useOrders();
+  const [customers, setCustomers] = useState<CustomerRow[] | null>(null);
 
+  useEffect(() => {
+    void listCustomers().then((res) => setCustomers(res.ok ? res.customers : []));
+  }, []);
+
+  if (customers === null) {
+    return <SkeletonRows rows={6} />;
+  }
+
+  const party = customers.find((c) => c.code === code) ?? null;
   if (!party) {
     return (
       <RecordDetail backTo="/parties" title="Customer not found" fields={[]} hiddenStorageKey="customerDetailFields" />
     );
   }
 
-  const orders = ORDERS.filter((o) => o.partyCode === party.code);
+  const orders = allOrders.filter((o) => o.partyCode === party.code);
   const totalQty = orders.reduce((s, o) => s + o.orderQty, 0);
 
   const fields: RecordField[] = [
     { key: "name", label: "Name", value: party.name },
     { key: "code", label: "Code", value: party.code },
     { key: "country", label: "Country", value: party.country || "—" },
+    { key: "currency", label: "Currency", value: party.currency || "—" },
+    { key: "paymentTerm", label: "Payment Term", value: party.paymentTermLabel || "—" },
+    { key: "port", label: "Port of Discharge", value: party.portOfDischarge || "—" },
+    { key: "address", label: "Address", value: party.address || "—" },
+    { key: "active", label: "Active", value: party.active ? "Yes" : "No" },
     { key: "orders", label: "Open Orders", value: String(orders.length) },
     { key: "totalQty", label: "Total Qty (sqm)", value: fmt(totalQty) },
   ];
@@ -34,6 +53,7 @@ export function CustomerDetail() {
       fields={fields}
       hiddenStorageKey="customerDetailFields"
       activityTable="Customer"
+      entityId={party.id}
     >
       <div className="card">
         <div style={{ overflow: "auto" }}>

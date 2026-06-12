@@ -5,10 +5,12 @@
    ============================================================ */
 import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
-import { DESIGNS, docTotals, lineTotals, type Quote } from "@/data";
+import { docTotals, lineTotals, type Quote } from "@/data";
+import { useMasters } from "@/features/masters/useMasters";
 import { fmt } from "@/lib/format";
 
 export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+  const { designs } = useMasters();
   const totals = docTotals(quote.lines, {
     docDiscount: quote.docDiscount,
     adjustment: quote.adjustment,
@@ -76,7 +78,7 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
           </thead>
           <tbody>
             {quote.lines.map((l, i) => {
-              const d = DESIGNS.find((x) => x.name === l.item);
+              const d = designs.find((x) => x.name === l.item);
               const t = lineTotals(l);
               return (
                 <tr key={i}>

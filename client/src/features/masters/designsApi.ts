@@ -89,6 +89,10 @@ const cache = createListCache(fetchDesigns);
 export function cachedDesigns(): DesignRow[] | null {
   return cache.cached()?.designs ?? null;
 }
+/** Subscribe to design-cache changes. Returns an unsubscribe fn. */
+export function subscribeDesigns(cb: () => void): () => void {
+  return cache.subscribe(cb);
+}
 /** Drop the cache so the next listDesigns() hits the network. */
 export function invalidateDesigns(): void {
   cache.invalidate();

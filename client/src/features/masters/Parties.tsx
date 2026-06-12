@@ -1,24 +1,32 @@
-/* Parties (Customers) — Books-parity list view: a table with a New
-   button and a ⋯ overflow menu (Sort / Refresh). New parties are kept
-   in local `drafts` state (frontend-only, not yet persisted) and shown
-   first, tagged "draft". */
-import { useMemo, useState } from "react";
+/* Parties (Customers) — Books-parity list view over the live Customer
+   master (customersApi). New customers save straight to the Data Store;
+   order counts come from the live orders cache (useOrders). */
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ProgressBar } from "@/ui/primitives";
 import { pct } from "@/lib/format";
-import { ORDERS, PARTIES } from "@/data";
-import { PartyForm, type PartyDraft } from "./PartyForm";
+import { useOrders } from "@/features/orders/useOrders";
+import { PartyForm } from "./PartyForm";
+import {
+  createCustomer,
+  listCustomers,
+  type CustomerInput,
+  type CustomerRow,
+  type PaymentTermOption,
+} from "./customersApi";
 
 type Row = {
   key: string;
-  draft: boolean;
-  name: string;
   code: string;
+  name: string;
   country: string;
   flag: string;
   currency: string;
   paymentTerm: string;
+  active: boolean;
   orders: number;
   qty: number;
   loaded: number;
@@ -28,70 +36,77 @@ type SortKey = "name" | "country" | "orders";
 
 export function PartiesView() {
   const navigate = useNavigate();
+  const { orders } = useOrders();
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [drafts, setDrafts] = useState<PartyDraft[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sort, setSort] = useState<SortKey>("name");
 
-  const addDraft = (p: PartyDraft) => {
-    setDrafts((d) => [p, ...d]);
+  const load = () => {
+    setLoading(true);
+    void listCustomers().then((res) => {
+      setLoading(false);
+      if (!res.ok) {
+        setError(res.error || "Failed to load customers");
+        return;
+      }
+      setError(null);
+      setCustomers(res.customers);
+      setPaymentTerms(res.paymentTerms);
+    });
+  };
+  useEffect(load, []);
+
+  const onSave = async (input: CustomerInput) => {
     setShowForm(false);
+    const res = await createCustomer(input);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    toast.success("Customer saved");
+    load();
   };
 
   const rows = useMemo<Row[]>(() => {
-    const draftRows: Row[] = drafts.map((p) => ({
-      key: p._id,
-      draft: true,
-      name: p.name,
-      code: p.code,
-      country: p.country || "—",
-      flag: p.flag || "",
-      currency: p.currency || "—",
-      paymentTerm: p.payment_term || "—",
-      orders: 0,
-      qty: 0,
-      loaded: 0,
-    }));
-    const baseRows: Row[] = PARTIES.map((p) => {
-      const open = ORDERS.filter((o) => o.partyCode === p.code);
+    const base: Row[] = customers.map((c) => {
+      const open = orders.filter((o) => o.partyCode === c.code);
       return {
-        key: p.code,
-        draft: false,
-        name: p.name,
-        code: p.code,
-        country: p.country,
-        flag: p.flag,
-        currency: "—",
-        paymentTerm: "—",
+        key: c.id,
+        code: c.code,
+        name: c.name,
+        country: c.country || "—",
+        flag: c.flag,
+        currency: c.currency || "—",
+        paymentTerm: c.paymentTermLabel || "—",
+        active: c.active,
         orders: open.length,
         qty: open.reduce((s, o) => s + o.orderQty, 0),
         loaded: open.reduce((s, o) => s + o.loadedQty, 0),
       };
     });
-    const sorted = [...baseRows].sort((a, b) => {
+    return base.sort((a, b) => {
       if (sort === "orders") return b.orders - a.orders;
       if (sort === "country") return a.country.localeCompare(b.country);
       return a.name.localeCompare(b.name);
     });
-    return [...draftRows, ...sorted]; // unsaved drafts always lead
-  }, [drafts, sort]);
+  }, [customers, orders, sort]);
 
-  const countries = new Set(PARTIES.map((p) => p.country)).size;
+  const countries = new Set(customers.map((c) => c.country).filter(Boolean)).size;
 
   return (
     <div>
-      {showForm && <PartyForm onSave={addDraft} onClose={() => setShowForm(false)} />}
+      {showForm && (
+        <PartyForm paymentTerms={paymentTerms} onSave={onSave} onClose={() => setShowForm(false)} />
+      )}
       <div className="page-head">
         <div>
           <div className="title">Customers</div>
           <div className="sub">
-            {PARTIES.length + drafts.length} active buyers across {countries} countries
-            {drafts.length > 0 && (
-              <>
-                {" · "}
-                <span className="dim">{drafts.length} unsaved draft{drafts.length > 1 ? "s" : ""}</span>
-              </>
-            )}
+            {customers.length} buyers across {countries} countries
           </div>
         </div>
         <div className="right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -113,12 +128,18 @@ export function PartiesView() {
                 <MenuItem label="Sort by Name" active={sort === "name"} onClick={() => { setSort("name"); setMenuOpen(false); }} />
                 <MenuItem label="Sort by Country" active={sort === "country"} onClick={() => { setSort("country"); setMenuOpen(false); }} />
                 <MenuItem label="Sort by Orders" active={sort === "orders"} onClick={() => { setSort("orders"); setMenuOpen(false); }} />
+                <MenuItem label="Refresh" active={false} onClick={() => { load(); setMenuOpen(false); }} />
               </div>
             )}
           </div>
         </div>
       </div>
 
+      {error && <ErrorCard message={error} onRetry={load} />}
+
+      {loading && customers.length === 0 ? (
+        <SkeletonRows rows={6} />
+      ) : (
       <div className="card">
         <div style={{ overflow: "auto" }}>
           <table className="tbl">
@@ -138,21 +159,17 @@ export function PartiesView() {
                 <tr key={r.key}>
                   <td>
                     {r.flag}{" "}
-                    {r.draft ? (
-                      <span style={{ color: "var(--fg)" }}>{r.name}</span>
-                    ) : (
-                      <button
-                        className="linkish"
-                        style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                        onClick={() => navigate(`/parties/${encodeURIComponent(r.code)}`)}
-                        title="Open details"
-                      >
-                        {r.name}
-                      </button>
-                    )}
-                    {r.draft && (
-                      <span className="chip" style={{ marginLeft: 6, background: "var(--accent-soft)", color: "var(--accent)" }}>
-                        draft
+                    <button
+                      className="linkish"
+                      style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                      onClick={() => navigate(`/parties/${encodeURIComponent(r.code)}`)}
+                      title="Open details"
+                    >
+                      {r.name}
+                    </button>
+                    {!r.active && (
+                      <span className="chip" style={{ marginLeft: 6 }}>
+                        inactive
                       </span>
                     )}
                   </td>
@@ -173,10 +190,14 @@ export function PartiesView() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                    No customers yet. Click <b>New</b> to add one.
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <EmptyState
+                      icon="flag"
+                      title="No customers yet"
+                      hint="Click New to add the first buyer."
+                    />
                   </td>
                 </tr>
               )}
@@ -184,6 +205,7 @@ export function PartiesView() {
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 }

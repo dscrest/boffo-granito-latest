@@ -1,27 +1,42 @@
-/* Item (Design) detail — read-only record page for a Design. */
+/* Item (Design) detail — read-only record page for a Design,
+   hydrated from the live Design master + live orders. */
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
-import { DESIGNS, ORDERS } from "@/data";
+import { SkeletonRows } from "@/ui/States";
+import { useOrders } from "@/features/orders/useOrders";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
+import { listDesigns, type DesignRow } from "./designsApi";
 
 export function ItemDetail() {
   const { id = "" } = useParams();
   const name = decodeURIComponent(id);
-  const design = DESIGNS.find((d) => d.name === name) ?? null;
+  const { orders: allOrders } = useOrders();
+  const [designs, setDesigns] = useState<DesignRow[] | null>(null);
 
+  useEffect(() => {
+    void listDesigns().then((res) => setDesigns(res.ok ? res.designs : []));
+  }, []);
+
+  if (designs === null) {
+    return <SkeletonRows rows={6} />;
+  }
+
+  const design = designs.find((d) => d.designName === name) ?? null;
   if (!design) {
     return <RecordDetail backTo="/design" title="Item not found" fields={[]} hiddenStorageKey="itemDetailFields" />;
   }
 
-  const orders = ORDERS.filter((o) => o.design === design.name);
+  const orders = allOrders.filter((o) => o.design === design.designName);
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
 
   const fields: RecordField[] = [
-    { key: "name", label: "Design Name", value: design.name },
-    { key: "size", label: "Size", value: design.size },
-    { key: "finish", label: "Finish", value: design.finish },
-    { key: "brand", label: "Brand", value: design.brand },
-    { key: "category", label: "Category", value: design.category },
+    { key: "name", label: "Design Name", value: design.designName },
+    { key: "sku", label: "SKU", value: design.sku || "—" },
+    { key: "size", label: "Size", value: design.sizeLabel || "—" },
+    { key: "finish", label: "Finish", value: design.finishLabel || "—" },
+    { key: "brand", label: "Brand", value: design.brandLabel || "—" },
+    { key: "category", label: "Category", value: design.categoryLabel || "—" },
     { key: "pos", label: "Active POs", value: String(orders.length) },
     { key: "openQty", label: "Open Qty", value: fmt(openQty) },
   ];
@@ -29,11 +44,12 @@ export function ItemDetail() {
   return (
     <RecordDetail
       backTo="/design"
-      title={design.name}
-      subtitle={`${design.size} · ${design.finish} · ${design.brand}`}
+      title={design.designName}
+      subtitle={`${design.sizeLabel} · ${design.finishLabel} · ${design.brandLabel}`}
       fields={fields}
       hiddenStorageKey="itemDetailFields"
       activityTable="Design"
+      entityId={design.id}
     >
       <div className="card">
         <div style={{ overflow: "auto" }}>

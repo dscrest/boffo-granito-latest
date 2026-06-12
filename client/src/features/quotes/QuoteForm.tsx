@@ -12,8 +12,6 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import {
   CATEGORIES,
   CURRENCIES,
-  DESIGNS,
-  PARTIES,
   PAYMENT_TERMS,
   PORTS,
   docTotals,
@@ -22,6 +20,7 @@ import {
   type QuoteLine,
   type TaxType,
 } from "@/data";
+import { useMasters } from "@/features/masters/useMasters";
 import { fmt } from "@/lib/format";
 
 const STATUSES = ["Draft", "Sent", "Accepted"] as const;
@@ -33,13 +32,6 @@ interface Charges {
   taxType: TaxType;
   taxPct: string;
 }
-
-const CUSTOMER_ADDR: Record<string, string> = {
-  MRK: "ul. Czerwone Maki 65, 30-392 Kraków, Poland",
-  FLB: "Obrtnička 5, 10000 Zagreb, Croatia",
-  ABS: "Verkių g. 25C, 08223 Vilnius, Lithuania",
-  DDM: "Str. Alexandru Vlahuță 1, Bacău 600310, Romania",
-};
 
 const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0 });
 
@@ -78,6 +70,7 @@ export function QuoteForm({
   onClose: () => void;
 }) {
   const editing = !!initial;
+  const { customers, parties, designs } = useMasters();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? "",
     address: initial?.address ?? "",
@@ -98,8 +91,8 @@ export function QuoteForm({
   );
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
-    () => (cat ? DESIGNS.filter((d) => d.category === cat) : DESIGNS),
-    [cat],
+    () => (cat ? designs.filter((d) => d.category === cat) : designs),
+    [cat, designs],
   );
   const num2str = (n: number | undefined) => (n ? String(n) : "");
   const [charges, setCharges] = useState<Charges>({
@@ -114,10 +107,10 @@ export function QuoteForm({
   const setHead = (k: keyof Head, val: string) =>
     setH((p) => {
       const next = { ...p, [k]: val };
-      // Auto-fill address when a known customer is picked.
+      // Auto-fill address from the Customer master when a known customer is picked.
       if (k === "customer") {
-        const party = PARTIES.find((x) => x.name === val);
-        if (party && CUSTOMER_ADDR[party.code]) next.address = CUSTOMER_ADDR[party.code];
+        const cust = customers.find((x) => x.name === val);
+        if (cust?.address) next.address = cust.address;
       }
       return next;
     });
@@ -151,7 +144,7 @@ export function QuoteForm({
       setShowErrors(true);
       return;
     }
-    const party = PARTIES.find((x) => x.name === h.customer);
+    const party = parties.find((x) => x.name === h.customer);
     onSave({
       ...h,
       id: initial?.id ?? newId().slice(0, 6).toUpperCase(),
@@ -199,7 +192,7 @@ export function QuoteForm({
                   value={h.customer}
                   onChange={(v) => setHead("customer", v)}
                   placeholder="Search customer…"
-                  options={PARTIES.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                  options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
                 />
                 {customerErr && <span className="field-err">{customerErr}</span>}
               </label>
@@ -309,7 +302,7 @@ export function QuoteForm({
                 <span />
               </div>
               {lines.map((l, i) => {
-                const d = DESIGNS.find((x) => x.name === l.item);
+                const d = designs.find((x) => x.name === l.item);
                 const t = lineTotals(l);
                 return (
                   <div className="ord-line qt-line" key={i}>

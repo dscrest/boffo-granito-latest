@@ -13,6 +13,8 @@ import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
+import { cachedCustomers, subscribeCustomers } from "@/features/masters/customersApi";
+import { cachedDesigns, subscribeDesigns } from "@/features/masters/designsApi";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -297,6 +299,26 @@ export default function App() {
     [],
   );
 
+  // Live master counts: subscribe-only (no warm fetch — the first masters
+  // screen or form visited hydrates the caches); mock seeds until then.
+  const [masterCounts, setMasterCounts] = useState<{ parties: number | null; designs: number | null }>(() => ({
+    parties: cachedCustomers()?.length ?? null,
+    designs: cachedDesigns()?.length ?? null,
+  }));
+  useEffect(() => {
+    const sync = () =>
+      setMasterCounts({
+        parties: cachedCustomers()?.length ?? null,
+        designs: cachedDesigns()?.length ?? null,
+      });
+    const unsubC = subscribeCustomers(sync);
+    const unsubD = subscribeDesigns(sync);
+    return () => {
+      unsubC();
+      unsubD();
+    };
+  }, []);
+
   const counts = useMemo<Record<string, number | string>>(() => {
     const ords = liveOrders ?? ORDERS;
     const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? QUOTES.length, kanban: ords.length, orders: ords.length };
@@ -304,10 +326,10 @@ export default function App() {
     ords.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
     c.byorder = distinctPOs.size;
     STAGES.forEach((s) => (c[s.id] = ords.filter((o) => o.stage === s.id).length));
-    c.design = DESIGNS.length;
-    c.parties = PARTIES.length;
+    c.design = masterCounts.designs ?? DESIGNS.length;
+    c.parties = masterCounts.parties ?? PARTIES.length;
     return c;
-  }, [liveQuoteCount, liveOrders]);
+  }, [liveQuoteCount, liveOrders, masterCounts]);
 
   const crumbs = VIEW_LABELS[baseId] || ["", ""];
   const sectionHref = firstLeafOf(crumbs[0]);
