@@ -92,6 +92,16 @@ export function QuoteDetail() {
 
   const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
 
+  const onPdf = async () => {
+    if (!quote) return;
+    try {
+      const { downloadQuotePdf } = await import("./quotePdf");
+      await downloadQuotePdf(quote);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "PDF generation failed");
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     const res = await listQuotes();
@@ -249,6 +259,9 @@ export function QuoteDetail() {
           </button>
           <button className="hbtn" onClick={() => setPrinting(true)} title="Print / PDF">
             <Icon name="printer" size={13} /> Print Quote
+          </button>
+          <button className="hbtn" onClick={() => void onPdf()} title="Download PDF">
+            <Icon name="download" size={13} /> PDF
           </button>
           <button className="hbtn" disabled={!!busy} onClick={() => void onDelete()} title="Delete quote" style={{ color: "var(--c-red)" }}>
             <Icon name="x" size={13} /> Delete

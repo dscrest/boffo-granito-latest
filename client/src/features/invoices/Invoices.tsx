@@ -50,6 +50,15 @@ export function Invoices() {
     );
   }, [invoices, query]);
 
+  const onPdf = async (row: InvoiceRow) => {
+    try {
+      const { downloadInvoicePdf } = await import("./invoicePdf");
+      await downloadInvoicePdf(row);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "PDF generation failed");
+    }
+  };
+
   const onGenerate = async (containerId: string) => {
     const res = await generateInvoice(containerId);
     if (!res.ok) {
@@ -134,6 +143,9 @@ export function Invoices() {
                       <span className="chip">{r.status}</span>
                     </td>
                     <td>
+                      <button className="btn" onClick={() => void onPdf(r)} title="Download PDF">
+                        <Icon name="download" size={12} />
+                      </button>
                       <button className="btn" onClick={() => onDelete(r)} title="Delete invoice">
                         ✕
                       </button>
