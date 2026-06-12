@@ -10,6 +10,7 @@ import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { ContainerForm } from "./ContainerForm";
+import { LoadBoard } from "./LoadBoard";
 import {
   createContainer,
   deleteContainer,
@@ -223,6 +224,8 @@ export function Containers() {
           )}
         </div>
       </div>
+
+      {!loading && rows.length > 0 && <LoadBoard containers={rows} />}
     </div>
   );
 }
