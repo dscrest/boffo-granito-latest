@@ -67,6 +67,8 @@ const ALLOWED = new Set([
   "OrderItemEvent",
   "Activity",
   "OperationLog",
+  "Invoice",
+  "TransactionSeries",
 ]);
 
 function assertTable(table) {
@@ -317,6 +319,7 @@ const NATURAL_KEY = {
   Grade: "name",
   PaymentTerm: "name",
   Pallet: "name",
+  Invoice: "invoice_number",
 };
 
 /**
@@ -980,6 +983,155 @@ async function dispatchContainer(catalyst, ds, containerId, body) {
   }
   await ds.table("Container").updateRow({ ROWID: containerId, status: "dispatched" });
   return { rowid: containerId, data: { container: containerId, batches: loadings.length } };
+}
+
+/* ============================================================
+   PHASE 5 — Invoicing
+   ============================================================ */
+
+/** Indian FY token for a date: Apr–Mar → "2026-27". */
+function fyToken(d) {
+  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${y}-${String((y + 1) % 100).padStart(2, "0")}`;
+}
+
+/** "yyyy-MM-dd" for Catalyst date columns. */
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * Next document number from TransactionSeries (creates the series row on
+ * first use). Format: `${prefix}${NN}/${fy_token}` e.g. "EX-14/2026-27".
+ * Resets the counter when the financial year rolls over.
+ */
+async function nextSeriesNumber(catalyst, ds, docType, defaultPrefix) {
+  const fy = fyToken(new Date());
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, prefix, current_number, fy_token FROM TransactionSeries WHERE doc_type = '${docType}'`,
+    ),
+  );
+  if (!rows.length) {
+    const ins = await ds.table("TransactionSeries").insertRow({
+      doc_type: docType,
+      prefix: defaultPrefix,
+      current_number: 1,
+      fy_token: fy,
+    });
+    return { number: `${defaultPrefix}01/${fy}`, seriesRowid: String(ins.ROWID) };
+  }
+  const s = rows[0];
+  const rolled = String(s.fy_token) !== fy;
+  const n = rolled ? 1 : (Number(s.current_number) || 0) + 1;
+  await ds.table("TransactionSeries").updateRow({ ROWID: s.ROWID, current_number: n, fy_token: fy });
+  const prefix = String(s.prefix || defaultPrefix);
+  return { number: `${prefix}${String(n).padStart(2, "0")}/${fy}`, seriesRowid: String(s.ROWID) };
+}
+
+/* Generate the export invoice for a loaded container (one per container).
+   Total = Σ over every loaded batch line: boxes × OrderItem rate less the
+   line's discount_pct. sales_order FK is set only when the whole container
+   belongs to a single order; currency comes from that order (first found). */
+app.post("/invoice-for-container/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const containerId = req.params.rowid;
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "Invoice", operation: "INSERT", payload: { containerId, ...body } },
+      async () => invoiceForContainer(catalyst, ds, containerId, body),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function invoiceForContainer(catalyst, ds, containerId, body) {
+  const cRows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, container_number, status FROM Container WHERE ROWID = ${containerId}`,
+    ),
+  );
+  if (!cRows.length) throw badRequest(`Container not found: ${containerId}`, 404);
+
+  // One invoice per container (idempotent).
+  const existing = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, invoice_number FROM Invoice WHERE container = ${containerId}`,
+    ),
+  );
+  if (existing.length) {
+    throw badRequest(`Container already invoiced (${existing[0].invoice_number})`, 409);
+  }
+
+  const loadings = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT batch FROM ContainerLoading WHERE container = ${containerId}`),
+  );
+  if (!loadings.length) throw badRequest("Container has no loaded pallets", 409);
+
+  // Sum value across every loaded batch line: boxes × line rate less discount.
+  let total = 0;
+  const soIds = new Set();
+  for (const ld of loadings) {
+    const lineRows = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${ld.batch}`,
+      ),
+    );
+    for (const ln of lineRows) {
+      const oiRows = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID, rate, discount_pct, sales_order FROM OrderItem WHERE ROWID = ${ln.order_item}`,
+        ),
+      );
+      if (!oiRows.length) continue;
+      const oi = oiRows[0];
+      const boxes = Number(ln.boxes) || 0;
+      const rate = Number(oi.rate) || 0;
+      const disc = Number(oi.discount_pct) || 0;
+      total += boxes * rate * (1 - disc / 100);
+      if (oi.sales_order) soIds.add(String(oi.sales_order));
+    }
+  }
+  total = round2(total);
+
+  // Currency from the (first) order on board; FK only for single-order containers.
+  let currency = "";
+  const soList = [...soIds];
+  if (soList.length) {
+    const soRows = rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, currency FROM SalesOrder WHERE ROWID = ${soList[0]}`),
+    );
+    if (soRows.length) currency = String(soRows[0].currency || "");
+  }
+
+  const { number } = await nextSeriesNumber(catalyst, ds, "Invoice", "EX-");
+  const payload = {
+    invoice_number: number,
+    invoice_date: String(body.invoice_date || "") || isoDate(new Date()),
+    total_amount: total,
+    currency,
+    status: "issued",
+    container: containerId,
+  };
+  if (soList.length === 1) payload.sales_order = soList[0];
+  const ins = await ds.table("Invoice").insertRow(payload);
+
+  return {
+    rowid: String(ins.ROWID),
+    data: {
+      invoice_number: number,
+      container: containerId,
+      container_number: String(cRows[0].container_number || ""),
+      total_amount: total,
+      currency,
+      orders_on_board: soList.length,
+    },
+  };
 }
 
 const { computeFit } = require("./lib/fit");

@@ -27,6 +27,8 @@ const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").the
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
 const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
 const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m) => ({ default: m.OperationsLog })));
+const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => ({ default: m.Invoices })));
+const Reports = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.Reports })));
 const PalletPacking = lazy(() => import("@/features/stages/PalletPacking").then((m) => ({ default: m.PalletPacking })));
 const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
@@ -106,12 +108,16 @@ function navTree(): NavNode[] {
         { id: "fit", label: "Fit Suggester", icon: "kanban" },
         { id: "loading", label: "Loading", icon: "truck" },
         { id: "final", label: "Final Loading", icon: "invoice" },
+        { id: "invoices", label: "Invoices", icon: "invoice" },
       ],
     },
     {
       label: "Reports",
       icon: "chart",
-      children: [{ id: "ops", label: "Audit Log", icon: "clock" }],
+      children: [
+        { id: "reports", label: "Quantity Reports", icon: "chart" },
+        { id: "ops", label: "Audit Log", icon: "clock" },
+      ],
     },
   ];
   return tree;
@@ -136,6 +142,8 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   fit: ["Stages", "Fit Suggester"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
+  invoices: ["Stages", "Invoices"],
+  reports: ["Reports", "Quantity Reports"],
   ops: ["Reports", "Audit Log"],
 };
 
@@ -435,6 +443,8 @@ export default function App() {
             <Route path="/packing" element={<PalletPacking />} />
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/reports" element={<Reports />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
