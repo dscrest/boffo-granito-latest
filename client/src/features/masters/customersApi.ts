@@ -33,6 +33,57 @@ export interface PaymentTermOption {
   label: string;
 }
 
+/* Books-parity extras: contact person + structured billing/shipping
+   address. All optional varchar columns on Customer (snake_case =
+   live column names, created 2026-06-12). */
+export const CUSTOMER_EXTRA_FIELDS = [
+  "contact_salutation",
+  "contact_first_name",
+  "contact_last_name",
+  "contact_email",
+  "contact_work_phone",
+  "contact_mobile",
+  "billing_attention",
+  "billing_country",
+  "billing_street1",
+  "billing_street2",
+  "billing_city",
+  "billing_state",
+  "billing_pincode",
+  "billing_phone",
+  "shipping_attention",
+  "shipping_country",
+  "shipping_street1",
+  "shipping_street2",
+  "shipping_city",
+  "shipping_state",
+  "shipping_pincode",
+  "shipping_phone",
+] as const;
+export type CustomerExtraField = (typeof CUSTOMER_EXTRA_FIELDS)[number];
+export type CustomerExtras = Record<CustomerExtraField, string>;
+
+export function emptyExtras(): CustomerExtras {
+  return Object.fromEntries(CUSTOMER_EXTRA_FIELDS.map((k) => [k, ""])) as CustomerExtras;
+}
+
+/** "Mr. Jan Kowalski" from the contact person parts ("" when unset). */
+export function contactName(x: Partial<CustomerExtras>): string {
+  return [x.contact_salutation, x.contact_first_name, x.contact_last_name]
+    .map((s) => (s || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** One-line address from the billing_* or shipping_* parts ("" when unset). */
+export function composeAddress(x: Partial<CustomerExtras>, prefix: "billing" | "shipping"): string {
+  const f = (k: string) => ((x as Record<string, string | undefined>)[`${prefix}_${k}`] || "").trim();
+  const cityLine = [f("city"), f("state"), f("pincode")].filter(Boolean).join(" ");
+  return [f("attention"), f("street1"), f("street2"), cityLine, f("country")]
+    .filter(Boolean)
+    .join(", ");
+}
+
 export interface CustomerRow {
   id: string; // ROWID
   code: string;
@@ -47,6 +98,8 @@ export interface CustomerRow {
   address: string;
   portOfDischarge: string;
   active: boolean;
+  /** Contact person + structured billing/shipping address columns. */
+  extras: CustomerExtras;
 }
 
 /** Mock-shaped view for screens still typed against data.ts Party. */
@@ -119,13 +172,16 @@ async function fetchCustomers(): Promise<{
       address: str(c.address),
       portOfDischarge: str(c.port_of_discharge),
       active: str(c.active) !== "false", // unset → active
+      extras: Object.fromEntries(
+        CUSTOMER_EXTRA_FIELDS.map((k) => [k, str(c[k])]),
+      ) as CustomerExtras,
     };
   });
 
   return { ok: true, customers: rows, paymentTerms };
 }
 
-export interface CustomerInput {
+export interface CustomerInput extends Partial<CustomerExtras> {
   code: string;
   name: string;
   country_code: string; // ISO ("PL"), never the emoji
@@ -148,6 +204,9 @@ function toPayload(input: CustomerInput): Record<string, unknown> {
     active: input.active,
   };
   if (input.payment_term) p.payment_term = input.payment_term; // FK only when chosen
+  for (const k of CUSTOMER_EXTRA_FIELDS) {
+    if (input[k] !== undefined) p[k] = String(input[k]).trim();
+  }
   return p;
 }
 

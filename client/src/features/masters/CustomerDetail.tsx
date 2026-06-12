@@ -6,7 +6,7 @@ import { fmt } from "@/lib/format";
 import { SkeletonRows } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
-import { listCustomers, type CustomerRow } from "./customersApi";
+import { composeAddress, contactName, listCustomers, type CustomerRow } from "./customersApi";
 
 export function CustomerDetail() {
   const { id = "" } = useParams();
@@ -39,7 +39,16 @@ export function CustomerDetail() {
     { key: "currency", label: "Currency", value: party.currency || "—" },
     { key: "paymentTerm", label: "Payment Term", value: party.paymentTermLabel || "—" },
     { key: "port", label: "Port of Discharge", value: party.portOfDischarge || "—" },
-    { key: "address", label: "Address", value: party.address || "—" },
+    { key: "contact", label: "Contact Person", value: contactName(party.extras) || "—" },
+    { key: "contactEmail", label: "Email", value: party.extras.contact_email || "—" },
+    {
+      key: "contactPhone",
+      label: "Phone",
+      value:
+        [party.extras.contact_work_phone, party.extras.contact_mobile].filter(Boolean).join(" / ") || "—",
+    },
+    { key: "billing", label: "Billing Address", value: composeAddress(party.extras, "billing") || party.address || "—" },
+    { key: "shipping", label: "Shipping Address", value: composeAddress(party.extras, "shipping") || "—" },
     { key: "active", label: "Active", value: party.active ? "Yes" : "No" },
     { key: "orders", label: "Open Orders", value: String(orders.length) },
     { key: "totalQty", label: "Total Qty (sqm)", value: fmt(totalQty) },
