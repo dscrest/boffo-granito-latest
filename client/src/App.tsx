@@ -9,7 +9,7 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "reac
 import { Icon } from "@/ui/Icon";
 import { ToastHost } from "@/ui/Toast";
 import { SkeletonRows } from "@/ui/States";
-import { DESIGNS, ORDERS, PARTIES, QUOTES, STAGES } from "@/data";
+import { STAGES, type Order } from "@/data";
 import { checkSession, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
@@ -297,7 +297,7 @@ export default function App() {
 
   // Live order counts: subscribe-only (no warm fetch — the first orders
   // screen visited hydrates the cache); mock seeds until then.
-  const [liveOrders, setLiveOrders] = useState<typeof ORDERS | null>(() => cachedOrders());
+  const [liveOrders, setLiveOrders] = useState<Order[] | null>(() => cachedOrders());
   useEffect(
     () =>
       subscribeOrders(() => {
@@ -328,14 +328,15 @@ export default function App() {
   }, []);
 
   const counts = useMemo<Record<string, number | string>>(() => {
-    const ords = liveOrders ?? ORDERS;
-    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? QUOTES.length, kanban: ords.length, orders: ords.length };
+    // Live-only: before the caches hydrate the badges show 0, never mock seeds.
+    const ords = liveOrders ?? [];
+    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? 0, kanban: ords.length, orders: ords.length };
     const distinctPOs = new Set<string>();
     ords.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
     c.byorder = distinctPOs.size;
     STAGES.forEach((s) => (c[s.id] = ords.filter((o) => o.stage === s.id).length));
-    c.design = masterCounts.designs ?? DESIGNS.length;
-    c.parties = masterCounts.parties ?? PARTIES.length;
+    c.design = masterCounts.designs ?? 0;
+    c.parties = masterCounts.parties ?? 0;
     return c;
   }, [liveQuoteCount, liveOrders, masterCounts]);
 
