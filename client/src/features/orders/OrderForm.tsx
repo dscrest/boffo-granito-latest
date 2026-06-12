@@ -34,6 +34,7 @@ export interface OrderDraft {
   currency: string;
   remarks: string;
   salesperson: string;
+  box_branding: string;
   customer_notes: string;
   terms: string;
   docDiscount: string;
@@ -74,6 +75,9 @@ const HEADER: FieldSpec[] = [
   { key: "status", label: "Status", kind: "select", options: STATUSES },
   { key: "salesperson", label: "Salesperson" },
   { key: "port_of_discharge", label: "Port of Discharge" },
+  // Renders as a free-text input with our Brand list as suggestions, so the
+  // customer's own branding can be typed when they want their name on the boxes.
+  { key: "box_branding", label: "Box Branding" },
 ];
 
 const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "", discount: "" });
@@ -100,6 +104,7 @@ export function OrderForm({
     currency: "EUR",
     remarks: "",
     salesperson: "",
+    box_branding: "",
     customer_notes: "",
     terms: "",
     docDiscount: "",
@@ -113,6 +118,10 @@ export function OrderForm({
   const itemOptions = useMemo(
     () => (cat ? designs.filter((d) => d.category === cat) : designs),
     [cat, designs],
+  );
+  const brandOptions = useMemo(
+    () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
+    [designs],
   );
 
   const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
@@ -200,6 +209,20 @@ export function OrderForm({
                         placeholder="Search customer…"
                         options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
                       />
+                    ) : f.key === "box_branding" ? (
+                      <>
+                        <input
+                          list="box-branding-brands"
+                          value={h.box_branding}
+                          onChange={(e) => setHead("box_branding", e.target.value)}
+                          placeholder="Our brand, or customer's own branding"
+                        />
+                        <datalist id="box-branding-brands">
+                          {brandOptions.map((b) => (
+                            <option key={b} value={b} />
+                          ))}
+                        </datalist>
+                      </>
                     ) : f.kind === "select" ? (
                       <select
                         className={err ? "error" : ""}

@@ -508,7 +508,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
    Business: SalesOrder header + line items
    body: { customer, po_number, order_date, shipment_date, payment_term,
            port_of_discharge, status, currency, remarks, address, order_number,
-           quote_rowid?, salesperson, customer_notes, terms,
+           quote_rowid?, salesperson, customer_notes, terms, box_branding?,
            lines: [{ item, qty, rate, discount?, stage?, priority?, due_date? }] }
    ---------------------------------------------------------------- */
 app.post("/so-with-items", async (req, res) => {
@@ -558,6 +558,8 @@ async function createSalesOrder(ds, body, maps) {
     remarks: body.remarks || "",
     address: body.address || "",
     manual_so_number: body.manual_so_number || "",
+    // Branding printed on the boxes: our Brand name or the customer's own.
+    box_branding: body.box_branding || "",
     salesperson: body.salesperson || "",
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
@@ -642,6 +644,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             // Carry the quote's Books-parity header fields onto the SO, allowing
             // the convert request to override per-field.
             salesperson: body.salesperson || q.salesperson || "",
+            box_branding: body.box_branding || "",
             customer_notes: body.customer_notes || q.customer_notes || "",
             terms: body.terms || q.terms || "",
             // Doc-level charges: inherit from the source quote unless overridden.

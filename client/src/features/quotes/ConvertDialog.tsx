@@ -33,6 +33,8 @@ export function ConvertDialog({
 }) {
   // Per-line convert qty; defaults to the full quoted qty.
   const [qty, setQty] = useState<number[]>(() => quote.lines.map((l) => l.qty));
+  // Branding printed on the boxes — our brand, or the customer's own name.
+  const [boxBranding, setBoxBranding] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Errors stay hidden until the first convert attempt, then update live.
@@ -61,6 +63,7 @@ export function ConvertDialog({
     const res = await convertQuote(quote.id, mode, lines, {
       order_number: soNumber,
       payment_term: quote.paymentTerm,
+      box_branding: boxBranding.trim(),
     });
     setBusy(false);
     if (!res.ok) {
@@ -98,6 +101,18 @@ export function ConvertDialog({
             <span className="dim" style={{ fontSize: "var(--t-sm)", marginLeft: "auto" }}>
               {included.length} of {quote.lines.length} lines
             </span>
+          </div>
+
+          <div className="form-section" style={{ marginBottom: 14 }}>
+            <label className="form-field">
+              <span className="lbl">Box Branding</span>
+              <input
+                value={boxBranding}
+                disabled={busy}
+                onChange={(e) => setBoxBranding(e.target.value)}
+                placeholder="Our brand, or the customer's own branding on the boxes"
+              />
+            </label>
           </div>
 
           <div className="form-section">

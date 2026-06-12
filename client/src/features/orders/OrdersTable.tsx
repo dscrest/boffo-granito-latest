@@ -31,6 +31,7 @@ function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     remarks: dr.remarks,
     address: "",
     salesperson: dr.salesperson,
+    box_branding: dr.box_branding,
     customer_notes: dr.customer_notes,
     terms: dr.terms,
     discount: parseFloat(dr.docDiscount) || 0,

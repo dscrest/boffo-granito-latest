@@ -191,7 +191,7 @@ export function convertQuote(
   rowid: string,
   mode: "Full" | "Partial",
   lines: { item: string; qty: number; rate: number }[],
-  extra: { order_number: string; po_number?: string; payment_term?: string },
+  extra: { order_number: string; po_number?: string; payment_term?: string; box_branding?: string },
 ) {
   return bust(
     op<{ so_rowid: string; quote_rowid: string; conversion_flag: string }>(

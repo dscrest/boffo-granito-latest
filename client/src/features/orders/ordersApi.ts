@@ -115,6 +115,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       discount: num(it.discount_pct),
       subTotal,
       salesperson: so ? str(so.salesperson) : "",
+      boxBranding: so ? str(so.box_branding) : "",
       shipmentDate: so ? str(so.shipment_date) : "",
       customerNotes: so ? str(so.customer_notes) : "",
       terms: so ? str(so.terms) : "",
@@ -143,6 +144,7 @@ export interface NewSalesOrderInput {
   remarks: string;
   address: string;
   salesperson: string;
+  box_branding: string;
   customer_notes: string;
   terms: string;
   discount: number;

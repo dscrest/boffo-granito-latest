@@ -60,6 +60,8 @@ export interface Order {
   subTotal?: number;
   /** SalesOrder header fields (repeated per line on hydrate). */
   salesperson?: string;
+  /** Branding printed on the boxes — our brand or the customer's own. */
+  boxBranding?: string;
   shipmentDate?: string;
   customerNotes?: string;
   terms?: string;

@@ -82,6 +82,7 @@ export function OrderDetail() {
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
+    { key: "boxBranding", label: "Box Branding", value: head.boxBranding || "—" },
     { key: "invoice", label: "Invoice", value: head.invoice || "—" },
   ];
 
