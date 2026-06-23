@@ -11,11 +11,12 @@ import { ToastHost } from "@/ui/Toast";
 import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
-import { checkSession, type SessionUser } from "@/lib/auth";
+import { checkSession, hasFeature, signOut, type SessionUser } from "@/lib/auth";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
 import { cachedCustomers, subscribeCustomers } from "@/features/masters/customersApi";
 import { cachedDesigns, subscribeDesigns } from "@/features/masters/designsApi";
+import { GlobalSearch } from "@/features/search/GlobalSearch";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -44,6 +45,7 @@ const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ d
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
+const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
 
 const TWEAK_DEFAULTS = {
   accent: "oklch(0.55 0.16 150)",
@@ -124,6 +126,14 @@ function navTree(): NavNode[] {
   return tree;
 }
 
+/* Drop leaves the signed-in role may not see (Role.features), then prune
+   parents left without children. ["*"] in features = everything visible. */
+function filterTreeByRole(nodes: NavNode[]): NavNode[] {
+  return nodes
+    .map((n) => (n.children ? { ...n, children: filterTreeByRole(n.children) } : n))
+    .filter((n) => (n.children ? n.children.length > 0 : !n.id || hasFeature(n.id)));
+}
+
 /* breadcrumb [section, page] per route id, mirrors the tree hierarchy. */
 const VIEW_LABELS: Record<string, [string, string]> = {
   dashboard: ["Workspace", "Dashboard"],
@@ -146,6 +156,7 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   invoices: ["Stages", "Invoices"],
   reports: ["Reports", "Quantity Reports"],
   ops: ["Reports", "Audit Log"],
+  users: ["Settings", "Users"],
 };
 
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
@@ -244,7 +255,8 @@ export default function App() {
   }, []);
   const isAdmin = user?.role === "Admin";
   const navigate = useNavigate();
-  const tree = useMemo(() => navTree(), []);
+  // Re-filter when the session user lands (perms snapshot lives in sessionStorage).
+  const tree = useMemo(() => filterTreeByRole(navTree()), [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Whole-sidebar collapse (icon rail ↔ full). Persisted across sessions.
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem("sidebar-collapsed") === "1");
@@ -403,11 +415,7 @@ export default function App() {
             <span className="cur">{crumbs[1]}</span>
           )}
         </div>
-        <div className="search">
-          <Icon name="search" size={13} className="icon" />
-          <input placeholder="Search PO, design, party, invoice…" />
-          <span className="kbd">⌘K</span>
-        </div>
+        <GlobalSearch />
         <button className="hbtn" title="Notifications" aria-label="Notifications">
           <Icon name="bell" size={13} />
           <span className="dot red" style={{ width: 5, height: 5, marginLeft: -3 }} />
@@ -415,7 +423,28 @@ export default function App() {
         <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/masters")}>
           <Icon name="settings" size={13} />
         </button>
-        <div className="avatar">BG</div>
+        {isAdmin && (
+          <button className="hbtn" title="Users" aria-label="Users" onClick={() => navigate("/users")}>
+            <Icon name="users" size={13} />
+          </button>
+        )}
+        <div
+          className="avatar"
+          role="button"
+          tabIndex={0}
+          title={user ? `${user.name} (${user.role || "no role"}) — click to sign out` : "Sign out"}
+          style={{ cursor: "pointer" }}
+          onClick={() => {
+            if (window.confirm("Sign out of BOFFO?")) signOut();
+          }}
+        >
+          {(user?.name || "BG")
+            .split(/\s+/)
+            .map((w) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase()}
+        </div>
       </header>
 
       <main className="main">
@@ -448,6 +477,7 @@ export default function App() {
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

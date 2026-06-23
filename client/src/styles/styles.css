@@ -149,6 +149,36 @@ a { color: inherit; text-decoration: none; }
   border: 1px solid var(--border-2); border-radius: 3px;
   padding: 1px 5px;
 }
+.header .search-results {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40;
+  max-height: 420px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  padding: 4px;
+}
+.header .search-empty {
+  padding: 12px 12px; font-size: var(--t-md); color: var(--muted);
+}
+.header .search-hit {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  padding: 7px 9px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--fg); cursor: pointer;
+}
+.header .search-hit.active { background: var(--hover); }
+.header .search-hit-kind {
+  flex-shrink: 0; width: 58px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--dim);
+}
+.header .search-hit-title {
+  font-size: var(--t-md); color: var(--fg); white-space: nowrap;
+}
+.header .search-hit-sub {
+  margin-left: auto; padding-left: 10px;
+  font-size: var(--t-sm); color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .header .hbtn {
   height: 30px; padding: 0 10px;
   display: inline-flex; align-items: center; gap: 7px;
