@@ -11,6 +11,7 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { ImageUploader } from "@/ui/ImageUploader";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
@@ -34,7 +35,6 @@ export interface DesignValues {
   random_faces: string;
   rate_per_sqft: string;
   rate_per_sqmt: string;
-  product_owner: string;
   accounting_stock: string;
   image_url: string;
 }
@@ -90,8 +90,6 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
       { key: "rate_per_sqft", label: "Rate / ft²", kind: "number" },
       { key: "rate_per_sqmt", label: "Rate / m²", kind: "number" },
       { key: "accounting_stock", label: "Accounting Stock", kind: "number" },
-      { key: "product_owner", label: "Product Owner" },
-      { key: "image_url", label: "Image URL" },
     ],
   },
 ];
@@ -100,7 +98,9 @@ const ALL_FIELDS = SECTIONS.flatMap((s) => s.fields);
 const REQUIRED = ALL_FIELDS.filter((f) => f.required).map((f) => f.key);
 
 export function blankDesign(): DesignValues {
-  return Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
+  const v = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
+  v.status = "Continue"; // #10: new designs default to Continue
+  return v;
 }
 
 /** True when any required field is still empty. */
@@ -131,7 +131,6 @@ export function rowToValues(r: DesignRow): DesignValues {
     random_faces: s(r.randomFaces),
     rate_per_sqft: s(r.ratePerSqft),
     rate_per_sqmt: s(r.ratePerSqmt),
-    product_owner: r.productOwner,
     accounting_stock: s(r.accountingStock),
     image_url: r.imageUrl,
   };
@@ -159,7 +158,7 @@ export function computeSku(v: DesignValues, lk: DesignLookups): string {
 const numOr0 = (s: string) => (s.trim() === "" ? 0 : Number(s) || 0);
 
 /** Convert form state → API DesignInput (numbers parsed, unique_name/sku computed). */
-export function toDesignInput(v: DesignValues, lk: DesignLookups): DesignInput {
+export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string[] = []): DesignInput {
   return {
     design_name: v.design_name,
     base_design_name: v.base_design_name,
@@ -181,9 +180,9 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups): DesignInput {
     random_faces: numOr0(v.random_faces),
     rate_per_sqft: numOr0(v.rate_per_sqft),
     rate_per_sqmt: numOr0(v.rate_per_sqmt),
-    product_owner: v.product_owner,
     accounting_stock: numOr0(v.accounting_stock),
-    image_url: v.image_url,
+    image_url: images[0] || v.image_url || "", // legacy single-image field = first image
+    image_urls: JSON.stringify(images),
   };
 }
 
@@ -194,22 +193,18 @@ export function DesignFields({
   onChange,
   lookups,
   showErrors,
+  images,
+  onImages,
 }: {
   value: DesignValues;
   onChange: (k: keyof DesignValues, v: string) => void;
   lookups: DesignLookups;
   showErrors?: boolean;
+  images: string[];
+  onImages: (next: string[]) => void;
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
-
-  const onImage = (file?: File) => {
-    if (!file) return;
-    // Frontend preview as data URL. Swap to a Stratus upload (hosted URL) later.
-    const reader = new FileReader();
-    reader.onload = () => onChange("image_url", String(reader.result));
-    reader.readAsDataURL(file);
-  };
 
   return (
     <>
@@ -235,18 +230,7 @@ export function DesignFields({
                     {f.suffix && <span className="hint"> ({f.suffix})</span>}
                     {f.required && <span className="req"> *</span>}
                   </span>
-                  {f.key === "image_url" ? (
-                    <>
-                      <input type="file" accept="image/*" onChange={(e) => onImage(e.target.files?.[0])} />
-                      {value.image_url && (
-                        <img
-                          src={value.image_url}
-                          alt="item preview"
-                          style={{ marginTop: 6, maxHeight: 90, borderRadius: 8, border: "1px solid var(--border)", objectFit: "cover" }}
-                        />
-                      )}
-                    </>
-                  ) : f.kind === "select" ? (
+                  {f.kind === "select" ? (
                     <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => onChange(f.key, e.target.value)}>
                       <option value="">—</option>
                       {opts
@@ -277,6 +261,12 @@ export function DesignFields({
           </div>
         </div>
       ))}
+
+      {/* #12: up to 5 images uploaded to Catalyst File Store. */}
+      <div className="form-section">
+        <div className="form-section-title">Images (max 5)</div>
+        <ImageUploader value={images} onChange={onImages} max={5} />
+      </div>
     </>
   );
 }
@@ -292,6 +282,7 @@ export function DesignForm({
   onClose: () => void;
 }) {
   const [v, setV] = useState<DesignValues>(blankDesign());
+  const [images, setImages] = useState<string[]>([]);
   const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
   const missing = missingRequired(v);
 
@@ -302,7 +293,7 @@ export function DesignForm({
       setShowErrors(true);
       return;
     }
-    onSave(toDesignInput(v, lookups));
+    onSave(toDesignInput(v, lookups, images));
   };
 
   const panelRef = useModalA11y(onClose);
@@ -324,7 +315,7 @@ export function DesignForm({
         </div>
 
         <div className="df-body">
-          <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} />
+          <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} images={images} onImages={setImages} />
         </div>
 
         <div className="df-foot">

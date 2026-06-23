@@ -21,10 +21,11 @@ import {
   type TaxType,
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
+import { salesPersonOptions } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
+import { todayISO, addDays } from "@/lib/dates";
 
-const STATUSES = ["Draft", "Sent", "Accepted"] as const;
-const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
+// #16 status set on QuoteDetail bar; #18 TDS/TCS removed — STATUSES/TAX_TYPES no longer used here.
 
 interface Charges {
   docDiscount: string;
@@ -70,12 +71,13 @@ export function QuoteForm({
   onClose: () => void;
 }) {
   const editing = !!initial;
-  const { customers, parties, designs } = useMasters();
+  const { customers, parties, designs, salesPersons } = useMasters();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? "",
     address: initial?.address ?? "",
-    quoteDate: initial?.quoteDate ?? "",
-    expiryDate: initial?.expiryDate ?? "",
+    // New quote: default Quote Date = today, Expiry = +15 days (#13).
+    quoteDate: initial?.quoteDate ?? todayISO(),
+    expiryDate: initial?.expiryDate ?? addDays(todayISO(), 15),
     paymentTerm: initial?.paymentTerm ?? "",
     portOfDischarge: initial?.portOfDischarge ?? "",
     status: initial?.status ?? "Draft",
@@ -204,13 +206,15 @@ export function QuoteForm({
                 <span className="lbl">Expiry Date</span>
                 <input type="date" value={h.expiryDate} onChange={(e) => setHead("expiryDate", e.target.value)} />
               </label>
-              <label className="form-field">
-                <span className="lbl">Reference No.</span>
-                <input value={h.referenceNo} onChange={(e) => setHead("referenceNo", e.target.value)} placeholder="Customer PO / ref" />
-              </label>
+              {/* #14: Reference No. removed from quotes (lives on the SO only). */}
               <label className="form-field">
                 <span className="lbl">Salesperson</span>
-                <input value={h.salesperson} onChange={(e) => setHead("salesperson", e.target.value)} placeholder="Owner" />
+                <Combobox
+                  value={h.salesperson}
+                  options={salesPersonOptions(salesPersons)}
+                  onChange={(v) => setHead("salesperson", v)}
+                  placeholder="Search sales person…"
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Payment Term</span>
@@ -244,16 +248,8 @@ export function QuoteForm({
                   ))}
                 </select>
               </label>
-              <label className="form-field">
-                <span className="lbl">Status</span>
-                <select value={h.status} onChange={(e) => setHead("status", e.target.value)}>
-                  {STATUSES.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* #16: Status removed from the form — set via the status bar on
+                  QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
               <label className="form-field" style={{ gridColumn: "1 / -1" }}>
                 <span className="lbl">Address</span>
                 <input value={h.address} onChange={(e) => setHead("address", e.target.value)} placeholder="Customer address" />
@@ -341,29 +337,13 @@ export function QuoteForm({
                 <span className="dim">Subtotal</span>
                 <span className="mono">{h.currency} {fmt(totals.final)}</span>
               </div>
-              <div className="row charge">
-                <span className="dim">Discount</span>
-                <input type="number" value={charges.docDiscount} placeholder="0.00" onChange={(e) => setCharge("docDiscount", e.target.value)} />
-              </div>
+              {/* #17: document-level Discount removed from quotes — inline per-line
+                  discount only. Adjustment kept. */}
               <div className="row charge">
                 <span className="dim">Adjustment</span>
                 <input type="number" value={charges.adjustment} placeholder="0.00" onChange={(e) => setCharge("adjustment", e.target.value)} />
               </div>
-              <div className="row charge">
-                <span className="lbl-wrap">
-                  <select value={charges.taxType} onChange={(e) => setCharge("taxType", e.target.value as TaxType)}>
-                    {TAX_TYPES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                  {charges.taxType !== "None" && (
-                    <input type="number" value={charges.taxPct} placeholder="%" onChange={(e) => setCharge("taxPct", e.target.value)} />
-                  )}
-                </span>
-                <span className="mono" style={{ color: charges.taxType === "TDS" ? "var(--c-red)" : "var(--fg)" }}>
-                  {charges.taxType === "TDS" ? "− " : charges.taxType === "TCS" ? "+ " : ""}{h.currency} {fmt(totals.taxAmt)}
-                </span>
-              </div>
+              {/* #18: TDS/TCS tax option removed from quotes. */}
               <div className="row total">
                 <span>Net Total</span>
                 <span className="mono">{h.currency} {fmt(totals.net)}</span>

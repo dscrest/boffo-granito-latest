@@ -17,7 +17,7 @@ import { closePallet, type ClosePalletInput } from "@/features/stages/palletisat
 let _soSeq = 100;
 const genOrderNumber = () => `SO/2026-27/${++_soSeq}`;
 
-function draftToInput(dr: OrderDraft): NewSalesOrderInput {
+export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   return {
     customer: dr.customer,
     order_number: genOrderNumber(),

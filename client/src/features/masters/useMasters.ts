@@ -18,6 +18,7 @@ import {
   type PaymentTermOption,
 } from "./customersApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "./designsApi";
+import { cachedSalesPersons, listSalesPersons, type SalesPersonRow } from "./salespersonApi";
 
 export interface UseMasters {
   customers: CustomerRow[];
@@ -25,6 +26,7 @@ export interface UseMasters {
   paymentTerms: PaymentTermOption[];
   designRows: DesignRow[];
   designs: Design[]; // mock-shaped designs (label strings)
+  salesPersons: SalesPersonRow[];
   loading: boolean;
   error: string | null;
   reload: () => void;
@@ -44,6 +46,7 @@ export function useMasters(): UseMasters {
   const [customers, setCustomers] = useState<CustomerRow[]>(() => cachedCustomers() ?? []);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>([]);
   const [designRows, setDesignRows] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
+  const [salesPersons, setSalesPersons] = useState<SalesPersonRow[]>(() => cachedSalesPersons() ?? []);
   const [loading, setLoading] = useState(
     () => cachedCustomers() == null || cachedDesigns() == null,
   );
@@ -51,7 +54,7 @@ export function useMasters(): UseMasters {
 
   const load = () => {
     setLoading(true);
-    void Promise.all([listCustomers(), listDesigns()]).then(([c, d]) => {
+    void Promise.all([listCustomers(), listDesigns(), listSalesPersons()]).then(([c, d, s]) => {
       setLoading(false);
       if (!c.ok || !d.ok) {
         setError(c.error || d.error || "Failed to load masters");
@@ -61,6 +64,7 @@ export function useMasters(): UseMasters {
       setCustomers(c.customers);
       setPaymentTerms(c.paymentTerms);
       setDesignRows(d.designs);
+      if (s.ok) setSalesPersons(s.salesPersons);
     });
   };
 
@@ -69,5 +73,5 @@ export function useMasters(): UseMasters {
   const parties = useMemo(() => customers.filter((c) => c.active).map(toParty), [customers]);
   const designs = useMemo(() => designRows.map(toDesign), [designRows]);
 
-  return { customers, parties, paymentTerms, designRows, designs, loading, error, reload: load };
+  return { customers, parties, paymentTerms, designRows, designs, salesPersons, loading, error, reload: load };
 }

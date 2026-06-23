@@ -21,9 +21,17 @@
  */
 const express = require("express");
 const catalystSDK = require("zcatalyst-sdk-node");
+const fs = require("fs");
+const os = require("os");
+const pathlib = require("path");
+const crypto = require("crypto");
+
+/* File Store folder for Design images (#12). Created 2026-06-23. */
+const DESIGN_IMAGES_FOLDER = "76673000000124054";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+// 10mb so a base64-encoded photo (one per upload request) fits the body.
+app.use(express.json({ limit: "10mb" }));
 
 // CORS — same-origin in prod; permissive so the dev proxy / probes never trip.
 app.use((req, res, next) => {
@@ -69,6 +77,7 @@ const ALLOWED = new Set([
   "OperationLog",
   "Invoice",
   "TransactionSeries",
+  "SalesPerson",
 ]);
 
 function assertTable(table) {
@@ -129,6 +138,16 @@ async function paymentTermMap(catalyst) {
       "ROWID",
     );
   return _cache.PaymentTerm;
+}
+async function salesPersonMap(catalyst) {
+  if (!_cache.SalesPerson)
+    _cache.SalesPerson = await buildMap(
+      catalyst,
+      "SELECT ROWID, name FROM SalesPerson WHERE deleted_at is null",
+      ["name"],
+      "ROWID",
+    );
+  return _cache.SalesPerson;
 }
 
 function resolve(map, name) {
@@ -320,6 +339,7 @@ const NATURAL_KEY = {
   PaymentTerm: "name",
   Pallet: "name",
   Invoice: "invoice_number",
+  SalesPerson: "name",
 };
 
 /**
@@ -343,6 +363,72 @@ function docCompute(lineSubtotal, body) {
 /* ----------------------------------------------------------------
    Health / root
    ---------------------------------------------------------------- */
+/* ----------------------------------------------------------------
+   PUBLIC: serve a Design image by File Store id (#12). Registered
+   BEFORE the auth guard so <img src> works without a token (images
+   can't send the X-App-Token header). Read-only, streams bytes.
+   ---------------------------------------------------------------- */
+const EXT_MIME = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+  gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml",
+};
+app.get("/public/design-image/:fileId", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const folder = catalyst.filestore().folder(DESIGN_IMAGES_FOLDER);
+    let mime = "image/jpeg";
+    try {
+      const details = await folder.getFileDetails(req.params.fileId);
+      const ext = String(details.file_name || "").split(".").pop().toLowerCase();
+      if (EXT_MIME[ext]) mime = EXT_MIME[ext];
+    } catch {
+      /* fall back to image/jpeg; browsers sniff anyway */
+    }
+    const stream = await folder.getFileStream(req.params.fileId);
+    res.set("Content-Type", mime);
+    res.set("Cache-Control", "public, max-age=86400");
+    stream.pipe(res);
+  } catch (err) {
+    res.status(404).json({ ok: false, error: "Image not found" });
+  }
+});
+
+/* ----------------------------------------------------------------
+   App auth: login/sessions/users + role guard for every route below.
+   Auth tables (AppUser/Role/AuthSession) are NOT in ALLOWED, so they
+   are reachable only through the /auth/* endpoints.
+   ---------------------------------------------------------------- */
+require("./lib/appauth").register(app, { init, rowList, sendErr });
+
+/* ----------------------------------------------------------------
+   Authenticated: upload a Design image (#12). Body { name, data }
+   where data is base64 (no data-URL prefix). Writes to /tmp, streams
+   to File Store, returns { id }. Client caps at 5 images.
+   ---------------------------------------------------------------- */
+app.post("/upload/design-image", async (req, res) => {
+  let tmpPath = null;
+  try {
+    const { name, data } = req.body || {};
+    if (!data) throw badRequest("No image data");
+    const safeName = String(name || "image.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const buf = Buffer.from(String(data), "base64");
+    if (!buf.length) throw badRequest("Empty image");
+    if (buf.length > 8 * 1024 * 1024) throw badRequest("Image exceeds 8MB");
+    tmpPath = pathlib.join(os.tmpdir(), `${crypto.randomBytes(8).toString("hex")}-${safeName}`);
+    fs.writeFileSync(tmpPath, buf);
+    const catalyst = init(req);
+    const uploaded = await catalyst
+      .filestore()
+      .folder(DESIGN_IMAGES_FOLDER)
+      .uploadFile({ code: fs.createReadStream(tmpPath), name: safeName });
+    res.json({ ok: true, id: String(uploaded.id), name: safeName });
+  } catch (err) {
+    sendErr(res, err);
+  } finally {
+    if (tmpPath) try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  }
+});
+
 app.get("/", (_req, res) => {
   res.json({ status: "ok", service: "data-ops" });
 });
@@ -362,6 +448,7 @@ app.post("/quote-with-items", async (req, res) => {
     const dMap = await designMap(catalyst);
     const cMap = await customerMap(catalyst);
     const pMap = await paymentTermMap(catalyst);
+    const sMap = await salesPersonMap(catalyst);
 
     const result = await withOpLog(
       catalyst,
@@ -372,6 +459,7 @@ app.post("/quote-with-items", async (req, res) => {
         assertDateOrder(body.quote_date, body.expiry_date, "quote date", "expiry date");
         const customer = resolveOrThrow(cMap, body.customer, "Customer");
         const paymentTerm = resolveOptional(pMap, body.payment_term, "Payment term");
+        const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
@@ -388,7 +476,7 @@ app.post("/quote-with-items", async (req, res) => {
           currency: body.currency || "EUR",
           remarks: body.remarks || "",
           address: body.address || "",
-          salesperson: body.salesperson || "",
+          sales_person: salesPerson || undefined,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -438,6 +526,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
     const dMap = await designMap(catalyst);
     const cMap = await customerMap(catalyst);
     const pMap = await paymentTermMap(catalyst);
+    const sMap = await salesPersonMap(catalyst);
 
     const result = await withOpLog(
       catalyst,
@@ -448,6 +537,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
         assertDateOrder(body.quote_date, body.expiry_date, "quote date", "expiry date");
         const customer = resolveOrThrow(cMap, body.customer, "Customer");
         const paymentTerm = resolveOptional(pMap, body.payment_term, "Payment term");
+        const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
@@ -464,7 +554,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           currency: body.currency || "EUR",
           remarks: body.remarks || "",
           address: body.address || "",
-          salesperson: body.salesperson || "",
+          sales_person: salesPerson || undefined,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -519,11 +609,12 @@ app.post("/so-with-items", async (req, res) => {
     const dMap = await designMap(catalyst);
     const cMap = await customerMap(catalyst);
     const pMap = await paymentTermMap(catalyst);
+    const sMap = await salesPersonMap(catalyst);
 
     const result = await withOpLog(
       catalyst,
       { table_name: "SalesOrder", operation: "insert", payload: body },
-      async () => createSalesOrder(ds, body, { dMap, cMap, pMap, catalyst }),
+      async () => createSalesOrder(ds, body, { dMap, cMap, pMap, sMap, catalyst }),
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
   } catch (err) {
@@ -539,6 +630,9 @@ async function createSalesOrder(ds, body, maps) {
   // (customer_rowid); direct SO creation passes a name to resolve strictly.
   const customer = body.customer_rowid || resolveOrThrow(maps.cMap, body.customer, "Customer");
   const paymentTerm = resolveOptional(maps.pMap, body.payment_term, "Payment term");
+  // Sales person: convert-quote passes the source FK directly (sales_person_rowid);
+  // direct SO creation passes a name to resolve against the master.
+  const salesPerson = resolveOptional(maps.sMap, body.salesperson, "Sales person") || body.sales_person_rowid || null;
   const { items, total } = computeLines(body.lines);
   const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
 
@@ -560,7 +654,7 @@ async function createSalesOrder(ds, body, maps) {
     manual_so_number: body.manual_so_number || "",
     // Branding printed on the boxes: our Brand name or the customer's own.
     box_branding: body.box_branding || "",
-    salesperson: body.salesperson || "",
+    sales_person: salesPerson || undefined,
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
     discount: doc.discount,
@@ -611,6 +705,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
     const dMap = await designMap(catalyst);
     const cMap = await customerMap(catalyst);
     const pMap = await paymentTermMap(catalyst);
+    const sMap = await salesPersonMap(catalyst);
 
     const result = await withOpLog(
       catalyst,
@@ -642,8 +737,10 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             remarks: `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
             address: q.address,
             // Carry the quote's Books-parity header fields onto the SO, allowing
-            // the convert request to override per-field.
-            salesperson: body.salesperson || q.salesperson || "",
+            // the convert request to override per-field. Sales person carries by
+            // FK (sales_person_rowid); a name override resolves in createSalesOrder.
+            sales_person_rowid: q.sales_person || null,
+            salesperson: body.salesperson || "",
             box_branding: body.box_branding || "",
             customer_notes: body.customer_notes || q.customer_notes || "",
             terms: body.terms || q.terms || "",
@@ -655,7 +752,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             quote_rowid: quoteId,
             lines: Array.isArray(body.lines) ? body.lines : [],
           },
-          { dMap, cMap, pMap, catalyst },
+          { dMap, cMap, pMap, sMap, catalyst },
         );
 
         const flag = body.mode === "Partial" ? "Partial" : "Full";
@@ -1336,6 +1433,7 @@ app.post("/:table", async (req, res) => {
         if (nk) for (const r of rows) await assertUnique(catalyst, table, nk, r[nk]);
         const inserted = await ds.table(table).insertRows(rows);
         const ids = (Array.isArray(inserted) ? inserted : [inserted]).map((r) => r.ROWID);
+        delete _cache[table]; // FK-name lookup map is now stale
         return { rowid: ids[0], data: { rowids: ids } };
       },
     );
@@ -1365,6 +1463,7 @@ app.patch("/:table/:rowid", async (req, res) => {
           await assertUnique(catalyst, table, nk, patch[nk], req.params.rowid);
         }
         const row = await ds.table(table).updateRow(patch);
+        delete _cache[table]; // FK-name lookup map is now stale
         return { rowid: (row && row.ROWID) || req.params.rowid, data: row };
       },
     );
@@ -1403,6 +1502,7 @@ app.delete("/:table/:rowid", async (req, res) => {
             deleted_at: new Date().toISOString().slice(0, 19).replace("T", " "),
           });
         }
+        delete _cache[table]; // FK-name lookup map is now stale
         return { rowid: req.params.rowid };
       },
     );

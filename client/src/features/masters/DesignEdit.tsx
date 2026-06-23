@@ -37,6 +37,7 @@ export function DesignEdit() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
+  const [images, setImages] = useState<string[]>([]);
   const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
   const [row, setRow] = useState<DesignRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,8 +58,10 @@ export function DesignEdit() {
       setLookups(res.lookups);
       const found = res.designs.find((d) => d.id === id) ?? null;
       setRow(found);
-      if (found) setV(rowToValues(found));
-      else setError("Design not found.");
+      if (found) {
+        setV(rowToValues(found));
+        setImages(found.images);
+      } else setError("Design not found.");
     })();
     return () => {
       live = false;
@@ -78,7 +81,7 @@ export function DesignEdit() {
     }
     setBusy(true);
     setError(null);
-    const res = await updateDesign(id, toDesignInput(v, lookups));
+    const res = await updateDesign(id, toDesignInput(v, lookups, images));
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Save failed");
@@ -137,7 +140,7 @@ export function DesignEdit() {
       {row && (
         <div className="card df-modal" style={{ padding: 16 }}>
           <div className="df-body" style={{ padding: 0 }}>
-            <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} />
+            <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} images={images} onImages={setImages} />
           </div>
           <div className="df-foot" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy} onClick={() => void onDelete()} title="Delete design">

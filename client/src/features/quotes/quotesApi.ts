@@ -62,13 +62,14 @@ export function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
 async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
   // listAll pages past ZCQL's 300-row cap; lookups project only the
   // columns this join actually reads (ROWID is always included).
-  const [q, items, customers, terms, designs, sos] = await Promise.all([
+  const [q, items, customers, terms, designs, sos, salesPersons] = await Promise.all([
     listAll("Quote", { order: "ROWID desc" }),
     listAll("QuoteItem"),
     listAll("Customer", { columns: ["name", "code"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
     listAll("Design", { columns: ["design_name"] }),
     listAll("SalesOrder", { columns: ["quote", "order_number"] }),
+    list("SalesPerson", { limit: 300, columns: ["name"] }),
   ]);
   if (!q.ok) return { ok: false, quotes: [], error: q.error };
 
@@ -76,6 +77,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
   const custCode = buildMap(customers.rows, "code");
   const termName = buildMap(terms.rows, "name");
   const designName = buildMap(designs.rows, "design_name");
+  const salesPersonName = buildMap(salesPersons.rows, "name");
 
   // QuoteItem rows grouped by parent quote ROWID → UI QuoteLine[].
   const linesByQuote = new Map<string, QuoteLine[]>();
@@ -111,7 +113,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       status: toStatus(str(r.status), str(r.conversion_flag)),
       currency: str(r.currency) || "EUR",
       remarks: str(r.remarks),
-      salesperson: str(r.salesperson),
+      salesperson: salesPersonName.get(str(r.sales_person)) || "",
       referenceNo: str(r.reference_no),
       customerNotes: str(r.customer_notes),
       terms: str(r.terms),

@@ -7,10 +7,25 @@ import { fmt, pct } from "@/lib/format";
 import { type Order } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+
+// #21b: toggleable columns for the Order-by-PO table (PO Number always shown).
+const PO_COLUMNS: ColumnDef[] = [
+  { key: "party", label: "Party" },
+  { key: "date", label: "Date" },
+  { key: "daysFromPI", label: "Days from PI" },
+  { key: "orderQty", label: "Order Qty" },
+  { key: "skus", label: "SKUs" },
+  { key: "progress", label: "Progress" },
+  { key: "stage", label: "Stage" },
+  { key: "docs", label: "Docs" },
+  { key: "due", label: "Due" },
+];
 
 export function PurchaseOrders() {
   const navigate = useNavigate();
   const { orders, loading, error, reload } = useOrders();
+  const { hidden, toggle, show } = useHiddenColumns("poTableColumns");
   // Group + sort only when the live orders snapshot changes.
   const pos = useMemo(() => {
     const groups: Record<string, Order[]> = {};
@@ -64,10 +79,7 @@ export function PurchaseOrders() {
         <button className="btn">Closed</button>
         <div style={{ flex: 1 }} />
         <input type="text" placeholder="Search PO number, party…" />
-        <button className="btn">
-          <Icon name="filter" size={12} />
-          Filter
-        </button>
+        <ColumnPicker columns={PO_COLUMNS} hidden={hidden} onToggle={toggle} />
       </div>
 
       {loading && orders.length === 0 ? (
@@ -81,21 +93,15 @@ export function PurchaseOrders() {
             <tr>
               <th style={{ width: 36, textAlign: "center" }}>#</th>
               <th>PO Number</th>
-              <th>Party</th>
-              <th>Date</th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Days from PI
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Order Qty
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                SKUs
-              </th>
-              <th>Progress</th>
-              <th>Stage</th>
-              <th>Docs</th>
-              <th>Due</th>
+              {show("party") && <th>Party</th>}
+              {show("date") && <th>Date</th>}
+              {show("daysFromPI") && <th className="num" style={{ textAlign: "right" }}>Days from PI</th>}
+              {show("orderQty") && <th className="num" style={{ textAlign: "right" }}>Order Qty</th>}
+              {show("skus") && <th className="num" style={{ textAlign: "right" }}>SKUs</th>}
+              {show("progress") && <th>Progress</th>}
+              {show("stage") && <th>Stage</th>}
+              {show("docs") && <th>Docs</th>}
+              {show("due") && <th>Due</th>}
             </tr>
           </thead>
           <tbody>
@@ -114,32 +120,39 @@ export function PurchaseOrders() {
                     {p.po}
                   </button>
                 </td>
-                <td>
-                  {p.flag} {p.party}{" "}
-                  <span className="muted" style={{ fontSize: 10.5 }}>
-                    ({p.country})
-                  </span>
-                </td>
-                <td className="mono muted">{p.date}</td>
-                <td className="num">{p.daysFromPI}</td>
-                <td className="num">{fmt(p.totalQty)}</td>
-                <td className="num">{p.skus}</td>
-                <td style={{ width: 160 }}>
-                  <div className="row" style={{ gap: 8 }}>
-                    <ProgressBar
-                      value={p.progress}
-                      max={100}
-                      color={p.progress > 75 ? "var(--c-green)" : p.progress > 30 ? "var(--c-amber)" : "var(--c-blue)"}
-                      height={5}
-                    />
-                    <span className="mono" style={{ fontSize: 11, color: "var(--muted)", minWidth: 32 }}>
-                      {p.progress}%
+                {show("party") && (
+                  <td>
+                    {p.flag} {p.party}{" "}
+                    <span className="muted" style={{ fontSize: 10.5 }}>
+                      ({p.country})
                     </span>
-                  </div>
-                </td>
-                <td>
-                  <StageBadge stage={p.stage} />
-                </td>
+                  </td>
+                )}
+                {show("date") && <td className="mono muted">{p.date}</td>}
+                {show("daysFromPI") && <td className="num">{p.daysFromPI}</td>}
+                {show("orderQty") && <td className="num">{fmt(p.totalQty)}</td>}
+                {show("skus") && <td className="num">{p.skus}</td>}
+                {show("progress") && (
+                  <td style={{ width: 160 }}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <ProgressBar
+                        value={p.progress}
+                        max={100}
+                        color={p.progress > 75 ? "var(--c-green)" : p.progress > 30 ? "var(--c-amber)" : "var(--c-blue)"}
+                        height={5}
+                      />
+                      <span className="mono" style={{ fontSize: 11, color: "var(--muted)", minWidth: 32 }}>
+                        {p.progress}%
+                      </span>
+                    </div>
+                  </td>
+                )}
+                {show("stage") && (
+                  <td>
+                    <StageBadge stage={p.stage} />
+                  </td>
+                )}
+                {show("docs") && (
                 <td>
                   <span className="row" style={{ gap: 4 }}>
                     <span title="PI" className="pill" style={{ height: 16, padding: "0 4px", fontSize: 10 }}>
@@ -159,7 +172,8 @@ export function PurchaseOrders() {
                     )}
                   </span>
                 </td>
-                <td className="mono muted">{p.dueDate}</td>
+                )}
+                {show("due") && <td className="mono muted">{p.dueDate}</td>}
               </tr>
             ))}
           </tbody>

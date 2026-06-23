@@ -1,17 +1,21 @@
 /* Login gate. State machine: checking → (authed | anon).
    - authed: render the app.
-   - anon: a two-column BOFFO sign-in screen (CTA left, illustration right).
-     A single "Sign in with Zoho" button hands the whole sign-in to Zoho's hosted
-     page — no inline form, so the user never sees two logins. Themed via login.css.
-   Dev uses the auth stub (see lib/auth.ts), so it lands on `authed` immediately. */
+   - anon: a two-column BOFFO sign-in screen (email+password form left,
+     illustration right). Auth is app-level: data-ops /auth/login verifies
+     against the AppUser table and returns a session token + role permissions
+     (see lib/auth.ts). Themed via login.css. */
 import { useEffect, useState } from "react";
-import { checkSession, signInWithZoho, type SessionUser } from "./lib/auth";
+import { checkSession, signIn, type SessionUser } from "./lib/auth";
 import "./styles/login.css";
 
 type Status = "checking" | "anon" | "authed";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("checking");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -39,6 +43,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, [status]);
 
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await signIn(email.trim(), password);
+      setStatus("authed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (status === "checking") {
     return (
       <div className="boffo-auth boffo-auth--center">
@@ -55,7 +74,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         <div className="boffo-auth-split">
           {/* ---- Left: the sign-in form ---- */}
           <div className="boffo-auth-pane">
-            <div className="boffo-auth-form">
+            <form className="boffo-auth-form" onSubmit={onSubmit}>
               <div className="boffo-auth-brand">
                 <div className="mark">B</div>
                 <div className="wordmark">
@@ -69,20 +88,45 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 Sign in to manage quotes, orders, production and dispatch.
               </p>
 
-              <button type="button" className="boffo-zoho-btn" onClick={signInWithZoho}>
-                <ZohoMark />
-                Sign in with Zoho
+              <label className="boffo-auth-field">
+                <span>Email</span>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  autoComplete="username"
+                  required
+                  autoFocus
+                />
+              </label>
+              <label className="boffo-auth-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                />
+              </label>
+
+              {error && <p className="boffo-auth-error">{error}</p>}
+
+              <button type="submit" className="boffo-zoho-btn" disabled={busy}>
+                {busy ? "Signing in…" : "Sign in"}
               </button>
 
               <p className="boffo-auth-hint">
-                You'll be securely signed in with your Zoho account.
+                Use the account your administrator created for you.
               </p>
 
               <div className="boffo-auth-foot">
                 <span className="dot" />
                 Plant Morbi · Secure access
               </div>
-            </div>
+            </form>
           </div>
 
           {/* ---- Right: branded illustration panel ---- */}
@@ -95,17 +139,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
-}
-
-/* Zoho brand mark — a rounded tile in Zoho's red with a white "Z", echoing the
-   "Sign in with <provider>" convention without misrendering the full wordmark. */
-function ZohoMark() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
-      <rect width="18" height="18" rx="4" fill="#E42527" />
-      <path d="M4.4 5.2h9.2v1.7l-5.7 5.2h5.9v1.7H4.1v-1.7l5.7-5.2H4.4z" fill="#fff" />
-    </svg>
-  );
 }
 
 /* Decorative line-art for the right panel: an Order-OS motif — stacked dispatch

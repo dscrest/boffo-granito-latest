@@ -11,7 +11,8 @@ import { ToastHost } from "@/ui/Toast";
 import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
-import { checkSession, hasFeature, signOut, type SessionUser } from "@/lib/auth";
+import { checkSession, hasFeature, type SessionUser } from "@/lib/auth";
+import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
 import { cachedCustomers, subscribeCustomers } from "@/features/masters/customersApi";
@@ -24,7 +25,9 @@ const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({
 const QuoteDetail = lazy(() => import("@/features/quotes/QuoteDetail").then((m) => ({ default: m.QuoteDetail })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
-const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
+// #21: "All Orders" list commented out — "By Order" (/byorder) is the primary orders page.
+// OrdersTable.tsx is kept (ByOrderView imports draftToInput from it); only the route/nav are removed.
+// const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
 const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })));
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
 const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
@@ -46,6 +49,7 @@ const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ d
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
+const SalesPersonsAdmin = lazy(() => import("@/features/admin/SalesPersons").then((m) => ({ default: m.SalesPersonsAdmin })));
 
 const TWEAK_DEFAULTS = {
   accent: "oklch(0.55 0.16 150)",
@@ -96,7 +100,8 @@ function navTree(): NavNode[] {
           children: [
             { id: "kanban", label: "Pipeline", icon: "kanban" },
             { id: "byorder", label: "By Order", icon: "orders" },
-            { id: "orders", label: "All Orders", icon: "docs" },
+            // #21: "All Orders" page commented out — By Order is the primary list.
+            // { id: "orders", label: "All Orders", icon: "docs" },
           ],
         },
       ],
@@ -416,35 +421,21 @@ export default function App() {
           )}
         </div>
         <GlobalSearch />
-        <button className="hbtn" title="Notifications" aria-label="Notifications">
-          <Icon name="bell" size={13} />
-          <span className="dot red" style={{ width: 5, height: 5, marginLeft: -3 }} />
-        </button>
+        <NotificationBell />
         <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/masters")}>
           <Icon name="settings" size={13} />
         </button>
+        {isAdmin && (
+          <button className="hbtn" title="Sales Persons" aria-label="Sales Persons" onClick={() => navigate("/salespersons")}>
+            <Icon name="cart" size={13} />
+          </button>
+        )}
         {isAdmin && (
           <button className="hbtn" title="Users" aria-label="Users" onClick={() => navigate("/users")}>
             <Icon name="users" size={13} />
           </button>
         )}
-        <div
-          className="avatar"
-          role="button"
-          tabIndex={0}
-          title={user ? `${user.name} (${user.role || "no role"}) — click to sign out` : "Sign out"}
-          style={{ cursor: "pointer" }}
-          onClick={() => {
-            if (window.confirm("Sign out of BOFFO?")) signOut();
-          }}
-        >
-          {(user?.name || "BG")
-            .split(/\s+/)
-            .map((w) => w[0])
-            .join("")
-            .slice(0, 2)
-            .toUpperCase()}
-        </div>
+        <UserMenu user={user} />
       </header>
 
       <main className="main">
@@ -457,7 +448,8 @@ export default function App() {
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
-            <Route path="/orders" element={<OrdersTable />} />
+            {/* #21: All Orders list route removed — see /byorder. */}
+            {/* <Route path="/orders" element={<OrdersTable />} /> */}
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
             <Route path="/design/:id/edit" element={<DesignEdit />} />
@@ -478,6 +470,7 @@ export default function App() {
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/salespersons" element={isAdmin ? <SalesPersonsAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

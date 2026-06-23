@@ -192,3 +192,40 @@
   }
 }
 
+
+/* Email/password fields for the app-level login form. */
+.boffo-auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+.boffo-auth-field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-2, #555);
+}
+.boffo-auth-field input {
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line, #d9d9d9);
+  border-radius: 10px;
+  background: var(--bg, #fff);
+  color: var(--fg, #111);
+  font: inherit;
+}
+.boffo-auth-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft, rgba(0, 0, 0, 0.08));
+}
+.boffo-auth-error {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--c-red, #c0392b);
+}
+.boffo-zoho-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

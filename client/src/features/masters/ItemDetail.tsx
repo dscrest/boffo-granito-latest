@@ -7,6 +7,7 @@ import { SkeletonRows } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { listDesigns, type DesignRow } from "./designsApi";
+import { designImageUrl } from "@/lib/api";
 
 export function ItemDetail() {
   const { id = "" } = useParams();
@@ -51,6 +52,18 @@ export function ItemDetail() {
       activityTable="Design"
       entityId={design.id}
     >
+      {design.images.length > 0 && (
+        <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {design.images.map((imgId, i) => (
+            <img
+              key={imgId + i}
+              src={designImageUrl(imgId)}
+              alt={`${design.designName} ${i + 1}`}
+              style={{ width: 120, height: 120, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
+            />
+          ))}
+        </div>
+      )}
       <div className="card">
         <div style={{ overflow: "auto" }}>
           <table className="tbl">

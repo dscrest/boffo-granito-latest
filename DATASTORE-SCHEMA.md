@@ -16,7 +16,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (26 tables)
+## Table Index (30 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -46,6 +46,74 @@
 | Container | 76673000000055377 | Shipping containers |
 | OperationLog | 76673000000056094 | Mutation op log (data-ops) |
 | ContainerLoading | 76673000000058115 | Container↔Batch loading |
+| Role | 76673000000092001 | App auth: role + permissions |
+| AppUser | 76673000000094001 | App auth: sign-in accounts |
+| AuthSession | 76673000000095001 | App auth: bearer tokens |
+| SalesPerson | 76673000000115495 | Sales reps on quotes/SO (links AppUser) |
+
+## SalesPerson (76673000000115495) — added 2026-06-23
+
+Master list of sales reps shown on Quotations / Sales Orders. In the generic-CRUD
+ALLOWED set; natural key = `name`. Managed via the Sales Persons admin page
+(`/salespersons`, admin-only) which reads `/auth/users` for the linked-user picker.
+
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(160) | unique, mandatory (natural key, shown on documents) |
+| email | varchar(160) | |
+| phone | varchar(40) | mobile |
+| region | varchar(120) | territory/market |
+| active | boolean | inactive → hidden from form pickers |
+| app_user | bigint | **logical FK** → AppUser ROWID (required by app convention). NOT a DB foreign key — the Create_Column MCP tool can't set int64 parent IDs (>2^53 precision loss), so the link is a plain bigint resolved in app code. |
+| deleted_at | datetime | soft delete |
+
+**Quote / SalesOrder change (2026-06-23):** the freeform `salesperson` varchar was
+**dropped** and replaced by `sales_person` (bigint, logical FK → SalesPerson ROWID).
+data-ops resolves the picker's name → ROWID on write (`salesPersonMap` + `resolveOptional`);
+client read paths (ordersApi/quotesApi/SharedQuote) join ROWID → name and still expose
+the field as `salesperson` (name string), so the UI contract is unchanged. Legacy text
+values ("Dhiraj"→existing user, "Ravi"→new disabled user `ravi@legacy.boffo.local`) were
+migrated to SalesPerson rows and backfilled.
+
+## Design images (#12, added 2026-06-23)
+
+- **File Store folder** `design_images` (id `76673000000124054`) holds uploaded design images.
+- **Design.image_urls** (text, col `76673000000118082`) — JSON array of File Store file ids (max 5, capped client + server). Legacy `image_url` kept (now = first image).
+- data-ops routes: `POST /upload/design-image` (auth, body `{name, data:<base64>}` → `{id}`; writes /tmp → streams to File Store) and **PUBLIC** `GET /public/design-image/:fileId` (registered BEFORE the auth guard so `<img>` works tokenless; streams bytes, infers mime from file ext). Client: `uploadDesignImage()` + `designImageUrl()` in [api.ts](client/src/lib/api.ts); `ImageUploader` in [ui/ImageUploader.tsx](client/src/ui/ImageUploader.tsx).
+
+## Auth tables (added 2026-06-12)
+
+App-level login (NOT Catalyst user management). Managed exclusively via data-ops `/auth/*`
+endpoints — these 3 tables are deliberately NOT in the generic-CRUD ALLOWED set.
+Every other data-ops route requires `Authorization: Bearer <token>`; POST/PATCH need
+`Role.can_update`, DELETE needs `Role.can_delete` (`POST /fit-suggest` exempt, read-only).
+
+### Role (76673000000092001)
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(50) | unique, mandatory (Admin / Editor / Viewer seeded) |
+| features | text | JSON array of nav ids visible to this role; `["*"]` = all |
+| can_update | boolean | default false — gates POST/PATCH (create+edit) |
+| can_delete | boolean | default false — gates DELETE |
+
+Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewer `…89014` (read-only).
+
+### AppUser (76673000000094001)
+| Column | Type | Notes |
+|---|---|---|
+| email | varchar(100) | unique, mandatory, stored lowercase |
+| name | varchar(100) | |
+| password_hash | varchar(255) | `scrypt$<salt-hex>$<hash-hex>` (scryptSync, 64-byte key) |
+| active | boolean | default true; false = cannot sign in |
+| deleted_at | datetime | soft delete |
+| role | FK → Role | ON-DELETE-SET-NULL; no role = no permissions |
+
+### AuthSession (76673000000095001)
+| Column | Type | Notes |
+|---|---|---|
+| token | varchar(100) | unique, mandatory; 64-hex random bearer token |
+| expires_at | datetime | IST string; lexicographic compare vs now (7-day TTL) |
+| app_user | FK → AppUser | ON-DELETE-CASCADE |
 
 ---
 

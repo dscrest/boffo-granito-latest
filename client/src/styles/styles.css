@@ -196,6 +196,34 @@ a { color: inherit; text-decoration: none; }
   font-size: 11px; font-weight: 600; color: #fff;
 }
 
+/* ---------- header dropdown menus (notifications, user) ---------- */
+.hdr-pop { position: relative; display: inline-flex; }
+.hdr-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border-2); border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.hdr-menu-head {
+  padding: 10px 12px; font-size: var(--t-sm); font-weight: 600; color: var(--fg-2);
+  border-bottom: 1px solid var(--border); background: var(--panel-2);
+}
+.hdr-menu-empty { padding: 18px 12px; font-size: var(--t-sm); color: var(--muted); text-align: center; }
+.hdr-menu-list { max-height: 360px; overflow: auto; }
+.hdr-menu-row { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.hdr-menu-row:last-child { border-bottom: none; }
+.hdr-menu-row-text { font-size: var(--t-sm); color: var(--fg); line-height: 1.35; }
+.hdr-menu-row-time { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+.hdr-menu-user { padding: 12px; border-bottom: 1px solid var(--border); }
+.hdr-menu-user-name { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
+.hdr-menu-user-sub { font-size: var(--t-sm); color: var(--muted); margin-top: 2px; }
+.hdr-menu-item {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; font-size: var(--t-md); color: var(--fg-2);
+  background: none; border: none; cursor: pointer; text-align: left;
+}
+.hdr-menu-item:hover { background: var(--hover); color: var(--fg); }
+
 /* ---------- sidebar ---------- */
 .sidebar {
   background: var(--sidebar-bg);
@@ -416,7 +444,9 @@ a { color: inherit; text-decoration: none; }
 .bar {
   position: relative;
   height: 4px; border-radius: 2px;
-  background: var(--panel-2);
+  /* #22: track was --panel-2 (~--hover) so it vanished on row hover. Darker
+     neutral keeps the unfilled portion visible on both white and hover rows. */
+  background: var(--border-2);
   overflow: hidden;
 }
 .bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 2px; display: block; }
@@ -802,6 +832,9 @@ a { color: inherit; text-decoration: none; }
 .tbl tr.clickable:hover td:last-child::after {
   content: '›'; color: var(--muted); margin-left: 6px;
 }
+/* #22: rows with an explicit chevron column (.expand-cell) already show one —
+   don't add the CSS hover arrow too (was causing two arrows on hover). */
+.tbl tr.clickable:hover td.expand-cell::after { content: none; }
 
 /* Multi-line PO indicator */
 .li-badge {

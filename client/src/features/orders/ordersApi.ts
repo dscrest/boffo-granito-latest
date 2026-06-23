@@ -50,7 +50,7 @@ export function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
 async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
   // listAll pages past ZCQL's 300-row cap; lookups project only the
   // columns this join actually reads (ROWID is always included).
-  const [sos, items, customers, designs, sizes, finishes, brands] = await Promise.all([
+  const [sos, items, customers, designs, sizes, finishes, brands, salesPersons] = await Promise.all([
     listAll("SalesOrder", { order: "ROWID desc" }),
     listAll("OrderItem"),
     listAll("Customer", { columns: ["name", "code", "country_code"] }),
@@ -58,6 +58,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     list("Size", { limit: 300, columns: ["code"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Brand", { limit: 300, columns: ["name"] }),
+    list("SalesPerson", { limit: 300, columns: ["name"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 
@@ -70,6 +71,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
   const sizeName = mapBy(sizes.rows, "code");
   const finishName = mapBy(finishes.rows, "name");
   const brandName = mapBy(brands.rows, "name");
+  const salesPersonName = mapBy(salesPersons.rows, "name");
   // Design row's own lookup FKs (size/finish/brand) → names.
   const designRow = new Map<string, DSRow>();
   (designs.rows || []).forEach((d) => designRow.set(String(d.ROWID), d));
@@ -114,7 +116,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       rate,
       discount: num(it.discount_pct),
       subTotal,
-      salesperson: so ? str(so.salesperson) : "",
+      salesperson: so ? salesPersonName.get(str(so.sales_person)) || "" : "",
       boxBranding: so ? str(so.box_branding) : "",
       shipmentDate: so ? str(so.shipment_date) : "",
       customerNotes: so ? str(so.customer_notes) : "",

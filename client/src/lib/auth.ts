@@ -1,80 +1,116 @@
-// Auth abstraction with a build-time split:
-//  - Prod (deployed Catalyst domain): use the real Catalyst Web SDK (window.catalyst.auth).
-//  - Dev (vite): /__catalyst/sdk/init.js 404s so window.catalyst is absent; return a stub
-//    that resolves a fake Admin user. The UI gate is convenience only — every function
-//    re-verifies the user server-side via getCurrentUser().
-import type { CatalystUser } from "../types/catalyst";
+// App-level auth backed by the data-ops /auth/* endpoints (AppUser/Role/
+// AuthSession tables). The session token + user/permissions snapshot live in
+// sessionStorage; lib/api.ts attaches the token to every request and clears
+// the session on 401. The old Catalyst-hosted-login / dev-stub split is gone.
+import { API_BASE } from "./api";
+
+export interface Perms {
+  features: string[]; // nav ids the role may see; ["*"] = all
+  can_update: boolean;
+  can_delete: boolean;
+}
 
 export interface SessionUser {
+  rowid: string;
   email: string;
   name: string;
-  role: string;
+  role: string | null;
+  perms: Perms;
 }
 
-const DEV_USER: SessionUser = { email: "dev@boffo.local", name: "Dev Admin", role: "Admin" };
+const KEY = "boffo_auth";
 
-// Dev-only: a sessionStorage flag stands in for a real session. The login screen
-// shows until the user clicks "Sign in" (no auth backend wired yet); the flag then
-// persists the "signed in" state across reloads until signOut clears it.
-const DEV_SESSION_KEY = "boffo_dev_session";
-
-function toSessionUser(u: CatalystUser): SessionUser {
-  const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
-  return {
-    email: u.email_id ?? "",
-    name: name || (u.email_id ?? "User"),
-    role: u.role_details?.role_name ?? "User",
-  };
+interface Stored {
+  token: string;
+  user: SessionUser;
 }
 
-const useStub = import.meta.env.DEV || !window.catalyst?.auth;
-
-export async function checkSession(): Promise<SessionUser | null> {
-  if (useStub) {
-    // Show the login screen until the user clicks "Sign in" (sets the flag below).
-    return sessionStorage.getItem(DEV_SESSION_KEY) ? DEV_USER : null;
-  }
+export function storedAuth(): Stored | null {
   try {
-    const u = await window.catalyst!.auth.isUserAuthenticated();
-    return toSessionUser(u);
+    const raw = sessionStorage.getItem(KEY);
+    return raw ? (JSON.parse(raw) as Stored) : null;
   } catch {
     return null;
   }
 }
 
-export function showLogin(elementId: string): void {
-  if (useStub) return;
-  // The form renders in a cross-origin iframe. Do NOT pass css_url: it makes Zoho
-  // load our stylesheet *instead of* its own, which drops the display:none rules that
-  // hide inactive steps — so every panel (email/password/OTP/CAPTCHA/MFA…) renders at
-  // once. Letting Zoho use its own complete stylesheet gives a clean single-step form;
-  // the surrounding BOFFO card supplies the branding. service_url returns to the SPA.
-  window.catalyst!.auth.signIn(elementId, {
-    service_url: "/app/index.html",
-  });
+export function authToken(): string {
+  return storedAuth()?.token ?? "";
 }
 
-// Full-page Zoho sign-in via Catalyst's hosted login page. Distinct from the
-// embedded email widget above: this hands the whole sign-in (incl. MFA / OneAuth)
-// to Zoho's hosted page, which redirects back to the app on success (return target
-// is set by the console's hosted-login redirect config). The `/__catalyst/auth/login`
-// route only exists on the deployed/served Catalyst domain.
-export function signInWithZoho(): void {
-  if (useStub) {
-    // Dev stub: no real auth backend. Mark the session and reload so the gate
-    // re-checks and lands on the dashboard.
-    sessionStorage.setItem(DEV_SESSION_KEY, "1");
-    window.location.reload();
-    return;
+export function clearAuth(): void {
+  sessionStorage.removeItem(KEY);
+}
+
+/** Validate the stored token server-side; null if absent/expired. */
+export async function checkSession(): Promise<SessionUser | null> {
+  const stored = storedAuth();
+  if (!stored) return null;
+  try {
+    const res = await fetch(`${API_BASE}/data-ops/auth/me`, {
+      // X-App-Token, not Authorization: the Catalyst gateway treats a Bearer
+      // header as a Zoho OAuth token and rejects it before the function runs.
+      headers: { Accept: "application/json", "X-App-Token": stored.token },
+    });
+    if (!res.ok) {
+      clearAuth();
+      return null;
+    }
+    const json = (await res.json()) as { ok: boolean; user: SessionUser };
+    return json.user;
+  } catch {
+    // Network hiccup: keep the stored session rather than logging the user out.
+    return stored.user;
   }
-  window.location.assign("/__catalyst/auth/login");
+}
+
+export async function signIn(email: string, password: string): Promise<SessionUser> {
+  const res = await fetch(`${API_BASE}/data-ops/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const json = (await res.json().catch(() => null)) as
+    | { ok: boolean; token?: string; user?: SessionUser; error?: string }
+    | null;
+  if (!res.ok || !json?.ok || !json.token || !json.user) {
+    throw new Error(json?.error || "Sign-in failed");
+  }
+  sessionStorage.setItem(KEY, JSON.stringify({ token: json.token, user: json.user }));
+  return json.user;
 }
 
 export function signOut(): void {
-  if (useStub) {
-    sessionStorage.removeItem(DEV_SESSION_KEY);
-    window.location.reload();
-    return;
+  const stored = storedAuth();
+  if (stored) {
+    void fetch(`${API_BASE}/data-ops/auth/logout`, {
+      method: "POST",
+      headers: { "X-App-Token": stored.token },
+    }).catch(() => undefined);
   }
-  window.catalyst!.auth.signOut("/app/index.html");
+  clearAuth();
+  window.location.reload();
+}
+
+/* ---- Permission helpers (synchronous; read the stored snapshot) ---- */
+
+export function perms(): Perms {
+  return storedAuth()?.user.perms ?? { features: [], can_update: false, can_delete: false };
+}
+
+export function hasFeature(id: string): boolean {
+  const f = perms().features;
+  return f.includes("*") || f.includes(id);
+}
+
+export function canUpdate(): boolean {
+  return perms().can_update;
+}
+
+export function canDelete(): boolean {
+  return perms().can_delete;
+}
+
+export function isAdmin(): boolean {
+  return storedAuth()?.user.role === "Admin";
 }

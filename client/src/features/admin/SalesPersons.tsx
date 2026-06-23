@@ -1,0 +1,295 @@
+/* ============================================================
+   Sales Persons (Settings) — admin master of the reps shown on
+   Quotations / Sales Orders. Each Sales Person wraps an existing
+   AppUser (required link → access perms flow through the user's
+   role). Follows the master-page UI convention: row-click edits.
+   Backed by the generic /data-ops/SalesPerson CRUD; the user picker
+   reads /data-ops/auth/users.
+   ============================================================ */
+import { useEffect, useMemo, useState } from "react";
+import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
+import { Combobox } from "@/ui/Combobox";
+import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { apiGet } from "@/lib/api";
+import {
+  listSalesPersons,
+  createSalesPerson,
+  updateSalesPerson,
+  deleteSalesPerson,
+  type SalesPersonRow,
+} from "@/features/masters/salespersonApi";
+
+interface AppUserOption {
+  rowid: string;
+  email: string;
+  name: string;
+}
+
+interface Draft {
+  rowid: string | null; // null = new
+  name: string;
+  email: string;
+  phone: string;
+  region: string;
+  active: boolean;
+  app_user: string; // AppUser ROWID (required)
+}
+
+const EMPTY: Draft = { rowid: null, name: "", email: "", phone: "", region: "", active: true, app_user: "" };
+
+export function SalesPersonsAdmin() {
+  const [rows, setRows] = useState<SalesPersonRow[]>([]);
+  const [users, setUsers] = useState<AppUserOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [sp, u] = await Promise.all([
+        listSalesPersons(),
+        apiGet<{ users: AppUserOption[] }>("data-ops/auth/users"),
+      ]);
+      if (!sp.ok) throw new Error(sp.error || "Failed to load sales persons");
+      setRows(sp.salesPersons);
+      setUsers(u.users);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const userName = useMemo(() => {
+    const m = new Map<string, string>();
+    users.forEach((u) => m.set(u.rowid, u.name || u.email));
+    return m;
+  }, [users]);
+
+  const userOptions = useMemo(
+    () => users.map((u) => ({ value: u.rowid, label: u.name || u.email, hint: u.email })),
+    [users],
+  );
+
+  const onPickUser = (rowid: string) => {
+    if (!draft) return;
+    const u = users.find((x) => x.rowid === rowid);
+    setDraft({
+      ...draft,
+      app_user: rowid,
+      // Default name/email from the user the first time, if blank.
+      name: draft.name || (u?.name ?? ""),
+      email: draft.email || (u?.email ?? ""),
+    });
+  };
+
+  const onSave = async () => {
+    if (!draft) return;
+    if (!draft.app_user) {
+      toast.error("Pick a linked user");
+      return;
+    }
+    if (!draft.name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
+    setBusy(true);
+    try {
+      const input = {
+        name: draft.name,
+        email: draft.email,
+        phone: draft.phone,
+        region: draft.region,
+        active: draft.active,
+        app_user: draft.app_user,
+      };
+      if (draft.rowid) {
+        await updateSalesPerson(draft.rowid, input);
+        toast.success("Sales person updated");
+      } else {
+        await createSalesPerson(input);
+        toast.success("Sales person created");
+      }
+      setDraft(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDelete = async () => {
+    if (!draft?.rowid) return;
+    if (!window.confirm(`Remove sales person "${draft.name}"?`)) return;
+    setBusy(true);
+    try {
+      await deleteSalesPerson(draft.rowid);
+      toast.success("Sales person removed");
+      setDraft(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="title">Sales Persons</div>
+          <div className="sub">
+            {loading ? "Loading…" : `${rows.length} reps · shown on quotations & sales orders`}
+          </div>
+        </div>
+        <div className="right">
+          <button className="hbtn" onClick={() => void load()} title="Refresh">
+            <Icon name="clock" size={13} />
+            Refresh
+          </button>
+          <button className="hbtn primary" onClick={() => setDraft({ ...EMPTY })}>
+            <Icon name="plus" size={13} />
+            New sales person
+          </button>
+        </div>
+      </div>
+
+      {error && <ErrorCard message={error} onRetry={() => void load()} />}
+
+      {draft && (
+        <div className="card form-section" style={{ marginBottom: 12, padding: 16, borderLeft: "3px solid var(--accent)" }}>
+          <div className="form-section-title" style={{ marginBottom: 14 }}>
+            <Icon name={draft.rowid ? "settings" : "plus"} size={13} className="ic" />
+            {draft.rowid ? `Edit ${draft.name}` : "New sales person"}
+          </div>
+          <div className="form-grid">
+            <label className="form-field">
+              <span className="lbl">
+                Linked user<span className="req"> *</span>
+              </span>
+              <Combobox
+                value={draft.app_user}
+                options={userOptions}
+                onChange={onPickUser}
+                placeholder="Search a sign-in user…"
+              />
+            </label>
+            <label className="form-field">
+              <span className="lbl">
+                Name<span className="req"> *</span>
+              </span>
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Display name on documents" />
+            </label>
+            <label className="form-field">
+              <span className="lbl">Email</span>
+              <input type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+            </label>
+            <label className="form-field">
+              <span className="lbl">Mobile</span>
+              <input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="+91…" />
+            </label>
+            <label className="form-field">
+              <span className="lbl">Region</span>
+              <input value={draft.region} onChange={(e) => setDraft({ ...draft, region: e.target.value })} placeholder="Territory / market" />
+            </label>
+            <label className="form-field">
+              <span className="lbl">Status</span>
+              <select value={draft.active ? "1" : "0"} onChange={(e) => setDraft({ ...draft, active: e.target.value === "1" })}>
+                <option value="1">Active</option>
+                <option value="0">Inactive (hidden from pickers)</option>
+              </select>
+            </label>
+          </div>
+          <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            {draft.rowid && (
+              <button className="btn" style={{ color: "var(--c-red)" }} disabled={busy} onClick={() => void onDelete()}>
+                Delete
+              </button>
+            )}
+            <button className="btn" onClick={() => setDraft(null)}>
+              Cancel
+            </button>
+            <button className="hbtn primary" disabled={busy} onClick={() => void onSave()}>
+              <Icon name="check" size={13} />
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div style={{ overflow: "auto" }}>
+          {loading && rows.length === 0 ? (
+            <SkeletonRows rows={4} />
+          ) : (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: 36, textAlign: "center" }}>#</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Mobile</th>
+                  <th>Region</th>
+                  <th>Linked user</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((s, i) => (
+                  <tr
+                    key={s.id}
+                    tabIndex={0}
+                    onClick={() =>
+                      setDraft({
+                        rowid: s.id,
+                        name: s.name,
+                        email: s.email,
+                        phone: s.phone,
+                        region: s.region,
+                        active: s.active,
+                        app_user: s.appUserId,
+                      })
+                    }
+                    style={{ cursor: "pointer" }}
+                    title="Edit sales person"
+                  >
+                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td style={{ color: "var(--fg)" }}>{s.name}</td>
+                    <td>{s.email || <span className="dim">—</span>}</td>
+                    <td>{s.phone || <span className="dim">—</span>}</td>
+                    <td>{s.region || <span className="dim">—</span>}</td>
+                    <td>{userName.get(s.appUserId) ? <span className="chip">{userName.get(s.appUserId)}</span> : <span className="dim">unlinked</span>}</td>
+                    <td>
+                      {s.active ? (
+                        <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+                      ) : (
+                        <span className="chip" style={{ color: "var(--dim)" }}>inactive</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7}>
+                      <EmptyState icon="users" title="No sales persons" hint="Click New sales person to add one." />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

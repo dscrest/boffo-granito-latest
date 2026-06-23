@@ -5,7 +5,9 @@ import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, pct } from "@/lib/format";
+import { exportCsv } from "@/lib/csv";
 import { STAGES } from "@/data";
+import type { Order } from "@/data";
 import { list } from "@/lib/dataOps";
 import { useOrders } from "@/features/orders/useOrders";
 import { cachedInvoices, listInvoices, type InvoiceRow } from "@/features/invoices/invoicesApi";
@@ -52,6 +54,26 @@ function feedTime(occurredAt: string): string {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   if (days === 1) return "Yest.";
   return `${days}d`;
+}
+
+/** Monday 00:00 of the week containing `d`. */
+function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  const mondayOffset = (x.getDay() + 6) % 7; // Sun=0 → 6, Mon=1 → 0 …
+  x.setDate(x.getDate() - mondayOffset);
+  return x;
+}
+
+/** True when a "yyyy-MM-dd[ HH:mm:ss]" order date falls in the current week. */
+function inThisWeek(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const d = new Date(dateStr.replace(" ", "T"));
+  if (isNaN(d.getTime())) return false;
+  const start = startOfWeek(new Date());
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return d >= start && d < end;
 }
 
 /** Latest successful operations, shaped for the activity feed. */
@@ -104,10 +126,39 @@ function useInvoiceKpi(): InvoiceRow[] {
 }
 
 export function Dashboard() {
-  const { orders, loading, error, reload } = useOrders();
+  const { orders: allOrders, loading, error, reload } = useOrders();
   const { feed, loading: feedLoading } = useActivityFeed();
   const invoices = useInvoiceKpi();
-  const showSkeleton = loading && orders.length === 0;
+  const [range, setRange] = useState<"all" | "week">("all");
+
+  // "This week" toggle scopes every KPI + table below to the current week.
+  const orders = useMemo(
+    () => (range === "week" ? allOrders.filter((o) => inThisWeek(o.orderDate)) : allOrders),
+    [allOrders, range],
+  );
+  const showSkeleton = loading && allOrders.length === 0;
+
+  const onExport = () => {
+    exportCsv<Order>(
+      `boffo-orders-${range === "week" ? "this-week" : "all"}-${new Date().toISOString().slice(0, 10)}`,
+      orders,
+      [
+        { header: "PO Number", value: (o) => o.poNumber },
+        { header: "Party", value: (o) => o.party },
+        { header: "Country", value: (o) => o.country },
+        { header: "Design", value: (o) => o.design },
+        { header: "Size", value: (o) => o.size },
+        { header: "Finish", value: (o) => o.finish },
+        { header: "Stage", value: (o) => o.stage },
+        { header: "Order Qty (sqm)", value: (o) => o.orderQty },
+        { header: "Produced Qty", value: (o) => o.producedQty },
+        { header: "Pallets", value: (o) => (o.boxesPerPallet > 0 ? Math.ceil(o.palletizedQty / o.boxesPerPallet) : 0) },
+        { header: "Boxes", value: (o) => o.totalBoxes },
+        { header: "Order Date", value: (o) => o.orderDate },
+        { header: "Due Date", value: (o) => o.dueDate },
+      ],
+    );
+  };
 
   // Same rule as the old mock READY_TO_LOAD, over live orders.
   const readyToLoad = useMemo(
@@ -195,15 +246,19 @@ export function Dashboard() {
           </div>
         </div>
         <div className="right">
-          <button className="hbtn">
+          <button className="hbtn" onClick={onExport} title="Export current orders to CSV">
             <Icon name="download" size={13} />
             Export
           </button>
-          <button className="hbtn">
+          <button
+            className={`hbtn${range === "week" ? " primary" : ""}`}
+            onClick={() => setRange((r) => (r === "week" ? "all" : "week"))}
+            title="Toggle current-week filter"
+          >
             <Icon name="calendar" size={13} />
-            This week
+            {range === "week" ? "This week ✓" : "This week"}
           </button>
-          <button className="hbtn primary" onClick={() => { location.hash = "#/orders"; }}>
+          <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
             <Icon name="plus" size={13} />
             New Order
           </button>

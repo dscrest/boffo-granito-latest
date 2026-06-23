@@ -13,6 +13,7 @@ webclient/
 
 # debug
 npm-debug.log*
+catalyst-debug.log
 *.tsbuildinfo
 *.stackdump
 .playwright-mcp/

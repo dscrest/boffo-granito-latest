@@ -64,6 +64,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "printer": return <svg {...common}><path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="7" rx="1"/></svg>;
     case "x": return <svg {...common}><path d="M6 6l12 12M18 6 6 18"/></svg>;
     case "chart": return <svg {...common}><path d="M3 3v18h18"/><path d="M7 15l3-4 3 3 5-7"/></svg>;
+    case "log-out": return <svg {...common}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>;
     default: return null;
   }
 }

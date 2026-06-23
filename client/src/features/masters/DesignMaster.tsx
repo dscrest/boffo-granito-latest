@@ -15,6 +15,7 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { finishClass } from "@/lib/format";
+import { canDelete, canUpdate } from "@/lib/auth";
 import { DesignForm } from "./DesignForm";
 import {
   bulkDeleteDesigns,
@@ -270,10 +271,12 @@ export function DesignMaster() {
             <Icon name="clock" size={13} />
             Refresh
           </button>
-          <button className="hbtn primary" onClick={() => setShowNew(true)}>
-            <Icon name="plus" size={13} />
-            New design
-          </button>
+          {canUpdate() && (
+            <button className="hbtn primary" onClick={() => setShowNew(true)}>
+              <Icon name="plus" size={13} />
+              New design
+            </button>
+          )}
         </div>
       </div>
 
@@ -285,12 +288,16 @@ export function DesignMaster() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          <button className="btn" onClick={() => setShowBulk(true)} disabled={busy}>
-            <Icon name="settings" size={12} className="ic" /> Bulk edit
-          </button>
-          <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
-            Delete
-          </button>
+          {canUpdate() && (
+            <button className="btn" onClick={() => setShowBulk(true)} disabled={busy}>
+              <Icon name="settings" size={12} className="ic" /> Bulk edit
+            </button>
+          )}
+          {canDelete() && (
+            <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
+              Delete
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={() => setSelected(new Set())}>
             Clear

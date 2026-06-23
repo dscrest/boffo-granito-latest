@@ -59,10 +59,10 @@ export interface DesignRow {
   randomFaces: number;
   ratePerSqft: number;
   ratePerSqmt: number;
-  productOwner: string;
   accountingStock: number;
   booksItemId: string;
   imageUrl: string;
+  images: string[]; // #12: File Store image ids
 }
 
 /* Per-lookup natural-key column (see schema gotchas). */
@@ -179,10 +179,10 @@ async function fetchDesigns(): Promise<{
       randomFaces: num(d.random_faces),
       ratePerSqft: num(d.rate_per_sqft),
       ratePerSqmt: num(d.rate_per_sqmt),
-      productOwner: str(d.product_owner),
       accountingStock: num(d.accounting_stock),
       booksItemId: str(d.books_item_id),
       imageUrl: str(d.image_url),
+      images: parseImages(str(d.image_urls)),
     };
   });
 
@@ -212,9 +212,20 @@ export interface DesignInput {
   random_faces: number;
   rate_per_sqft: number;
   rate_per_sqmt: number;
-  product_owner: string;
   accounting_stock: number;
   image_url: string;
+  image_urls: string; // #12: JSON array of File Store image ids
+}
+
+/** Parse the image_urls JSON column → string[] (tolerant of blank/legacy). */
+function parseImages(raw: string): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
 }
 
 const FK_KEYS = ["size", "finish", "category", "glaze", "brand", "grade"] as const;
@@ -236,9 +247,9 @@ function toPayload(input: DesignInput): Record<string, unknown> {
     random_faces: input.random_faces,
     rate_per_sqft: input.rate_per_sqft,
     rate_per_sqmt: input.rate_per_sqmt,
-    product_owner: input.product_owner.trim(),
     accounting_stock: input.accounting_stock,
     image_url: input.image_url.trim(),
+    image_urls: input.image_urls || "[]",
   };
   for (const k of FK_KEYS) if (input[k]) p[k] = input[k]; // FK only when chosen
   return p;

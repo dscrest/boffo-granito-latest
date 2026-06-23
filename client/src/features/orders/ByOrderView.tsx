@@ -1,5 +1,8 @@
-/* By Order — grouped view. Ported verbatim from prototype/by-order.jsx. */
+/* By Order — grouped view. Ported verbatim from prototype/by-order.jsx.
+   Now the primary orders list (All Orders commented, #21): carries New Order
+   create (#8) + a choosable filter (#20). */
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
@@ -7,6 +10,11 @@ import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
+import { OrderForm, type OrderDraft } from "./OrderForm";
+import { draftToInput } from "./OrdersTable";
+import { createSalesOrder } from "./ordersApi";
+import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "./OrdersFilter";
+import { toast } from "@/ui/Toast";
 
 interface Totals {
   qty: number;
@@ -38,23 +46,44 @@ export function ByOrderView() {
   const { orders, loading, error, reload } = useOrders();
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [partyFilter, setPartyFilter] = useState("all");
-  const [stageFilter, setStageFilter] = useState("all");
+  // #20: shared choosable filter (Customer / PO / Stage) + free-text search.
+  const [filter, setFilter] = useState(EMPTY_FILTER);
   const [sortBy, setSortBy] = useState("progress");
   const [limit, setLimit] = useState(PAGE_SIZE);
+  const [showForm, setShowForm] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  // Distinct parties from live orders (replaces the PARTIES mock).
-  const parties = useMemo(() => {
-    const m = new Map<string, { code: string; name: string }>();
-    orders.forEach((o) => {
-      if (!m.has(o.partyCode)) m.set(o.partyCode, { code: o.partyCode, name: o.party });
-    });
-    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [orders]);
+  // #8: deep-link from Dashboard "New Order" (/byorder?new=1) opens the form directly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowForm(true);
+      searchParams.delete("new");
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onSaveOrder = async (dr: OrderDraft) => {
+    setShowForm(false);
+    setNotice("Saving order…");
+    const res = await createSalesOrder(draftToInput(dr));
+    if (!res.ok) {
+      setNotice(null);
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setNotice(`Order saved (#${res.rowid}).`);
+    toast.success(`Order saved (#${res.rowid})`);
+    reload();
+  };
+
+  // Filter + search applied before grouping (shared with the Pipeline).
+  const fOrders = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
 
   const groups = useMemo<Group[]>(() => {
     const m: Record<string, Omit<Group, "totals" | "stageDist" | "minStageIdx" | "progress">> = {};
-    orders.forEach((o) => {
+    fOrders.forEach((o) => {
       const key = `${o.poNumber}__${o.partyCode}`;
       if (!m[key]) {
         m[key] = {
@@ -94,25 +123,21 @@ export function ByOrderView() {
 
       return { ...g, totals, stageDist, minStageIdx, progress: pct(totals.loaded, totals.qty) };
     });
-  }, [orders]);
+  }, [fOrders]);
 
   const visible = useMemo(() => {
-    let arr = groups;
-    if (partyFilter !== "all") arr = arr.filter((g) => g.partyCode === partyFilter);
-    if (stageFilter !== "all") arr = arr.filter((g) => g.items.some((o) => o.stage === stageFilter));
-    arr = [...arr].sort((a, b) => {
+    return [...groups].sort((a, b) => {
       if (sortBy === "progress") return a.progress - b.progress;
       if (sortBy === "qty") return b.totals.qty - a.totals.qty;
       if (sortBy === "party") return a.party.localeCompare(b.party);
       return 0;
     });
-    return arr;
-  }, [groups, partyFilter, stageFilter, sortBy]);
+  }, [groups, sortBy]);
 
   // Filter/sort change → start from the first page again.
   useEffect(() => {
     setLimit(PAGE_SIZE);
-  }, [partyFilter, stageFilter, sortBy]);
+  }, [filter, sortBy]);
 
   const shown = visible.slice(0, limit);
 
@@ -126,11 +151,13 @@ export function ByOrderView() {
 
   return (
     <div>
+      {showForm && <OrderForm onSave={onSaveOrder} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
           <div className="title">Orders — by PO</div>
           <div className="sub">
             {visible.length} POs · {visible.reduce((s, g) => s + g.items.length, 0)} line items · grouped view of the pipeline
+            {notice && <> · <span className="dim">{notice}</span></>}
           </div>
         </div>
         <div className="right">
@@ -142,46 +169,21 @@ export function ByOrderView() {
             <Icon name="download" size={13} />
             Export
           </button>
-          <button className="hbtn primary">
+          <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
-            New PO
+            New Order
           </button>
         </div>
       </div>
 
+      {/* #20: shared choosable filter (type-to-search value) + search box. */}
+      <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
       <div className="fbar">
-        <button className={`btn ${partyFilter === "all" ? "active" : ""}`} onClick={() => setPartyFilter("all")}>
-          All parties
-        </button>
-        {parties.map((p) => (
-          <button key={p.code} className={`btn ${partyFilter === p.code ? "active" : ""}`} onClick={() => setPartyFilter(p.code)}>
-            {p.name}
-          </button>
-        ))}
-        <div style={{ width: 1, height: 18, background: "var(--border)" }} />
-        <button className={`btn ${stageFilter === "all" ? "active" : ""}`} onClick={() => setStageFilter("all")}>
-          Any stage
-        </button>
-        {STAGES.map((s) => (
-          <button key={s.id} className={`btn ${stageFilter === s.id ? "active" : ""}`} onClick={() => setStageFilter(s.id)}>
-            <span className={`dot ${s.color}`} />
-            {s.short}
-          </button>
-        ))}
         <div style={{ flex: 1 }} />
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value)}
-          style={{
-            height: 26,
-            padding: "0 8px",
-            borderRadius: 5,
-            border: "1px solid var(--border-2)",
-            background: "var(--panel-2)",
-            color: "var(--fg-2)",
-            fontSize: 11.5,
-            outline: "none",
-          }}
+          style={{ height: 26, padding: "0 8px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--panel-2)", color: "var(--fg-2)", fontSize: 11.5, outline: "none" }}
         >
           <option value="progress">Sort: Least progress first</option>
           <option value="qty">Sort: Largest qty</option>

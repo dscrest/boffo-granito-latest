@@ -27,15 +27,17 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; e
   if (!r) return { quote: null, error: "This share link is invalid or has been revoked." };
   const id = str(r.ROWID);
 
-  const [items, customers, terms, designs] = await Promise.all([
+  const [items, customers, terms, designs, salesPersons] = await Promise.all([
     list("QuoteItem", { where: `quote = ${id}`, limit: 300 }),
     list("Customer", { where: `ROWID = ${str(r.customer) || "0"}`, columns: ["name", "code"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
     list("Design", { limit: 300, columns: ["design_name"] }),
+    list("SalesPerson", { where: `ROWID = ${str(r.sales_person) || "0"}`, columns: ["name"] }),
   ]);
   const designName = new Map((designs.rows || []).map((d) => [str(d.ROWID), str(d.design_name)]));
   const termName = new Map((terms.rows || []).map((t) => [str(t.ROWID), str(t.name)]));
   const cust = (customers.rows || [])[0];
+  const salesPerson = (salesPersons.rows || [])[0];
 
   const lines: QuoteLine[] = (items.rows || []).map((it) => ({
     item: designName.get(str(it.design)) || str(it.design),
@@ -58,7 +60,7 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; e
       status: "Sent",
       currency: str(r.currency) || "EUR",
       remarks: str(r.remarks),
-      salesperson: str(r.salesperson),
+      salesperson: salesPerson ? str(salesPerson.name) : "",
       referenceNo: str(r.reference_no),
       customerNotes: str(r.customer_notes),
       terms: str(r.terms),

@@ -17,7 +17,7 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
-import { docTotals, lineTotals, type Quote } from "@/data";
+import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
@@ -34,6 +34,7 @@ import {
   ensureShareToken,
   invalidateQuotes,
   listQuotes,
+  updateQuote,
   updateQuoteWithItems,
 } from "./quotesApi";
 
@@ -46,7 +47,7 @@ const FIELDS: FieldDef[] = [
   { key: "status", label: "Status", value: (q) => STATUS_LABEL[q.status] },
   { key: "quoteDate", label: "Quote Date", value: (q) => q.quoteDate || "—" },
   { key: "expiryDate", label: "Expiry Date", value: (q) => q.expiryDate || "—" },
-  { key: "referenceNo", label: "Reference No.", value: (q) => q.referenceNo || "—" },
+  // #14: Reference No. removed from quotes (SO-only field).
   { key: "salesperson", label: "Salesperson", value: (q) => q.salesperson || "—" },
   { key: "paymentTerm", label: "Payment Term", value: (q) => q.paymentTerm || "—" },
   { key: "portOfDischarge", label: "Port of Discharge", value: (q) => q.portOfDischarge || "—" },
@@ -58,6 +59,9 @@ const FIELDS: FieldDef[] = [
   { key: "customerNotes", label: "Customer Notes", value: (q) => q.customerNotes || "—", wide: true },
   { key: "terms", label: "Terms & Conditions", value: (q) => q.terms || "—", wide: true },
 ];
+
+/* #19: these render in a card BELOW the line-item table, not in the header grid. */
+const NOTE_KEYS = new Set(["remarks", "customerNotes", "terms"]);
 
 const HIDDEN_KEY = "quoteDetailFields"; // stores JSON array of hidden field keys
 
@@ -120,6 +124,21 @@ export function QuoteDetail() {
       toast.info(url); // clipboard blocked — surface the URL instead
     }
     void load();
+  };
+
+  // #16: Zoho-Books-style status transitions from the top bar (no form open).
+  const changeStatus = async (next: QuoteStatus, label: string) => {
+    if (!quote) return;
+    setBusy(`${label}…`);
+    try {
+      await updateQuote(quote.id, { status: next });
+      await load();
+      toast.success(label);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Status update failed");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const load = async () => {
@@ -266,6 +285,22 @@ export function QuoteDetail() {
           </div>
         </div>
         <div className="right">
+          {/* #16: status transitions (Zoho Books style). */}
+          {quote.status === "Draft" && (
+            <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Sent", "Marked as sent")} title="Mark as sent">
+              <Icon name="check" size={13} /> Mark As Sent
+            </button>
+          )}
+          {quote.status === "Sent" && (
+            <>
+              <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Accepted", "Marked accepted")} title="Mark accepted">
+                <Icon name="check" size={13} /> Accept
+              </button>
+              <button className="hbtn" disabled={!!busy} onClick={() => void changeStatus("Rejected", "Marked rejected")} title="Mark rejected" style={{ color: "var(--c-red)" }}>
+                <Icon name="x" size={13} /> Reject
+              </button>
+            </>
+          )}
           <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">
             <Icon name="edit" size={13} /> Edit
           </button>
@@ -343,7 +378,7 @@ export function QuoteDetail() {
         <>
           <div className="card" style={{ padding: 18, marginBottom: 12 }}>
             <div className="form-grid">
-              {FIELDS.filter((f) => !hidden.has(f.key)).map((f) => (
+              {FIELDS.filter((f) => !hidden.has(f.key) && !NOTE_KEYS.has(f.key)).map((f) => (
                 <div className="form-field" key={f.key} style={f.wide ? { gridColumn: "1 / -1" } : undefined}>
                   <span className="lbl">{f.label}</span>
                   <span style={{ color: "var(--fg)" }}>{f.value(quote)}</span>
@@ -399,6 +434,20 @@ export function QuoteDetail() {
               </span>
             </div>
           </div>
+
+          {/* #19: Remarks / Customer Notes / Terms below the item table. */}
+          {FIELDS.some((f) => NOTE_KEYS.has(f.key) && !hidden.has(f.key)) && (
+            <div className="card" style={{ padding: 18, marginTop: 12 }}>
+              <div className="form-grid">
+                {FIELDS.filter((f) => NOTE_KEYS.has(f.key) && !hidden.has(f.key)).map((f) => (
+                  <div className="form-field" key={f.key} style={{ gridColumn: "1 / -1" }}>
+                    <span className="lbl">{f.label}</span>
+                    <span style={{ color: "var(--fg)", whiteSpace: "pre-wrap" }}>{f.value(quote)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
 

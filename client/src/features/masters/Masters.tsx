@@ -8,6 +8,7 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { canDelete, canUpdate } from "@/lib/auth";
 
 type FieldType = "text" | "number" | "select";
 
@@ -259,9 +260,11 @@ function MasterTable({ def }: { def: MasterDef }) {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {selected.size} selected
           </span>
-          <button className="btn" onClick={removeSelected}>
-            Delete
-          </button>
+          {canDelete() && (
+            <button className="btn" onClick={removeSelected}>
+              Delete
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={() => setSelected(new Set())}>
             Clear
@@ -272,10 +275,12 @@ function MasterTable({ def }: { def: MasterDef }) {
           <span className="muted mono">{filtered.length} rows</span>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder={`Search ${def.label.toLowerCase()}…`} value={query} onChange={(e) => setQuery(e.target.value)} />
-          <button className="hbtn primary" onClick={() => setEditing({ id: null })}>
-            <Icon name="plus" size={13} />
-            New {def.label.toLowerCase()}
-          </button>
+          {canUpdate() && (
+            <button className="hbtn primary" onClick={() => setEditing({ id: null })}>
+              <Icon name="plus" size={13} />
+              New {def.label.toLowerCase()}
+            </button>
+          )}
         </div>
       )}
 

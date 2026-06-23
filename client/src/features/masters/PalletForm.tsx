@@ -227,6 +227,8 @@ export function PalletForm({
             </div>
           </div>
 
+          {/* #15: Arrangement B (mixed loads) hidden for now — fields keep their
+              defaults (0/blank) so saves still succeed. Uncomment to restore.
           <div className="form-section">
             <div className="form-section-title">Arrangement B (mixed loads — optional)</div>
             <div className="form-grid">
@@ -263,6 +265,7 @@ export function PalletForm({
               </label>
             </div>
           </div>
+          */}
 
           <div className="form-section">
             <div className="form-section-title">Per Container (computed)</div>

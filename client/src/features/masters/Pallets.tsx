@@ -13,6 +13,7 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt } from "@/lib/format";
+import { canDelete, canUpdate } from "@/lib/auth";
 import { PalletForm } from "./PalletForm";
 import {
   bulkDeletePallets,
@@ -167,10 +168,12 @@ export function Pallets() {
             <Icon name="clock" size={13} />
             Refresh
           </button>
-          <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
-            <Icon name="plus" size={13} />
-            New pallet
-          </button>
+          {canUpdate() && (
+            <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
+              <Icon name="plus" size={13} />
+              New pallet
+            </button>
+          )}
         </div>
       </div>
 
@@ -182,9 +185,11 @@ export function Pallets() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
-            Delete
-          </button>
+          {canDelete() && (
+            <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
+              Delete
+            </button>
+          )}
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={() => setSelected(new Set())}>
             Clear

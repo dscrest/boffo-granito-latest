@@ -11,7 +11,9 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { CATEGORIES, docTotals, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
+import { salesPersonOptions } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
+import { todayISO } from "@/lib/dates";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
 
@@ -96,7 +98,7 @@ export function OrderForm({
   const [h, setH] = useState<Omit<OrderDraft, "_id" | "lines">>({
     customer: "",
     po_number: "",
-    order_date: "",
+    order_date: todayISO(), // #13 default to today on new SO
     shipment_date: "",
     payment_term: "",
     port_of_discharge: "",
@@ -113,7 +115,7 @@ export function OrderForm({
     taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
-  const { parties, designs } = useMasters();
+  const { parties, designs, salesPersons } = useMasters();
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
     () => (cat ? designs.filter((d) => d.category === cat) : designs),
@@ -208,6 +210,13 @@ export function OrderForm({
                         onChange={(v) => setHead("customer", v)}
                         placeholder="Search customer…"
                         options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
+                      />
+                    ) : f.key === "salesperson" ? (
+                      <Combobox
+                        value={h.salesperson}
+                        onChange={(v) => setHead("salesperson", v)}
+                        placeholder="Search sales person…"
+                        options={salesPersonOptions(salesPersons)}
                       />
                     ) : f.key === "box_branding" ? (
                       <>
@@ -338,10 +347,7 @@ export function OrderForm({
                 <span className="dim">Subtotal</span>
                 <span className="mono">{h.currency} {fmt(totals.final)}</span>
               </div>
-              <div className="row charge">
-                <span className="dim">Discount</span>
-                <input type="number" value={h.docDiscount} placeholder="0.00" onChange={(e) => setHead("docDiscount", e.target.value)} />
-              </div>
+              {/* #17: document-level Discount removed from SO — inline per-line discount only. */}
               <div className="row charge">
                 <span className="dim">Adjustment</span>
                 <input type="number" value={h.adjustment} placeholder="0.00" onChange={(e) => setHead("adjustment", e.target.value)} />

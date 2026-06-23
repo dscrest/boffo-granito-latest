@@ -8,31 +8,26 @@ import { useOrders } from "@/features/orders/useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { QuickView } from "./QuickView";
 import { OrderDrawer } from "@/features/orders/OrderDrawer";
+import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "@/features/orders/OrdersFilter";
 
 export function Kanban() {
   const { orders, loading, error, reload } = useOrders();
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(EMPTY_FILTER);
   const [openOrder, setOpenOrder] = useState<Order | null>(null);
   const [quickView, setQuickView] = useState<{ order: Order; rect: DOMRect } | null>(null);
 
-  // Distinct parties from live orders (replaces the PARTIES mock).
-  const parties = useMemo(() => {
-    const m = new Map<string, { code: string; name: string }>();
-    orders.forEach((o) => {
-      if (!m.has(o.partyCode)) m.set(o.partyCode, { code: o.partyCode, name: o.party });
-    });
-    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [orders]);
+  // Same choosable filter + search as By Order.
+  const filtered = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
 
   const byStage = useMemo(() => {
     const m: Record<string, Order[]> = {};
     STAGES.forEach((s) => (m[s.id] = []));
-    orders.forEach((o) => {
+    filtered.forEach((o) => {
       // Live rows can carry stage values outside STAGES — bucket them on the fly.
-      if (filter === "all" || o.partyCode === filter) (m[o.stage] ??= []).push(o);
+      (m[o.stage] ??= []).push(o);
     });
     return m;
-  }, [filter, orders]);
+  }, [filtered]);
 
   // PO-sibling counts (poNumber + partyCode) for the "N items" badge on cards.
   const siblingCounts = useMemo(() => {
@@ -60,33 +55,14 @@ export function Kanban() {
           </div>
         </div>
         <div className="right">
-          <button className="hbtn">
-            <Icon name="filter" size={13} />
-            Filters
-          </button>
-          <button className="hbtn primary" onClick={() => { location.hash = "#/orders"; }}>
+          <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
             <Icon name="plus" size={13} />
             New Order
           </button>
         </div>
       </div>
 
-      <div className="fbar">
-        <button className={`btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
-          All parties
-        </button>
-        {parties.map((p) => (
-          <button key={p.code} className={`btn ${filter === p.code ? "active" : ""}`} onClick={() => setFilter(p.code)}>
-            {p.name}
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Search PO, design, party…" />
-        <button className="btn">
-          <Icon name="settings" size={12} />
-          Fields
-        </button>
-      </div>
+      <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
 
       {loading && orders.length === 0 ? (
         <SkeletonRows />
