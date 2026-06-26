@@ -1,6 +1,6 @@
-/* Dashboard — live orders (useOrders) + live activity feed
-   (OperationLog). Ready-to-Load is derived from the live pipeline. */
-import { useEffect, useMemo, useState } from "react";
+/* Dashboard — live orders (useOrders). Ready-to-Load is derived from
+   the live pipeline. */
+import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
@@ -8,53 +8,7 @@ import { fmt, pct } from "@/lib/format";
 import { exportCsv } from "@/lib/csv";
 import { STAGES } from "@/data";
 import type { Order } from "@/data";
-import { list } from "@/lib/dataOps";
 import { useOrders } from "@/features/orders/useOrders";
-import { cachedInvoices, listInvoices, type InvoiceRow } from "@/features/invoices/invoicesApi";
-
-interface FeedItem {
-  time: string;
-  who: string;
-  action: string;
-  detail: string;
-  tag: string;
-}
-
-const str = (v: unknown) => (v == null ? "" : String(v));
-
-const OP_VERB: Record<string, string> = { INSERT: "created", UPDATE: "updated", DELETE: "deleted" };
-const TABLE_LABEL: Record<string, string> = {
-  Quote: "quote",
-  SalesOrder: "order",
-  OrderItem: "order line",
-  Customer: "customer",
-  Design: "design",
-  Pallet: "pallet",
-  PalletisedBatch: "pallet batch",
-  PalletisedBatchLine: "batch line",
-  Container: "container",
-  ContainerLoading: "container load",
-};
-const TABLE_TAG: Record<string, string> = {
-  Quote: "po",
-  SalesOrder: "po",
-  OrderItem: "po",
-  PalletisedBatch: "packing",
-  PalletisedBatchLine: "packing",
-  Container: "loading",
-  ContainerLoading: "loading",
-};
-
-/** "yyyy-MM-dd HH:mm:ss" (OperationLog.occurred_at) → relative label. */
-function feedTime(occurredAt: string): string {
-  const d = new Date(occurredAt.replace(" ", "T"));
-  if (isNaN(d.getTime())) return "—";
-  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  if (days <= 0)
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (days === 1) return "Yest.";
-  return `${days}d`;
-}
 
 /** Monday 00:00 of the week containing `d`. */
 function startOfWeek(d: Date): Date {
@@ -76,59 +30,8 @@ function inThisWeek(dateStr: string): boolean {
   return d >= start && d < end;
 }
 
-/** Latest successful operations, shaped for the activity feed. */
-function useActivityFeed(): { feed: FeedItem[]; loading: boolean } {
-  const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let alive = true;
-    void list("OperationLog", { order: "ROWID desc", limit: 50 }).then((res) => {
-      if (!alive) return;
-      setLoading(false);
-      const items = (res.rows || [])
-        .filter((r) => str(r.status) === "success")
-        .slice(0, 10)
-        .map((r) => {
-          const table = str(r.table_name);
-          const op = str(r.operation).toUpperCase();
-          return {
-            time: feedTime(str(r.occurred_at)),
-            who: str(r.actor) || "system",
-            action: `${OP_VERB[op] || op.toLowerCase()} ${TABLE_LABEL[table] || table}`,
-            detail: str(r.payload_summary) || (r.entity_rowid ? `#${str(r.entity_rowid)}` : "—"),
-            tag: TABLE_TAG[table] || "production",
-          };
-        });
-      setFeed(items);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  return { feed, loading };
-}
-
-/** Live invoices for the KPI strip (cache-first, refreshed on mount). */
-function useInvoiceKpi(): InvoiceRow[] {
-  const [invoices, setInvoices] = useState<InvoiceRow[]>(() => cachedInvoices() ?? []);
-  useEffect(() => {
-    let alive = true;
-    void listInvoices().then((r) => {
-      if (alive && r.ok) setInvoices(r.invoices);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return invoices;
-}
-
 export function Dashboard() {
   const { orders: allOrders, loading, error, reload } = useOrders();
-  const { feed, loading: feedLoading } = useActivityFeed();
-  const invoices = useInvoiceKpi();
   const [range, setRange] = useState<"all" | "week">("all");
 
   // "This week" toggle scopes every KPI + table below to the current week.
@@ -196,22 +99,7 @@ export function Dashboard() {
     0,
   );
 
-  // Invoiced this month, summed only when every invoice shares one currency.
   const now = new Date();
-  const monthInvoices = invoices.filter((i) => {
-    const d = new Date(i.invoiceDate.replace(" ", "T"));
-    return !isNaN(d.getTime()) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const invCurrencies = new Set(monthInvoices.map((i) => i.currency).filter(Boolean));
-  const invTotal = monthInvoices.reduce((s, i) => s + i.totalAmount, 0);
-  const invDelta =
-    monthInvoices.length === 0
-      ? "no invoices yet"
-      : invCurrencies.size === 1
-        ? `${[...invCurrencies][0]} ${fmt(invTotal)} total`
-        : `${fmt(invTotal)} total (mixed currency)`;
-  const monthLabel = now.toLocaleDateString("en-GB", { month: "short" });
-
   const dateLabel = `Today, ${now.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} · ${now.toLocaleDateString("en-GB", { weekday: "long" })}`;
 
   const byDesign = useMemo(() => {
@@ -276,7 +164,6 @@ export function Dashboard() {
         <KPI label="Pallets Packed" value={fmt(packedPallets)} unit="pallets" delta={`${fmt(totalPal)} boxes total`} color="var(--c-violet)" />
         <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} color="var(--c-cyan)" />
         <KPI label="Loaded" value={fmt(loadedPallets)} unit="pallets" delta={`${fmt(loadedBoxes)} boxes loaded`} color="var(--c-green)" />
-        <KPI label={`Invoiced (${monthLabel})`} value={String(monthInvoices.length)} unit="invoices" delta={invDelta} color="var(--c-amber)" />
       </div>
       )}
 
@@ -430,7 +317,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="split" style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12 }}>
         <div className="card">
           <div className="card-head">
             <Icon name="tile" size={13} />
@@ -479,45 +366,6 @@ export function Dashboard() {
             })}
           </div>
           )}
-        </div>
-
-        <div className="card">
-          <div className="card-head">
-            <Icon name="bell" size={13} />
-            <span className="title">Activity</span>
-            <div className="right">
-              <span className="muted">Live</span>
-              <span className="live-dot" />
-            </div>
-          </div>
-          <div className="activity">
-            {feedLoading && feed.length === 0 && <SkeletonRows rows={6} />}
-            {!feedLoading && feed.length === 0 && (
-              <div className="muted" style={{ textAlign: "center", padding: 18 }}>
-                No activity yet.
-              </div>
-            )}
-            {feed.map((a, i) => {
-              const stageColor =
-                ({ production: "blue", packing: "violet", loading: "cyan", po: "amber", final: "green" } as Record<string, string>)[
-                  a.tag
-                ] || "blue";
-              return (
-                <div className="item" key={i}>
-                  <div className="time">{a.time}</div>
-                  <div className="indicator">
-                    <span className={`dot ${stageColor}`} />
-                  </div>
-                  <div className="body">
-                    <div>
-                      <span className="who">{a.who}</span> <span className="action">{a.action}</span>
-                    </div>
-                    <div className="detail">{a.detail}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
     </div>
