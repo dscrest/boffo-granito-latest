@@ -17,7 +17,15 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 export interface LookupOption {
   id: string; // parent ROWID (the value stored in the FK column)
   label: string;
+  widthMm?: number; // Size only: tile dimensions, used to auto-fill the form
+  lengthMm?: number;
 }
+
+/* Whether to persist per-design width_mm/length_mm columns on the Design
+   table. Flip to true once those decimal columns exist in Catalyst; while
+   false the form still computes coverage from width/length (auto-filled
+   from the Size lookup) and persists only coverage_sqm/coverage_sqft. */
+export const PERSIST_DESIGN_DIMS = true;
 
 /** All six FK lookup option lists, ready for the form selects. */
 export interface DesignLookups {
@@ -52,6 +60,8 @@ export interface DesignRow {
   gradeId: string;
   gradeLabel: string;
   // specs / rates
+  widthMm: number;
+  lengthMm: number;
   pcsPerBox: number;
   boxWeightKg: number;
   coverageSqm: number;
@@ -77,8 +87,16 @@ const LOOKUP_KEY: Record<string, string> = {
 
 function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
   const key = LOOKUP_KEY[table];
+  const withDims = table === "Size";
   return (rows || [])
-    .map((r) => ({ id: String(r.ROWID), label: str(r[key]) || str(r.name) || String(r.ROWID) }))
+    .map((r) => {
+      const o: LookupOption = { id: String(r.ROWID), label: str(r[key]) || str(r.name) || String(r.ROWID) };
+      if (withDims) {
+        o.widthMm = num(r.width_mm);
+        o.lengthMm = num(r.length_mm);
+      }
+      return o;
+    })
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
@@ -117,7 +135,7 @@ async function fetchDesigns(): Promise<{
   // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
   const [designs, size, finish, category, glaze, brand, grade] = await Promise.all([
     listAll("Design", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code"] }),
+    list("Size", { limit: 300, columns: ["code", "width_mm", "length_mm"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Category", { limit: 300, columns: ["name"] }),
     list("Glaze", { limit: 300, columns: ["name"] }),
@@ -172,6 +190,8 @@ async function fetchDesigns(): Promise<{
       brandLabel: br.get(brandId) || "",
       gradeId,
       gradeLabel: gr.get(gradeId) || "",
+      widthMm: num(d.width_mm),
+      lengthMm: num(d.length_mm),
       pcsPerBox: num(d.pcs_per_box),
       boxWeightKg: num(d.box_weight_kg),
       coverageSqm: num(d.coverage_sqm),
@@ -205,6 +225,8 @@ export interface DesignInput {
   brand: string;
   grade: string;
   // specs / rates
+  width_mm: number;
+  length_mm: number;
   pcs_per_box: number;
   box_weight_kg: number;
   coverage_sqm: number;
@@ -242,6 +264,7 @@ function toPayload(input: DesignInput): Record<string, unknown> {
     status: input.status.trim(),
     pcs_per_box: input.pcs_per_box,
     box_weight_kg: input.box_weight_kg,
+    ...(PERSIST_DESIGN_DIMS ? { width_mm: input.width_mm, length_mm: input.length_mm } : {}),
     coverage_sqm: input.coverage_sqm,
     coverage_sqft: input.coverage_sqft,
     random_faces: input.random_faces,

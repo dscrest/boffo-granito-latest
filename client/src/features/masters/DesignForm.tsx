@@ -9,13 +9,15 @@
    from designsApi (no static lists). Field keys match Data Store
    column names for 1:1 API wiring.
    ============================================================ */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
-/* Flat, all-string form state. Lookup fields hold a parent ROWID. */
+/* Flat, all-string form state. Lookup fields hold a parent ROWID.
+   Coverage is NOT held here — it's derived from width/length/pcs. */
 export interface DesignValues {
   design_name: string;
   base_design_name: string;
@@ -28,10 +30,10 @@ export interface DesignValues {
   glaze: string;
   brand: string;
   grade: string;
+  width_mm: string;
+  length_mm: string;
   pcs_per_box: string;
   box_weight_kg: string;
-  coverage_sqm: string;
-  coverage_sqft: string;
   random_faces: string;
   rate_per_sqft: string;
   rate_per_sqmt: string;
@@ -40,6 +42,10 @@ export interface DesignValues {
 }
 
 const STATUSES = ["Continue", "Discontinued"];
+
+/* Pick lists with more than this many options render as a searchable
+   Combobox (type-to-filter) instead of a scroll-only native <select>. */
+const SEARCHABLE_THRESHOLD = 10;
 
 type FieldKind = "text" | "number" | "select";
 interface FieldSpec {
@@ -75,12 +81,12 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     ],
   },
   {
-    title: "Specs",
+    title: "Dimensions & Coverage",
     fields: [
+      { key: "width_mm", label: "Width", kind: "number", suffix: "mm" },
+      { key: "length_mm", label: "Length", kind: "number", suffix: "mm" },
       { key: "pcs_per_box", label: "Pcs / Box", kind: "number" },
       { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg" },
-      { key: "coverage_sqm", label: "Coverage", kind: "number", suffix: "m²" },
-      { key: "coverage_sqft", label: "Coverage", kind: "number", suffix: "ft²" },
       { key: "random_faces", label: "Random Faces", kind: "number" },
     ],
   },
@@ -124,10 +130,10 @@ export function rowToValues(r: DesignRow): DesignValues {
     glaze: r.glazeId,
     brand: r.brandId,
     grade: r.gradeId,
+    width_mm: s(r.widthMm),
+    length_mm: s(r.lengthMm),
     pcs_per_box: s(r.pcsPerBox),
     box_weight_kg: s(r.boxWeightKg),
-    coverage_sqm: s(r.coverageSqm),
-    coverage_sqft: s(r.coverageSqft),
     random_faces: s(r.randomFaces),
     rate_per_sqft: s(r.ratePerSqft),
     rate_per_sqmt: s(r.ratePerSqmt),
@@ -156,9 +162,19 @@ export function computeSku(v: DesignValues, lk: DesignLookups): string {
 }
 
 const numOr0 = (s: string) => (s.trim() === "" ? 0 : Number(s) || 0);
+const round4 = (n: number) => Math.round(n * 1e4) / 1e4;
+const SQFT_PER_SQM = 10.763915;
 
-/** Convert form state → API DesignInput (numbers parsed, unique_name/sku computed). */
+/** Coverage per box, derived from tile dimensions:
+    sqm = (width/1000 · length/1000) · pcs;  sqft = sqm · 10.763915. */
+export function computeCoverage(v: DesignValues): { sqm: number; sqft: number } {
+  const sqm = (numOr0(v.width_mm) / 1000) * (numOr0(v.length_mm) / 1000) * numOr0(v.pcs_per_box);
+  return { sqm: round4(sqm), sqft: round4(sqm * SQFT_PER_SQM) };
+}
+
+/** Convert form state → API DesignInput (numbers parsed, unique_name/sku/coverage computed). */
 export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string[] = []): DesignInput {
+  const cov = computeCoverage(v);
   return {
     design_name: v.design_name,
     base_design_name: v.base_design_name,
@@ -173,10 +189,12 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
     glaze: v.glaze,
     brand: v.brand,
     grade: v.grade,
+    width_mm: numOr0(v.width_mm),
+    length_mm: numOr0(v.length_mm),
     pcs_per_box: numOr0(v.pcs_per_box),
     box_weight_kg: numOr0(v.box_weight_kg),
-    coverage_sqm: numOr0(v.coverage_sqm),
-    coverage_sqft: numOr0(v.coverage_sqft),
+    coverage_sqm: cov.sqm,
+    coverage_sqft: cov.sqft,
     random_faces: numOr0(v.random_faces),
     rate_per_sqft: numOr0(v.rate_per_sqft),
     rate_per_sqmt: numOr0(v.rate_per_sqmt),
@@ -205,12 +223,37 @@ export function DesignFields({
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
+  const cov = useMemo(() => computeCoverage(value), [value]);
+
+  // Auto-fill width/length from the chosen Size's dimensions when blank
+  // (covers edit-load when dims aren't persisted, and fresh size picks).
+  useEffect(() => {
+    if (!value.size || (value.width_mm && value.length_mm)) return;
+    const opt = lookups.sizes.find((o) => o.id === value.size);
+    if (!opt) return;
+    if (!value.width_mm && opt.widthMm) onChange("width_mm", String(opt.widthMm));
+    if (!value.length_mm && opt.lengthMm) onChange("length_mm", String(opt.lengthMm));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.size, lookups.sizes]);
+
+  // On an explicit Size change, overwrite width/length with that size's dims.
+  const handleField = (key: keyof DesignValues, val: string) => {
+    onChange(key, val);
+    if (key === "size") {
+      const opt = lookups.sizes.find((o) => o.id === val);
+      onChange("width_mm", opt?.widthMm ? String(opt.widthMm) : "");
+      onChange("length_mm", opt?.lengthMm ? String(opt.lengthMm) : "");
+    }
+  };
 
   return (
     <>
       <div className="df-banner">
         <span className="k">unique_name</span>
         <span className="chip">{uniqueName || "—"}</span>
+        <div style={{ flex: 1 }} />
+        <span className="k">coverage</span>
+        <span className="chip">{cov.sqm ? `${cov.sqm} m² · ${cov.sqft} ft²` : "—"}</span>
         <div style={{ flex: 1 }} />
         <span className="k">sku</span>
         <span className="chip">{sku}</span>
@@ -231,20 +274,31 @@ export function DesignFields({
                     {f.required && <span className="req"> *</span>}
                   </span>
                   {f.kind === "select" ? (
-                    <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => onChange(f.key, e.target.value)}>
-                      <option value="">—</option>
-                      {opts
-                        ? opts.map((o) => (
-                            <option key={o.id} value={o.id}>
+                    (() => {
+                      // Lookup FK options (id/label) or static string options.
+                      const comboOpts: ComboOption[] = opts
+                        ? opts.map((o) => ({ value: o.id, label: o.label }))
+                        : f.options!.map((o) => ({ value: o, label: o }));
+                      // >10 options → searchable Combobox; else scroll-only select.
+                      return comboOpts.length > SEARCHABLE_THRESHOLD ? (
+                        <Combobox
+                          value={value[f.key]}
+                          options={[{ value: "", label: "—" }, ...comboOpts]}
+                          onChange={(val) => handleField(f.key, val)}
+                          placeholder={`Search ${f.label.toLowerCase()}…`}
+                          invalid={!!err}
+                        />
+                      ) : (
+                        <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => handleField(f.key, e.target.value)}>
+                          <option value="">—</option>
+                          {comboOpts.map((o) => (
+                            <option key={o.value} value={o.value}>
                               {o.label}
                             </option>
-                          ))
-                        : f.options!.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
                           ))}
-                    </select>
+                        </select>
+                      );
+                    })()
                   ) : (
                     <input
                       className={err ? "error" : ""}

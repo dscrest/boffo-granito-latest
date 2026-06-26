@@ -237,6 +237,8 @@ Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewe
 | coverage_sqm | double | |
 | coverage_sqft | double | |
 | random_faces | int | |
+| width_mm | double | tile width (mm); auto-filled from Size, drives coverage calc |
+| length_mm | double | tile length (mm); auto-filled from Size, drives coverage calc |
 | status | varchar(50) | |
 | collection_name | varchar(255) | |
 | rate_per_sqft | double | keep BOTH rates, convert in app |

@@ -22,11 +22,14 @@ export function Combobox({
   options,
   onChange,
   placeholder = "Search…",
+  invalid = false,
 }: {
   value: string;
   options: ComboOption[];
   onChange: (value: string) => void;
   placeholder?: string;
+  /** Adds the `.error` class (red border) — drives required-field validation. */
+  invalid?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -90,7 +93,7 @@ export function Combobox({
   return (
     <div className="combo" ref={ref}>
       <input
-        className="combo-input"
+        className={invalid ? "combo-input error" : "combo-input"}
         role="combobox"
         aria-expanded={open}
         aria-autocomplete="list"
