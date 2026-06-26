@@ -32,6 +32,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "orders": return <svg {...common}><path d="M3 7h18M3 12h18M3 17h18"/></svg>;
     case "cart": return <svg {...common}><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.2 12.2a1.5 1.5 0 0 0 1.5 1.3h8.3a1.5 1.5 0 0 0 1.5-1.2L21.5 7H6"/></svg>;
     case "users": return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+    case "user": return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M5 21v-1a7 7 0 0 1 14 0v1"/></svg>;
     case "truck": return <svg {...common}><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/></svg>;
     case "package": return <svg {...common}><path d="M12 3 21 7v10l-9 4-9-4V7z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>;
     case "factory": return <svg {...common}><path d="M3 21V10l5 3V10l5 3V6h8v15z"/><path d="M9 21v-4M13 21v-4M17 21v-4"/></svg>;

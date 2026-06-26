@@ -427,7 +427,7 @@ export default function App() {
         </button>
         {isAdmin && (
           <button className="hbtn" title="Sales Persons" aria-label="Sales Persons" onClick={() => navigate("/salespersons")}>
-            <Icon name="cart" size={13} />
+            <Icon name="user" size={13} />
           </button>
         )}
         {isAdmin && (
