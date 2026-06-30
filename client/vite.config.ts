@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   // so the client can call functions during `vite dev` without CORS.
   const functionHost =
     env.VITE_FUNCTION_HOST ||
-    "https://boffo-latest-project-926227227.development.catalystserverless.com";
+    "https://boffo-granito-export-tracker-925638796.development.catalystserverless.com";
 
   return {
     plugins: [react()],

@@ -206,7 +206,20 @@ export function QuotesTable() {
                     <td>
                       <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>
                     </td>
-                    <td className="mono muted">{q.soNumber || "—"}</td>
+                    <td className="mono muted">
+                      {q.soNumber && q.soId ? (
+                        <button
+                          className="linkish"
+                          style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                          onClick={() => navigate(`/orders/${q.soId}`)}
+                          title="Open Master Order"
+                        >
+                          {q.soNumber}
+                        </button>
+                      ) : (
+                        q.soNumber || "—"
+                      )}
+                    </td>
                   </tr>
                 );
               })}

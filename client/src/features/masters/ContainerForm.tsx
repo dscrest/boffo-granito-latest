@@ -92,7 +92,7 @@ export function ContainerForm({
               <label className="form-field">
                 <span className="lbl">Type</span>
                 <select value={v.container_type} onChange={(e) => setStr("container_type", e.target.value)}>
-                  <option value="">—</option>
+                  <option value=""></option>
                   {CONTAINER_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}

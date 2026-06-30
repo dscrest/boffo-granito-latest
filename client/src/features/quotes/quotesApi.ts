@@ -92,10 +92,10 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
     (linesByQuote.get(qid) || linesByQuote.set(qid, []).get(qid)!).push(line);
   });
 
-  // SalesOrder number by source quote (for the SO column).
-  const soByQuote = new Map<string, string>();
+  // SalesOrder number + ROWID by source quote (for the SO column + link).
+  const soByQuote = new Map<string, { number: string; id: string }>();
   (sos.rows || []).forEach((s) => {
-    if (s.quote) soByQuote.set(str(s.quote), str(s.order_number));
+    if (s.quote) soByQuote.set(str(s.quote), { number: str(s.order_number), id: String(s.ROWID) });
   });
 
   const quotes: Quote[] = (q.rows || []).map((r) => {
@@ -123,7 +123,8 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       taxPct: num(r.tax_pct),
       taxAmount: num(r.tax_amount),
       lines: linesByQuote.get(id) || [],
-      soNumber: soByQuote.get(id) || null,
+      soNumber: soByQuote.get(id)?.number || null,
+      soId: soByQuote.get(id)?.id || null,
       shareToken: str(r.share_token),
     };
   });

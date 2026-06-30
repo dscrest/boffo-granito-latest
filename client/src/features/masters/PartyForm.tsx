@@ -177,7 +177,7 @@ export function PartyForm({
               <label className="form-field">
                 <span className="lbl">Country</span>
                 <select value={country} onChange={(e) => setCountry(e.target.value)}>
-                  <option value="">—</option>
+                  <option value=""></option>
                   {Object.keys(COUNTRIES).map((c) => (
                     <option key={c} value={c}>
                       {COUNTRIES[c].flag} {c}
@@ -194,7 +194,7 @@ export function PartyForm({
               <label className="form-field">
                 <span className="lbl">Salutation</span>
                 <select value={x.contact_salutation} onChange={(e) => setExtra("contact_salutation", e.target.value)}>
-                  <option value="">—</option>
+                  <option value=""></option>
                   {SALUTATIONS.map((s) => (
                     <option key={s} value={s}>
                       {s}
@@ -241,7 +241,7 @@ export function PartyForm({
               <label className="form-field">
                 <span className="lbl">Payment Term</span>
                 <select value={v.payment_term} onChange={(e) => set("payment_term", e.target.value)}>
-                  <option value="">—</option>
+                  <option value=""></option>
                   {paymentTerms.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}

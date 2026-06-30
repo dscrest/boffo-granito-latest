@@ -169,11 +169,13 @@ export interface Quote {
   lines: QuoteLine[];
   /** SO number once converted (full or partial). */
   soNumber: string | null;
+  /** SalesOrder ROWID for the linked SO (for navigation); null until converted. */
+  soId?: string | null;
   /** Public share-link token ("" until first shared). */
   shareToken?: string;
 }
 
-export const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
+// Payment terms now come from the live PaymentTerm master (useMasters().paymentTerms).
 export const PORTS = ["Mundra", "Nhava Sheva", "Pipavav", "Hazira", "Kandla"];
 export const CURRENCIES = ["INR", "USD", "EUR"];
 

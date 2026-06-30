@@ -283,14 +283,14 @@ export function DesignFields({
                       return comboOpts.length > SEARCHABLE_THRESHOLD ? (
                         <Combobox
                           value={value[f.key]}
-                          options={[{ value: "", label: "—" }, ...comboOpts]}
+                          options={[{ value: "", label: "" }, ...comboOpts]}
                           onChange={(val) => handleField(f.key, val)}
                           placeholder={`Search ${f.label.toLowerCase()}…`}
                           invalid={!!err}
                         />
                       ) : (
                         <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => handleField(f.key, e.target.value)}>
-                          <option value="">—</option>
+                          <option value=""></option>
                           {comboOpts.map((o) => (
                             <option key={o.value} value={o.value}>
                               {o.label}

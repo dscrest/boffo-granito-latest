@@ -5,13 +5,13 @@
    line keys match the Data Store column names for 1:1 API wiring
    later. Reuses the shared form/modal CSS (df-*, form-*).
    ============================================================ */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { CATEGORIES, docTotals, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { salesPersonOptions } from "@/features/masters/salespersonApi";
+import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 
@@ -53,7 +53,6 @@ function orderLineSub(l: OrderLine): number {
   return gross - disc;
 }
 
-const PAYMENT_TERMS = ["Advance", "Credit 30", "Net 15", "Net 30", "Net 45", "Net 60"];
 const STATUSES = ["Confirmed", "InProgress", "Cancelled"];
 const CURRENCIES = ["INR", "USD", "EUR"];
 
@@ -72,7 +71,8 @@ const HEADER: FieldSpec[] = [
   { key: "po_number", label: "PO Number", required: true },
   { key: "order_date", label: "Order Date", kind: "date" },
   { key: "shipment_date", label: "Shipment Date", kind: "date" },
-  { key: "payment_term", label: "Payment Term", kind: "select", options: PAYMENT_TERMS },
+  // options injected at render from the live PaymentTerm master (useMasters)
+  { key: "payment_term", label: "Payment Term", kind: "select", options: [] },
   { key: "currency", label: "Currency", kind: "select", options: CURRENCIES },
   { key: "status", label: "Status", kind: "select", options: STATUSES },
   { key: "salesperson", label: "Salesperson" },
@@ -115,7 +115,7 @@ export function OrderForm({
     taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
-  const { parties, designs, salesPersons } = useMasters();
+  const { parties, designs, salesPersons, paymentTerms } = useMasters();
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
     () => (cat ? designs.filter((d) => d.category === cat) : designs),
@@ -125,6 +125,17 @@ export function OrderForm({
     () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
     [designs],
   );
+
+  // Default the salesperson to the rep linked to the logged-in user.
+  const defaultedSp = useRef(false);
+  useEffect(() => {
+    if (defaultedSp.current || !salesPersons.length) return;
+    const name = currentSalespersonName(salesPersons);
+    if (name) {
+      defaultedSp.current = true;
+      setH((p) => (p.salesperson ? p : { ...p, salesperson: name }));
+    }
+  }, [salesPersons]);
 
   const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
   const setLine = (i: number, k: keyof OrderLine, val: string) =>
@@ -238,8 +249,8 @@ export function OrderForm({
                         value={h[f.key as keyof typeof h]}
                         onChange={(e) => setHead(f.key, e.target.value)}
                       >
-                        <option value="">—</option>
-                        {f.options!.map((o) => (
+                        <option value=""></option>
+                        {(f.key === "payment_term" ? paymentTerms.map((t) => t.label) : f.options!).map((o) => (
                           <option key={o} value={o}>
                             {o}
                           </option>

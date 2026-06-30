@@ -1,8 +1,14 @@
 {
   "functions": {
     "source": "functions",
-    "targets": ["api-health", "data-ops"],
-    "ignore": [".git", "*.log"]
+    "targets": [
+      "api-health",
+      "data-ops"
+    ],
+    "ignore": [
+      ".git",
+      "*.log"
+    ]
   },
   "client": {
     "source": "client/dist"

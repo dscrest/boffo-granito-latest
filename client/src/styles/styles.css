@@ -421,7 +421,7 @@ a { color: inherit; text-decoration: none; }
 .stage.green  { color: var(--c-green);  border-color: oklch(0.55 0.16 150 / 0.30); background: oklch(0.55 0.16 150 / 0.10); }
 
 /* KPI */
-.kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .kpi {
   background: var(--panel);
   border: 1px solid var(--border);

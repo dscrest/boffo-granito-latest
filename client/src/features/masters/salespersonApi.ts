@@ -9,6 +9,7 @@
    ============================================================ */
 import { list, listAll, insert, update, remove } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { storedAuth } from "@/lib/auth";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -97,6 +98,13 @@ export function updateSalesPerson(rowid: string, input: SalesPersonInput) {
 
 export function deleteSalesPerson(rowid: string) {
   return bust(remove("SalesPerson", rowid));
+}
+
+/** Name of the active SalesPerson linked to the logged-in AppUser, or "" if none. */
+export function currentSalespersonName(rows: SalesPersonRow[]): string {
+  const uid = storedAuth()?.user.rowid;
+  if (!uid) return "";
+  return rows.find((s) => s.active && s.appUserId === uid)?.name ?? "";
 }
 
 /** Combobox options (value = name, since Quote/SO resolve salesperson by name). */

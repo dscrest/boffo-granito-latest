@@ -381,7 +381,18 @@ export function QuoteDetail() {
               {FIELDS.filter((f) => !hidden.has(f.key) && !NOTE_KEYS.has(f.key)).map((f) => (
                 <div className="form-field" key={f.key} style={f.wide ? { gridColumn: "1 / -1" } : undefined}>
                   <span className="lbl">{f.label}</span>
-                  <span style={{ color: "var(--fg)" }}>{f.value(quote)}</span>
+                  {f.key === "soNumber" && quote.soNumber && quote.soId ? (
+                    <button
+                      className="linkish"
+                      style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", textAlign: "left" }}
+                      onClick={() => navigate(`/orders/${quote.soId}`)}
+                      title="Open Master Order"
+                    >
+                      {quote.soNumber}
+                    </button>
+                  ) : (
+                    <span style={{ color: "var(--fg)" }}>{f.value(quote)}</span>
+                  )}
                 </div>
               ))}
             </div>

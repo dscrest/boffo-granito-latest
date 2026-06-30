@@ -2,14 +2,17 @@
    Masters — generic, config-driven data-entry for the BOFFO
    lookup tables (Size, Finish, Category, Glaze, Brand, Grade,
    PaymentTerm). One <MasterTable> driven by a per-table field
-   schema. FRONTEND-ONLY for now: rows live in local React state
-   (no DB writes yet — backend CRUD wires in later). Markup reuses
-   existing app classes (page-head, fbar, card, tbl, btn, hbtn).
+   schema, backed by the Catalyst Data Store via mastersApi (each
+   write recorded in OperationLog). Markup reuses existing app
+   classes (page-head, fbar, card, tbl, btn, hbtn).
    ============================================================ */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
+import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
+import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
 
 /* Admin areas that have their own dedicated pages (not local-draft lookup
    tables). Surfaced here as config tiles that route out to those pages. */
@@ -32,26 +35,23 @@ interface MasterDef {
   key: string;
   label: string;
   icon: string;
+  /** Catalyst Data Store table name (CRUD target). */
+  table: string;
   /** column field that visually leads the row (rendered as a chip) */
   lead: string;
   fields: Field[];
-  seed: Row[];
 }
 
-type Row = Record<string, string> & { _id: string };
+type Row = MasterRow;
 
-let _seq = 0;
-const newId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `r${++_seq}`;
-const seed = (rows: Record<string, string>[]): Row[] => rows.map((r) => ({ ...r, _id: newId() }));
-
-/* Column/field schema + starter rows per master. Field keys match the
-   Catalyst Data Store column names so wiring to the API later is 1:1. */
+/* Column/field schema per master. Field keys match the Catalyst Data Store
+   column names, so values pass straight through mastersApi to the table. */
 const MASTERS: MasterDef[] = [
   {
     key: "size",
     label: "Size",
     icon: "tile",
+    table: "Size",
     lead: "code",
     fields: [
       { key: "code", label: "Code", required: true },
@@ -59,77 +59,64 @@ const MASTERS: MasterDef[] = [
       { key: "length_mm", label: "Length (mm)", type: "number" },
       { key: "seq_code", label: "Seq" },
     ],
-    seed: seed([
-      { code: "600x1200", width_mm: "600", length_mm: "1200", seq_code: "01" },
-      { code: "200x1200", width_mm: "200", length_mm: "1200", seq_code: "02" },
-      { code: "600x600", width_mm: "600", length_mm: "600", seq_code: "03" },
-      { code: "75x600", width_mm: "75", length_mm: "600", seq_code: "04" },
-    ]),
   },
   {
     key: "finish",
     label: "Finish",
     icon: "palette",
+    table: "Finish",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "seq_code", label: "Seq" },
     ],
-    seed: seed([
-      { name: "Glossy", seq_code: "01" },
-      { name: "Matt", seq_code: "02" },
-      { name: "Carving", seq_code: "03" },
-      { name: "Hard Matt", seq_code: "04" },
-    ]),
   },
   {
     key: "category",
     label: "Category",
     icon: "tile",
+    table: "Category",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "seq_code", label: "Seq" },
     ],
-    seed: seed([]),
   },
   {
     key: "glaze",
     label: "Glaze",
     icon: "palette",
+    table: "Glaze",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "seq_code", label: "Seq" },
     ],
-    seed: seed([]),
   },
   {
     key: "brand",
     label: "Brand",
     icon: "flag",
+    table: "Brand",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "internal_or_external", label: "Type", type: "select", options: ["Internal", "External"] },
     ],
-    seed: seed([
-      { name: "Bonza", internal_or_external: "Internal" },
-      { name: "BIG", internal_or_external: "External" },
-    ]),
   },
   {
     key: "grade",
     label: "Grade",
     icon: "check",
+    table: "Grade",
     lead: "name",
     fields: [{ key: "name", label: "Name", required: true }],
-    seed: seed([{ name: "1st" }]),
   },
   {
     key: "payment_term",
     label: "Payment Term",
     icon: "invoice",
+    table: "PaymentTerm",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
@@ -140,10 +127,6 @@ const MASTERS: MasterDef[] = [
         options: ["Advance", "Credit", "Net 15", "Net 30", "Net 45", "Net 60"],
       },
     ],
-    seed: seed([
-      { name: "Advance", term_type: "Advance" },
-      { name: "Credit 30", term_type: "Net 30" },
-    ]),
   },
 ];
 
@@ -182,7 +165,7 @@ function MasterEditor({
             </span>
             {f.type === "select" ? (
               <select value={vals[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)}>
-                <option value="">—</option>
+                <option value=""></option>
                 {f.options!.map((o) => (
                   <option key={o} value={o}>
                     {o}
@@ -214,10 +197,34 @@ function MasterEditor({
 }
 
 function MasterTable({ def }: { def: MasterDef }) {
-  const [rows, setRows] = useState<Row[]>(def.seed);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ id: string | null } | null>(null); // null = closed, {id:null} = new
+
+  const fieldKeys = useMemo(() => def.fields.map((f) => f.key), [def]);
+
+  const load = async () => {
+    setLoading(true);
+    const res = await listMaster(def.table, fieldKeys);
+    setLoading(false);
+    if (!res.ok) {
+      setError(res.error || `Failed to load ${def.label}`);
+      return;
+    }
+    setError(null);
+    setRows(res.rows);
+    setSelected(new Set());
+  };
+
+  // Reload whenever the active master changes (keyed remount also resets state).
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [def.table]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -228,13 +235,21 @@ function MasterTable({ def }: { def: MasterDef }) {
   const initialForm =
     editing && editing.id ? (rows.find((r) => r._id === editing.id) ?? emptyForm(def)) : emptyForm(def);
 
-  const save = (vals: Record<string, string>) => {
-    if (editing?.id) {
-      setRows((rs) => rs.map((r) => (r._id === editing.id ? { ...r, ...vals } : r)));
-    } else {
-      setRows((rs) => [...rs, { ...vals, _id: newId() }]);
-    }
+  const save = async (vals: Record<string, string>) => {
+    const editId = editing?.id;
     setEditing(null);
+    setBusy(true);
+    const res = editId
+      ? await updateMaster(def.table, editId, vals)
+      : await createMaster(def.table, vals);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      setError(res.error || "Save failed");
+      return;
+    }
+    toast.success(editId ? `${def.label} updated` : `${def.label} added`);
+    await load();
   };
 
   const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r._id));
@@ -254,10 +269,20 @@ function MasterTable({ def }: { def: MasterDef }) {
       return next;
     });
 
-  const removeSelected = () => {
-    if (!window.confirm(`Delete ${selected.size} selected row${selected.size > 1 ? "s" : ""}?`)) return;
-    setRows((rs) => rs.filter((r) => !selected.has(r._id)));
-    setSelected(new Set());
+  const removeSelected = async () => {
+    const ids = [...selected];
+    if (!window.confirm(`Delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}?`)) return;
+    setBusy(true);
+    const results = await Promise.all(ids.map((id) => deleteMaster(def.table, id)));
+    setBusy(false);
+    const failed = results.filter((r) => !r.ok).length;
+    if (failed) {
+      toast.error(`${ids.length - failed} deleted, ${failed} failed`);
+      setError(results.find((r) => !r.ok)?.error || "Delete failed");
+    } else {
+      toast.success(`${ids.length} deleted`);
+    }
+    await load();
   };
 
   return (
@@ -269,7 +294,7 @@ function MasterTable({ def }: { def: MasterDef }) {
             {selected.size} selected
           </span>
           {canDelete() && (
-            <button className="btn" onClick={removeSelected}>
+            <button className="btn" onClick={() => void removeSelected()} disabled={busy}>
               Delete
             </button>
           )}
@@ -294,7 +319,12 @@ function MasterTable({ def }: { def: MasterDef }) {
 
       {editing && <MasterEditor def={def} initial={initialForm} onSave={save} onCancel={() => setEditing(null)} />}
 
+      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
+
       <div className="card">
+        {loading && rows.length === 0 ? (
+          <SkeletonRows rows={6} />
+        ) : (
         <table className="tbl">
           <thead>
             <tr>
@@ -315,10 +345,10 @@ function MasterTable({ def }: { def: MasterDef }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <tr>
                 <td colSpan={def.fields.length + 2} className="muted" style={{ textAlign: "center", padding: 24 }}>
-                  No rows yet — click “New {def.label.toLowerCase()}”.
+                  {rows.length > 0 ? "No matching results." : `No rows yet — click “New ${def.label.toLowerCase()}”.`}
                 </td>
               </tr>
             )}
@@ -358,6 +388,7 @@ function MasterTable({ def }: { def: MasterDef }) {
             })}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   );
@@ -374,8 +405,7 @@ export function Masters() {
         <div>
           <div className="title">Masters</div>
           <div className="sub">
-            Lookup data entry · {MASTERS.length} tables ·{" "}
-            <span style={{ color: "var(--c-amber, var(--dim))" }}>local draft — not yet saved to database</span>
+            Lookup data entry · {MASTERS.length} tables · saved to Catalyst Data Store
           </div>
         </div>
       </div>

@@ -3,12 +3,17 @@
    (emits a PalletInput to the parent, which persists via palletsApi).
    Reuses the shared form/modal CSS (df-*, form-*).
    ============================================================ */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import type { PalletInput, SizeOption } from "./palletsApi";
 
-// Known pallet types (datalist suggestions; field stays free text).
+// Default pallet types (datalist seed). The live list is these merged with the
+// distinct types already saved on Pallet rows — a new type typed here is
+// created on save (it persists as the Pallet.pallet_type column value).
+// ponytail: no dedicated PalletType master table; distinct column values are
+// the "master". Add a real table if types ever need their own attributes.
 const PALLET_TYPES = [
   "Junglee",
   "Pine Euro",
@@ -40,13 +45,17 @@ const blank: PalletInput = {
 };
 
 export function PalletForm({
-  sizes,
+  palletTypes = [],
+  sizeOptions = [],
   initial,
   isEdit,
   onSave,
   onClose,
 }: {
-  sizes: SizeOption[];
+  /** Distinct pallet types already in the DB — merged with the defaults. */
+  palletTypes?: string[];
+  /** Live Size master options (FK ROWID + label), from the DB. */
+  sizeOptions?: SizeOption[];
   initial?: PalletFormInitial;
   isEdit?: boolean;
   onSave: (input: PalletInput) => void;
@@ -56,21 +65,52 @@ export function PalletForm({
   const setStr = (k: keyof PalletInput, val: string) => setV((p) => ({ ...p, [k]: val }));
   const setNum = (k: keyof PalletInput, val: string) => setV((p) => ({ ...p, [k]: Number(val) || 0 }));
 
-  const missing = !v.name.trim();
+  // Size comes from the Size master (FK in v.size). The label drives the name +
+  // pallet_size_label. Legacy rows with only a pallet_size_label (no FK) keep
+  // that label as a fallback until the operator re-picks a Size.
+  const sizeLabel =
+    sizeOptions.find((o) => o.id === v.size)?.label || initial?.pallet_size_label || "";
+
+  // Packing detail auto-computes from arrangement A → "[30 * 18] = 540".
+  const packing = useMemo(() => {
+    const product = v.boxes_per_pallet * v.pallets_per_container;
+    return v.boxes_per_pallet && v.pallets_per_container
+      ? `[${v.boxes_per_pallet} * ${v.pallets_per_container}] = ${product}`
+      : "";
+  }, [v.boxes_per_pallet, v.pallets_per_container]);
+
+  // 5.4: auto-name → "SIZE - Packing Detail - Type", e.g.
+  // "800x1600 - [30 * 18] = 540 - Junglee".
+  const autoName = useMemo(
+    () => [sizeLabel, packing, v.pallet_type.trim()].filter(Boolean).join(" - "),
+    [sizeLabel, packing, v.pallet_type],
+  );
+
+  // Keep Name in sync with the formula until the operator types over it.
+  const [nameTouched, setNameTouched] = useState(!!isEdit);
+  useEffect(() => {
+    if (!nameTouched) setV((p) => (p.name === autoName ? p : { ...p, name: autoName }));
+  }, [autoName, nameTouched]);
+
+  const typeOptions = useMemo(
+    () => [...new Set([...PALLET_TYPES, ...palletTypes].filter(Boolean))],
+    [palletTypes],
+  );
+  const isNewType = !!v.pallet_type.trim() && !typeOptions.includes(v.pallet_type.trim());
+
   const totalBoxes =
     v.boxes_per_pallet * v.pallets_per_container + v.b_boxes_per_pallet * v.b_pallets_per_container;
   const totalPallets = v.pallets_per_container + v.b_pallets_per_container;
 
-  // Errors stay hidden until the first submit attempt, then update live.
-  const [showErrors, setShowErrors] = useState(false);
-  const nameErr = showErrors && !v.name.trim() ? "Name is required" : null;
-
+  // 5.5: nothing is mandatory — submit always proceeds.
   const submit = () => {
-    if (missing) {
-      setShowErrors(true);
-      return;
-    }
-    onSave({ ...v, name: v.name.trim() });
+    onSave({
+      ...v,
+      name: v.name.trim(),
+      packing_details: packing,
+      pallet_size_label: sizeLabel,
+      size: v.size,
+    });
   };
 
   const panelRef = useModalA11y(onClose);
@@ -96,35 +136,13 @@ export function PalletForm({
             <div className="form-section-title">Identity</div>
             <div className="form-grid">
               <label className="form-field">
-                <span className="lbl">
-                  Name<span className="req"> *</span>
-                </span>
-                <input
-                  className={nameErr ? "error" : ""}
-                  value={v.name}
-                  onChange={(e) => setStr("name", e.target.value)}
-                  placeholder="e.g. 600x1200 - [32 * 30] = 960 - Pine Euro"
-                />
-                {nameErr && <span className="field-err">{nameErr}</span>}
-              </label>
-              <label className="form-field">
-                <span className="lbl">Packing Details</span>
-                <input
-                  value={v.packing_details}
-                  onChange={(e) => setStr("packing_details", e.target.value)}
-                  placeholder="e.g. [32 * 30] = 960"
-                />
-              </label>
-              <label className="form-field">
                 <span className="lbl">Size</span>
-                <select value={v.size} onChange={(e) => setStr("size", e.target.value)}>
-                  <option value="">—</option>
-                  {sizes.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={v.size}
+                  options={[{ value: "", label: "" }, ...sizeOptions.map((s) => ({ value: s.id, label: s.label }))]}
+                  onChange={(val) => setStr("size", val)}
+                  placeholder="Search size…"
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Pallet Type</span>
@@ -135,18 +153,45 @@ export function PalletForm({
                   placeholder="e.g. Junglee"
                 />
                 <datalist id="pallet-type-list">
-                  {PALLET_TYPES.map((t) => (
+                  {typeOptions.map((t) => (
                     <option key={t} value={t} />
                   ))}
                 </datalist>
+                {isNewType && (
+                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                    + New type — created when you save
+                  </span>
+                )}
               </label>
               <label className="form-field">
-                <span className="lbl">Pallet Size</span>
+                <span className="lbl">Packing Details (auto)</span>
+                {/* ponytail: auto from Boxes/Pallet × Pallets/Container. Make it
+                    auto-with-override (mirror nameTouched) only if operators need
+                    custom packing notes. */}
                 <input
-                  value={v.pallet_size_label}
-                  onChange={(e) => setStr("pallet_size_label", e.target.value)}
-                  placeholder={`e.g. 30"x48"`}
+                  value={packing || "—"}
+                  readOnly
+                  tabIndex={-1}
+                  title="Boxes/Pallet × Pallets/Container"
+                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  placeholder="e.g. [32 * 30] = 960"
                 />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Name (auto)</span>
+                <input
+                  value={v.name}
+                  onChange={(e) => {
+                    setNameTouched(true);
+                    setStr("name", e.target.value);
+                  }}
+                  placeholder="Auto-generated from Size, packing & type"
+                />
+                {!nameTouched && (
+                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                    Auto from the fields above — edit to override
+                  </span>
+                )}
               </label>
             </div>
           </div>
@@ -305,9 +350,7 @@ export function PalletForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">
-            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
-          </span>
+          <span className="df-req-note">Name auto-generates — no required fields</span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>

@@ -109,7 +109,7 @@ export function OrderDetail() {
               disabled={sel.size === 0 || !head.salesOrderId}
               onClick={() => setPack({ mode: "selected" })}
             >
-              Palletize selected ({sel.size})
+              Send selected ({sel.size})
             </button>
             <button
               className="hbtn primary"
@@ -117,7 +117,7 @@ export function OrderDetail() {
               onClick={() => setPack({ mode: "all" })}
             >
               <Icon name="palette" size={13} />
-              Palletize all
+              Send to Palletisation
             </button>
           </div>
         </div>

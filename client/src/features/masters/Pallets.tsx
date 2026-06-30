@@ -118,13 +118,20 @@ export function Pallets() {
     await load();
   };
 
+  // Distinct types already saved, fed to the form so the picker can create-on-save.
+  const palletTypes = useMemo(
+    () => [...new Set(rows.map((r) => r.palletType).filter(Boolean))].sort(),
+    [rows],
+  );
+
   const initial: Partial<PalletInput> | undefined = editing?.row
     ? {
         name: editing.row.name,
         packing_details: editing.row.packingDetails,
         size: editing.row.sizeId,
         pallet_type: editing.row.palletType,
-        pallet_size_label: editing.row.palletSizeLabel,
+        // Carries the "WxL" tile label the form parses back into Width/Length.
+        pallet_size_label: editing.row.palletSizeLabel || editing.row.sizeLabel,
         coverage_sqm: editing.row.coverageSqm,
         coverage_sqft: editing.row.coverageSqft,
         box_weight_kg: editing.row.boxWeightKg,
@@ -142,7 +149,8 @@ export function Pallets() {
     <div>
       {editing && (
         <PalletForm
-          sizes={sizes}
+          palletTypes={palletTypes}
+          sizeOptions={sizes}
           initial={initial}
           isEdit={!!editing.row}
           onSave={onSave}
@@ -250,7 +258,7 @@ export function Pallets() {
                     <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
                     <td><span className="chip">{r.name}</span></td>
                     <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>
-                    <td>{r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : <span className="dim">—</span>}</td>
+                    <td>{r.sizeLabel || r.palletSizeLabel ? <span className="chip size">{r.sizeLabel || r.palletSizeLabel}</span> : <span className="dim">—</span>}</td>
                     <td className="muted">{r.palletType || <span className="dim">—</span>}</td>
                     <td className="num mono">
                       {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}

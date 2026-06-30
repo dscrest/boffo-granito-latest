@@ -5,14 +5,13 @@
    the Export Tracker `Quotes` reference for later Data Store wiring.
    Reuses shared form/modal CSS (df-*, form-*, ord-*).
    ============================================================ */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import {
   CATEGORIES,
   CURRENCIES,
-  PAYMENT_TERMS,
   PORTS,
   docTotals,
   lineTotals,
@@ -21,7 +20,7 @@ import {
   type TaxType,
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { salesPersonOptions } from "@/features/masters/salespersonApi";
+import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
 
@@ -71,7 +70,7 @@ export function QuoteForm({
   onClose: () => void;
 }) {
   const editing = !!initial;
-  const { customers, parties, designs, salesPersons } = useMasters();
+  const { customers, parties, designs, salesPersons, paymentTerms } = useMasters();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? "",
     address: initial?.address ?? "",
@@ -116,6 +115,17 @@ export function QuoteForm({
       }
       return next;
     });
+
+  // New quote: default the salesperson to the rep linked to the logged-in user.
+  const defaultedSp = useRef(false);
+  useEffect(() => {
+    if (editing || defaultedSp.current || !salesPersons.length) return;
+    const name = currentSalespersonName(salesPersons);
+    if (name) {
+      defaultedSp.current = true;
+      setH((p) => (p.salesperson ? p : { ...p, salesperson: name }));
+    }
+  }, [salesPersons, editing]);
 
   const setLine = (i: number, k: keyof QuoteLine, val: string) =>
     setLines((ls) =>
@@ -219,10 +229,10 @@ export function QuoteForm({
               <label className="form-field">
                 <span className="lbl">Payment Term</span>
                 <select value={h.paymentTerm} onChange={(e) => setHead("paymentTerm", e.target.value)}>
-                  <option value="">—</option>
-                  {PAYMENT_TERMS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
+                  <option value=""></option>
+                  {paymentTerms.map((t) => (
+                    <option key={t.id} value={t.label}>
+                      {t.label}
                     </option>
                   ))}
                 </select>
@@ -230,7 +240,7 @@ export function QuoteForm({
               <label className="form-field">
                 <span className="lbl">Port of Discharge</span>
                 <select value={h.portOfDischarge} onChange={(e) => setHead("portOfDischarge", e.target.value)}>
-                  <option value="">—</option>
+                  <option value=""></option>
                   {PORTS.map((o) => (
                     <option key={o} value={o}>
                       {o}

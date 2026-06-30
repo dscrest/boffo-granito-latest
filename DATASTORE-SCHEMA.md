@@ -146,11 +146,15 @@ Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewe
 | length_mm | int | |
 | seq_code | varchar(10) | SKU segment |
 
+Values (`code` → width×length mm): 75x600, 98x600, 98x1200, 198x1200, 200x1200, 300x600, 400x1200, 600x600, 600x900, 600x1200, 800x800, 800x1600, 1200x1200, 1200x2780, 400x400.
+
 ### Finish (76673000000051001)
 | Column | Type | Notes |
 |---|---|---|
 | name | varchar(255) | key column |
 | seq_code | varchar(10) | SKU segment |
+
+Values: Glossy, Hard Matt, Carving, Matt, Elevation, High Glossy, Carving + Punch, DG Matt, GHR, Glossy Endless, Glossy Granula, Granula, Granula + Lapato.
 
 ### Category (76673000000052001)
 | Column | Type | Notes |
@@ -169,6 +173,8 @@ Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewe
 |---|---|---|
 | name | varchar(255) | key column |
 | term_type | varchar(50) | |
+
+Values: Credit, Advance, Net 15, Net 30, Net 45, Net 60.
 
 ### NumberMaster (76673000000049360)
 | Column | Type | Notes |
