@@ -98,9 +98,15 @@ export function PalletForm({
   );
   const isNewType = !!v.pallet_type.trim() && !typeOptions.includes(v.pallet_type.trim());
 
+  const r2 = (n: number) => Math.round(n * 100) / 100;
   const totalBoxes =
     v.boxes_per_pallet * v.pallets_per_container + v.b_boxes_per_pallet * v.b_pallets_per_container;
   const totalPallets = v.pallets_per_container + v.b_pallets_per_container;
+  // Per spec: one loaded pallet = (box wt × boxes/pallet) + empty pallet wt.
+  const totalPalletWeight = v.box_weight_kg * v.boxes_per_pallet + v.empty_pallet_weight_kg;
+  const totalSqm = totalBoxes * v.coverage_sqm;
+  const totalSqft = totalBoxes * v.coverage_sqft;
+  const totalBoxWeight = totalBoxes * v.box_weight_kg;
 
   // 5.5: nothing is mandatory — submit always proceeds.
   const submit = () => {
@@ -135,6 +141,22 @@ export function PalletForm({
           <div className="form-section">
             <div className="form-section-title">Identity</div>
             <div className="form-grid">
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Name</span>
+                <input
+                  value={v.name}
+                  onChange={(e) => {
+                    setNameTouched(true);
+                    setStr("name", e.target.value);
+                  }}
+                  placeholder="Auto-generated from Size, packing & type"
+                />
+                {!nameTouched && (
+                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                    Auto from the fields below — edit to override
+                  </span>
+                )}
+              </label>
               <label className="form-field">
                 <span className="lbl">Size</span>
                 <Combobox
@@ -164,7 +186,7 @@ export function PalletForm({
                 )}
               </label>
               <label className="form-field">
-                <span className="lbl">Packing Details (auto)</span>
+                <span className="lbl">Packing Details</span>
                 {/* ponytail: auto from Boxes/Pallet × Pallets/Container. Make it
                     auto-with-override (mirror nameTouched) only if operators need
                     custom packing notes. */}
@@ -176,22 +198,6 @@ export function PalletForm({
                   style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
                   placeholder="e.g. [32 * 30] = 960"
                 />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Name (auto)</span>
-                <input
-                  value={v.name}
-                  onChange={(e) => {
-                    setNameTouched(true);
-                    setStr("name", e.target.value);
-                  }}
-                  placeholder="Auto-generated from Size, packing & type"
-                />
-                {!nameTouched && (
-                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                    Auto from the fields above — edit to override
-                  </span>
-                )}
               </label>
             </div>
           </div>
@@ -259,7 +265,7 @@ export function PalletForm({
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">Pallet Weight (kg)</span>
+                <span className="lbl">Empty Pallet Weight (kg)</span>
                 <input
                   type="number"
                   min={0}
@@ -333,6 +339,46 @@ export function PalletForm({
                   tabIndex={-1}
                   style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
                   title="A pallets + B pallets"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total Pallet Weight (kg)</span>
+                <input
+                  value={totalPalletWeight > 0 ? String(r2(totalPalletWeight)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  title="(Box weight × Boxes/Pallet) + Empty pallet weight"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total Sq.M / Container</span>
+                <input
+                  value={totalSqm > 0 ? String(r2(totalSqm)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  title="Total Boxes × Coverage Sq.M"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total Sq.Ft / Container</span>
+                <input
+                  value={totalSqft > 0 ? String(r2(totalSqft)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  title="Total Boxes × Coverage Sq.Ft"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total Box Weight / Container (kg)</span>
+                <input
+                  value={totalBoxWeight > 0 ? String(r2(totalBoxWeight)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  title="Total Boxes × Box weight"
                 />
               </label>
             </div>

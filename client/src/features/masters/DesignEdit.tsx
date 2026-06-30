@@ -18,7 +18,9 @@ import {
 } from "./DesignForm";
 import {
   deleteDesign,
+  getDesignPallets,
   listDesigns,
+  setDesignPallets,
   updateDesign,
   type DesignLookups,
   type DesignRow,
@@ -31,6 +33,7 @@ const EMPTY_LOOKUPS: DesignLookups = {
   glazes: [],
   brands: [],
   grades: [],
+  partyBrands: [],
 };
 
 export function DesignEdit() {
@@ -38,6 +41,7 @@ export function DesignEdit() {
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
   const [images, setImages] = useState<string[]>([]);
+  const [palletIds, setPalletIds] = useState<string[]>([]);
   const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
   const [row, setRow] = useState<DesignRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +65,7 @@ export function DesignEdit() {
       if (found) {
         setV(rowToValues(found));
         setImages(found.images);
+        setPalletIds(await getDesignPallets(id));
       } else setError("Design not found.");
     })();
     return () => {
@@ -82,6 +87,7 @@ export function DesignEdit() {
     setBusy(true);
     setError(null);
     const res = await updateDesign(id, toDesignInput(v, lookups, images));
+    if (res.ok) await setDesignPallets(id, palletIds);
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Save failed");
@@ -140,7 +146,16 @@ export function DesignEdit() {
       {row && (
         <div className="card df-modal" style={{ padding: 16 }}>
           <div className="df-body" style={{ padding: 0 }}>
-            <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} images={images} onImages={setImages} />
+            <DesignFields
+              value={v}
+              onChange={set}
+              lookups={lookups}
+              showErrors={showErrors}
+              images={images}
+              onImages={setImages}
+              pallets={palletIds}
+              onPallets={setPalletIds}
+            />
           </div>
           <div className="df-foot" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy} onClick={() => void onDelete()} title="Delete design">

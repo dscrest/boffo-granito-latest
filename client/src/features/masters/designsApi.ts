@@ -35,6 +35,9 @@ export interface DesignLookups {
   glazes: LookupOption[];
   brands: LookupOption[];
   grades: LookupOption[];
+  // Party brands are free-text per party — the "master" is the distinct set
+  // already saved on Design rows (seeds the field's pick-list suggestions).
+  partyBrands: string[];
 }
 
 export interface DesignRow {
@@ -150,6 +153,7 @@ async function fetchDesigns(): Promise<{
     glazes: optionsOf(glaze.rows, "Glaze"),
     brands: optionsOf(brand.rows, "Brand"),
     grades: optionsOf(grade.rows, "Grade"),
+    partyBrands: [],
   };
 
   if (!designs.ok) return { ok: false, designs: [], lookups, error: designs.error };
@@ -205,6 +209,10 @@ async function fetchDesigns(): Promise<{
       images: parseImages(str(d.image_urls)),
     };
   });
+
+  lookups.partyBrands = [...new Set(rows.map((r) => r.partyBrandName).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b),
+  );
 
   return { ok: true, designs: rows, lookups };
 }
@@ -299,6 +307,31 @@ export function updateDesign(rowid: string, input: DesignInput) {
 
 export function deleteDesign(rowid: string) {
   return bust(remove("Design", rowid));
+}
+
+/* ---- Associate Pallets (DesignPallet many-to-many join) ---- */
+
+/** Live pallet ROWIDs linked to a design via the DesignPallet join table. */
+export async function getDesignPallets(designId: string): Promise<string[]> {
+  if (!designId) return [];
+  const res = await list("DesignPallet", { where: `design = ${designId}`, columns: ["pallet"] });
+  if (!res.ok) return [];
+  return (res.rows || []).map((r) => str(r.pallet)).filter(Boolean);
+}
+
+/** Reconcile a design's pallet links to exactly `palletIds` — insert the
+    added pairs, soft-delete the dropped ones. Returns the first failure. */
+export async function setDesignPallets(designId: string, palletIds: string[]): Promise<OpResult> {
+  const res = await list("DesignPallet", { where: `design = ${designId}` });
+  if (!res.ok) return res;
+  const existing = res.rows || [];
+  const want = new Set(palletIds);
+  const have = new Set(existing.map((r) => str(r.pallet)));
+  const ops: Promise<OpResult>[] = [];
+  for (const r of existing) if (!want.has(str(r.pallet))) ops.push(remove("DesignPallet", String(r.ROWID)));
+  for (const pid of want) if (!have.has(pid)) ops.push(insert("DesignPallet", { design: designId, pallet: pid }));
+  const results = await Promise.all(ops);
+  return results.find((r) => !r.ok) || { ok: true };
 }
 
 /* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */

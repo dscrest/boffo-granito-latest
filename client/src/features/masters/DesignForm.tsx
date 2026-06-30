@@ -15,6 +15,7 @@ import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
+import { listPallets, type PalletRow } from "./palletsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID.
    Coverage is NOT held here — it's derived from width/length/pcs. */
@@ -47,13 +48,14 @@ const STATUSES = ["Continue", "Discontinued"];
    Combobox (type-to-filter) instead of a scroll-only native <select>. */
 const SEARCHABLE_THRESHOLD = 10;
 
-type FieldKind = "text" | "number" | "select";
+type FieldKind = "text" | "number" | "select" | "datalist";
 interface FieldSpec {
   key: keyof DesignValues;
   label: string;
   kind?: FieldKind;
-  lookup?: keyof DesignLookups; // dynamic FK options
+  lookup?: "sizes" | "finishes" | "categories" | "glazes" | "brands" | "grades"; // dynamic FK options
   options?: string[]; // static select options (e.g. status)
+  suggest?: "partyBrands"; // datalist suggestions (free-text + pick list)
   required?: boolean;
   suffix?: string;
 }
@@ -64,7 +66,7 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     fields: [
       { key: "design_name", label: "Design Name", required: true },
       { key: "base_design_name", label: "Base Design Name" },
-      { key: "party_brand_name", label: "Party Brand Name" },
+      { key: "party_brand_name", label: "Party Brand Name", kind: "datalist", suggest: "partyBrands" },
       { key: "collection_name", label: "Collection" },
     ],
   },
@@ -204,6 +206,62 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
   };
 }
 
+/* Associate Pallets — DesignPallet many-to-many picker. Self-fetches the
+   pallet list (cached); the parent owns only the selected ROWIDs + persists. */
+function AssociatePallets({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+  const [pallets, setPallets] = useState<PalletRow[]>([]);
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    let live = true;
+    void listPallets().then((r) => {
+      if (live && r.ok) setPallets(r.pallets);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const sel = new Set(value);
+  const toggle = (id: string) => onChange(sel.has(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? pallets.filter((p) => `${p.name} ${p.sizeLabel} ${p.palletType}`.toLowerCase().includes(needle))
+    : pallets;
+
+  return (
+    <div className="form-section">
+      <div className="form-section-title">Associate Pallets</div>
+      {pallets.length === 0 ? (
+        <div className="dim">No pallets defined yet — add them in the Pallet master first.</div>
+      ) : (
+        <>
+          <input placeholder="Search pallets…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 8 }} />
+          <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
+            {shown.map((p) => (
+              <label
+                key={p.id}
+                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 0" }}
+              >
+                <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} style={{ width: "auto" }} />
+                <span>
+                  <strong>{p.name || "(unnamed)"}</strong>
+                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                    {" · "}
+                    {[p.sizeLabel, p.packingDetails].filter(Boolean).join(" · ")} · {p.totalBoxesPerContainer} boxes/ctn
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="dim" style={{ marginTop: 6, fontSize: "var(--t-sm)" }}>
+            {value.length} pallet{value.length === 1 ? "" : "s"} selected
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* Reusable sections grid + computed-key banner + image upload.
    Presentational: owns no save logic, just renders fields and reports edits. */
 export function DesignFields({
@@ -213,6 +271,8 @@ export function DesignFields({
   showErrors,
   images,
   onImages,
+  pallets,
+  onPallets,
 }: {
   value: DesignValues;
   onChange: (k: keyof DesignValues, v: string) => void;
@@ -220,6 +280,8 @@ export function DesignFields({
   showErrors?: boolean;
   images: string[];
   onImages: (next: string[]) => void;
+  pallets: string[];
+  onPallets: (next: string[]) => void;
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
@@ -299,6 +361,21 @@ export function DesignFields({
                         </select>
                       );
                     })()
+                  ) : f.kind === "datalist" ? (
+                    <>
+                      <input
+                        className={err ? "error" : ""}
+                        list={`dl-${f.key}`}
+                        value={value[f.key]}
+                        onChange={(e) => onChange(f.key, e.target.value)}
+                        placeholder={f.label}
+                      />
+                      <datalist id={`dl-${f.key}`}>
+                        {(f.suggest ? lookups[f.suggest] : []).map((o) => (
+                          <option key={o} value={o} />
+                        ))}
+                      </datalist>
+                    </>
                   ) : (
                     <input
                       className={err ? "error" : ""}
@@ -321,6 +398,8 @@ export function DesignFields({
         <div className="form-section-title">Images (max 5)</div>
         <ImageUploader value={images} onChange={onImages} max={5} />
       </div>
+
+      <AssociatePallets value={pallets} onChange={onPallets} />
     </>
   );
 }
@@ -332,11 +411,12 @@ export function DesignForm({
   onClose,
 }: {
   lookups: DesignLookups;
-  onSave: (input: DesignInput) => void;
+  onSave: (input: DesignInput, palletIds: string[]) => void;
   onClose: () => void;
 }) {
   const [v, setV] = useState<DesignValues>(blankDesign());
   const [images, setImages] = useState<string[]>([]);
+  const [palletIds, setPalletIds] = useState<string[]>([]);
   const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
   const missing = missingRequired(v);
 
@@ -347,7 +427,7 @@ export function DesignForm({
       setShowErrors(true);
       return;
     }
-    onSave(toDesignInput(v, lookups, images));
+    onSave(toDesignInput(v, lookups, images), palletIds);
   };
 
   const panelRef = useModalA11y(onClose);
@@ -369,7 +449,16 @@ export function DesignForm({
         </div>
 
         <div className="df-body">
-          <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} images={images} onImages={setImages} />
+          <DesignFields
+            value={v}
+            onChange={set}
+            lookups={lookups}
+            showErrors={showErrors}
+            images={images}
+            onImages={setImages}
+            pallets={palletIds}
+            onPallets={setPalletIds}
+          />
         </div>
 
         <div className="df-foot">

@@ -318,8 +318,12 @@ function assertDateOrder(start, end, startLabel, endLabel) {
 async function assertUnique(catalyst, table, field, value, excludeRowid) {
   if (value == null || String(value).trim() === "") return;
   const safe = String(value).replace(/'/g, "''"); // ZCQL string-literal escape
+  // Ignore soft-deleted rows so a deleted name can be re-used (every table
+  // here has deleted_at; assertUnique is never called on OperationLog).
   const rows = rowList(
-    await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ${field} = '${safe}'`),
+    await catalyst
+      .zcql()
+      .executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ${field} = '${safe}' AND deleted_at is null`),
   );
   if (rows.some((r) => String(r.ROWID) !== String(excludeRowid || ""))) {
     throw badRequest(`${table} ${field} "${value}" already exists`, 409);

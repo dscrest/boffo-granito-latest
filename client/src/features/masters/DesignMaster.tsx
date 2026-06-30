@@ -21,6 +21,7 @@ import {
   bulkDeleteDesigns,
   bulkUpdateDesigns,
   createDesign,
+  setDesignPallets,
   listDesigns,
   type DesignInput,
   type DesignLookups,
@@ -34,6 +35,7 @@ const EMPTY_LOOKUPS: DesignLookups = {
   glazes: [],
   brands: [],
   grades: [],
+  partyBrands: [],
 };
 
 /* Bulk-edit is restricted to fields that don't feed the computed
@@ -190,7 +192,7 @@ export function DesignMaster() {
       return next;
     });
 
-  const onCreate = async (input: DesignInput) => {
+  const onCreate = async (input: DesignInput, palletIds: string[]) => {
     setShowNew(false);
     setNotice("Saving design…");
     const res = await createDesign(input);
@@ -200,6 +202,7 @@ export function DesignMaster() {
       toast.error(res.error || "Save failed");
       return;
     }
+    if (res.rowid && palletIds.length) await setDesignPallets(res.rowid, palletIds);
     setNotice(`Design saved (#${res.rowid}).`);
     toast.success("Design saved");
     await load();
