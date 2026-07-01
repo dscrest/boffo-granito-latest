@@ -8,6 +8,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { DateInput } from "@/ui/DateInput";
 import type { Order } from "@/data";
 
 export interface ProductionLog {
@@ -114,7 +115,7 @@ export function ProductionForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Date</span>
-                <input type="date" value={v.production_date} onChange={(e) => set("production_date", e.target.value)} />
+                <DateInput value={v.production_date} onChange={(e) => set("production_date", e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">Shift</span>

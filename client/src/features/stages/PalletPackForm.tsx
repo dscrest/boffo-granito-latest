@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { Combobox } from "@/ui/Combobox";
+import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableOrder } from "./palletisationApi";
@@ -177,14 +179,13 @@ export function PalletPackForm({
                     {presetOrderId ? (
                       <input value={order?.label || presetOrderId} readOnly disabled />
                     ) : (
-                      <select className={orderErr ? "error" : ""} value={orderId} onChange={(e) => setOrderId(e.target.value)}>
-                        <option value="">— select —</option>
-                        {orders.map((o) => (
-                          <option key={o.salesOrderId} value={o.salesOrderId}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
+                      <Combobox
+                        value={orderId}
+                        options={orders.map((o) => ({ value: o.salesOrderId, label: o.label }))}
+                        onChange={setOrderId}
+                        placeholder="Search master orders…"
+                        invalid={!!orderErr}
+                      />
                     )}
                     {orderErr && <span className="field-err">{orderErr}</span>}
                   </label>
@@ -192,20 +193,22 @@ export function PalletPackForm({
                     <span className="lbl">
                       Pallet<span className="req"> *</span>
                     </span>
-                    <select className={palletErr ? "error" : ""} value={palletId} onChange={(e) => setPalletId(e.target.value)}>
-                      <option value="">— select —</option>
-                      {pallets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                          {p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""}
-                        </option>
-                      ))}
-                    </select>
+                    <Combobox
+                      value={palletId}
+                      options={pallets.map((p) => ({
+                        value: p.id,
+                        label: p.name + (p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""),
+                        hint: p.sizeLabel,
+                      }))}
+                      onChange={setPalletId}
+                      placeholder="Search pallets…"
+                      invalid={!!palletErr}
+                    />
                     {palletErr && <span className="field-err">{palletErr}</span>}
                   </label>
                   <label className="form-field">
                     <span className="lbl">Delivery Date</span>
-                    <input type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+                    <DateInput value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
                   </label>
                   <label className="form-field">
                     <span className="lbl">Remarks</span>

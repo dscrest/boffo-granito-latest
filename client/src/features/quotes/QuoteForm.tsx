@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
+import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import {
   CATEGORIES,
@@ -210,11 +211,11 @@ export function QuoteForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Quote Date</span>
-                <input type="date" value={h.quoteDate} onChange={(e) => setHead("quoteDate", e.target.value)} />
+                <DateInput value={h.quoteDate} onChange={(e) => setHead("quoteDate", e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">Expiry Date</span>
-                <input type="date" value={h.expiryDate} onChange={(e) => setHead("expiryDate", e.target.value)} />
+                <DateInput value={h.expiryDate} onChange={(e) => setHead("expiryDate", e.target.value)} />
               </label>
               {/* #14: Reference No. removed from quotes (lives on the SO only). */}
               <label className="form-field">

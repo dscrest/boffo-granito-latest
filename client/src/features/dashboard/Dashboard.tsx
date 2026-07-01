@@ -206,7 +206,7 @@ export function Dashboard() {
       </div>
       )}
 
-      <div className="split" style={{ marginTop: 16 }}>
+      <div className="split" style={{ marginTop: 16, alignItems: "stretch" }}>
         <div className="card">
           <div className="card-head">
             <Icon name="truck" size={13} />

@@ -5,6 +5,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { CONTAINER_STATUSES, CONTAINER_TYPES, type ContainerInput } from "./containersApi";
 
@@ -178,11 +179,11 @@ export function ContainerForm({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">ETD</span>
-                <input type="date" value={v.etd} onChange={(e) => setStr("etd", e.target.value)} />
+                <DateInput value={v.etd} onChange={(e) => setStr("etd", e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">ETA</span>
-                <input type="date" value={v.eta} onChange={(e) => setStr("eta", e.target.value)} />
+                <DateInput value={v.eta} onChange={(e) => setStr("eta", e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">Port of Loading</span>
