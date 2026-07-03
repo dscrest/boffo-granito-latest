@@ -4,18 +4,34 @@
    function records its outcome here (success / failed + error +
    duration), so operation status can be checked from the UI.
    ============================================================ */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
+// Toggleable columns (Time always shown).
+const OPS_COLUMNS: ColumnDef[] = [
+  { key: "table", label: "Table" },
+  { key: "operation", label: "Operation" },
+  { key: "status", label: "Status" },
+  { key: "ms", label: "ms" },
+  { key: "row", label: "Row" },
+  { key: "actor", label: "Actor" },
+  { key: "detail", label: "Detail / Error" },
+];
+
 export function OperationsLog() {
   const [rows, setRows] = useState<DSRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [opF, setOpF] = useState("");
+  const { hidden, toggle, show } = useHiddenColumns("opsTableColumns");
 
   const load = async () => {
     setLoading(true);
@@ -36,13 +52,26 @@ export function OperationsLog() {
   const okCount = rows.filter((r) => str(r.status) === "success").length;
   const failCount = rows.filter((r) => str(r.status) === "failed").length;
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((r) => {
+      if (opF && str(r.operation) !== opF) return false;
+      if (!q) return true;
+      return `${str(r.table_name)} ${str(r.actor)} ${str(r.payload_summary)} ${str(r.error_text)}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [rows, query, opF]);
+  const pager = usePagination(filtered.length, "opsPageSize", `${query}|${opF}`);
+  const opOptions = useMemo(() => [...new Set(rows.map((r) => str(r.operation)).filter(Boolean))].sort(), [rows]);
+
   return (
     <div>
       <div className="page-head">
         <div>
           <div className="title">Audit Log</div>
           <div className="sub">
-            {loading ? "Loading…" : `${rows.length} recent operations · ${okCount} ok · ${failCount} failed`}
+            {loading ? "Loading…" : `${okCount} ok · ${failCount} failed`}
           </div>
         </div>
         <div className="right">
@@ -55,6 +84,25 @@ export function OperationsLog() {
 
       {error && <ErrorCard message={error} onRetry={() => void load()} />}
 
+      <div className="fbar">
+        <div style={{ flex: 1 }} />
+        <select value={opF} onChange={(e) => setOpF(e.target.value)} title="Filter by operation">
+          <option value="">All operations</option>
+          {opOptions.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Search table, actor, detail…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ColumnPicker columns={OPS_COLUMNS} hidden={hidden} onToggle={toggle} />
+      </div>
+
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && rows.length === 0 ? (
@@ -64,33 +112,37 @@ export function OperationsLog() {
             <thead>
               <tr>
                 <th>Time</th>
-                <th>Table</th>
-                <th>Operation</th>
-                <th>Status</th>
-                <th className="num" style={{ textAlign: "right" }}>ms</th>
-                <th>Row</th>
-                <th>Actor</th>
-                <th>Detail / Error</th>
+                {show("table") && <th>Table</th>}
+                {show("operation") && <th>Operation</th>}
+                {show("status") && <th>Status</th>}
+                {show("ms") && <th className="num" style={{ textAlign: "right" }}>ms</th>}
+                {show("row") && <th>Row</th>}
+                {show("actor") && <th>Actor</th>}
+                {show("detail") && <th>Detail / Error</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {pager.slice(filtered).map((r) => {
                 const status = str(r.status);
                 const ok = status === "success";
                 return (
                   <tr key={String(r.ROWID)}>
                     <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
-                    <td className="mono">{str(r.table_name)}</td>
-                    <td>{str(r.operation)}</td>
-                    <td>
-                      <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{status || "—"}</span>
-                    </td>
-                    <td className="num mono">{fmt(Number(r.duration_ms) || 0)}</td>
-                    <td className="mono muted">{str(r.entity_rowid) || "—"}</td>
-                    <td className="muted">{str(r.actor)}</td>
-                    <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
-                    </td>
+                    {show("table") && <td className="mono">{str(r.table_name)}</td>}
+                    {show("operation") && <td>{str(r.operation)}</td>}
+                    {show("status") && (
+                      <td>
+                        <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{status || "—"}</span>
+                      </td>
+                    )}
+                    {show("ms") && <td className="num mono">{fmt(Number(r.duration_ms) || 0)}</td>}
+                    {show("row") && <td className="mono muted">{str(r.entity_rowid) || "—"}</td>}
+                    {show("actor") && <td className="muted">{str(r.actor)}</td>}
+                    {show("detail") && (
+                      <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -109,6 +161,7 @@ export function OperationsLog() {
           </table>
           )}
         </div>
+        {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

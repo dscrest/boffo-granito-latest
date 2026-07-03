@@ -13,21 +13,21 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import {
   composeAddress,
   emptyExtras,
+  isoInfo,
   type CustomerExtras,
   type CustomerInput,
   type PaymentTermOption,
 } from "./customersApi";
 
-/* country → ISO code + flag (Data Store stores ISO, not emoji). */
-const COUNTRIES: Record<string, { iso: string; flag: string }> = {
-  Poland: { iso: "PL", flag: "🇵🇱" },
-  Lithuania: { iso: "LT", flag: "🇱🇹" },
-  Romania: { iso: "RO", flag: "🇷🇴" },
-  Croatia: { iso: "HR", flag: "🇭🇷" },
-  Greece: { iso: "GR", flag: "🇬🇷" },
-  Germany: { iso: "DE", flag: "🇩🇪" },
-  India: { iso: "IN", flag: "🇮🇳" },
-};
+/* ISO codes offered in the country picker (Data Store stores ISO, not
+   emoji); display name + flag are derived via isoInfo. */
+const COUNTRY_CODES = [
+  "AM", "CO", "DE", "EC", "ES", "FR", "GR", "HR", "IN", "IT", "LC", "LT",
+  "MT", "NI", "NL", "PE", "PL", "RO", "RU", "SA", "SD", "SE", "TN",
+];
+const COUNTRY_OPTIONS = COUNTRY_CODES.map((iso) => ({ iso, ...isoInfo(iso) })).sort((a, b) =>
+  a.country.localeCompare(b.country),
+);
 const CURRENCIES = ["EUR", "USD", "INR"];
 const SALUTATIONS = ["Mr.", "Mrs.", "Ms.", "Dr."];
 
@@ -46,20 +46,20 @@ const ADDRESS_LABELS: Record<(typeof ADDRESS_KEYS)[number], string> = {
 
 export function PartyForm({
   paymentTerms,
+  salesPersons,
   initial,
   isEdit,
   onSave,
   onClose,
 }: {
   paymentTerms: PaymentTermOption[];
+  salesPersons: PaymentTermOption[];
   initial?: Partial<CustomerInput>;
   isEdit?: boolean;
   onSave: (c: CustomerInput) => void;
   onClose: () => void;
 }) {
-  const initialCountry =
-    Object.keys(COUNTRIES).find((c) => COUNTRIES[c].iso === initial?.country_code) ?? "";
-  const [country, setCountry] = useState(initialCountry);
+  const [country, setCountry] = useState(initial?.country_code ?? "");
   const [v, setV] = useState({
     name: initial?.name ?? "",
     code: initial?.code ?? "",
@@ -101,7 +101,7 @@ export function PartyForm({
     onSave({
       name: v.name,
       code: v.code,
-      country_code: COUNTRIES[country]?.iso ?? "",
+      country_code: country,
       currency: v.currency,
       payment_term: v.payment_term,
       port_of_discharge: v.port_of_discharge,
@@ -178,12 +178,28 @@ export function PartyForm({
                 <span className="lbl">Country</span>
                 <select value={country} onChange={(e) => setCountry(e.target.value)}>
                   <option value=""></option>
-                  {Object.keys(COUNTRIES).map((c) => (
-                    <option key={c} value={c}>
-                      {COUNTRIES[c].flag} {c}
+                  {COUNTRY_OPTIONS.map((c) => (
+                    <option key={c.iso} value={c.iso}>
+                      {c.flag} {c.country}
                     </option>
                   ))}
                 </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Main Party Name</span>
+                <input
+                  value={x.main_party_name}
+                  onChange={(e) => setExtra("main_party_name", e.target.value)}
+                  placeholder="Parent / group party"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Working Status</span>
+                <input
+                  value={x.working_status}
+                  onChange={(e) => setExtra("working_status", e.target.value)}
+                  placeholder="Working status"
+                />
               </label>
             </div>
           </div>
@@ -245,6 +261,17 @@ export function PartyForm({
                   {paymentTerms.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Handling Person</span>
+                <select value={x.handling_person} onChange={(e) => setExtra("handling_person", e.target.value)}>
+                  <option value=""></option>
+                  {salesPersons.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
                     </option>
                   ))}
                 </select>

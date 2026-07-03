@@ -83,9 +83,10 @@ function navTree(): NavNode[] {
       icon: "tile",
       children: [
         { id: "design", label: "Items", icon: "tile" },
+        // Pallet Master = the master of pallet formats (an Items master).
+        // Palletization (Sales, id "packing") is the process that consumes it.
         { id: "pallets", label: "Pallet Master", icon: "palette" },
         { id: "prod", label: "Production", icon: "factory" },
-        { id: "packing", label: "Pallets", icon: "palette" },
       ],
     },
     {
@@ -104,6 +105,7 @@ function navTree(): NavNode[] {
             // { id: "orders", label: "All Orders", icon: "docs" },
           ],
         },
+        { id: "packing", label: "Palletization", icon: "palette" },
       ],
     },
     {
@@ -146,7 +148,7 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   masters: ["Settings", "Masters"],
   prod: ["Items", "Production"],
   pallets: ["Items", "Pallet Master"],
-  packing: ["Items", "Pallets"],
+  packing: ["Sales", "Palletization"],
   quotes: ["Sales", "Quotes"],
   parties: ["Sales", "Customers"],
   kanban: ["Master Orders", "Pipeline"],

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
@@ -13,6 +15,20 @@ import { createSalesOrder, listOrders, type NewSalesOrderInput } from "./ordersA
 import { toast } from "@/ui/Toast";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
 import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
+
+// Toggleable columns (ID/PO + # and actions always shown).
+const ORDER_COLUMNS: ColumnDef[] = [
+  { key: "party", label: "Party" },
+  { key: "design", label: "Design" },
+  { key: "size", label: "Size" },
+  { key: "finish", label: "Finish" },
+  { key: "brand", label: "Brand" },
+  { key: "qty", label: "Order Qty" },
+  { key: "progress", label: "Progress" },
+  { key: "remaining", label: "Remaining" },
+  { key: "stage", label: "Stage" },
+  { key: "due", label: "Due" },
+];
 
 let _soSeq = 100;
 const genOrderNumber = () => `SO/2026-27/${++_soSeq}`;
@@ -51,7 +67,9 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
 export function OrdersTable() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("all");
+  const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const { hidden, toggle, show } = useHiddenColumns("ordersTableColumns");
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -105,9 +123,15 @@ export function OrdersTable() {
   };
 
   const filtered = useMemo(() => {
-    if (tab === "all") return orders;
-    return orders.filter((o) => o.stage === tab);
-  }, [tab, orders]);
+    const q = query.trim().toLowerCase();
+    return orders.filter((o) => {
+      if (tab !== "all" && o.stage !== tab) return false;
+      if (!q) return true;
+      return `${o.poNumber} ${o.party} ${o.design}`.toLowerCase().includes(q);
+    });
+  }, [tab, orders, query]);
+
+  const pager = usePagination(filtered.length, "ordersPageSize", `${tab}|${query}`);
 
   return (
     <div>
@@ -119,7 +143,7 @@ export function OrdersTable() {
         <div>
           <div className="title">All Master Orders</div>
           <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${orders.length} order lines`} · grouped by stage
+            {loading ? "Loading…" : "Grouped by stage"}
             {notice && (
               <>
                 {" · "}
@@ -153,6 +177,17 @@ export function OrdersTable() {
         ))}
       </div>
 
+      <div className="fbar">
+        <div style={{ flex: 1 }} />
+        <input
+          type="text"
+          placeholder="Search PO, party, design…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ColumnPicker columns={ORDER_COLUMNS} hidden={hidden} onToggle={toggle} />
+      </div>
+
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && orders.length === 0 ? (
@@ -164,25 +199,25 @@ export function OrdersTable() {
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>ID</th>
                 <th>PO Number</th>
-                <th>Party</th>
-                <th>Design</th>
-                <th>Size</th>
-                <th>Finish</th>
-                <th>Brand</th>
-                <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
-                <th>Progress</th>
-                <th className="num" style={{ textAlign: "right" }}>Remaining</th>
-                <th>Stage</th>
-                <th>Due</th>
+                {show("party") && <th>Party</th>}
+                {show("design") && <th>Design</th>}
+                {show("size") && <th>Size</th>}
+                {show("finish") && <th>Finish</th>}
+                {show("brand") && <th>Brand</th>}
+                {show("qty") && <th className="num" style={{ textAlign: "right" }}>Order Qty</th>}
+                {show("progress") && <th>Progress</th>}
+                {show("remaining") && <th className="num" style={{ textAlign: "right" }}>Remaining</th>}
+                {show("stage") && <th>Stage</th>}
+                {show("due") && <th>Due</th>}
                 <th style={{ width: 90 }}></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((o, i) => {
+              {pager.slice(filtered).map((o, i) => {
                 const remaining = o.orderQty - o.loadedQty;
                 return (
                   <tr key={o.id}>
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     <td className="mono">
                       <button
                         className="linkish"
@@ -194,23 +229,29 @@ export function OrdersTable() {
                       </button>
                     </td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
-                    <td>
-                      <span style={{ marginRight: 6 }}>{o.flag}</span>
-                      {o.party}
-                    </td>
-                    <td><span className="design-name">{o.design}</span></td>
-                    <td>
-                      <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
-                    </td>
-                    <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
-                    <td><span className={`chip brand ${o.brand === "BIG" ? "big" : ""}`}>{o.brand}</span></td>
-                    <td className="num">{fmt(o.orderQty)}</td>
-                    <td style={{ width: 140 }}>
-                      <SplitBar produced={o.producedQty} palletized={o.palletizedQty} loaded={o.loadedQty} total={o.orderQty} />
-                    </td>
-                    <td className="num">{fmt(remaining)}</td>
-                    <td><StageBadge stage={o.stage} /></td>
-                    <td className="mono muted">{o.dueDate}</td>
+                    {show("party") && (
+                      <td>
+                        <span style={{ marginRight: 6 }}>{o.flag}</span>
+                        {o.party}
+                      </td>
+                    )}
+                    {show("design") && <td><span className="design-name">{o.design}</span></td>}
+                    {show("size") && (
+                      <td>
+                        <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
+                      </td>
+                    )}
+                    {show("finish") && <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>}
+                    {show("brand") && <td><span className={`chip brand ${o.brand === "BIG" ? "big" : ""}`}>{o.brand}</span></td>}
+                    {show("qty") && <td className="num">{fmt(o.orderQty)}</td>}
+                    {show("progress") && (
+                      <td style={{ width: 140 }}>
+                        <SplitBar produced={o.producedQty} palletized={o.palletizedQty} loaded={o.loadedQty} total={o.orderQty} />
+                      </td>
+                    )}
+                    {show("remaining") && <td className="num">{fmt(remaining)}</td>}
+                    {show("stage") && <td><StageBadge stage={o.stage} /></td>}
+                    {show("due") && <td className="mono muted">{o.dueDate}</td>}
                     <td>
                       {o.salesOrderId && (
                         <button
@@ -251,6 +292,7 @@ export function OrdersTable() {
           </table>
           )}
         </div>
+        {!(loading && orders.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

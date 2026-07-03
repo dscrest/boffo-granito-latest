@@ -36,7 +36,10 @@ export function CustomerDetail() {
   const fields: RecordField[] = [
     { key: "name", label: "Name", value: party.name },
     { key: "code", label: "Code", value: party.code },
+    { key: "mainParty", label: "Main Party", value: party.extras.main_party_name || "—" },
     { key: "country", label: "Country", value: party.country || "—" },
+    { key: "workingStatus", label: "Working Status", value: party.extras.working_status || "—" },
+    { key: "handlingPerson", label: "Handling Person", value: party.handlingPersonLabel || "—" },
     { key: "currency", label: "Currency", value: party.currency || "—" },
     { key: "paymentTerm", label: "Payment Term", value: party.paymentTermLabel || "—" },
     { key: "port", label: "Port of Discharge", value: party.portOfDischarge || "—" },

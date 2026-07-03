@@ -2,7 +2,8 @@
    Pallet" action opens the close-pallet saga form which commits a real
    PalletisedBatch (produced → palletized); table reloads on success.
    KPI tiles above remain static prototype figures. */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -10,15 +11,19 @@ import { KPI, StageBadge } from "@/ui/primitives";
 import { finishClass } from "@/lib/format";
 import { type Order } from "@/data";
 import { listOrders } from "@/features/orders/ordersApi";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { PalletPackForm } from "./PalletPackForm";
 import { closePallet, type ClosePalletInput } from "./palletisationApi";
 
 export function PalletPacking() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sizeF, setSizeF] = useState("");
+  const [query, setQuery] = useState("");
 
   const load = async () => {
     const res = await listOrders();
@@ -33,7 +38,18 @@ export function PalletPacking() {
     void load();
   }, []);
 
-  const items = orders.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
+  const packable = orders.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
+  // Size chips come from the live rows (DB-sourced), not a static list.
+  const sizeOptions = useMemo(() => [...new Set(packable.map((o) => o.size).filter(Boolean))].sort(), [orders]);
+  const items = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return packable.filter((o) => {
+      if (sizeF && o.size !== sizeF) return false;
+      if (!q) return true;
+      return `${o.poNumber} ${o.design} ${o.party}`.toLowerCase().includes(q);
+    });
+  }, [orders, sizeF, query]);
+  const pager = usePagination(items.length, "packingPageSize", `${sizeF}|${query}`);
 
   // Form stays open (showing "Saving…") until the saga resolves; closes on success.
   const onSave = async (input: ClosePalletInput) => {
@@ -58,7 +74,7 @@ export function PalletPacking() {
       {showForm && <PalletPackForm onSave={onSave} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
-          <div className="title">Pallet Packing</div>
+          <div className="title">Palletization</div>
           <div className="sub">
             {items.length} active packing jobs · 6,284 boxes total · 173 updates today
             {notice && (
@@ -76,7 +92,7 @@ export function PalletPacking() {
           </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
-            New Pallet
+            New Palletization
           </button>
         </div>
       </div>
@@ -91,14 +107,23 @@ export function PalletPacking() {
       </div>
 
       <div className="fbar" style={{ marginTop: 14 }}>
-        <button className="btn active">600x1200</button>
-        <button className="btn">600x600</button>
-        <button className="btn">200x1200</button>
-        <button className="btn">800x1600</button>
-        <button className="btn">75x600</button>
+        {sizeOptions.map((s) => (
+          <button
+            key={s}
+            className={`btn${sizeF === s ? " active" : ""}`}
+            onClick={() => setSizeF(sizeF === s ? "" : s)}
+            title={sizeF === s ? "Clear size filter" : `Only ${s}`}
+          >
+            {s}
+          </button>
+        ))}
         <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Search pallet code…" />
-        <button className="btn">Group: Party</button>
+        <input
+          type="text"
+          placeholder="Search PO, design, party…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       </div>
 
       <div className="card">
@@ -108,7 +133,7 @@ export function PalletPacking() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Pallet ID</th>
+              <th>Party</th>
               <th>PO Number</th>
               <th>Design</th>
               <th>Size</th>
@@ -129,19 +154,25 @@ export function PalletPacking() {
             </tr>
           </thead>
           <tbody>
-            {items.slice(0, 16).map((o, i) => {
-              const palletId = `[${o.boxesPerPallet}x${Math.ceil(o.orderQty / 60 / o.boxesPerPallet)}] · 26-04-2026`;
+            {pager.slice(items).map((o, i) => {
               const loaded = Math.floor(o.loadedQty / 60);
               const total = Math.ceil(o.orderQty / 60);
               const palletQty = Math.ceil(total / o.boxesPerPallet);
               const status = o.loadedQty >= o.orderQty ? "final" : o.palletizedQty >= o.orderQty * 0.85 ? "loading" : "packing";
               return (
-                <tr key={o.id + i}>
-                  <td className="mono" style={{ color: "var(--fg)" }}>
-                    {palletId.split(" · ")[0]}
-                    <span className="muted" style={{ fontSize: 10, marginLeft: 6 }}>
-                      26-04-2026
-                    </span>
+                <tr
+                  key={o.id + i}
+                  tabIndex={0}
+                  onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${encodeURIComponent(o.id)}`);
+                  }}
+                  style={{ cursor: "pointer" }}
+                  title="Open order details"
+                >
+                  <td>
+                    <span style={{ marginRight: 6 }}>{o.flag}</span>
+                    {o.party}
                   </td>
                   <td className="mono">{o.poNumber}</td>
                   <td>
@@ -168,22 +199,27 @@ export function PalletPacking() {
             {!loading && !error && items.length === 0 && (
               <tr>
                 <td colSpan={10}>
-                  <EmptyState
-                    icon="package"
-                    title="No packing jobs"
-                    hint="Orders appear here once they reach the packing stage"
-                    action={
-                      <button className="hbtn primary" onClick={() => setShowForm(true)}>
-                        New Pallet
-                      </button>
-                    }
-                  />
+                  {packable.length > 0 ? (
+                    <EmptyState title="No matching results" hint="Try a different size filter or search" />
+                  ) : (
+                    <EmptyState
+                      icon="package"
+                      title="No packing jobs"
+                      hint="Orders appear here once they reach the packing stage"
+                      action={
+                        <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                          New Palletization
+                        </button>
+                      }
+                    />
+                  )}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
         )}
+        {!(loading && orders.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 /* Purchase Orders — ported verbatim from prototype/views2.jsx. */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
@@ -8,6 +8,7 @@ import { type Order } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 
 // #21b: toggleable columns for the Order-by-PO table (PO Number always shown).
 const PO_COLUMNS: ColumnDef[] = [
@@ -26,6 +27,7 @@ export function PurchaseOrders() {
   const navigate = useNavigate();
   const { orders, loading, error, reload } = useOrders();
   const { hidden, toggle, show } = useHiddenColumns("poTableColumns");
+  const [query, setQuery] = useState("");
   // Group + sort only when the live orders snapshot changes.
   const pos = useMemo(() => {
     const groups: Record<string, Order[]> = {};
@@ -51,14 +53,19 @@ export function PurchaseOrders() {
       .sort((a, b) => b.totalQty - a.totalQty);
   }, [orders]);
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return pos;
+    return pos.filter((p) => `${p.po} ${p.party}`.toLowerCase().includes(q));
+  }, [pos, query]);
+  const pager = usePagination(filtered.length, "poPageSize", query);
+
   return (
     <div>
       <div className="page-head">
         <div>
           <div className="title">Purchase Orders</div>
-          <div className="sub">
-            {pos.length} POs · {fmt(pos.reduce((s, p) => s + p.totalQty, 0))} sqm total
-          </div>
+          <div className="sub">{fmt(pos.reduce((s, p) => s + p.totalQty, 0))} sqm total</div>
         </div>
         <div className="right">
           <button className="hbtn">
@@ -78,7 +85,12 @@ export function PurchaseOrders() {
         <button className="btn">Partially shipped</button>
         <button className="btn">Closed</button>
         <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Search PO number, party…" />
+        <input
+          type="text"
+          placeholder="Search PO number, party…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <ColumnPicker columns={PO_COLUMNS} hidden={hidden} onToggle={toggle} />
       </div>
 
@@ -105,10 +117,10 @@ export function PurchaseOrders() {
             </tr>
           </thead>
           <tbody>
-            {pos.map((p, i) => (
+            {pager.slice(filtered).map((p, i) => (
               <tr key={p.po + i}>
                 <td className="muted mono" style={{ textAlign: "center" }}>
-                  {i + 1}
+                  {pager.from + i}
                 </td>
                 <td className="mono">
                   <button
@@ -178,6 +190,7 @@ export function PurchaseOrders() {
             ))}
           </tbody>
         </table>
+        <GridFooter {...pager} />
       </div>
       )}
     </div>

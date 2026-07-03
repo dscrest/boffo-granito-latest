@@ -351,7 +351,11 @@ a { color: inherit; text-decoration: none; }
 .app.collapsed .sidebar .foot .row { gap: 0; }
 
 /* ---------- generic ---------- */
-.main { padding: 14px 18px 32px; overflow: auto; }
+/* Bottom spacing lives in ::after, NOT padding: sticky elements pin to the
+   scroll container's CONTENT box, so bottom padding would leave the grid
+   footer floating above the window edge with rows peeking underneath. */
+.main { padding: 14px 18px 0; overflow: auto; }
+.main::after { content: ""; display: block; height: 32px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .between { display: flex; align-items: center; justify-content: space-between; }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -363,7 +367,9 @@ a { color: inherit; text-decoration: none; }
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  /* clip (not hidden): still rounds corners, but doesn't create a scroll
+     context — lets the sticky grid footer pin to .main's scrollport. */
+  overflow: clip;
   box-shadow: 0 1px 2px rgba(15, 20, 25, 0.03);
 }
 .card-head {
@@ -1536,7 +1542,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .stage-strip { grid-template-columns: repeat(2, 1fr); }
   .mini-stats { grid-template-columns: repeat(2, 1fr); }
-  .main { padding: 10px 10px 24px; }
+  .main { padding: 10px 10px 0; }
   .page-head { flex-wrap: wrap; gap: 8px; }
 }
 

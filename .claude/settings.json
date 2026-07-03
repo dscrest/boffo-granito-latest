@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://sku-gen-octfis-925638796.development.catalystserverless.com/app/\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/index.html\")",
+      "Bash(curl -s https://boffo-latest-project-926227227.development.catalystserverless.com/app/index.html)",
+      "Bash(curl -s \"https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/#/orders\" -o /dev/null -w \"%{http_code}\\\\n\")",
+      "mcp__claude_ai_MCP_DS_HOME__CatalystbyZoho_Execute_Query",
+      "mcp__claude_ai_Catalyst_Zoho__CatalystbyZoho_Update_Rows",
+      "Bash(npx catalyst *)",
+      "Bash(npm --prefix client run build)",
+      "Bash(curl -s https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/index.html)",
+      "Bash(rm -rf dist)",
+      "Bash(mv dist-real *)",
+      "Bash(mkdir -p .claude/memory)",
+      "Bash(cp /Users/octfistechnollp/.claude/projects/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/memory/*.md .claude/memory/)"
+    ]
+  }
+}

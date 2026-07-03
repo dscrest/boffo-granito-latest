@@ -12,6 +12,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { ContainerForm } from "./ContainerForm";
@@ -32,15 +34,28 @@ const STATUS_COLOR: Record<string, string> = {
   dispatched: "var(--c-green)",
 };
 
+// Toggleable columns (Container No. + checkbox/# always shown).
+const CONTAINER_COLUMNS: ColumnDef[] = [
+  { key: "type", label: "Type" },
+  { key: "vessel", label: "Vessel" },
+  { key: "capBoxes", label: "Cap. Boxes" },
+  { key: "capPallets", label: "Cap. Pallets" },
+  { key: "etd", label: "ETD" },
+  { key: "discharge", label: "Discharge" },
+  { key: "status", label: "Status" },
+];
+
 export function Containers() {
   const [rows, setRows] = useState<ContainerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [statusF, setStatusF] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ row: ContainerRow | null } | null>(null); // null=closed, {row:null}=new
+  const { hidden, toggle, show } = useHiddenColumns("containersTableColumns");
 
   const load = async () => {
     setLoading(true);
@@ -61,15 +76,21 @@ export function Containers() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (statusF && r.status !== statusF) return false;
+      if (!q) return true;
+      return (
         r.containerNumber.toLowerCase().includes(q) ||
         r.vesselName.toLowerCase().includes(q) ||
         r.portOfDischarge.toLowerCase().includes(q) ||
-        r.status.toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+        r.status.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, query, statusF]);
+
+  const pager = usePagination(filtered.length, "containersPageSize", `${query}|${statusF}`);
+  const pageRows = pager.slice(filtered);
+  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
 
   const onSave = async (input: ContainerInput) => {
     const target = editing?.row;
@@ -87,7 +108,8 @@ export function Containers() {
     await load();
   };
 
-  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
+  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
 
   const toggleOne = (id: string) =>
     setSelected((p) => {
@@ -99,8 +121,8 @@ export function Containers() {
   const toggleAll = () =>
     setSelected((p) => {
       const next = new Set(p);
-      if (allShownSelected) filtered.forEach((r) => next.delete(r.id));
-      else filtered.forEach((r) => next.add(r.id));
+      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
+      else pageRows.forEach((r) => next.add(r.id));
       return next;
     });
 
@@ -154,15 +176,7 @@ export function Containers() {
       <div className="page-head">
         <div>
           <div className="title">Container Master</div>
-          <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${rows.length} containers`}
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
-          </div>
+          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
@@ -198,9 +212,17 @@ export function Containers() {
         </div>
       ) : (
         <div className="fbar">
-          <span className="muted mono">{filtered.length} rows</span>
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
+            <option value="">All statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder="Search container…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <ColumnPicker columns={CONTAINER_COLUMNS} hidden={hidden} onToggle={toggle} />
         </div>
       )}
 
@@ -222,17 +244,17 @@ export function Containers() {
                 </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>Container No.</th>
-                <th>Type</th>
-                <th>Vessel</th>
-                <th className="num" style={{ textAlign: "right" }}>Cap. Boxes</th>
-                <th className="num" style={{ textAlign: "right" }}>Cap. Pallets</th>
-                <th>ETD</th>
-                <th>Discharge</th>
-                <th>Status</th>
+                {show("type") && <th>Type</th>}
+                {show("vessel") && <th>Vessel</th>}
+                {show("capBoxes") && <th className="num" style={{ textAlign: "right" }}>Cap. Boxes</th>}
+                {show("capPallets") && <th className="num" style={{ textAlign: "right" }}>Cap. Pallets</th>}
+                {show("etd") && <th>ETD</th>}
+                {show("discharge") && <th>Discharge</th>}
+                {show("status") && <th>Status</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => {
+              {pageRows.map((r, i) => {
                 const sel = selected.has(r.id);
                 return (
                   <tr
@@ -249,17 +271,19 @@ export function Containers() {
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
                     </td>
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.containerNumber}</td>
-                    <td>{r.containerType ? <span className="chip">{r.containerType}</span> : <span className="dim">—</span>}</td>
-                    <td className="muted">{r.vesselName || <span className="dim">—</span>}</td>
-                    <td className="num mono">{r.capacityBoxes > 0 ? fmt(r.capacityBoxes) : <span className="dim">—</span>}</td>
-                    <td className="num mono">{r.capacityPallets > 0 ? fmt(r.capacityPallets) : <span className="dim">—</span>}</td>
-                    <td className="mono muted">{r.etd || <span className="dim">—</span>}</td>
-                    <td className="muted">{r.portOfDischarge || <span className="dim">—</span>}</td>
-                    <td>
-                      <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }}>{r.status}</span>
-                    </td>
+                    {show("type") && <td>{r.containerType ? <span className="chip">{r.containerType}</span> : <span className="dim">—</span>}</td>}
+                    {show("vessel") && <td className="muted">{r.vesselName || <span className="dim">—</span>}</td>}
+                    {show("capBoxes") && <td className="num mono">{r.capacityBoxes > 0 ? fmt(r.capacityBoxes) : <span className="dim">—</span>}</td>}
+                    {show("capPallets") && <td className="num mono">{r.capacityPallets > 0 ? fmt(r.capacityPallets) : <span className="dim">—</span>}</td>}
+                    {show("etd") && <td className="mono muted">{r.etd || <span className="dim">—</span>}</td>}
+                    {show("discharge") && <td className="muted">{r.portOfDischarge || <span className="dim">—</span>}</td>}
+                    {show("status") && (
+                      <td>
+                        <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }}>{r.status}</span>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -287,6 +311,7 @@ export function Containers() {
           </table>
           )}
         </div>
+        {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>
 
       {!loading && rows.length > 0 && <LoadBoard containers={rows} />}

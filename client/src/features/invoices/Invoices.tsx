@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { listContainers, type ContainerRow } from "@/features/masters/containersApi";
@@ -17,12 +19,24 @@ import {
   type InvoiceRow,
 } from "./invoicesApi";
 
+// Toggleable columns (Invoice # + actions always shown).
+const INVOICE_COLUMNS: ColumnDef[] = [
+  { key: "date", label: "Date" },
+  { key: "container", label: "Container" },
+  { key: "masterOrder", label: "Master Order" },
+  { key: "customer", label: "Customer" },
+  { key: "amount", label: "Amount" },
+  { key: "status", label: "Status" },
+];
+
 export function Invoices() {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showGen, setShowGen] = useState(false);
   const [query, setQuery] = useState("");
+  const [statusF, setStatusF] = useState("");
+  const { hidden, toggle, show } = useHiddenColumns("invoicesTableColumns");
 
   const load = () => {
     setLoading(true);
@@ -40,15 +54,20 @@ export function Invoices() {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return invoices;
-    return invoices.filter(
-      (r) =>
+    return invoices.filter((r) => {
+      if (statusF && r.status !== statusF) return false;
+      if (!q) return true;
+      return (
         r.invoiceNumber.toLowerCase().includes(q) ||
         r.containerNumber.toLowerCase().includes(q) ||
         r.orderNumber.toLowerCase().includes(q) ||
-        r.customerName.toLowerCase().includes(q),
-    );
-  }, [invoices, query]);
+        r.customerName.toLowerCase().includes(q)
+      );
+    });
+  }, [invoices, query, statusF]);
+
+  const pager = usePagination(rows.length, "invoicesPageSize", `${query}|${statusF}`);
+  const statusOptions = useMemo(() => [...new Set(invoices.map((r) => r.status).filter(Boolean))].sort(), [invoices]);
 
   const onPdf = async (row: InvoiceRow) => {
     try {
@@ -90,17 +109,24 @@ export function Invoices() {
       <div className="page-head">
         <div>
           <div className="title">Invoices</div>
-          <div className="sub">
-            {invoices.length} invoice{invoices.length === 1 ? "" : "s"} · {fmt(total)} total
-          </div>
+          <div className="sub">{fmt(total)} total</div>
         </div>
         <div className="right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
+            <option value="">All statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
           <input
             placeholder="Search invoice / container / order…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{ width: 240 }}
           />
+          <ColumnPicker columns={INVOICE_COLUMNS} hidden={hidden} onToggle={toggle} />
           <button className="hbtn primary" onClick={() => setShowGen(true)}>
             <Icon name="plus" size={13} />
             Generate
@@ -119,29 +145,33 @@ export function Invoices() {
               <thead>
                 <tr>
                   <th>Invoice #</th>
-                  <th>Date</th>
-                  <th>Container</th>
-                  <th>Master Order</th>
-                  <th>Customer</th>
-                  <th className="num" style={{ textAlign: "right" }}>Amount</th>
-                  <th>Status</th>
+                  {show("date") && <th>Date</th>}
+                  {show("container") && <th>Container</th>}
+                  {show("masterOrder") && <th>Master Order</th>}
+                  {show("customer") && <th>Customer</th>}
+                  {show("amount") && <th className="num" style={{ textAlign: "right" }}>Amount</th>}
+                  {show("status") && <th>Status</th>}
                   <th style={{ width: 40 }} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {pager.slice(rows).map((r) => (
                   <tr key={r.id}>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.invoiceNumber}</td>
-                    <td className="mono muted">{r.invoiceDate || "—"}</td>
-                    <td className="mono">{r.containerNumber || "—"}</td>
-                    <td className="mono muted">{r.orderNumber || "multi"}</td>
-                    <td>{r.customerName || "—"}</td>
-                    <td className="num mono">
-                      {r.currency} {fmt(r.totalAmount)}
-                    </td>
-                    <td>
-                      <span className="chip">{r.status}</span>
-                    </td>
+                    {show("date") && <td className="mono muted">{r.invoiceDate || "—"}</td>}
+                    {show("container") && <td className="mono">{r.containerNumber || "—"}</td>}
+                    {show("masterOrder") && <td className="mono muted">{r.orderNumber || "multi"}</td>}
+                    {show("customer") && <td>{r.customerName || "—"}</td>}
+                    {show("amount") && (
+                      <td className="num mono">
+                        {r.currency} {fmt(r.totalAmount)}
+                      </td>
+                    )}
+                    {show("status") && (
+                      <td>
+                        <span className="chip">{r.status}</span>
+                      </td>
+                    )}
                     <td>
                       <button className="btn" onClick={() => void onPdf(r)} title="Download PDF">
                         <Icon name="download" size={12} />
@@ -166,6 +196,7 @@ export function Invoices() {
               </tbody>
             </table>
           </div>
+          <GridFooter {...pager} />
         </div>
       )}
     </div>

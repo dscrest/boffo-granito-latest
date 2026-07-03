@@ -48,7 +48,7 @@ export function SplitBar({
   const p2 = pctv(palletized - loaded, total); // violet
   const p3 = pctv(produced - palletized, total); // blue
   return (
-    <div className="bar tall" style={{ background: "var(--panel-2)", position: "relative" }}>
+    <div className="bar tall" style={{ background: "var(--border-2)", position: "relative" }}>
       <i style={{ width: `${p1}%`, background: "var(--c-green)", left: 0 }} />
       <i style={{ width: `${p2}%`, background: "var(--c-violet)", left: `${p1}%` }} />
       <i style={{ width: `${p3}%`, background: "var(--c-blue)", left: `${p1 + p2}%` }} />

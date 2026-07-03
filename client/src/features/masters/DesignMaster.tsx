@@ -14,6 +14,8 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { finishClass } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { DesignForm } from "./DesignForm";
@@ -27,6 +29,17 @@ import {
   type DesignLookups,
   type DesignRow,
 } from "./designsApi";
+
+// Toggleable columns (Design Name + checkbox/# always shown).
+const DESIGN_COLUMNS: ColumnDef[] = [
+  { key: "size", label: "Size" },
+  { key: "finish", label: "Finish" },
+  { key: "brand", label: "Brand" },
+  { key: "category", label: "Category" },
+  { key: "glaze", label: "Glaze" },
+  { key: "status", label: "Status" },
+  { key: "sku", label: "SKU" },
+];
 
 const EMPTY_LOOKUPS: DesignLookups = {
   sizes: [],
@@ -137,7 +150,10 @@ export function DesignMaster() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [sizeF, setSizeF] = useState("");
+  const [statusF, setStatusF] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { hidden, toggle, show } = useHiddenColumns("designTableColumns");
   const [showNew, setShowNew] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -162,16 +178,25 @@ export function DesignMaster() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.designName, r.uniqueName, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
+    return rows.filter((r) => {
+      if (sizeF && r.sizeLabel !== sizeF) return false;
+      if (statusF && r.status !== statusF) return false;
+      if (!q) return true;
+      return [r.designName, r.uniqueName, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
         .join(" ")
         .toLowerCase()
-        .includes(q),
-    );
-  }, [rows, query]);
+        .includes(q);
+    });
+  }, [rows, query, sizeF, statusF]);
 
-  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+  const pager = usePagination(filtered.length, "designPageSize", `${query}|${sizeF}|${statusF}`);
+  const pageRows = pager.slice(filtered);
+  // Filter options come from the live rows (DB-sourced), not static lists.
+  const sizeOptions = useMemo(() => [...new Set(rows.map((r) => r.sizeLabel).filter(Boolean))].sort(), [rows]);
+  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
+
+  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
+  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
 
   const toggleOne = (id: string) =>
     setSelected((p) => {
@@ -182,13 +207,9 @@ export function DesignMaster() {
 
   const toggleAll = () =>
     setSelected((p) => {
-      if (allShownSelected) {
-        const next = new Set(p);
-        filtered.forEach((r) => next.delete(r.id));
-        return next;
-      }
       const next = new Set(p);
-      filtered.forEach((r) => next.add(r.id));
+      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
+      else pageRows.forEach((r) => next.add(r.id));
       return next;
     });
 
@@ -259,14 +280,9 @@ export function DesignMaster() {
       <div className="page-head">
         <div>
           <div className="title">Design Master</div>
+          {/* Counts live in the grid footer; the sub line only carries status. */}
           <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${rows.length} items`}
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
+            {loading ? "Loading…" : <span className="dim">{notice}</span>}
           </div>
         </div>
         <div className="right">
@@ -308,9 +324,25 @@ export function DesignMaster() {
         </div>
       ) : (
         <div className="fbar">
-          <span className="muted mono">{filtered.length} rows</span>
+          <select value={sizeF} onChange={(e) => setSizeF(e.target.value)} title="Filter by size">
+            <option value="">All sizes</option>
+            {sizeOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
+            <option value="">All statuses</option>
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder="Search design…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <ColumnPicker columns={DESIGN_COLUMNS} hidden={hidden} onToggle={toggle} />
         </div>
       )}
 
@@ -332,17 +364,17 @@ export function DesignMaster() {
                 </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>Design Name</th>
-                <th>Size</th>
-                <th>Finish</th>
-                <th>Brand</th>
-                <th>Category</th>
-                <th>Glaze</th>
-                <th>Status</th>
-                <th>SKU</th>
+                {show("size") && <th>Size</th>}
+                {show("finish") && <th>Finish</th>}
+                {show("brand") && <th>Brand</th>}
+                {show("category") && <th>Category</th>}
+                {show("glaze") && <th>Glaze</th>}
+                {show("status") && <th>Status</th>}
+                {show("sku") && <th>SKU</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((d, i) => {
+              {pageRows.map((d, i) => {
                 const sel = selected.has(d.id);
                 return (
                   <tr
@@ -360,44 +392,52 @@ export function DesignMaster() {
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(d.id)} />
                     </td>
                     <td className="muted mono" style={{ textAlign: "center" }}>
-                      {i + 1}
+                      {pager.from + i}
                     </td>
                     <td>
                       <span className="design-name">{d.designName}</span>
                     </td>
-                    <td>
-                      {d.sizeLabel ? (
-                        <span className={`chip size ${d.sizeLabel.startsWith("200") || d.sizeLabel.startsWith("75") ? "b" : ""}`}>
-                          {d.sizeLabel}
-                        </span>
-                      ) : (
-                        <span className="dim">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {d.finishLabel ? (
-                        <span className={`chip finish ${finishClass(d.finishLabel)}`}>{d.finishLabel}</span>
-                      ) : (
-                        <span className="dim">—</span>
-                      )}
-                    </td>
-                    <td>
-                      {d.brandLabel ? (
-                        <span className={`chip brand ${d.brandLabel === "BIG" ? "big" : ""}`}>{d.brandLabel}</span>
-                      ) : (
-                        <span className="dim">—</span>
-                      )}
-                    </td>
-                    <td className="muted">{d.categoryLabel || <span className="dim">—</span>}</td>
-                    <td>
-                      {d.glazeLabel ? (
-                        <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span>
-                      ) : (
-                        <span className="dim">—</span>
-                      )}
-                    </td>
-                    <td className="muted">{d.status || <span className="dim">—</span>}</td>
-                    <td className="muted mono">{d.sku || <span className="dim">—</span>}</td>
+                    {show("size") && (
+                      <td>
+                        {d.sizeLabel ? (
+                          <span className={`chip size ${d.sizeLabel.startsWith("200") || d.sizeLabel.startsWith("75") ? "b" : ""}`}>
+                            {d.sizeLabel}
+                          </span>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                    )}
+                    {show("finish") && (
+                      <td>
+                        {d.finishLabel ? (
+                          <span className={`chip finish ${finishClass(d.finishLabel)}`}>{d.finishLabel}</span>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                    )}
+                    {show("brand") && (
+                      <td>
+                        {d.brandLabel ? (
+                          <span className={`chip brand ${d.brandLabel === "BIG" ? "big" : ""}`}>{d.brandLabel}</span>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                    )}
+                    {show("category") && <td className="muted">{d.categoryLabel || <span className="dim">—</span>}</td>}
+                    {show("glaze") && (
+                      <td>
+                        {d.glazeLabel ? (
+                          <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span>
+                        ) : (
+                          <span className="dim">—</span>
+                        )}
+                      </td>
+                    )}
+                    {show("status") && <td className="muted">{d.status || <span className="dim">—</span>}</td>}
+                    {show("sku") && <td className="muted mono">{d.sku || <span className="dim">—</span>}</td>}
                   </tr>
                 );
               })}
@@ -425,6 +465,7 @@ export function DesignMaster() {
           </table>
           )}
         </div>
+        {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

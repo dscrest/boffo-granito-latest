@@ -1,0 +1,5 @@
+- [Pick lists DB-sourced](pick-lists-db-sourced.md) — master pick-list values must be uniform & come from the DB, never static
+- [Catalyst MCP server choice](catalyst-mcp-server-choice.md) — use the Catalyst Zoho (OCTFIS) MCP for boffo DB ops; MCP_DS_HOME is the wrong account
+- [Grid UX standard](grid-ux-standard.md) — every list grid: footer pager (25 default, persisted), column show/hide, wired basic filters
+- [Deploy target](boffo-deploy-target.md) — `catalyst deploy --project boffo-latest-project --org 926227227`; bare deploy hits the old project
+- [Pallet naming](pallet-naming.md) — Pallet Master (Items) = formats master; Palletization (Sales) = process; never move/merge them

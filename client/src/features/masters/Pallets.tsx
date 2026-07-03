@@ -12,6 +12,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { PalletForm } from "./PalletForm";
@@ -25,6 +27,16 @@ import {
   type SizeOption,
 } from "./palletsApi";
 
+// Toggleable columns (Name + checkbox/# always shown).
+const PALLET_COLUMNS: ColumnDef[] = [
+  { key: "packing", label: "Packing" },
+  { key: "size", label: "Size" },
+  { key: "type", label: "Type" },
+  { key: "coverage", label: "Coverage (m² / ft²)" },
+  { key: "boxesPerCont", label: "Boxes / Cont." },
+  { key: "palletsPerCont", label: "Pallets / Cont." },
+];
+
 export function Pallets() {
   const [rows, setRows] = useState<PalletRow[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
@@ -32,8 +44,10 @@ export function Pallets() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [typeF, setTypeF] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const { hidden, toggle, show } = useHiddenColumns("palletsTableColumns");
   const [editing, setEditing] = useState<{ row: PalletRow | null } | null>(null); // null=closed, {row:null}=new
 
   const load = async () => {
@@ -56,15 +70,20 @@ export function Pallets() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
+    return rows.filter((r) => {
+      if (typeF && r.palletType !== typeF) return false;
+      if (!q) return true;
+      return (
         r.name.toLowerCase().includes(q) ||
         r.sizeLabel.toLowerCase().includes(q) ||
         r.palletType.toLowerCase().includes(q) ||
-        r.packingDetails.toLowerCase().includes(q),
-    );
-  }, [rows, query]);
+        r.packingDetails.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, query, typeF]);
+
+  const pager = usePagination(filtered.length, "palletsPageSize", `${query}|${typeF}`);
+  const pageRows = pager.slice(filtered);
 
   const onSave = async (input: PalletInput) => {
     const target = editing?.row;
@@ -82,7 +101,8 @@ export function Pallets() {
     await load();
   };
 
-  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
+  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
+  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
 
   const toggleOne = (id: string) =>
     setSelected((p) => {
@@ -94,8 +114,8 @@ export function Pallets() {
   const toggleAll = () =>
     setSelected((p) => {
       const next = new Set(p);
-      if (allShownSelected) filtered.forEach((r) => next.delete(r.id));
-      else filtered.forEach((r) => next.add(r.id));
+      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
+      else pageRows.forEach((r) => next.add(r.id));
       return next;
     });
 
@@ -161,15 +181,7 @@ export function Pallets() {
       <div className="page-head">
         <div>
           <div className="title">Pallet Master</div>
-          <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${rows.length} pallets`}
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
-          </div>
+          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
@@ -205,9 +217,17 @@ export function Pallets() {
         </div>
       ) : (
         <div className="fbar">
-          <span className="muted mono">{filtered.length} rows</span>
+          <select value={typeF} onChange={(e) => setTypeF(e.target.value)} title="Filter by type">
+            <option value="">All types</option>
+            {palletTypes.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <ColumnPicker columns={PALLET_COLUMNS} hidden={hidden} onToggle={toggle} />
         </div>
       )}
 
@@ -229,16 +249,16 @@ export function Pallets() {
                 </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>Name</th>
-                <th>Packing</th>
-                <th>Size</th>
-                <th>Type</th>
-                <th className="num" style={{ textAlign: "right" }}>Coverage (m² / ft²)</th>
-                <th className="num" style={{ textAlign: "right" }}>Boxes / Cont.</th>
-                <th className="num" style={{ textAlign: "right" }}>Pallets / Cont.</th>
+                {show("packing") && <th>Packing</th>}
+                {show("size") && <th>Size</th>}
+                {show("type") && <th>Type</th>}
+                {show("coverage") && <th className="num" style={{ textAlign: "right" }}>Coverage (m² / ft²)</th>}
+                {show("boxesPerCont") && <th className="num" style={{ textAlign: "right" }}>Boxes / Cont.</th>}
+                {show("palletsPerCont") && <th className="num" style={{ textAlign: "right" }}>Pallets / Cont.</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => {
+              {pageRows.map((r, i) => {
                 const sel = selected.has(r.id);
                 return (
                   <tr
@@ -255,18 +275,22 @@ export function Pallets() {
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
                     </td>
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     <td><span className="chip">{r.name}</span></td>
-                    <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>
-                    <td>{r.sizeLabel || r.palletSizeLabel ? <span className="chip size">{r.sizeLabel || r.palletSizeLabel}</span> : <span className="dim">—</span>}</td>
-                    <td className="muted">{r.palletType || <span className="dim">—</span>}</td>
-                    <td className="num mono">
-                      {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}
-                    </td>
-                    <td className="num mono" style={{ color: "var(--fg)" }}>
-                      {r.totalBoxesPerContainer > 0 ? fmt(r.totalBoxesPerContainer) : <span className="dim">—</span>}
-                    </td>
-                    <td className="num mono">{r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : <span className="dim">—</span>}</td>
+                    {show("packing") && <td className="muted mono">{r.packingDetails || <span className="dim">—</span>}</td>}
+                    {show("size") && <td>{r.sizeLabel || r.palletSizeLabel ? <span className="chip size">{r.sizeLabel || r.palletSizeLabel}</span> : <span className="dim">—</span>}</td>}
+                    {show("type") && <td className="muted">{r.palletType || <span className="dim">—</span>}</td>}
+                    {show("coverage") && (
+                      <td className="num mono">
+                        {r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : <span className="dim">—</span>}
+                      </td>
+                    )}
+                    {show("boxesPerCont") && (
+                      <td className="num mono" style={{ color: "var(--fg)" }}>
+                        {r.totalBoxesPerContainer > 0 ? fmt(r.totalBoxesPerContainer) : <span className="dim">—</span>}
+                      </td>
+                    )}
+                    {show("palletsPerCont") && <td className="num mono">{r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : <span className="dim">—</span>}</td>}
                   </tr>
                 );
               })}
@@ -294,6 +318,7 @@ export function Pallets() {
           </table>
           )}
         </div>
+        {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

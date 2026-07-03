@@ -4,10 +4,12 @@
    the master-page UI convention: row-click opens the editor.
    Roles control feature visibility + update/delete rights.
    ============================================================ */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 
 interface UserRow {
@@ -37,6 +39,13 @@ interface Draft {
 
 const EMPTY: Draft = { rowid: null, email: "", name: "", password: "", role: "", active: true };
 
+// Toggleable columns (Email + # always shown).
+const USER_COLUMNS: ColumnDef[] = [
+  { key: "name", label: "Name" },
+  { key: "role", label: "Role" },
+  { key: "status", label: "Status" },
+];
+
 export function UsersAdmin() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
@@ -44,6 +53,9 @@ export function UsersAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [roleF, setRoleF] = useState("");
+  const { hidden, toggle, show } = useHiddenColumns("usersTableColumns");
 
   const load = async () => {
     setLoading(true);
@@ -96,6 +108,16 @@ export function UsersAdmin() {
     }
   };
 
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return users.filter((u) => {
+      if (roleF && (u.role || "") !== roleF) return false;
+      if (!q) return true;
+      return `${u.email} ${u.name}`.toLowerCase().includes(q);
+    });
+  }, [users, query, roleF]);
+  const pager = usePagination(filtered.length, "usersPageSize", `${query}|${roleF}`);
+
   const valid =
     draft &&
     (draft.rowid
@@ -108,7 +130,7 @@ export function UsersAdmin() {
       <div className="page-head">
         <div>
           <div className="title">Users</div>
-          <div className="sub">{loading ? "Loading…" : `${users.length} sign-in accounts · roles control feature access`}</div>
+          <div className="sub">{loading ? "Loading…" : "Roles control feature access"}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
@@ -195,6 +217,25 @@ export function UsersAdmin() {
         </div>
       )}
 
+      <div className="fbar">
+        <div style={{ flex: 1 }} />
+        <select value={roleF} onChange={(e) => setRoleF(e.target.value)} title="Filter by role">
+          <option value="">All roles</option>
+          {roles.map((r) => (
+            <option key={r.rowid} value={r.rowid}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Search email, name…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ColumnPicker columns={USER_COLUMNS} hidden={hidden} onToggle={toggle} />
+      </div>
+
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && users.length === 0 ? (
@@ -205,13 +246,13 @@ export function UsersAdmin() {
                 <tr>
                   <th style={{ width: 36, textAlign: "center" }}>#</th>
                   <th>Email</th>
-                  <th>Name</th>
-                  <th>Role</th>
-                  <th>Status</th>
+                  {show("name") && <th>Name</th>}
+                  {show("role") && <th>Role</th>}
+                  {show("status") && <th>Status</th>}
                 </tr>
               </thead>
               <tbody>
-                {users.map((u, i) => (
+                {pager.slice(filtered).map((u, i) => (
                   <tr
                     key={u.rowid}
                     tabIndex={0}
@@ -232,17 +273,19 @@ export function UsersAdmin() {
                     style={{ cursor: "pointer" }}
                     title="Edit user"
                   >
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{u.email}</td>
-                    <td>{u.name || <span className="dim">—</span>}</td>
-                    <td>{u.roleName ? <span className="chip">{u.roleName}</span> : <span className="dim">no role</span>}</td>
-                    <td>
-                      {u.active ? (
-                        <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
-                      ) : (
-                        <span className="chip" style={{ color: "var(--dim)" }}>disabled</span>
-                      )}
-                    </td>
+                    {show("name") && <td>{u.name || <span className="dim">—</span>}</td>}
+                    {show("role") && <td>{u.roleName ? <span className="chip">{u.roleName}</span> : <span className="dim">no role</span>}</td>}
+                    {show("status") && (
+                      <td>
+                        {u.active ? (
+                          <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+                        ) : (
+                          <span className="chip" style={{ color: "var(--dim)" }}>disabled</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {!loading && users.length === 0 && (
@@ -256,6 +299,7 @@ export function UsersAdmin() {
             </table>
           )}
         </div>
+        {!(loading && users.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

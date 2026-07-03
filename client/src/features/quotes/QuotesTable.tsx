@@ -7,6 +7,8 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
@@ -35,6 +37,17 @@ const TABS: Array<{ id: string; label: string }> = [
   { id: "Sent", label: "Sent" },
   { id: "Accepted", label: "Accepted" },
   { id: "Converted", label: "Converted" },
+];
+
+// Toggleable columns (Quote No always shown).
+const QUOTE_COLUMNS: ColumnDef[] = [
+  { key: "customer", label: "Customer" },
+  { key: "date", label: "Date" },
+  { key: "items", label: "Items" },
+  { key: "total", label: "Final Total" },
+  { key: "terms", label: "Terms" },
+  { key: "status", label: "Status" },
+  { key: "so", label: "SO" },
 ];
 
 export const convertible = (s: QuoteStatus) =>
@@ -67,7 +80,9 @@ export function quoteToInput(q: Quote): NewQuoteInput {
 export function QuotesTable() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("all");
+  const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const { hidden, toggle, show } = useHiddenColumns("quotesTableColumns");
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
@@ -112,9 +127,16 @@ export function QuotesTable() {
   const nextSeq = quotes.length + 1;
 
   const filtered = useMemo(() => {
-    if (tab === "all") return quotes;
-    return quotes.filter((q) => q.status === tab || (tab === "Converted" && q.status === "PartiallyConverted"));
-  }, [tab, quotes]);
+    const q = query.trim().toLowerCase();
+    return quotes.filter((r) => {
+      if (tab !== "all" && !(r.status === tab || (tab === "Converted" && r.status === "PartiallyConverted")))
+        return false;
+      if (!q) return true;
+      return `${r.quoteNo} ${r.customer}`.toLowerCase().includes(q);
+    });
+  }, [tab, quotes, query]);
+
+  const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}`);
 
   const tabCount = (id: string) =>
     id === "all"
@@ -129,7 +151,7 @@ export function QuotesTable() {
         <div>
           <div className="title">Quotes</div>
           <div className="sub">
-            {loading ? "Loading…" : `${filtered.length} of ${quotes.length} quotes`} · raised → shared → converted to Master Order
+            {loading ? "Loading…" : "Raised → shared → converted to Master Order"}
             {notice && (
               <>
                 {" · "}
@@ -163,6 +185,14 @@ export function QuotesTable() {
             ))}
           </select>
         </label>
+        <div style={{ flex: 1 }} />
+        <input
+          type="text"
+          placeholder="Search quote no, customer…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ColumnPicker columns={QUOTE_COLUMNS} hidden={hidden} onToggle={toggle} />
       </div>
 
       <div className="card">
@@ -174,17 +204,17 @@ export function QuotesTable() {
             <thead>
               <tr>
                 <th>Quote No</th>
-                <th>Customer</th>
-                <th>Date</th>
-                <th className="num" style={{ textAlign: "right" }}>Items</th>
-                <th className="num" style={{ textAlign: "right" }}>Final Total</th>
-                <th>Terms</th>
-                <th>Status</th>
-                <th>SO</th>
+                {show("customer") && <th>Customer</th>}
+                {show("date") && <th>Date</th>}
+                {show("items") && <th className="num" style={{ textAlign: "right" }}>Items</th>}
+                {show("total") && <th className="num" style={{ textAlign: "right" }}>Final Total</th>}
+                {show("terms") && <th>Terms</th>}
+                {show("status") && <th>Status</th>}
+                {show("so") && <th>SO</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((q) => {
+              {pager.slice(filtered).map((q) => {
                 const totals = quoteTotals(q);
                 return (
                   <tr key={q.id}>
@@ -198,28 +228,32 @@ export function QuotesTable() {
                         {q.quoteNo}
                       </button>
                     </td>
-                    <td>{q.customer}</td>
-                    <td className="mono muted">{q.quoteDate || "—"}</td>
-                    <td className="num mono">{q.lines.length}</td>
-                    <td className="num mono">{q.currency} {fmt(totals.final)}</td>
-                    <td className="muted">{q.paymentTerm || "—"}</td>
-                    <td>
-                      <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>
-                    </td>
-                    <td className="mono muted">
-                      {q.soNumber && q.soId ? (
-                        <button
-                          className="linkish"
-                          style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                          onClick={() => navigate(`/orders/${q.soId}`)}
-                          title="Open Master Order"
-                        >
-                          {q.soNumber}
-                        </button>
-                      ) : (
-                        q.soNumber || "—"
-                      )}
-                    </td>
+                    {show("customer") && <td>{q.customer}</td>}
+                    {show("date") && <td className="mono muted">{q.quoteDate || "—"}</td>}
+                    {show("items") && <td className="num mono">{q.lines.length}</td>}
+                    {show("total") && <td className="num mono">{q.currency} {fmt(totals.final)}</td>}
+                    {show("terms") && <td className="muted">{q.paymentTerm || "—"}</td>}
+                    {show("status") && (
+                      <td>
+                        <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>
+                      </td>
+                    )}
+                    {show("so") && (
+                      <td className="mono muted">
+                        {q.soNumber && q.soId ? (
+                          <button
+                            className="linkish"
+                            style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                            onClick={() => navigate(`/orders/${q.soId}`)}
+                            title="Open Master Order"
+                          >
+                            {q.soNumber}
+                          </button>
+                        ) : (
+                          q.soNumber || "—"
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -247,6 +281,7 @@ export function QuotesTable() {
           </table>
           )}
         </div>
+        {!(loading && quotes.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

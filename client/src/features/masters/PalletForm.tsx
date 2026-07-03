@@ -86,11 +86,11 @@ export function PalletForm({
     [sizeLabel, packing, v.pallet_type],
   );
 
-  // Keep Name in sync with the formula until the operator types over it.
-  const [nameTouched, setNameTouched] = useState(!!isEdit);
+  // Name is formula-owned: the field is read-only so typing can't break the
+  // automation. Always mirrors "SIZE - Packing Detail - Type".
   useEffect(() => {
-    if (!nameTouched) setV((p) => (p.name === autoName ? p : { ...p, name: autoName }));
-  }, [autoName, nameTouched]);
+    setV((p) => (p.name === autoName ? p : { ...p, name: autoName }));
+  }, [autoName]);
 
   const typeOptions = useMemo(
     () => [...new Set([...PALLET_TYPES, ...palletTypes].filter(Boolean))],
@@ -145,17 +145,14 @@ export function PalletForm({
                 <span className="lbl">Name</span>
                 <input
                   value={v.name}
-                  onChange={(e) => {
-                    setNameTouched(true);
-                    setStr("name", e.target.value);
-                  }}
+                  readOnly
+                  disabled
                   placeholder="Auto-generated from Size, packing & type"
+                  title="Auto-generated — fill Size, packing & type below"
                 />
-                {!nameTouched && (
-                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                    Auto from the fields below — edit to override
-                  </span>
-                )}
+                <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                  Auto-generated from the fields below — not editable
+                </span>
               </label>
               <label className="form-field">
                 <span className="lbl">Size</span>
@@ -187,9 +184,8 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Packing Details</span>
-                {/* ponytail: auto from Boxes/Pallet × Pallets/Container. Make it
-                    auto-with-override (mirror nameTouched) only if operators need
-                    custom packing notes. */}
+                {/* ponytail: auto from Boxes/Pallet × Pallets/Container; add an
+                    override only if operators ever need custom packing notes. */}
                 <input
                   value={packing || "—"}
                   readOnly

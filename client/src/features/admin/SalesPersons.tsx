@@ -11,6 +11,8 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { apiGet } from "@/lib/api";
 import {
   listSalesPersons,
@@ -38,6 +40,15 @@ interface Draft {
 
 const EMPTY: Draft = { rowid: null, name: "", email: "", phone: "", region: "", active: true, app_user: "" };
 
+// Toggleable columns (Name + # always shown).
+const SP_COLUMNS: ColumnDef[] = [
+  { key: "email", label: "Email" },
+  { key: "mobile", label: "Mobile" },
+  { key: "region", label: "Region" },
+  { key: "linkedUser", label: "Linked user" },
+  { key: "status", label: "Status" },
+];
+
 export function SalesPersonsAdmin() {
   const [rows, setRows] = useState<SalesPersonRow[]>([]);
   const [users, setUsers] = useState<AppUserOption[]>([]);
@@ -45,6 +56,9 @@ export function SalesPersonsAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusF, setStatusF] = useState("");
+  const { hidden, toggle, show } = useHiddenColumns("salesPersonsTableColumns");
 
   const load = async () => {
     setLoading(true);
@@ -78,6 +92,16 @@ export function SalesPersonsAdmin() {
     () => users.map((u) => ({ value: u.rowid, label: u.name || u.email, hint: u.email })),
     [users],
   );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return rows.filter((s) => {
+      if (statusF && (statusF === "active") !== s.active) return false;
+      if (!q) return true;
+      return `${s.name} ${s.email} ${s.region}`.toLowerCase().includes(q);
+    });
+  }, [rows, query, statusF]);
+  const pager = usePagination(filtered.length, "salesPersonsPageSize", `${query}|${statusF}`);
 
   const onPickUser = (rowid: string) => {
     if (!draft) return;
@@ -148,9 +172,7 @@ export function SalesPersonsAdmin() {
       <div className="page-head">
         <div>
           <div className="title">Sales Persons</div>
-          <div className="sub">
-            {loading ? "Loading…" : `${rows.length} reps · shown on quotations & sales orders`}
-          </div>
+          <div className="sub">{loading ? "Loading…" : "Shown on quotations & sales orders"}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
@@ -227,6 +249,22 @@ export function SalesPersonsAdmin() {
         </div>
       )}
 
+      <div className="fbar">
+        <div style={{ flex: 1 }} />
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <input
+          type="text"
+          placeholder="Search name, email, region…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <ColumnPicker columns={SP_COLUMNS} hidden={hidden} onToggle={toggle} />
+      </div>
+
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && rows.length === 0 ? (
@@ -237,15 +275,15 @@ export function SalesPersonsAdmin() {
                 <tr>
                   <th style={{ width: 36, textAlign: "center" }}>#</th>
                   <th>Name</th>
-                  <th>Email</th>
-                  <th>Mobile</th>
-                  <th>Region</th>
-                  <th>Linked user</th>
-                  <th>Status</th>
+                  {show("email") && <th>Email</th>}
+                  {show("mobile") && <th>Mobile</th>}
+                  {show("region") && <th>Region</th>}
+                  {show("linkedUser") && <th>Linked user</th>}
+                  {show("status") && <th>Status</th>}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((s, i) => (
+                {pager.slice(filtered).map((s, i) => (
                   <tr
                     key={s.id}
                     tabIndex={0}
@@ -263,19 +301,23 @@ export function SalesPersonsAdmin() {
                     style={{ cursor: "pointer" }}
                     title="Edit sales person"
                   >
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     <td style={{ color: "var(--fg)" }}>{s.name}</td>
-                    <td>{s.email || <span className="dim">—</span>}</td>
-                    <td>{s.phone || <span className="dim">—</span>}</td>
-                    <td>{s.region || <span className="dim">—</span>}</td>
-                    <td>{userName.get(s.appUserId) ? <span className="chip">{userName.get(s.appUserId)}</span> : <span className="dim">unlinked</span>}</td>
-                    <td>
-                      {s.active ? (
-                        <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
-                      ) : (
-                        <span className="chip" style={{ color: "var(--dim)" }}>inactive</span>
-                      )}
-                    </td>
+                    {show("email") && <td>{s.email || <span className="dim">—</span>}</td>}
+                    {show("mobile") && <td>{s.phone || <span className="dim">—</span>}</td>}
+                    {show("region") && <td>{s.region || <span className="dim">—</span>}</td>}
+                    {show("linkedUser") && (
+                      <td>{userName.get(s.appUserId) ? <span className="chip">{userName.get(s.appUserId)}</span> : <span className="dim">unlinked</span>}</td>
+                    )}
+                    {show("status") && (
+                      <td>
+                        {s.active ? (
+                          <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+                        ) : (
+                          <span className="chip" style={{ color: "var(--dim)" }}>inactive</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {!loading && rows.length === 0 && (
@@ -289,6 +331,7 @@ export function SalesPersonsAdmin() {
             </table>
           )}
         </div>
+        {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>
     </div>
   );

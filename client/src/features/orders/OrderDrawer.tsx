@@ -1,5 +1,6 @@
 /* Order Detail Drawer — ported verbatim from prototype/order-detail.jsx. */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
@@ -31,6 +32,10 @@ export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => v
   );
 
   const stageIdx = STAGES.findIndex((s) => s.id === order.stage);
+
+  const navigate = useNavigate();
+  // Same rule as OrderDetail's avail(): produced but not yet palletized.
+  const palletizable = totals.produced - totals.palletized > 0;
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -68,6 +73,18 @@ export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => v
             <span className="li-badge">
               <Icon name="docs" size={10} /> PI · PO {order.stage === "final" && "· INV"}
             </span>
+            <button
+              className="hbtn primary"
+              disabled={!palletizable}
+              title={palletizable ? "Select items and close a pallet" : "Nothing produced yet to palletize"}
+              onClick={() => {
+                onClose();
+                navigate(`/orders/${encodeURIComponent(order.id)}`);
+              }}
+            >
+              <Icon name="palette" size={13} />
+              Send to Palletisation
+            </button>
             <button className="iconbtn" title="Print">
               <Icon name="download" size={14} />
             </button>

@@ -174,7 +174,12 @@ Values: Glossy, Hard Matt, Carving, Matt, Elevation, High Glossy, Carving + Punc
 | name | varchar(255) | key column |
 | term_type | varchar(50) | |
 
-Values: Credit, Advance, Net 15, Net 30, Net 45, Net 60.
+Values: Credit 30, Advance, Net 15, Net 30, Net 45, Net 60, plus the Party List
+terms added 2026-07-02: Against Full TT · 10% Advance & 90% Against B/L ·
+20% Advance & 80% Against B/L · 20% Advance & 80% 40 Days from B/L ·
+20% Advance & 80% 60 Days from B/L · 30% Advance & 70% Against B/L ·
+30% Advance & 70% Before Loading · 90 Days from B/L Date · 100 Days from B/L Date ·
+120 Days from B/L Date.
 
 ### NumberMaster (76673000000049360)
 | Column | Type | Notes |
@@ -229,6 +234,9 @@ Values: Credit, Advance, Net 15, Net 30, Net 45, Net 60.
 | shipping_state | varchar(80) | |
 | shipping_pincode | varchar(20) | |
 | shipping_phone | varchar(30) | |
+| main_party_name | varchar(255) | parent/group party (Party List master, 2026-07-02) |
+| working_status | varchar(100) | Party List master, 2026-07-02 |
+| handling_person | bigint | **logical FK** → SalesPerson ROWID (2026-07-02; plain bigint, same MCP int64 limitation as SalesPerson.app_user) |
 
 ### Design (76673000000052723) — keys on `unique_name` / `design_name`
 | Column | Type | Notes |
