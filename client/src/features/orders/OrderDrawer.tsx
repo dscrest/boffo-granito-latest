@@ -7,10 +7,14 @@ import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
+import { AdvanceButton } from "./AdvanceButton";
 
-export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => void }) {
+export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose: () => void }) {
   // Live orders (cache-first, so opening the drawer costs no extra fetch).
   const { orders } = useOrders();
+  // Track the live row so a stage advance from inside the drawer repaints
+  // the timeline/badges without reopening; fall back to the clicked snapshot.
+  const order = orders.find((o) => o.id === initial.id) ?? initial;
   const lineItems = useMemo(() => {
     const list = orders.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
     return list.length > 0 ? list : [order];
@@ -69,6 +73,7 @@ export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => v
             <span className="li-badge">
               <Icon name="docs" size={10} /> PI · PO {order.stage === "final" && "· INV"}
             </span>
+            <AdvanceButton order={order} className="hbtn primary" verbose />
             <button
               className="hbtn primary"
               disabled={!palletizable}

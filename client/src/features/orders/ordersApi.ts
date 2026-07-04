@@ -5,7 +5,7 @@
    header, Customer, and Design (+ Size/Finish/Brand lookups), to
    match the flat Order shape in client/src/data.ts.
    ============================================================ */
-import { list, listAll, remove, op, type DSRow } from "@/lib/dataOps";
+import { list, listAll, remove, update, op, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import type { Order, TaxType } from "@/data";
 
@@ -170,4 +170,21 @@ export function createSalesOrder(input: NewSalesOrderInput) {
 
 export function deleteSalesOrder(rowid: string) {
   return bust(remove("SalesOrder", rowid));
+}
+
+/** Manual stage advance — only the judgment transitions (po→prod→qc→packing).
+    packing→loading→final are set server-side when work is recorded
+    (close-pallet / load-container / dispatch sagas), so a manual set there
+    would let stage contradict the quantities. */
+export const NEXT_STAGE: Record<string, string> = { po: "prod", prod: "qc", qc: "packing" };
+
+export async function advanceStage(orderItemId: string, currentStage: string): Promise<OpResult> {
+  const next = NEXT_STAGE[currentStage];
+  if (!next) return { ok: false, error: "This stage advances by recording work" };
+  const res = await update("OrderItem", orderItemId, { stage: next });
+  if (res.ok) {
+    cache.invalidate();
+    void cache.load(); // refetch + notify every subscribed screen
+  }
+  return res;
 }

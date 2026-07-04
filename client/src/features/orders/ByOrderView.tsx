@@ -10,6 +10,7 @@ import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
+import { AdvanceButton } from "./AdvanceButton";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { createSalesOrder } from "./ordersApi";
@@ -324,6 +325,7 @@ function ByOrderGroup({
                 </th>
                 <th>Progress</th>
                 <th>Stage</th>
+                <th style={{ width: 100 }}></th>
                 <th style={{ width: 36 }}></th>
               </tr>
             </thead>
@@ -362,6 +364,9 @@ function ByOrderGroup({
                   </td>
                   <td>
                     <StageBadge stage={li.stage} />
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <AdvanceButton order={li} />
                   </td>
                   <td className="expand-cell">
                     <Icon name="chev-r" size={12} />
