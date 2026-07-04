@@ -232,22 +232,28 @@ function MasterTable({ def }: { def: MasterDef }) {
     return rows.filter((r) => def.fields.some((f) => (r[f.key] ?? "").toLowerCase().includes(q)));
   }, [rows, query, def]);
 
-  const initialForm =
-    editing && editing.id ? (rows.find((r) => r._id === editing.id) ?? emptyForm(def)) : emptyForm(def);
+  // Seed the editor with ONLY the form's field keys — the row also carries
+  // the internal _id (ROWID), which must never reach the PATCH payload
+  // (Catalyst rejects unknown columns: "Invalid column name _id").
+  const editRow = editing?.id ? rows.find((r) => r._id === editing.id) : undefined;
+  const initialForm = editRow
+    ? Object.fromEntries(def.fields.map((f) => [f.key, editRow[f.key] ?? ""]))
+    : emptyForm(def);
 
   const save = async (vals: Record<string, string>) => {
     const editId = editing?.id;
-    setEditing(null);
     setBusy(true);
     const res = editId
       ? await updateMaster(def.table, editId, vals)
       : await createMaster(def.table, vals);
     setBusy(false);
     if (!res.ok) {
+      // Keep the editor open — closing here would discard everything typed.
       toast.error(res.error || "Save failed");
       setError(res.error || "Save failed");
       return;
     }
+    setEditing(null);
     toast.success(editId ? `${def.label} updated` : `${def.label} added`);
     await load();
   };

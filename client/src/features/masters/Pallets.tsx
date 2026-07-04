@@ -87,15 +87,16 @@ export function Pallets() {
 
   const onSave = async (input: PalletInput) => {
     const target = editing?.row;
-    setEditing(null);
     setNotice(target ? "Saving changes…" : "Saving pallet…");
     const res = target ? await updatePallet(target.id, input) : await createPallet(input);
     if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
       setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
+    setEditing(null);
     setNotice(`Pallet saved (#${res.rowid}).`);
     toast.success(target ? "Pallet updated" : "Pallet saved");
     await load();

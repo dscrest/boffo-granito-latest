@@ -84,12 +84,13 @@ export function PartiesView() {
   useEffect(load, []);
 
   const onSave = async (input: CustomerInput) => {
-    setShowForm(false);
     const res = await createCustomer(input);
     if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
       toast.error(res.error || "Save failed");
       return;
     }
+    setShowForm(false);
     toast.success("Customer saved");
     load();
   };

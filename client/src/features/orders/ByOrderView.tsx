@@ -66,14 +66,15 @@ export function ByOrderView() {
   }, []);
 
   const onSaveOrder = async (dr: OrderDraft) => {
-    setShowForm(false);
     setNotice("Saving order…");
     const res = await createSalesOrder(draftToInput(dr));
     if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
       setNotice(null);
       toast.error(res.error || "Save failed");
       return;
     }
+    setShowForm(false);
     setNotice(`Order saved (#${res.rowid}).`);
     toast.success(`Order saved (#${res.rowid})`);
     reload();

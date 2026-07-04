@@ -30,13 +30,10 @@ const ORDER_COLUMNS: ColumnDef[] = [
   { key: "due", label: "Due" },
 ];
 
-let _soSeq = 100;
-const genOrderNumber = () => `SO/2026-27/${++_soSeq}`;
-
 export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   return {
     customer: dr.customer,
-    order_number: genOrderNumber(),
+    order_number: "", // blank → data-ops assigns the next SO number server-side
     po_number: dr.po_number,
     order_date: dr.order_date,
     shipment_date: dr.shipment_date,
@@ -93,15 +90,16 @@ export function OrdersTable() {
   }, []);
 
   const onSave = async (dr: OrderDraft) => {
-    setShowForm(false);
     setNotice("Saving master order…");
     const res = await createSalesOrder(draftToInput(dr));
     if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
       setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
+    setShowForm(false);
     setNotice(`Master order saved (#${res.rowid}).`);
     toast.success(`Master order saved (#${res.rowid})`);
     await load();

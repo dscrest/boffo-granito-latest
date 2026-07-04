@@ -213,17 +213,23 @@ export function DesignMaster() {
       return next;
     });
 
-  const onCreate = async (input: DesignInput, palletIds: string[]) => {
-    setShowNew(false);
+  const onCreate = async (input: DesignInput) => {
+    // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
+    const dup = rows.find((r) => r.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase());
+    if (dup) {
+      toast.error(`An item named "${input.unique_name}" already exists`);
+      return; // keep the modal open so the entry can be fixed
+    }
     setNotice("Saving design…");
     const res = await createDesign(input);
     if (!res.ok) {
+      // Keep the modal open — closing here would discard everything typed.
       setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    if (res.rowid && palletIds.length) await setDesignPallets(res.rowid, palletIds);
+    setShowNew(false);
     setNotice(`Design saved (#${res.rowid}).`);
     toast.success("Design saved");
     await load();

@@ -626,9 +626,31 @@ app.post("/so-with-items", async (req, res) => {
   }
 });
 
+/* Server-assigned SO number: max numeric suffix for this fiscal year + 1.
+   ponytail: MAX-scan over SalesOrder, not TransactionSeries — assertUnique
+   below is the backstop if two inserts race; wire TransactionSeries when
+   multi-user contention becomes real. */
+async function nextOrderNumber(catalyst) {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
+  const prefix = `SO/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
+  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT order_number FROM SalesOrder"));
+  let max = 0;
+  for (const r of rows) {
+    const n = String(r.order_number || "");
+    if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
+  }
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
 async function createSalesOrder(ds, body, maps) {
+  // Blank order_number → the server assigns the next number (clients no
+  // longer generate SO numbers; hard-coded counters caused 409 collisions).
+  const orderNumber =
+    String(body.order_number || "").trim() ||
+    (maps.catalyst ? await nextOrderNumber(maps.catalyst) : "");
   // Validate everything up front — never write a header then fail on a line.
-  if (maps.catalyst) await assertUnique(maps.catalyst, "SalesOrder", "order_number", body.order_number);
+  if (maps.catalyst) await assertUnique(maps.catalyst, "SalesOrder", "order_number", orderNumber);
   assertDateOrder(body.order_date, body.shipment_date, "order date", "shipment date");
   // Customer: convert-quote passes the source quote's customer ROWID directly
   // (customer_rowid); direct SO creation passes a name to resolve strictly.
@@ -642,7 +664,7 @@ async function createSalesOrder(ds, body, maps) {
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
-    order_number: body.order_number || "",
+    order_number: orderNumber,
     quote: body.quote_rowid || null,
     customer,
     po_number: body.po_number || "",
@@ -691,7 +713,7 @@ async function createSalesOrder(ds, body, maps) {
       final_total: it.sub,
     });
   }
-  return { rowid: soId, data: { ROWID: soId, total_amount: doc.total_amount } };
+  return { rowid: soId, data: { ROWID: soId, order_number: orderNumber, total_amount: doc.total_amount } };
 }
 
 /* ----------------------------------------------------------------
@@ -765,7 +787,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
           conversion_flag: flag,
           status: flag === "Full" ? "Converted" : "PartiallyConverted",
         });
-        return { rowid: so.rowid, data: { so_rowid: so.rowid, quote_rowid: quoteId, conversion_flag: flag } };
+        return { rowid: so.rowid, data: { so_rowid: so.rowid, quote_rowid: quoteId, conversion_flag: flag, order_number: so.data.order_number } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });

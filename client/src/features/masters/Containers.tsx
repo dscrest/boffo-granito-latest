@@ -94,15 +94,16 @@ export function Containers() {
 
   const onSave = async (input: ContainerInput) => {
     const target = editing?.row;
-    setEditing(null);
     setNotice(target ? "Saving changes…" : "Saving container…");
     const res = target ? await updateContainer(target.id, input) : await createContainer(input);
     if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
       setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
+    setEditing(null);
     setNotice(`Container saved (#${res.rowid}).`);
     toast.success(target ? "Container updated" : "Container saved");
     await load();

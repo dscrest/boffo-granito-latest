@@ -194,10 +194,11 @@ export function convertQuote(
   rowid: string,
   mode: "Full" | "Partial",
   lines: { item: string; qty: number; rate: number }[],
-  extra: { order_number: string; po_number?: string; payment_term?: string; box_branding?: string },
+  // order_number omitted → data-ops assigns the next SO number server-side.
+  extra: { order_number?: string; po_number?: string; payment_term?: string; box_branding?: string },
 ) {
   return bust(
-    op<{ so_rowid: string; quote_rowid: string; conversion_flag: string }>(
+    op<{ so_rowid: string; quote_rowid: string; conversion_flag: string; order_number: string }>(
       `convert-quote/${rowid}`,
       { mode, lines, ...extra },
     ),

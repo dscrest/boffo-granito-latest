@@ -19,9 +19,6 @@ import { lineTotals, type Quote } from "@/data";
 import { fmt } from "@/lib/format";
 import { convertQuote } from "./quotesApi";
 
-let _soSeq = 4; // provisional client-side SO number until TransactionSeries wiring
-const nextSoNumber = () => `SO/2026-27/${String(++_soSeq).padStart(3, "0")}`;
-
 export function ConvertDialog({
   quote,
   onClose,
@@ -58,10 +55,8 @@ export function ConvertDialog({
     }
     setBusy(true);
     setError(null);
-    const soNumber = nextSoNumber();
     const lines = included.map((c) => ({ item: c.line.item, qty: c.qty, rate: c.line.rate }));
     const res = await convertQuote(quote.id, mode, lines, {
-      order_number: soNumber,
       payment_term: quote.paymentTerm,
       box_branding: boxBranding.trim(),
     });
@@ -71,6 +66,7 @@ export function ConvertDialog({
       toast.error(res.error || "Convert failed");
       return;
     }
+    const soNumber = res.data?.order_number || "Master Order";
     toast.success(`Quote converted to ${soNumber}`);
     onConverted(quote.id, soNumber);
     location.hash = "#/orders";
