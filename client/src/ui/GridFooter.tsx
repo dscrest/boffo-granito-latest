@@ -70,7 +70,8 @@ export function useSortRows<T>(rows: T[], get: (row: T, key: string) => unknown,
 
 export type Sorter = Pick<ReturnType<typeof useSortRows>, "sortKey" | "dir" | "onSort">;
 
-/** Sortable <th>: shows ▲/▼ on the active column, ↕ (faint) otherwise. */
+/** Sortable <th>: shows ▲/▼ on the active column, ↕ otherwise.
+    Keyboard-operable (Tab + Enter/Space) and announces aria-sort. */
 export function SortTh({
   id,
   label,
@@ -81,12 +82,20 @@ export function SortTh({
   return (
     <th
       {...thProps}
+      tabIndex={0}
+      aria-sort={active ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
       onClick={() => sort.onSort(id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          sort.onSort(id);
+        }
+      }}
       title={active ? (sort.dir === 1 ? "Sorted ascending — click for descending" : "Sorted descending — click for ascending") : "Click to sort"}
       style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", ...thProps.style }}
     >
       {label}
-      <span aria-hidden style={{ marginLeft: 4, fontSize: 9, opacity: active ? 0.9 : 0.3 }}>
+      <span aria-hidden style={{ marginLeft: 4, fontSize: 9, opacity: active ? 0.9 : 0.55 }}>
         {active ? (sort.dir === 1 ? "▲" : "▼") : "↕"}
       </span>
     </th>

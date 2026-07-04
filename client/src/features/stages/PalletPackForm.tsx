@@ -139,7 +139,7 @@ export function PalletPackForm({
   const panelRef = useModalA11y(onClose);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop">
       <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">

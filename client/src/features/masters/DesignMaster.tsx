@@ -78,7 +78,7 @@ function BulkEditModal({
   const nothing = Object.keys(patch).length === 0;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop">
       <div className="modal-panel card df-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">

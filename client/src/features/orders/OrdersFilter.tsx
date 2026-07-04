@@ -21,7 +21,7 @@ export const EMPTY_FILTER: OrdersFilterState = { field: "none", value: "", searc
 const selStyle: React.CSSProperties = {
   height: 26, padding: "0 8px", borderRadius: 5,
   border: "1px solid var(--border-2)", background: "var(--panel-2)",
-  color: "var(--fg-2)", fontSize: 11.5, outline: "none",
+  color: "var(--fg-2)", fontSize: 11.5,
 };
 
 /** Filter + free-text search applied to a flat Order list. */

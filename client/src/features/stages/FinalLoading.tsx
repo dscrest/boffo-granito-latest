@@ -75,7 +75,7 @@ export function FinalLoading() {
         <div>
           <div className="title">Final Loading &amp; Invoicing</div>
           <div className="sub">
-            {inv.length} active invoices · 22 issued this month · ₹4.62 Cr
+            {loading ? "Loading…" : "Loaded orders grouped by invoice"}
             {notice && (
               <>
                 {" · "}
@@ -85,10 +85,6 @@ export function FinalLoading() {
           </div>
         </div>
         <div className="right">
-          <button className="hbtn">
-            <Icon name="invoice" size={13} />
-            Generate invoice
-          </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="truck" size={13} />
             Dispatch
@@ -98,11 +94,11 @@ export function FinalLoading() {
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KPI label="Invoices (May)" value="22" delta="+4 vs April" trend="up" spark={[3, 4, 5, 4, 6, 7, 8]} color="var(--c-green)" />
-        <KPI label="Pallets Loaded" value="347" unit="pallets" delta="EX-14/2026-27" spark={[5, 6, 7, 8, 9, 10, 11]} color="var(--c-green)" />
-        <KPI label="Boxes Loaded" value="12,664" delta="818 boxes today" spark={[6, 8, 9, 10, 11, 12, 13]} color="var(--c-green)" />
-        <KPI label="Avg Days to Ship" value="42" unit="days" delta="-3 days vs Q1" trend="up" spark={[10, 9, 8, 8, 7, 7, 6]} color="var(--c-cyan)" />
+      {/* Live figures computed from the loaded orders — no placeholder numbers. */}
+      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <KPI label="Active Invoices" value={String(inv.length)} delta="awaiting dispatch" color="var(--c-green)" />
+        <KPI label="Line Items" value={String(finals.length)} delta="in final stage" color="var(--c-green)" />
+        <KPI label="Final Qty" value={fmt(finals.reduce((s, o) => s + o.orderQty, 0))} unit="sqm" color="var(--c-cyan)" />
       </div>
 
       <div className="sec-title">

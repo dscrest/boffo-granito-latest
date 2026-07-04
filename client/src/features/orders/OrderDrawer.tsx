@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
@@ -37,20 +38,15 @@ export function OrderDrawer({ order, onClose }: { order: Order; onClose: () => v
   // Same rule as OrderDetail's avail(): produced but not yet palletized.
   const palletizable = totals.produced - totals.palletized > 0;
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
+  // Focus trap + Esc + focus restore, same as the form modals.
+  const panelRef = useModalA11y(onClose);
 
   const [tab, setTab] = useState("overview");
 
   return (
     <>
       <div className="drawer-scrim" onClick={onClose} />
-      <aside className="drawer" role="dialog" aria-label="Order detail">
+      <aside ref={panelRef} className="drawer" role="dialog" aria-modal="true" aria-label="Order detail">
         <div className="drawer-head">
           <div className="meta">
             <div className="id">

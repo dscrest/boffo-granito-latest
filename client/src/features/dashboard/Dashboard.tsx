@@ -212,15 +212,6 @@ export function Dashboard() {
             <Icon name="truck" size={13} />
             <span className="title">Ready to Load Today</span>
             <span className="muted">· {readyToLoad.length} shipment{readyToLoad.length === 1 ? "" : "s"}</span>
-            <div className="right">
-              <span className="pill">
-                <span className="dot green" />
-                Dock 2 active
-              </span>
-              <button className="hbtn" style={{ height: 26, padding: "0 8px" }}>
-                View all
-              </button>
-            </div>
           </div>
           <div style={{ maxHeight: 326, overflow: "auto" }}>
             <table className="tbl">
@@ -323,17 +314,6 @@ export function Dashboard() {
             <Icon name="tile" size={13} />
             <span className="title">Remaining Qty by Design</span>
             <span className="muted">· Top 7 outstanding</span>
-            <div className="right">
-              <button className="hbtn" style={{ height: 26, padding: "0 8px" }}>
-                By party
-              </button>
-              <button
-                className="hbtn"
-                style={{ height: 26, padding: "0 8px", background: "var(--accent-soft)", borderColor: "var(--accent)", color: "var(--accent)" }}
-              >
-                By design
-              </button>
-            </div>
           </div>
           {showSkeleton ? (
             <SkeletonRows rows={7} />

@@ -67,23 +67,9 @@ export function PurchaseOrders() {
           <div className="title">Purchase Orders</div>
           <div className="sub">{fmt(pos.reduce((s, p) => s + p.totalQty, 0))} sqm total</div>
         </div>
-        <div className="right">
-          <button className="hbtn">
-            <Icon name="download" size={13} />
-            Export
-          </button>
-          <button className="hbtn primary">
-            <Icon name="plus" size={13} />
-            Create PO
-          </button>
-        </div>
       </div>
 
       <div className="fbar">
-        <button className="btn active">All POs</button>
-        <button className="btn">Open</button>
-        <button className="btn">Partially shipped</button>
-        <button className="btn">Closed</button>
         <div style={{ flex: 1 }} />
         <input
           type="text"

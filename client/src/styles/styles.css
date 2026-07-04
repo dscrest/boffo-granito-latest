@@ -14,11 +14,12 @@
   --hover:        #f0f2f5;
   --sidebar-bg:   #eef0f3;   /* left panel — light gray, distinct from white content */
 
-  /* Text */
+  /* Text — muted/dim darkened 2026-07-03 for WCAG AA (muted ≥4.5:1 on
+     --panel-2 at 10px headers; dim was 2.6:1 and used for real content). */
   --fg:           #0f1419;
   --fg-2:         #3a424d;
-  --muted:        #6b7380;
-  --dim:          #99a1ad;
+  --muted:        #5f6773;
+  --dim:          #7d8694;
   --faint:        #c8ced6;
 
   /* Accents — for stage / status (darker for light bg readability) */
@@ -351,6 +352,10 @@ a { color: inherit; text-decoration: none; }
 .app.collapsed .sidebar .foot .row { gap: 0; }
 
 /* ---------- generic ---------- */
+/* Keyboard users get one consistent focus ring everywhere; form fields
+   layer their own accent ring on top (see .form-field rules). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* Bottom spacing lives in ::after, NOT padding: sticky elements pin to the
    scroll container's CONTENT box, so bottom padding would leave the grid
    footer floating above the window edge with rows peeking underneath. */
@@ -467,7 +472,7 @@ a { color: inherit; text-decoration: none; }
 .tbl th {
   text-align: left;
   font-weight: 500;
-  font-size: 10px;
+  font-size: 10.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
@@ -516,7 +521,8 @@ a { color: inherit; text-decoration: none; }
   border-radius: 6px;
   padding: 9px 10px;
   display: flex; flex-direction: column; gap: 7px;
-  cursor: grab;
+  /* pointer, not grab: cards open a drawer; there is no drag-and-drop. */
+  cursor: pointer;
 }
 .kcard:hover { background: var(--elevated); border-color: #2c3645; }
 .kcard .top { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }

@@ -197,7 +197,20 @@ const KanbanCard = memo(function KanbanCard({
   };
 
   return (
-    <div ref={cardRef} className="kcard" onClick={() => onOpen && onOpen(order)}>
+    <div
+      ref={cardRef}
+      className="kcard"
+      role="button"
+      tabIndex={0}
+      aria-label={`${order.poNumber} · ${order.design} · ${order.party}`}
+      onClick={() => onOpen && onOpen(order)}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+          e.preventDefault();
+          onOpen(order);
+        }
+      }}
+    >
       <button
         className={`quick-btn ${quickViewActive ? "open" : ""}`}
         onClick={handleQuickView}

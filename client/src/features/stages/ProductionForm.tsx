@@ -63,7 +63,7 @@ export function ProductionForm({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop">
       <div className="modal-panel card df-modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">

@@ -165,10 +165,6 @@ export function ByOrderView() {
             <Icon name="kanban" size={13} />
             {allCollapsed ? "Expand all" : "Collapse all"}
           </button>
-          <button className="hbtn">
-            <Icon name="download" size={13} />
-            Export
-          </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New Order
@@ -183,7 +179,7 @@ export function ByOrderView() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value)}
-          style={{ height: 26, padding: "0 8px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--panel-2)", color: "var(--fg-2)", fontSize: 11.5, outline: "none" }}
+          style={{ height: 26, padding: "0 8px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--panel-2)", color: "var(--fg-2)", fontSize: 11.5 }}
         >
           <option value="progress">Sort: Least progress first</option>
           <option value="qty">Sort: Largest qty</option>
@@ -333,12 +329,18 @@ function ByOrderGroup({
             </thead>
             <tbody>
               {items.map((li, i) => (
-                <tr key={li.id} className="clickable" onClick={() => onOpenLineItem(li)}>
+                <tr
+                  key={li.id}
+                  className="clickable"
+                  tabIndex={0}
+                  onClick={() => onOpenLineItem(li)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) onOpenLineItem(li);
+                  }}
+                  title="Open line item"
+                >
                   <td className="li-num">{i + 1}</td>
-                  <td className="li-design">
-                    {li.design}
-                    <small>{li.id}</small>
-                  </td>
+                  <td className="li-design">{li.design}</td>
                   <td>
                     <span className={`chip size ${li.size.startsWith("200") || li.size.startsWith("75") ? "b" : ""}`}>{li.size}</span>
                   </td>

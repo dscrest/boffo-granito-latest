@@ -150,21 +150,16 @@ export function QC() {
             <StageBadge stage="qc" /> · pre &amp; post-pallet inspection · {allItems.length} line items in queue
           </div>
         </div>
-        <div className="right">
-          <button className="hbtn">
-            <Icon name="download" size={13} />
-            QC report
-          </button>
-        </div>
       </div>
 
       {error && <ErrorCard message={error} onRetry={reload} />}
 
+      {/* Values are live; sparklines removed — no stage history exists yet. */}
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KPI label="Pass Rate" value={String(passRate)} unit="%" delta={`${passed} cleared`} trend="up" spark={[6, 7, 8, 8, 9, 9, 10]} color="var(--c-green)" />
-        <KPI label="Pending" value={String(pending)} delta="awaiting inspection" spark={[10, 9, 9, 8, 7, 7, 6]} color="var(--c-amber)" />
-        <KPI label="Failed" value={String(failed)} delta="needs rework" spark={[1, 2, 1, 2, 1, 1, 2]} color="var(--c-red)" />
-        <KPI label="In Queue" value={String(allItems.length)} delta="pre + post pallet" spark={[8, 9, 10, 9, 11, 10, 12]} color="var(--c-blue)" />
+        <KPI label="Pass Rate" value={String(passRate)} unit="%" delta={`${passed} cleared`} trend="up" color="var(--c-green)" />
+        <KPI label="Pending" value={String(pending)} delta="awaiting inspection" color="var(--c-amber)" />
+        <KPI label="Failed" value={String(failed)} delta="needs rework" color="var(--c-red)" />
+        <KPI label="In Queue" value={String(allItems.length)} delta="pre + post pallet" color="var(--c-blue)" />
       </div>
 
       <div className="sec-title" style={{ marginTop: 14 }}>

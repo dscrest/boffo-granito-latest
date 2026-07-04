@@ -134,7 +134,7 @@ export function PartyForm({
   );
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop">
       <div
         ref={panelRef}
         role="dialog"

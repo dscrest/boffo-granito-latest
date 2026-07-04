@@ -8,7 +8,7 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { KPI, StageBadge } from "@/ui/primitives";
-import { finishClass } from "@/lib/format";
+import { finishClass, fmt } from "@/lib/format";
 import { type Order } from "@/data";
 import { listOrders } from "@/features/orders/ordersApi";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -75,21 +75,9 @@ export function PalletPacking() {
       <div className="page-head">
         <div>
           <div className="title">Palletization</div>
-          <div className="sub">
-            {items.length} active packing jobs · 6,284 boxes total · 173 updates today
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
-          </div>
+          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
         </div>
         <div className="right">
-          <button className="hbtn">
-            <Icon name="download" size={13} />
-            Print labels
-          </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New Palletization
@@ -99,11 +87,17 @@ export function PalletPacking() {
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
+      {/* Live figures computed from the loaded orders — no placeholder numbers. */}
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KPI label="Pallets In Progress" value="3,142" unit="pallets" delta="+128 today" trend="up" spark={[5, 6, 7, 8, 9, 10, 11]} color="var(--c-violet)" />
-        <KPI label="Boxes Palletized" value="112,108" delta="6,284 boxes today" spark={[4, 6, 7, 9, 10, 11, 12]} color="var(--c-violet)" />
-        <KPI label="Remaining to Pack" value="58,140" delta="across 173 SKUs" spark={[14, 12, 11, 10, 9, 8, 7]} color="var(--c-amber)" />
-        <KPI label="Error Rate" value="0.02" unit="%" delta="3 mispacks this week" spark={[2, 1, 2, 1, 2, 1, 1]} color="var(--c-red)" />
+        <KPI label="Packing Jobs" value={String(packable.length)} delta="in packing, loading & final" color="var(--c-violet)" />
+        <KPI label="Palletized" value={fmt(packable.reduce((s, o) => s + o.palletizedQty, 0))} unit="sqm" color="var(--c-violet)" />
+        <KPI
+          label="Remaining to Pack"
+          value={fmt(packable.reduce((s, o) => s + Math.max(o.orderQty - o.palletizedQty, 0), 0))}
+          unit="sqm"
+          color="var(--c-amber)"
+        />
+        <KPI label="Loaded" value={fmt(packable.reduce((s, o) => s + o.loadedQty, 0))} unit="sqm" color="var(--c-green)" />
       </div>
 
       <div className="fbar" style={{ marginTop: 14 }}>

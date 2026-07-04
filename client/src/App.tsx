@@ -396,13 +396,9 @@ export default function App() {
         </nav>
 
         <div className="foot">
-          <div className="row" style={{ marginBottom: 6 }}>
+          <div className="row">
             <span className="dot" />
             <span style={{ color: "var(--fg-2)" }}>Live data</span>
-          </div>
-          <div className="row" style={{ color: "var(--dim)" }}>
-            <Icon name="clock" size={11} />
-            <span>Plant Morbi · Shift A</span>
           </div>
         </div>
       </aside>
