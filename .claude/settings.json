@@ -15,7 +15,21 @@
       "Bash(rm -rf dist)",
       "Bash(mv dist-real *)",
       "Bash(mkdir -p .claude/memory)",
-      "Bash(cp /Users/octfistechnollp/.claude/projects/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/memory/*.md .claude/memory/)"
+      "Bash(cp /Users/octfistechnollp/.claude/projects/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/memory/*.md .claude/memory/)",
+      "Bash(claude plugin *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(list\\(d['plugins'].keys\\(\\)\\)\\)\")",
+      "Skill(impeccable)",
+      "Skill(impeccable:*)",
+      "Bash(node .claude/skills/impeccable/scripts/context.mjs)",
+      "Bash(node .claude/skills/impeccable/scripts/critique-storage.mjs slug \"client/src\")",
+      "Bash(node .claude/skills/impeccable/scripts/detect.mjs --json client/src)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(awk -F: '$2>0')",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"BOFFO app UI \\(client/src\\)\",\"total_score\":21,\"p0_count\":2,\"p1_count\":2}' node .claude/skills/impeccable/scripts/critique-storage.mjs write client-src \"/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/9e7f82ea-8a56-4661-b348-2053151d6821/scratchpad/critique-body.md\")",
+      "Bash(node .claude/skills/impeccable/scripts/critique-storage.mjs trend client-src 5)",
+      "Bash(awk -F: '{print $1}')",
+      "Bash(xargs -n1 basename)"
     ]
   }
 }
