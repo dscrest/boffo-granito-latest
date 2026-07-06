@@ -127,8 +127,7 @@ export function ContainerForm({
                 </span>
                 <input
                   className={boxesErr ? "error" : ""}
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.capacity_boxes || ""}
                   onChange={(e) => setNum("capacity_boxes", e.target.value)}
                   placeholder="e.g. 1200"
@@ -138,8 +137,7 @@ export function ContainerForm({
               <label className="form-field">
                 <span className="lbl">Capacity (pallets)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.capacity_pallets || ""}
                   onChange={(e) => setNum("capacity_pallets", e.target.value)}
                   placeholder="e.g. 20"
@@ -150,8 +148,7 @@ export function ContainerForm({
                   Capacity area<span className="hint"> (m²)</span>
                 </span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.capacity_area_sqm || ""}
                   onChange={(e) => setNum("capacity_area_sqm", e.target.value)}
@@ -163,8 +160,7 @@ export function ContainerForm({
                   Max weight<span className="hint"> (kg)</span>
                 </span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.max_weight_kg || ""}
                   onChange={(e) => setNum("max_weight_kg", e.target.value)}

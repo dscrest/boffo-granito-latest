@@ -11,16 +11,17 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
-import { ImageUploader } from "@/ui/ImageUploader";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
-import { listPallets, type PalletRow } from "./palletsApi";
+import { insert } from "@/lib/dataOps";
+import { invalidateDesigns, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID.
    Coverage is NOT held here — it's derived from width/length/pcs. */
 export interface DesignValues {
   design_name: string;
+  seq_code: string; // design short code — first SKU segment
   base_design_name: string;
   party_brand_name: string;
   collection_name: string;
@@ -44,10 +45,8 @@ export interface DesignValues {
 
 const STATUSES = ["Continue", "Discontinued"];
 
-/* Pick lists with more than this many options render as a searchable
-   Combobox (type-to-filter) instead of a scroll-only native <select>. */
-const SEARCHABLE_THRESHOLD = 10;
-
+/* "datalist" = free-text value with a creatable Combobox over suggestions
+   (party brand: the PartyBrand master ∪ legacy values already on designs). */
 type FieldKind = "text" | "number" | "select" | "datalist";
 interface FieldSpec {
   key: keyof DesignValues;
@@ -65,6 +64,7 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     title: "Identity",
     fields: [
       { key: "design_name", label: "Design Name", required: true },
+      { key: "seq_code", label: "Short Code", suffix: "SKU" },
       { key: "base_design_name", label: "Base Design Name" },
       { key: "party_brand_name", label: "Party Brand Name", kind: "datalist", suggest: "partyBrands" },
       { key: "collection_name", label: "Collection" },
@@ -122,6 +122,7 @@ const s = (n: number) => (n ? String(n) : "");
 export function rowToValues(r: DesignRow): DesignValues {
   return {
     design_name: r.designName,
+    seq_code: r.seqCode,
     base_design_name: r.baseDesignName,
     party_brand_name: r.partyBrandName,
     collection_name: r.collectionName,
@@ -146,21 +147,39 @@ export function rowToValues(r: DesignRow): DesignValues {
 
 const labelById = (opts: LookupOption[], id: string) => opts.find((o) => o.id === id)?.label ?? "";
 
-/** unique_name = "Design - Size - Finish" (app-enforced unique downstream). */
+/** unique_name = "Design - Size - Finish[ - Party Brand]" (app-enforced unique downstream). */
 export function computeUniqueName(v: DesignValues, lk: DesignLookups): string {
-  return [v.design_name, labelById(lk.sizes, v.size), labelById(lk.finishes, v.finish)]
+  return [v.design_name, labelById(lk.sizes, v.size), labelById(lk.finishes, v.finish), v.party_brand_name]
     .map((s) => s.trim())
     .filter(Boolean)
     .join(" - ");
 }
 
-/** SKU = position codes of Size-Category-Finish-Glaze → NN-NN-NN-NN (00 = unset). */
+/* SKU formula (PO spec 2026-07-04):
+   DesignShortCode - Size - Finish - Category - Glaze - Brand - Grade
+   [- PartyBrand]  — the party-brand segment is appended only when a party
+   brand is set. Every segment is the stored `seq_code` of the chosen master
+   value ("00" = unset). */
+const SKU_SEGMENTS = [
+  { lookup: "sizes", field: "size" },
+  { lookup: "finishes", field: "finish" },
+  { lookup: "categories", field: "category" },
+  { lookup: "glazes", field: "glaze" },
+  { lookup: "brands", field: "brand" },
+  { lookup: "grades", field: "grade" },
+] as const;
+
 export function computeSku(v: DesignValues, lk: DesignLookups): string {
-  const pad = (n: number) => (n <= 0 ? "00" : String(n).padStart(2, "0"));
-  const pos = (opts: LookupOption[], id: string) => opts.findIndex((o) => o.id === id) + 1;
-  return [pos(lk.sizes, v.size), pos(lk.categories, v.category), pos(lk.finishes, v.finish), pos(lk.glazes, v.glaze)]
-    .map(pad)
-    .join("-");
+  const code = (s?: string) => (s || "").trim() || "00";
+  const parts = [
+    code(v.seq_code), // design short code
+    ...SKU_SEGMENTS.map(({ lookup, field }) =>
+      code(lk[lookup].find((o: LookupOption) => o.id === v[field])?.seqCode),
+    ),
+  ];
+  const pb = v.party_brand_name.trim();
+  if (pb) parts.push(code(lk.partyBrandSeq[pb]));
+  return parts.join("-");
 }
 
 const numOr0 = (s: string) => (s.trim() === "" ? 0 : Number(s) || 0);
@@ -185,6 +204,7 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
     status: v.status,
     unique_name: computeUniqueName(v, lk),
     sku: computeSku(v, lk),
+    seq_code: v.seq_code,
     size: v.size,
     finish: v.finish,
     category: v.category,
@@ -206,82 +226,25 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
   };
 }
 
-/* Associate Pallets — DesignPallet many-to-many picker. Self-fetches the
-   pallet list (cached); the parent owns only the selected ROWIDs + persists. */
-function AssociatePallets({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
-  const [pallets, setPallets] = useState<PalletRow[]>([]);
-  const [q, setQ] = useState("");
-  useEffect(() => {
-    let live = true;
-    void listPallets().then((r) => {
-      if (live && r.ok) setPallets(r.pallets);
-    });
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  const sel = new Set(value);
-  const toggle = (id: string) => onChange(sel.has(id) ? value.filter((x) => x !== id) : [...value, id]);
-  const needle = q.trim().toLowerCase();
-  const shown = needle
-    ? pallets.filter((p) => `${p.name} ${p.sizeLabel} ${p.palletType}`.toLowerCase().includes(needle))
-    : pallets;
-
-  return (
-    <div className="form-section">
-      <div className="form-section-title">Associate Pallets</div>
-      {pallets.length === 0 ? (
-        <div className="dim">No pallets defined yet — add them in the Pallet master first.</div>
-      ) : (
-        <>
-          <input placeholder="Search pallets…" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 8 }} />
-          <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gap: 4 }}>
-            {shown.map((p) => (
-              <label
-                key={p.id}
-                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "2px 0" }}
-              >
-                <input type="checkbox" checked={sel.has(p.id)} onChange={() => toggle(p.id)} style={{ width: "auto" }} />
-                <span>
-                  <strong>{p.name || "(unnamed)"}</strong>
-                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                    {" · "}
-                    {[p.sizeLabel, p.packingDetails].filter(Boolean).join(" · ")} · {p.totalBoxesPerContainer} boxes/ctn
-                  </span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <div className="dim" style={{ marginTop: 6, fontSize: "var(--t-sm)" }}>
-            {value.length} pallet{value.length === 1 ? "" : "s"} selected
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* Reusable sections grid + computed-key banner + image upload.
-   Presentational: owns no save logic, just renders fields and reports edits. */
+/* Reusable sections grid + computed-key banner.
+   Presentational: owns no save logic, just renders fields and reports edits.
+   `mode` drives the creation rules: status locked to Continue, no accounting
+   stock at create (images live on the item detail screen now).
+   Pallet association was removed from this form per the 2026-07-04 spec —
+   the DesignPallet capability (designsApi.setDesignPallets) is kept for when
+   it is reintroduced elsewhere. */
 export function DesignFields({
   value,
   onChange,
   lookups,
   showErrors,
-  images,
-  onImages,
-  pallets,
-  onPallets,
+  mode,
 }: {
   value: DesignValues;
   onChange: (k: keyof DesignValues, v: string) => void;
   lookups: DesignLookups;
   showErrors?: boolean;
-  images: string[];
-  onImages: (next: string[]) => void;
-  pallets: string[];
-  onPallets: (next: string[]) => void;
+  mode: "create" | "edit";
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
@@ -308,6 +271,15 @@ export function DesignFields({
     }
   };
 
+  // Creatable party brand: set the free-text value, then persist to the
+  // PartyBrand master so it appears in every future pick list.
+  const createPartyBrand = async (name: string) => {
+    onChange("party_brand_name", name);
+    const res = await insert("PartyBrand", { name });
+    if (!res.ok) toast.error(res.error || "Could not add the party brand to the master");
+    else invalidateDesigns(); // next lookup fetch includes the new brand
+  };
+
   return (
     <>
       <div className="df-banner">
@@ -321,11 +293,14 @@ export function DesignFields({
         <span className="chip">{sku}</span>
       </div>
 
-      {SECTIONS.map((sec) => (
+      {SECTIONS.map((sec) => {
+        // #7: Accounting Stock is edit-only (removed from the creation flow).
+        const fields = sec.fields.filter((f) => !(mode === "create" && f.key === "accounting_stock"));
+        return (
         <div key={sec.title} className="form-section">
           <div className="form-section-title">{sec.title}</div>
           <div className="form-grid">
-            {sec.fields.map((f) => {
+            {fields.map((f) => {
               const opts = f.lookup ? lookups[f.lookup] : null;
               const err = showErrors && f.required && !value[f.key].trim() ? `${f.label} is required` : null;
               return (
@@ -336,13 +311,17 @@ export function DesignFields({
                     {f.required && <span className="req"> *</span>}
                   </span>
                   {f.kind === "select" ? (
+                    // #4: status is locked to Continue while creating; edit mode unlocks it.
+                    f.key === "status" && mode === "create" ? (
+                      <input value="Continue" disabled title="Status is locked during creation — edit the item to change it" />
+                    ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.
                       const comboOpts: ComboOption[] = opts
                         ? opts.map((o) => ({ value: o.id, label: o.label }))
                         : f.options!.map((o) => ({ value: o, label: o }));
-                      // >10 options → searchable Combobox; else scroll-only select.
-                      return comboOpts.length > SEARCHABLE_THRESHOLD ? (
+                      // House standard: every pick list is a searchable Combobox.
+                      return (
                         <Combobox
                           value={value[f.key]}
                           options={[{ value: "", label: "" }, ...comboOpts]}
@@ -350,38 +329,36 @@ export function DesignFields({
                           placeholder={`Search ${f.label.toLowerCase()}…`}
                           invalid={!!err}
                         />
-                      ) : (
-                        <select className={err ? "error" : ""} value={value[f.key]} onChange={(e) => handleField(f.key, e.target.value)}>
-                          <option value=""></option>
-                          {comboOpts.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
                       );
                     })()
+                    )
                   ) : f.kind === "datalist" ? (
-                    <>
-                      <input
-                        className={err ? "error" : ""}
-                        list={`dl-${f.key}`}
-                        value={value[f.key]}
-                        onChange={(e) => onChange(f.key, e.target.value)}
-                        placeholder={f.label}
-                      />
-                      <datalist id={`dl-${f.key}`}>
-                        {(f.suggest ? lookups[f.suggest] : []).map((o) => (
-                          <option key={o} value={o} />
-                        ))}
-                      </datalist>
-                    </>
+                    (() => {
+                      // Free-text value + creatable pick list (PartyBrand master).
+                      const vals = f.suggest ? lookups[f.suggest] : [];
+                      const cur = value[f.key];
+                      const all = cur && !vals.includes(cur) ? [cur, ...vals] : vals;
+                      return (
+                        <Combobox
+                          value={cur}
+                          options={[{ value: "", label: "" }, ...all.map((o) => ({ value: o, label: o }))]}
+                          onChange={(val) => onChange(f.key, val)}
+                          onCreate={(name) => void createPartyBrand(name)}
+                          placeholder={`Search ${f.label.toLowerCase()}…`}
+                          invalid={!!err}
+                        />
+                      );
+                    })()
                   ) : (
                     <input
                       className={err ? "error" : ""}
                       type={f.kind === "number" ? "number" : "text"}
+                      // Rule #5: numeric fields never accept negatives (server rejects too).
+                      min={f.kind === "number" ? 0 : undefined}
                       value={value[f.key]}
-                      onChange={(e) => onChange(f.key, e.target.value)}
+                      onChange={(e) =>
+                        onChange(f.key, f.kind === "number" ? e.target.value.replace(/^-/, "") : e.target.value)
+                      }
                       placeholder={f.label}
                     />
                   )}
@@ -391,15 +368,9 @@ export function DesignFields({
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
 
-      {/* #12: up to 5 images uploaded to Catalyst File Store. */}
-      <div className="form-section">
-        <div className="form-section-title">Images (max 5)</div>
-        <ImageUploader value={images} onChange={onImages} max={5} />
-      </div>
-
-      <AssociatePallets value={pallets} onChange={onPallets} />
     </>
   );
 }
@@ -411,12 +382,10 @@ export function DesignForm({
   onClose,
 }: {
   lookups: DesignLookups;
-  onSave: (input: DesignInput, palletIds: string[]) => void;
+  onSave: (input: DesignInput) => void;
   onClose: () => void;
 }) {
   const [v, setV] = useState<DesignValues>(blankDesign());
-  const [images, setImages] = useState<string[]>([]);
-  const [palletIds, setPalletIds] = useState<string[]>([]);
   const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
   const missing = missingRequired(v);
 
@@ -427,7 +396,8 @@ export function DesignForm({
       setShowErrors(true);
       return;
     }
-    onSave(toDesignInput(v, lookups, images), palletIds);
+    // #12: images are managed on the item detail screen, not at creation.
+    onSave(toDesignInput(v, lookups, []));
   };
 
   const panelRef = useModalA11y(onClose);
@@ -440,7 +410,7 @@ export function DesignForm({
             <Icon name="tile" size={18} />
           </div>
           <div>
-            <div className="ttl">New Design</div>
+            <div className="ttl">New Item</div>
             <div className="sub2">Item master · saved to Catalyst Data Store</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
@@ -449,16 +419,7 @@ export function DesignForm({
         </div>
 
         <div className="df-body">
-          <DesignFields
-            value={v}
-            onChange={set}
-            lookups={lookups}
-            showErrors={showErrors}
-            images={images}
-            onImages={setImages}
-            pallets={palletIds}
-            onPallets={setPalletIds}
-          />
+          <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode="create" />
         </div>
 
         <div className="df-foot">
@@ -470,7 +431,7 @@ export function DesignForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            Save design
+            Save
           </button>
         </div>
       </div>

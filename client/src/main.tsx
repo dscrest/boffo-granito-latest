@@ -14,6 +14,14 @@ import "./styles/styles.css";
 // AuthGate so customers can open it without a Zoho sign-in.
 const isPublicShare = window.location.hash.startsWith("#/share/quote/");
 
+// After a deploy, a tab opened on the previous build may lazy-load a chunk
+// whose hashed filename no longer exists — the click then appears to break
+// or reload the page. Recover by reloading once onto the new build.
+window.addEventListener("vite:preloadError", (e) => {
+  e.preventDefault();
+  window.location.reload();
+});
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {isPublicShare ? (

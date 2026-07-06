@@ -1,9 +1,11 @@
 /* ============================================================
-   Toast notifications — tiny module-level pub/sub, no context.
+   Notification popups — tiny module-level pub/sub, no context.
 
    Anywhere in the app:  toast.success("Saved"); toast.error(msg);
-   <ToastHost/> (mounted once in App) renders the stack bottom-right
-   and auto-dismisses after a few seconds. Click a toast to dismiss.
+   <ToastHost/> (mounted once in App) renders centered popups
+   ("proper pop up", user mandate 2026-07-04): success/info
+   auto-dismiss after a few seconds, errors dim the screen and stay
+   until closed. Click a popup (or its ✕) to dismiss.
    ============================================================ */
 import { useEffect, useState } from "react";
 
@@ -28,7 +30,8 @@ export const toast = {
   info: (msg: string) => push(msg, "info"),
 };
 
-const TOAST_MS = 4500;
+const TOAST_MS = 3000;
+const ICON: Record<ToastKind, string> = { success: "✓", error: "!", info: "i" };
 
 export function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([]);
@@ -36,7 +39,10 @@ export function ToastHost() {
   useEffect(() => {
     const add = (t: ToastItem) => {
       setItems((p) => [...p, t]);
-      window.setTimeout(() => setItems((p) => p.filter((x) => x.id !== t.id)), TOAST_MS);
+      // Errors stay until the user closes them; success/info auto-dismiss.
+      if (t.kind !== "error") {
+        window.setTimeout(() => setItems((p) => p.filter((x) => x.id !== t.id)), TOAST_MS);
+      }
     };
     listeners.add(add);
     return () => {
@@ -45,15 +51,25 @@ export function ToastHost() {
   }, []);
 
   if (items.length === 0) return null;
+  const hasError = items.some((t) => t.kind === "error");
+  const dismiss = (id: number) => setItems((p) => p.filter((x) => x.id !== id));
+
   return (
-    <div className="toast-host" role="status" aria-live="polite">
+    <div className={`toast-host${hasError ? " has-error" : ""}`} role="status" aria-live="polite">
       {items.map((t) => (
-        <div
-          key={t.id}
-          className={`toast ${t.kind}`}
-          onClick={() => setItems((p) => p.filter((x) => x.id !== t.id))}
-        >
-          {t.msg}
+        <div key={t.id} className={`toast ${t.kind}`} onClick={() => dismiss(t.id)}>
+          <span className="toast-ico" aria-hidden="true">{ICON[t.kind]}</span>
+          <span className="toast-msg">{t.msg}</span>
+          <button
+            className="toast-x"
+            title="Close"
+            onClick={(e) => {
+              e.stopPropagation();
+              dismiss(t.id);
+            }}
+          >
+            ✕
+          </button>
         </div>
       ))}
     </div>

@@ -17,10 +17,9 @@ import {
   type DesignValues,
 } from "./DesignForm";
 import {
+  cachedDesigns,
   deleteDesign,
-  getDesignPallets,
   listDesigns,
-  setDesignPallets,
   updateDesign,
   type DesignLookups,
   type DesignRow,
@@ -34,6 +33,7 @@ const EMPTY_LOOKUPS: DesignLookups = {
   brands: [],
   grades: [],
   partyBrands: [],
+  partyBrandSeq: {},
 };
 
 export function DesignEdit() {
@@ -41,7 +41,6 @@ export function DesignEdit() {
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
   const [images, setImages] = useState<string[]>([]);
-  const [palletIds, setPalletIds] = useState<string[]>([]);
   const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
   const [row, setRow] = useState<DesignRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +64,6 @@ export function DesignEdit() {
       if (found) {
         setV(rowToValues(found));
         setImages(found.images);
-        setPalletIds(await getDesignPallets(id));
       } else setError("Design not found.");
     })();
     return () => {
@@ -84,10 +82,18 @@ export function DesignEdit() {
       setShowErrors(true);
       return;
     }
+    const input = toDesignInput(v, lookups, images);
+    // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
+    const dup = (cachedDesigns() || []).find(
+      (d) => d.id !== id && d.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase(),
+    );
+    if (dup) {
+      toast.error(`An item named "${input.unique_name}" already exists`);
+      return;
+    }
     setBusy(true);
     setError(null);
-    const res = await updateDesign(id, toDesignInput(v, lookups, images));
-    if (res.ok) await setDesignPallets(id, palletIds);
+    const res = await updateDesign(id, input);
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Save failed");
@@ -146,16 +152,7 @@ export function DesignEdit() {
       {row && (
         <div className="card df-modal" style={{ padding: 16 }}>
           <div className="df-body" style={{ padding: 0 }}>
-            <DesignFields
-              value={v}
-              onChange={set}
-              lookups={lookups}
-              showErrors={showErrors}
-              images={images}
-              onImages={setImages}
-              pallets={palletIds}
-              onPallets={setPalletIds}
-            />
+            <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode="edit" />
           </div>
           <div className="df-foot" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy} onClick={() => void onDelete()} title="Delete design">
@@ -170,7 +167,7 @@ export function DesignEdit() {
             </button>
             <button className="hbtn primary" disabled={busy} onClick={() => void onSave()}>
               <Icon name="check" size={13} />
-              {busy ? "Saving…" : "Save changes"}
+              {busy ? "Saving…" : "Save"}
             </button>
           </div>
         </div>

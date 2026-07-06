@@ -204,8 +204,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Coverage (Sq.M.)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.coverage_sqm || ""}
                   onChange={(e) => setNum("coverage_sqm", e.target.value)}
@@ -215,8 +214,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Coverage (Sq.Ft.)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.coverage_sqft || ""}
                   onChange={(e) => setNum("coverage_sqft", e.target.value)}
@@ -226,8 +224,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Box Weight (kg)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.box_weight_kg || ""}
                   onChange={(e) => setNum("box_weight_kg", e.target.value)}
@@ -243,8 +240,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Boxes / Pallet</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.boxes_per_pallet || ""}
                   onChange={(e) => setNum("boxes_per_pallet", e.target.value)}
                   placeholder="e.g. 32"
@@ -253,8 +249,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Pallets / Container</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.pallets_per_container || ""}
                   onChange={(e) => setNum("pallets_per_container", e.target.value)}
                   placeholder="e.g. 30"
@@ -263,8 +258,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">Empty Pallet Weight (kg)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.empty_pallet_weight_kg || ""}
                   onChange={(e) => setNum("empty_pallet_weight_kg", e.target.value)}
@@ -282,8 +276,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">B · Boxes / Pallet</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.b_boxes_per_pallet || ""}
                   onChange={(e) => setNum("b_boxes_per_pallet", e.target.value)}
                   placeholder="e.g. 32"
@@ -292,8 +285,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">B · Pallets / Container</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   value={v.b_pallets_per_container || ""}
                   onChange={(e) => setNum("b_pallets_per_container", e.target.value)}
                   placeholder="e.g. 5"
@@ -302,8 +294,7 @@ export function PalletForm({
               <label className="form-field">
                 <span className="lbl">B · Pallet Weight (kg)</span>
                 <input
-                  type="number"
-                  min={0}
+                  type="number" min={0}
                   step="0.01"
                   value={v.b_pallet_weight || ""}
                   onChange={(e) => setNum("b_pallet_weight", e.target.value)}

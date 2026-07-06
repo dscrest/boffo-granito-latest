@@ -269,8 +269,7 @@ export function PalletPackForm({
                             <td className="num">
                               {ready ? (
                                 <input
-                                  type="number"
-                                  min={0}
+                                  type="number" min={0}
                                   max={it.available}
                                   value={boxesByItem[it.orderItemId] || ""}
                                   onChange={(e) => setBoxes(it.orderItemId, e.target.value, it.available)}

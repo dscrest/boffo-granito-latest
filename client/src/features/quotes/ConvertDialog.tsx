@@ -132,8 +132,7 @@ export function ConvertDialog({
                       <td className="num mono muted">{fmt(l.qty)}</td>
                       <td className="num">
                         <input
-                          type="number"
-                          min={0}
+                          type="number" min={0}
                           max={l.qty}
                           value={qty[i]}
                           disabled={busy}

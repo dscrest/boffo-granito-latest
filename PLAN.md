@@ -81,3 +81,42 @@ File: `masters/PalletForm.tsx` + `masters/palletsApi.ts`.
 5. #4 verify/relabel only
 
 Awaiting the second list before locking #5 details (formula pair, any extra fields).
+
+---
+
+# Item Master round — change-request spec 2026-07-04
+
+Status legend: ✅ done · ⏳ blocked on a product-owner reference · 🔴 deferred/pending
+
+| # | Item | Status |
+|---|------|--------|
+| 1 | Size & Status filters DB-sourced | ✅ (were already derived from live rows; Size filter unchanged — see open Qs) |
+| 2 | Remove "Design Master" title | ✅ |
+| 3 | "New Design" → "New Item"; Refresh removed | ✅ |
+| 4 | Status defaults "Continue", locked at create, editable in edit | ✅ |
+| 5 | 🧠 No negative numbers app-wide (input `min=0` + server 400 guard; `adjustment`/`qty_delta` exempt) | ✅ |
+| 6 | Associate Pallets removed from creation AND edit (per follow-up; DesignPallet capability kept in designsApi) | ✅ |
+| 7 | Accounting Stock removed from creation (kept in edit) | ✅ |
+| 8 | Unique name (+ Party Brand append) · PartyBrand master table `69851000000060042` + Settings form + creatable combobox · server 409 + client pre-check | ✅ (no existing duplicates found in audit 2026-07-04) |
+| 9 | 🧠 Pick lists standardized on Combobox: arrow nav + Enter + arrow-then-Space select + typable | ✅ item module; 🔴 sweep of remaining forms (Party/Order/Quote/Container/Pallet/stage forms) |
+| 10 | "Save Design" → "Save" | ✅ |
+| 11 | 🧠 Required `*` red everywhere (global `.req` rule in styles.css) | ✅ |
+| 12 | Image upload removed from creation; Inventory Image Upload manager on item detail (Front/Rear/Other slots) | ✅ · 12.2 image reference at creation time ⏳ |
+| 13 | Item detail: left shrunk name list + right panel, Edit/Delete top-left | ✅ · 13.2 Zoho Books field mapping ⏳ (stub rows on detail) |
+| 14 | Detail shows Unique Name + SKU + primary details | ✅ · 14.3 remaining fields/layout ⏳ (screenshot ref) |
+| 15 | SKU formula CONFIRMED & live 2026-07-04: `DesignShortCode-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand]` from stored `seq_code`s (PartyBrand segment only when set; "00" = unset). New Design "Short Code" field + seq_code on Brand/Grade/Design (Brand/Grade seeded alphabetically) | ✅ · 🔴 fill Short Codes per design + PartyBrand seq codes, then backfill existing NULL SKUs; server-side SKU uniqueness once codes are filled |
+| 16 | Multi-select filter panel | 🔴 DEFERRED (per PO, do later) |
+
+**SKU uniqueness note:** distinct designs legitimately share a classification
+(8 designs are 600x1200·Glossy), so segment-only SKUs can't be unique. Server
+uniqueness enforcement + backfill wait for the suffix format reference
+(`NumberMaster` exists as the sequence source — don't build early).
+
+**Project note (2026-07-04):** `boffo-latest-project` was deleted; live project is
+`boffo-granito-export-tracker` (OCTFIS org). PartyBrand recreated there
+(`69851000000060042`), seq_codes reseeded, design_images folder `69851000000059622`,
+app deployed. See boffo-deploy-target memory.
+
+**Open Qs for PO:** Size grid filter — show full Size master or only in-use
+sizes (current)? Front/Rear image slots are positional (deleting Front makes
+Rear the new Front) — OK, or need fixed view-type columns?

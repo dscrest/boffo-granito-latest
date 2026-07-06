@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -23,7 +24,6 @@ import {
   bulkDeleteDesigns,
   bulkUpdateDesigns,
   createDesign,
-  setDesignPallets,
   listDesigns,
   type DesignInput,
   type DesignLookups,
@@ -49,6 +49,7 @@ const EMPTY_LOOKUPS: DesignLookups = {
   brands: [],
   grades: [],
   partyBrands: [],
+  partyBrandSeq: {},
 };
 
 /* Bulk-edit is restricted to fields that don't feed the computed
@@ -97,33 +98,40 @@ function BulkEditModal({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Status</span>
-                <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                  <option value="">— leave unchanged —</option>
-                  <option value="Continue">Continue</option>
-                  <option value="Discontinued">Discontinued</option>
-                </select>
+                <Combobox
+                  value={status}
+                  options={[
+                    { value: "", label: "— leave unchanged —" },
+                    { value: "Continue", label: "Continue" },
+                    { value: "Discontinued", label: "Discontinued" },
+                  ]}
+                  onChange={setStatus}
+                  placeholder="— leave unchanged —"
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Brand</span>
-                <select value={brand} onChange={(e) => setBrand(e.target.value)}>
-                  <option value="">— leave unchanged —</option>
-                  {lookups.brands.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={brand}
+                  options={[
+                    { value: "", label: "— leave unchanged —" },
+                    ...lookups.brands.map((o) => ({ value: o.id, label: o.label })),
+                  ]}
+                  onChange={setBrand}
+                  placeholder="— leave unchanged —"
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Grade</span>
-                <select value={grade} onChange={(e) => setGrade(e.target.value)}>
-                  <option value="">— leave unchanged —</option>
-                  {lookups.grades.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={grade}
+                  options={[
+                    { value: "", label: "— leave unchanged —" },
+                    ...lookups.grades.map((o) => ({ value: o.id, label: o.label })),
+                  ]}
+                  onChange={setGrade}
+                  placeholder="— leave unchanged —"
+                />
               </label>
             </div>
           </div>
@@ -285,21 +293,16 @@ export function DesignMaster() {
 
       <div className="page-head">
         <div>
-          <div className="title">Design Master</div>
           {/* Counts live in the grid footer; the sub line only carries status. */}
           <div className="sub">
             {loading ? "Loading…" : <span className="dim">{notice}</span>}
           </div>
         </div>
         <div className="right">
-          <button className="hbtn" onClick={() => void load()} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
           {canUpdate() && (
             <button className="hbtn primary" onClick={() => setShowNew(true)}>
               <Icon name="plus" size={13} />
-              New design
+              New Item
             </button>
           )}
         </div>
@@ -386,12 +389,12 @@ export function DesignMaster() {
                   <tr
                     key={d.id}
                     tabIndex={0}
-                    onClick={() => navigate(`/design/${d.id}/edit`)}
+                    onClick={() => navigate(`/design/${d.id}`)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/design/${d.id}/edit`);
+                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/design/${d.id}`);
                     }}
                     style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
-                    title="Edit item"
+                    title="View item"
                   >
                     {/* checkbox cell stops propagation so toggling never navigates */}
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
@@ -456,10 +459,10 @@ export function DesignMaster() {
                       <EmptyState
                         icon="tile"
                         title="No items yet"
-                        hint="Add your first item with New design"
+                        hint="Add your first item with New Item"
                         action={
                           <button className="hbtn primary" onClick={() => setShowNew(true)}>
-                            New design
+                            New Item
                           </button>
                         }
                       />

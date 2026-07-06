@@ -3,8 +3,13 @@
 > Snapshot pulled directly from Zoho Catalyst on **2026-06-12** via `List_All_Tables` + `List_All_Columns`.
 > This is the source of truth for table/column names and IDs — prefer this over plan docs.
 
-**Project:** `boffo-latest-project` · projectId `76673000000030007` · org `926227227` · env `Development`
-**Endpoint:** `https://boffo-latest-project-926227227.development.catalystserverless.com/server/data-ops/`
+**Project (LIVE since 2026-07-04):** `boffo-granito-export-tracker` · projectId `69851000000043001` · org OCTFIS `925638796` · env `Development`
+**Endpoint:** `https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/server/data-ops/`
+
+> ⚠️ 2026-07-04: `boffo-latest-project` (org 926227227) was deleted. All `76673…` table_ids
+> below are from that dead project and kept only as schema reference — the live table ids
+> are in [catalyst-migration/new-table-ids.json](catalyst-migration/new-table-ids.json)
+> (schema/columns are identical; FK columns are plain bigint in the live project).
 
 ## Conventions
 
@@ -16,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (30 tables)
+## Table Index (31 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -50,6 +55,7 @@
 | AppUser | 76673000000094001 | App auth: sign-in accounts |
 | AuthSession | 76673000000095001 | App auth: bearer tokens |
 | SalesPerson | 76673000000115495 | Sales reps on quotes/SO (links AppUser) |
+| PartyBrand | 69851000000060042 (live) | Lookup — party brands (feeds unique_name) |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
@@ -127,13 +133,13 @@ Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewe
 | default_currency | varchar(10) | |
 | address | text(10000) | |
 
-### Brand (76673000000047360)
+### Brand (76673000000047360) — `seq_code` varchar(10) added 2026-07-04 (SKU segment, live project)
 | Column | Type | Notes |
 |---|---|---|
 | name | varchar(255) | key column |
 | internal_or_external | varchar(50) | |
 
-### Grade (76673000000048008)
+### Grade (76673000000048008) — `seq_code` varchar(10) added 2026-07-04 (SKU segment, live project)
 | Column | Type | Notes |
 |---|---|---|
 | name | varchar(50) | key column |
@@ -167,6 +173,17 @@ Values: Glossy, Hard Matt, Carving, Matt, Elevation, High Glossy, Carving + Punc
 |---|---|---|
 | name | varchar(255) | key column |
 | seq_code | varchar(10) | SKU segment |
+
+### PartyBrand (live id 69851000000060042) — added 2026-07-04
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | key column (app-enforced unique via NATURAL_KEY) |
+| seq_code | varchar(10) | SKU segment (provisioned; not yet used in SKU) |
+| deleted_at | datetime | soft delete |
+
+Party brand master (Settings → Masters → Party Brand). The Design column
+`party_brand_name` stays free-text varchar; the item form offers these names
+via a creatable Combobox and appends the value to `unique_name`.
 
 ### PaymentTerm (76673000000049001)
 | Column | Type | Notes |
@@ -241,11 +258,12 @@ terms added 2026-07-02: Against Full TT · 10% Advance & 90% Against B/L ·
 ### Design (76673000000052723) — keys on `unique_name` / `design_name`
 | Column | Type | Notes |
 |---|---|---|
-| unique_name | varchar(255) | unique guard in app |
+| unique_name | varchar(255) | unique (app + data-ops 409); = Design - Size - Finish[ - PartyBrand] |
 | design_name | varchar(255) | |
+| seq_code | varchar(10) | design Short Code — first SKU segment (added 2026-07-04, live project) |
 | base_design_name | varchar(255) | |
-| sku | varchar(100) | auto NN-NN-NN-NN |
-| party_brand_name | varchar(255) | |
+| sku | varchar(100) | auto: `DesignShortCode-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand]` from stored `seq_code`s (PB segment only when set); uniqueness enforced once short codes are filled |
+| party_brand_name | varchar(255) | free text; picked from PartyBrand master (creatable) |
 | pcs_per_box | int | |
 | box_weight_kg | double | nullable → uncalibrated for fit |
 | coverage_sqm | double | |

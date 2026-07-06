@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { Combobox } from "@/ui/Combobox";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
@@ -102,6 +103,18 @@ const MASTERS: MasterDef[] = [
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "internal_or_external", label: "Type", type: "select", options: ["Internal", "External"] },
+      { key: "seq_code", label: "Seq" },
+    ],
+  },
+  {
+    key: "party_brand",
+    label: "Party Brand",
+    icon: "flag",
+    table: "PartyBrand",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq" },
     ],
   },
   {
@@ -110,7 +123,10 @@ const MASTERS: MasterDef[] = [
     icon: "check",
     table: "Grade",
     lead: "name",
-    fields: [{ key: "name", label: "Name", required: true }],
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq" },
+    ],
   },
   {
     key: "payment_term",
@@ -164,19 +180,19 @@ function MasterEditor({
               {f.required && <span className="req"> *</span>}
             </span>
             {f.type === "select" ? (
-              <select value={vals[f.key] ?? ""} onChange={(e) => set(f.key, e.target.value)}>
-                <option value=""></option>
-                {f.options!.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+              <Combobox
+                value={vals[f.key] ?? ""}
+                options={[{ value: "", label: "" }, ...f.options!.map((o) => ({ value: o, label: o }))]}
+                onChange={(val) => set(f.key, val)}
+                placeholder={`Search ${f.label.toLowerCase()}…`}
+              />
             ) : (
               <input
                 type={f.type === "number" ? "number" : "text"}
+                // Rule #5: numeric fields never accept negatives (server rejects too).
+                min={f.type === "number" ? 0 : undefined}
                 value={vals[f.key] ?? ""}
-                onChange={(e) => set(f.key, e.target.value)}
+                onChange={(e) => set(f.key, f.type === "number" ? e.target.value.replace(/^-/, "") : e.target.value)}
                 placeholder={f.label}
               />
             )}

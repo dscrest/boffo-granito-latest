@@ -27,7 +27,10 @@ const pathlib = require("path");
 const crypto = require("crypto");
 
 /* File Store folder for Design images (#12). Created 2026-06-23. */
-const DESIGN_IMAGES_FOLDER = "76673000000124054";
+/* File Store folder `design_images` in boffo-granito-export-tracker
+   (project 69851000000043001, org OCTFIS 925638796) — the live project
+   since 2026-07-04; boffo-latest-project was deleted. */
+const DESIGN_IMAGES_FOLDER = "69851000000059622";
 
 const app = express();
 // 10mb so a base64-encoded photo (one per upload request) fits the body.
@@ -66,6 +69,7 @@ const ALLOWED = new Set([
   "Glaze",
   "Brand",
   "Grade",
+  "PartyBrand",
   "Pallet",
   "DesignPallet",
   "PalletisedBatch",
@@ -330,6 +334,20 @@ async function assertUnique(catalyst, table, field, value, excludeRowid) {
   }
 }
 
+/* Fields that are legitimately signed (deltas / doc adjustments) — exempt
+   from the app-wide no-negative-numbers rule (persistent rule #5). */
+const SIGNED_FIELDS = new Set(["adjustment", "qty_delta"]);
+
+/** Throw 400 if any numeric value in the payload is negative (rule #5).
+    Covers both real numbers and numeric strings; SIGNED_FIELDS exempt. */
+function assertNoNegatives(obj) {
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (SIGNED_FIELDS.has(k)) continue;
+    const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+    if (!Number.isNaN(n) && n < 0) throw badRequest(`${k} cannot be negative`);
+  }
+}
+
 /** Natural (business) key per table — used to block duplicate inserts on the generic routes. */
 const NATURAL_KEY = {
   Customer: "code",
@@ -340,6 +358,7 @@ const NATURAL_KEY = {
   Category: "name",
   Glaze: "name",
   Grade: "name",
+  PartyBrand: "name",
   PaymentTerm: "name",
   Pallet: "name",
   Invoice: "invoice_number",
@@ -1456,7 +1475,10 @@ app.post("/:table", async (req, res) => {
       async () => {
         // Reject inserts that collide with an existing row on the table's natural key.
         const nk = NATURAL_KEY[table];
-        if (nk) for (const r of rows) await assertUnique(catalyst, table, nk, r[nk]);
+        for (const r of rows) {
+          assertNoNegatives(r); // rule #5: no negative numeric values
+          if (nk) await assertUnique(catalyst, table, nk, r[nk]);
+        }
         const inserted = await ds.table(table).insertRows(rows);
         const ids = (Array.isArray(inserted) ? inserted : [inserted]).map((r) => r.ROWID);
         delete _cache[table]; // FK-name lookup map is now stale
@@ -1484,6 +1506,7 @@ app.patch("/:table/:rowid", async (req, res) => {
       { table_name: table, operation: "update", payload: req.body },
       async () => {
         // Reject natural-key changes that collide with a different existing row.
+        assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];
         if (nk && patch[nk] !== undefined) {
           await assertUnique(catalyst, table, nk, patch[nk], req.params.rowid);

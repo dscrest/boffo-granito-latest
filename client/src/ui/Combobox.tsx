@@ -23,6 +23,7 @@ export function Combobox({
   onChange,
   placeholder = "Search…",
   invalid = false,
+  onCreate,
 }: {
   value: string;
   options: ComboOption[];
@@ -30,6 +31,8 @@ export function Combobox({
   placeholder?: string;
   /** Adds the `.error` class (red border) — drives required-field validation. */
   invalid?: boolean;
+  /** When set, typing a value with no exact match offers a "Create …" row. */
+  onCreate?: (label: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -58,10 +61,26 @@ export function Combobox({
   const filtered = matches.slice(0, MAX_VISIBLE);
   const hidden = matches.length - filtered.length;
 
+  // "Create …" row appears when typed text matches no option exactly.
+  const canCreate = !!onCreate && !!needle && !options.some((o) => o.label.trim().toLowerCase() === needle);
+  const navLen = filtered.length + (canCreate ? 1 : 0);
+
   const pick = (v: string) => {
     onChange(v);
     setOpen(false);
     setActive(-1);
+  };
+
+  const doCreate = () => {
+    onCreate!(q.trim());
+    setOpen(false);
+    setActive(-1);
+  };
+
+  /** Select the arrow-highlighted row (option or the "Create …" row). */
+  const pickActive = () => {
+    if (active < filtered.length) pick(filtered[active].value);
+    else doCreate();
   };
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -73,13 +92,15 @@ export function Combobox({
         setActive(0);
         return;
       }
-      if (filtered.length === 0) return;
+      if (navLen === 0) return;
       const delta = e.key === "ArrowDown" ? 1 : -1;
-      setActive((i) => (i + delta + filtered.length) % filtered.length);
-    } else if (e.key === "Enter") {
-      if (open && active >= 0 && active < filtered.length) {
+      setActive((i) => (i + delta + navLen) % navLen);
+    } else if (e.key === "Enter" || e.key === " ") {
+      // Space selects only after arrow navigation highlighted a row
+      // (typing resets `active` to -1, so a mid-word space still types).
+      if (open && active >= 0 && active < navLen) {
         e.preventDefault();
-        pick(filtered[active].value);
+        pickActive();
       }
     } else if (e.key === "Escape") {
       if (open) {
@@ -114,7 +135,7 @@ export function Combobox({
       />
       {open && (
         <div className="combo-pop" role="listbox" id={listboxId}>
-          {filtered.length === 0 && <div className="combo-empty">No match</div>}
+          {filtered.length === 0 && !canCreate && <div className="combo-empty">No match</div>}
           {filtered.map((o, i) => (
             <div
               key={o.value}
@@ -129,6 +150,17 @@ export function Combobox({
               {o.hint && <span className="combo-hint">{o.hint}</span>}
             </div>
           ))}
+          {canCreate && (
+            <div
+              id={`${listboxId}-opt-${filtered.length}`}
+              role="option"
+              aria-selected={false}
+              className={`combo-opt ${active === filtered.length ? "active" : ""}`}
+              onMouseDown={doCreate}
+            >
+              <span>Create “{q.trim()}”</span>
+            </div>
+          )}
           {hidden > 0 && (
             <div className="combo-empty">{hidden} more match{hidden > 1 ? "es" : ""} — keep typing to narrow</div>
           )}

@@ -318,9 +318,9 @@ export function QuoteForm({
                         </span>
                       )}
                     </div>
-                    <input type="number" value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
-                    <input type="number" value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
-                    <input type="number" value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
+                    <input type="number" min={0} value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
+                    <input type="number" min={0} value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
+                    <input type="number" min={0} value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
                     <span className="mono" style={{ alignSelf: "center", color: "var(--fg)" }}>
                       {fmt(t.subTotal)}
                     </span>

@@ -322,19 +322,19 @@ export function OrderForm({
                       )}
                     </div>
                     <input
-                      type="number"
+                      type="number" min={0}
                       value={l.ordered_qty_boxes}
                       onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
                       placeholder="0"
                     />
                     <input
-                      type="number"
+                      type="number" min={0}
                       value={l.rate}
                       onChange={(e) => setLine(i, "rate", e.target.value)}
                       placeholder="0.00"
                     />
                     <input
-                      type="number"
+                      type="number" min={0}
                       value={l.discount}
                       onChange={(e) => setLine(i, "discount", e.target.value)}
                       placeholder="0"
@@ -371,7 +371,7 @@ export function OrderForm({
                     ))}
                   </select>
                   {h.taxType !== "None" && (
-                    <input type="number" value={h.taxPct} placeholder="%" onChange={(e) => setHead("taxPct", e.target.value)} />
+                    <input type="number" min={0} value={h.taxPct} placeholder="%" onChange={(e) => setHead("taxPct", e.target.value)} />
                   )}
                 </span>
                 <span className="mono" style={{ color: h.taxType === "TDS" ? "var(--c-red)" : "var(--fg)" }}>

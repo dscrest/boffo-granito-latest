@@ -17,6 +17,7 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 export interface LookupOption {
   id: string; // parent ROWID (the value stored in the FK column)
   label: string;
+  seqCode?: string; // stored SKU segment short code (Size/Finish/Category/Glaze)
   widthMm?: number; // Size only: tile dimensions, used to auto-fill the form
   lengthMm?: number;
 }
@@ -35,9 +36,10 @@ export interface DesignLookups {
   glazes: LookupOption[];
   brands: LookupOption[];
   grades: LookupOption[];
-  // Party brands are free-text per party — the "master" is the distinct set
-  // already saved on Design rows (seeds the field's pick-list suggestions).
+  // Party brands: PartyBrand master names ∪ legacy free-text values on designs.
   partyBrands: string[];
+  // PartyBrand name → seq_code (SKU segment, appended only when a brand is set).
+  partyBrandSeq: Record<string, string>;
 }
 
 export interface DesignRow {
@@ -46,6 +48,7 @@ export interface DesignRow {
   baseDesignName: string;
   uniqueName: string;
   sku: string;
+  seqCode: string; // design short code — first SKU segment
   partyBrandName: string;
   collectionName: string;
   status: string;
@@ -94,6 +97,7 @@ function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
   return (rows || [])
     .map((r) => {
       const o: LookupOption = { id: String(r.ROWID), label: str(r[key]) || str(r.name) || String(r.ROWID) };
+      o.seqCode = str(r.seq_code);
       if (withDims) {
         o.widthMm = num(r.width_mm);
         o.lengthMm = num(r.length_mm);
@@ -136,14 +140,15 @@ async function fetchDesigns(): Promise<{
   error?: string;
 }> {
   // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
-  const [designs, size, finish, category, glaze, brand, grade] = await Promise.all([
+  const [designs, size, finish, category, glaze, brand, grade, partyBrand] = await Promise.all([
     listAll("Design", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code", "width_mm", "length_mm"] }),
-    list("Finish", { limit: 300, columns: ["name"] }),
-    list("Category", { limit: 300, columns: ["name"] }),
-    list("Glaze", { limit: 300, columns: ["name"] }),
-    list("Brand", { limit: 300, columns: ["name"] }),
-    list("Grade", { limit: 300, columns: ["name"] }),
+    list("Size", { limit: 300, columns: ["code", "width_mm", "length_mm", "seq_code"] }),
+    list("Finish", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Category", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Glaze", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Brand", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Grade", { limit: 300, columns: ["name", "seq_code"] }),
+    list("PartyBrand", { limit: 300, columns: ["name", "seq_code"] }),
   ]);
 
   const lookups: DesignLookups = {
@@ -154,6 +159,7 @@ async function fetchDesigns(): Promise<{
     brands: optionsOf(brand.rows, "Brand"),
     grades: optionsOf(grade.rows, "Grade"),
     partyBrands: [],
+    partyBrandSeq: {},
   };
 
   if (!designs.ok) return { ok: false, designs: [], lookups, error: designs.error };
@@ -179,6 +185,7 @@ async function fetchDesigns(): Promise<{
       baseDesignName: str(d.base_design_name),
       uniqueName: str(d.unique_name),
       sku: str(d.sku),
+      seqCode: str(d.seq_code),
       partyBrandName: str(d.party_brand_name),
       collectionName: str(d.collection_name),
       status: str(d.status),
@@ -210,9 +217,14 @@ async function fetchDesigns(): Promise<{
     };
   });
 
-  lookups.partyBrands = [...new Set(rows.map((r) => r.partyBrandName).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b),
+  // Party Brand master names ∪ legacy free-text values still on designs.
+  const masterBrands = (partyBrand.rows || []).map((r) => str(r.name)).filter(Boolean);
+  lookups.partyBrands = [...new Set([...masterBrands, ...rows.map((r) => r.partyBrandName).filter(Boolean)])].sort(
+    (a, b) => a.localeCompare(b),
   );
+  for (const r of partyBrand.rows || []) {
+    if (r.name) lookups.partyBrandSeq[str(r.name)] = str(r.seq_code);
+  }
 
   return { ok: true, designs: rows, lookups };
 }
@@ -224,6 +236,7 @@ export interface DesignInput {
   collection_name: string;
   unique_name: string;
   sku: string;
+  seq_code: string; // design short code — first SKU segment
   status: string;
   // FK ROWIDs ("" = leave unset / clear)
   size: string;
@@ -269,6 +282,7 @@ function toPayload(input: DesignInput): Record<string, unknown> {
     collection_name: input.collection_name.trim(),
     unique_name: input.unique_name.trim(),
     sku: input.sku.trim(),
+    seq_code: input.seq_code.trim(),
     status: input.status.trim(),
     pcs_per_box: input.pcs_per_box,
     box_weight_kg: input.box_weight_kg,
