@@ -29,7 +29,18 @@
       "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"BOFFO app UI \\(client/src\\)\",\"total_score\":21,\"p0_count\":2,\"p1_count\":2}' node .claude/skills/impeccable/scripts/critique-storage.mjs write client-src \"/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/9e7f82ea-8a56-4661-b348-2053151d6821/scratchpad/critique-body.md\")",
       "Bash(node .claude/skills/impeccable/scripts/critique-storage.mjs trend client-src 5)",
       "Bash(awk -F: '{print $1}')",
-      "Bash(xargs -n1 basename)"
+      "Bash(xargs -n1 basename)",
+      "Bash(perl -pi -e 's/type=\"number\"\\(?! min\\)/type=\"number\" min={0}/ unless /adjustment|qty_delta/' quotes/QuoteForm.tsx quotes/ConvertDialog.tsx stages/PalletPackForm.tsx stages/ProductionForm.tsx masters/ContainerForm.tsx masters/PalletForm.tsx orders/OrderForm.tsx)",
+      "Bash(python3 -)",
+      "Bash(perl -0pi -e 's/type=\"number\" min=\\\\{0\\\\}\\\\n\\\\s*min=\\\\{0\\\\}/type=\"number\" min={0}/g' masters/ContainerForm.tsx masters/PalletForm.tsx quotes/ConvertDialog.tsx stages/PalletPackForm.tsx)",
+      "mcp__claude_ai_Catalyst_Zoho__CatalystbyZoho_Create_Folder",
+      "Bash(curl -s -m 20 \"https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/server/data-ops/\")",
+      "Bash(curl -s -m 20 -o /dev/null -w \"app: %{http_code}\\\\n\" \"https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/index.html\")",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(lsof -iTCP -sTCP:LISTEN -P)",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"client/src\",\"total_score\":27,\"p0_count\":1,\"p1_count\":2}' node .claude/skills/impeccable/scripts/critique-storage.mjs write client-src \"/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/c0d0d5de-8add-4cb6-98de-5273a7601cb5/scratchpad/critique-body.md\")"
     ]
   }
 }
