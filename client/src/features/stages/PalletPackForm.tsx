@@ -12,6 +12,7 @@ import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listContainers, listContainerFill, type ContainerRow } from "@/features/masters/containersApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableOrder } from "./palletisationApi";
 
 export function PalletPackForm({
@@ -33,6 +34,8 @@ export function PalletPackForm({
   const navigate = useNavigate();
   const [orders, setOrders] = useState<PalletizableOrder[]>([]);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
+  const [containers, setContainers] = useState<ContainerRow[]>([]);
+  const [fill, setFill] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,9 +47,11 @@ export function PalletPackForm({
 
   useEffect(() => {
     void (async () => {
-      const [po, pl] = await Promise.all([
+      const [po, pl, cs, cf] = await Promise.all([
         listPalletizable(presetOrderId ? { includeOrderId: presetOrderId } : undefined),
         listPallets(),
+        listContainers(),
+        listContainerFill(),
       ]);
       setLoading(false);
       if (!po.ok) {
@@ -55,6 +60,9 @@ export function PalletPackForm({
       }
       setOrders(po.orders);
       setPallets(pl.ok ? pl.pallets : []);
+      // Advisory only — a failed container read just hides the fill hint.
+      setContainers(cs.ok ? cs.containers : []);
+      setFill(cf.ok ? cf.loadedBoxes : new Map());
       // Auto-select the preset order, or the only order when there's just one.
       if (presetOrderId && po.orders.some((o) => o.salesOrderId === presetOrderId)) {
         setOrderId(presetOrderId);
@@ -65,6 +73,27 @@ export function PalletPackForm({
   }, [presetOrderId]);
 
   const order = useMemo(() => orders.find((o) => o.salesOrderId === orderId) || null, [orders, orderId]);
+
+  // Pallet specs offered = those matching the sizes being palletized (a batch
+  // has ONE spec). Before boxes are typed: any size on the order; once boxes
+  // are entered: only those lines' sizes. Size-less specs/items don't constrain.
+  const filteredPallets = useMemo(() => {
+    if (!order) return pallets;
+    const sizes = new Set<string>();
+    for (const it of order.items) {
+      if (it.sizeId && (boxesByItem[it.orderItemId] || 0) > 0) sizes.add(it.sizeId);
+    }
+    if (sizes.size === 0) {
+      for (const it of order.items) if (it.sizeId && it.available > 0) sizes.add(it.sizeId);
+    }
+    if (sizes.size === 0) return pallets;
+    return pallets.filter((p) => !p.sizeId || sizes.has(p.sizeId));
+  }, [order, pallets, boxesByItem]);
+
+  // A previously chosen pallet that no longer matches the entered sizes clears.
+  useEffect(() => {
+    if (palletId && !filteredPallets.some((p) => p.id === palletId)) setPalletId("");
+  }, [filteredPallets, palletId]);
 
   // Reset per-item boxes whenever the chosen order changes, then apply any
   // preselect / auto-fill-all requested by the launch point (Order detail).
@@ -104,6 +133,26 @@ export function PalletPackForm({
     [order, boxesByItem],
   );
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+
+  /* Advisory container-fill math (arrangement A). Hint only — the batch is
+     still assigned to a container later, in the Loading stage. */
+  const pallet = useMemo(() => pallets.find((p) => p.id === palletId) || null, [pallets, palletId]);
+  const bpc = pallet?.boxesPerContainer || 0; // boxes_per_pallet × pallets_per_container
+  const palletsNeeded = pallet && pallet.boxesPerPallet > 0 ? Math.ceil(totalBoxes / pallet.boxesPerPallet) : 0;
+  const containersNeeded = bpc > 0 ? Math.ceil(totalBoxes / bpc) : 0;
+  const pctOfContainer = bpc > 0 ? Math.round((totalBoxes / bpc) * 100) : 0;
+
+  // Partially-full, undispatched containers headed to the order's destination
+  // (spec 8.1). POD is free text on both tables → case-insensitive trim match.
+  const podMatches = useMemo(() => {
+    const pod = (order?.portOfDischarge || "").trim().toLowerCase();
+    if (!pod) return [];
+    return containers
+      .filter((c) => c.status !== "dispatched" && c.capacityBoxes > 0)
+      .filter((c) => c.portOfDischarge.trim().toLowerCase() === pod)
+      .map((c) => ({ ...c, loaded: fill.get(c.id) || 0 }))
+      .filter((c) => c.loaded > 0 && c.loaded < c.capacityBoxes);
+  }, [containers, fill, order]);
   // Lines with nothing ready to palletize but still owed production.
   const needProduction = useMemo(
     () => (order?.items || []).filter((it) => it.available <= 0 && it.toProduce > 0).length,
@@ -195,7 +244,7 @@ export function PalletPackForm({
                     </span>
                     <Combobox
                       value={palletId}
-                      options={pallets.map((p) => ({
+                      options={filteredPallets.map((p) => ({
                         value: p.id,
                         label: p.name + (p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""),
                         hint: p.sizeLabel,
@@ -311,6 +360,40 @@ export function PalletPackForm({
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {pallet && totalBoxes > 0 && bpc > 0 && (
+                <div className="form-section">
+                  <div className="form-section-title">Container fill (estimate)</div>
+                  <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>
+                      <b className="mono">{palletsNeeded}</b> pallet{palletsNeeded !== 1 ? "s" : ""} ·{" "}
+                      <b className="mono">{pctOfContainer}%</b> of one container ({pallet.boxesPerPallet} boxes ×{" "}
+                      {pallet.palletsPerContainer} pallets = {bpc} boxes)
+                    </span>
+                    {totalBoxes <= bpc ? (
+                      <span className="muted">Space left in this container: {bpc - totalBoxes} boxes</span>
+                    ) : (
+                      <span className="muted">
+                        Needs {containersNeeded} containers ({totalBoxes - bpc * (containersNeeded - 1)} boxes in the
+                        last one)
+                      </span>
+                    )}
+                    {podMatches.length > 0 && (
+                      <>
+                        <span className="muted" style={{ marginTop: 4 }}>
+                          Partially full containers to {order?.portOfDischarge}:
+                        </span>
+                        {podMatches.map((c) => (
+                          <span key={c.id} className="mono muted">
+                            {c.containerNumber} · {c.capacityBoxes - c.loaded} boxes free ·{" "}
+                            {Math.round((c.loaded / c.capacityBoxes) * 100)}% full
+                          </span>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </>

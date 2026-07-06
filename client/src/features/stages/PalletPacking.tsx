@@ -75,7 +75,7 @@ export function PalletPacking() {
       <div className="page-head">
         <div>
           <div className="title">Palletization</div>
-          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
+          <div className="sub">{loading ? "Loading…" : <span className="muted">{notice}</span>}</div>
         </div>
         <div className="right">
           <button className="hbtn primary" onClick={() => setShowForm(true)}>

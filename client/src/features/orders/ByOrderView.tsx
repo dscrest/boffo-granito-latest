@@ -16,6 +16,7 @@ import { draftToInput } from "./OrdersTable";
 import { createSalesOrder } from "./ordersApi";
 import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "./OrdersFilter";
 import { toast } from "@/ui/Toast";
+import { GridFooter, usePagination } from "@/ui/GridFooter";
 
 interface Totals {
   qty: number;
@@ -39,10 +40,6 @@ interface Group {
   progress: number;
 }
 
-/** Groups rendered per "page" — each group is a heavy card, so cap the
-    initial render and reveal more on demand. */
-const PAGE_SIZE = 5;
-
 export function ByOrderView() {
   const { orders, loading, error, reload } = useOrders();
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
@@ -50,7 +47,6 @@ export function ByOrderView() {
   // #20: shared choosable filter (Customer / PO / Stage) + free-text search.
   const [filter, setFilter] = useState(EMPTY_FILTER);
   const [sortBy, setSortBy] = useState("progress");
-  const [limit, setLimit] = useState(PAGE_SIZE);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -136,12 +132,10 @@ export function ByOrderView() {
     });
   }, [groups, sortBy]);
 
-  // Filter/sort change → start from the first page again.
-  useEffect(() => {
-    setLimit(PAGE_SIZE);
-  }, [filter, sortBy]);
-
-  const shown = visible.slice(0, limit);
+  // House pager (grid standard): persisted page size, snaps to page 1 on
+  // filter/sort change via resetKey.
+  const pager = usePagination(visible.length, "pg.byorder", `${JSON.stringify(filter)}|${sortBy}`);
+  const shown = pager.slice(visible);
 
   const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
   const allCollapsed = visible.every((g) => collapsed[g.key]);
@@ -159,7 +153,7 @@ export function ByOrderView() {
           <div className="title">Orders — by PO</div>
           <div className="sub">
             {visible.length} POs · {visible.reduce((s, g) => s + g.items.length, 0)} line items · grouped view of the pipeline
-            {notice && <> · <span className="dim">{notice}</span></>}
+            {notice && <> · <span className="muted">{notice}</span></>}
           </div>
         </div>
         <div className="right">
@@ -198,11 +192,10 @@ export function ByOrderView() {
           {shown.map((g) => (
             <ByOrderGroup key={g.key} group={g} collapsed={!!collapsed[g.key]} onToggle={() => toggle(g.key)} onOpenLineItem={setOpenDrawer} />
           ))}
-          {visible.length > limit && (
-            <button className="hbtn" style={{ justifySelf: "center", margin: "4px auto" }} onClick={() => setLimit((l) => l + PAGE_SIZE)}>
-              Show {Math.min(PAGE_SIZE, visible.length - limit)} more ({visible.length - limit} remaining)
-            </button>
-          )}
+          {/* .card wrapper gives the standalone pager the house panel chrome. */}
+          <div className="card" style={{ overflow: "hidden" }}>
+            <GridFooter {...pager} />
+          </div>
         </div>
       )}
 
@@ -361,7 +354,16 @@ function ByOrderGroup({
                     {li.loadedQty > 0 ? fmt(li.loadedQty) : "—"}
                   </td>
                   <td style={{ width: 130 }}>
-                    <SplitBar produced={li.producedQty} palletized={li.palletizedQty} loaded={li.loadedQty} total={li.orderQty} />
+                    <div
+                      className="row"
+                      style={{ gap: 6, alignItems: "center" }}
+                      title={`produced ${fmt(li.producedQty)} · palletized ${fmt(li.palletizedQty)} · loaded ${fmt(li.loadedQty)} of ${fmt(li.orderQty)}`}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <SplitBar produced={li.producedQty} palletized={li.palletizedQty} loaded={li.loadedQty} total={li.orderQty} />
+                      </div>
+                      <span className="mono dim" style={{ fontSize: 11 }}>{pct(li.loadedQty, li.orderQty)}%</span>
+                    </div>
                   </td>
                   <td>
                     <StageBadge stage={li.stage} />

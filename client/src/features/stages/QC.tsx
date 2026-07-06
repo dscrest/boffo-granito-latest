@@ -147,7 +147,10 @@ export function QC() {
         <div>
           <div className="title">Quality Control</div>
           <div className="sub">
-            <StageBadge stage="qc" /> · pre &amp; post-pallet inspection · {allItems.length} line items in queue
+            <StageBadge stage="qc" /> · pre &amp; post-pallet inspection · {allItems.length} line items in queue ·{" "}
+            <span style={{ color: "var(--c-amber)", fontWeight: 600 }}>
+              checklist is a worksheet — verdicts are not saved yet
+            </span>
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 /* Final Loading & Invoicing — invoice tables are live (listOrders, Data
    Store), grouped by invoice number. The "Dispatch" action opens the
    dispatch saga form (loaded → dispatched); tables reload on success.
-   KPI tiles above remain static prototype figures. */
+   KPI tiles are live-computed from the loaded orders. */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
@@ -79,7 +79,7 @@ export function FinalLoading() {
             {notice && (
               <>
                 {" · "}
-                <span className="dim">{notice}</span>
+                <span className="muted">{notice}</span>
               </>
             )}
           </div>
@@ -174,57 +174,9 @@ export function FinalLoading() {
         )}
       </div>
 
-      <div className="sec-title">
-        <h2>Recent Invoices · Batch detail</h2>
-        <span className="meta">Master view · Master - For Printing</span>
-      </div>
-
-      <div className="card">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: 36, textAlign: "center" }}>Sr.</th>
-              <th>PO Number</th>
-              <th>Party</th>
-              <th>Batch / Shade</th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Pallets - Rem.
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Pallets Loaded
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Boxes / Pallet
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Loaded Boxes
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {finals.slice(0, 9).map((o, i) => {
-              const pal = Math.ceil(o.orderQty / 60 / o.boxesPerPallet);
-              const batch = `0${500 + i * 3}/${i % 2 ? 2 : 1}`;
-              return (
-                <tr key={o.id}>
-                  <td className="muted mono" style={{ textAlign: "center" }}>
-                    {419 + i}
-                  </td>
-                  <td className="mono">{o.poNumber}</td>
-                  <td>
-                    {o.flag} {o.party}
-                  </td>
-                  <td className="mono">{batch}</td>
-                  <td className="num">{i === 1 ? 3 : 0}</td>
-                  <td className="num">{pal - (i === 1 ? 3 : 0)}</td>
-                  <td className="num">{o.boxesPerPallet}</td>
-                  <td className="num">{fmt(Math.ceil(o.orderQty / 60))}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Batch-detail table removed — its Sr./batch/remaining figures were
+          prototype fiction. It returns when it reads PalletisedBatch +
+          ContainerLoading for real. */}
     </div>
   );
 }

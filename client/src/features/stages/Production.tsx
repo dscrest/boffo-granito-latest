@@ -1,21 +1,38 @@
-/* Production — active jobs + Log Production entry form. Logged
-   entries kept in local `logs` state (frontend-only, not persisted). */
+/* Production — active jobs + Log Production entry form. Entries write
+   through the production-log saga (OrderItemEvent + produced bump);
+   local `logs` is just this session's receipt list. */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar } from "@/ui/primitives";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
+import { toast } from "@/ui/Toast";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { type Order } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
+import { logProduction } from "./palletisationApi";
 import { ProductionForm, type ProductionLog } from "./ProductionForm";
 
 export function Production() {
   const { orders, loading, error, reload } = useOrders();
   const [showForm, setShowForm] = useState(false);
   const [logs, setLogs] = useState<ProductionLog[]>([]);
-  const addLog = (l: ProductionLog) => {
+  const addLog = async (l: ProductionLog) => {
+    const res = await logProduction({
+      order_item: l.order,
+      qty_boxes: parseInt(l.qty_delta, 10) || 0,
+      production_date: l.production_date,
+      shift: l.shift,
+      performed_by: l.performed_by,
+      note: l.note,
+    });
+    if (!res.ok) {
+      toast.error(res.error || "Production log failed");
+      return; // keep the form open — nothing was recorded
+    }
+    toast.success(`+${l.qty_delta} boxes logged — ${l.design}`);
     setLogs((p) => [l, ...p]);
     setShowForm(false);
+    reload();
   };
 
   const prodOrders = useMemo(
@@ -41,20 +58,16 @@ export function Production() {
         <div>
           <div className="title">Production</div>
           <div className="sub">
-            {prodOrders.length} active jobs · Plant Morbi · Shift A (07:00–15:00)
+            {prodOrders.length} active jobs · orders in Production or Packing
             {logs.length > 0 && (
               <>
                 {" · "}
-                <span className="dim">{logs.length} unsaved log{logs.length > 1 ? "s" : ""}</span>
+                <span className="muted">{logs.length} log{logs.length > 1 ? "s" : ""} this session</span>
               </>
             )}
           </div>
         </div>
         <div className="right">
-          <button className="hbtn">
-            <Icon name="calendar" size={13} />
-            26 May 2026
-          </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             Log Production
@@ -65,11 +78,11 @@ export function Production() {
       {error && <ErrorCard message={error} onRetry={reload} />}
 
       {logs.length > 0 && (
-        <div className="card" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
+        <div className="card" style={{ marginBottom: 12 }}>
           <div className="card-head">
             <Icon name="factory" size={13} className="ic" />
             <span style={{ fontWeight: 600 }}>Recent production logs</span>
-            <span className="muted">· {logs.length} this session (local draft)</span>
+            <span className="muted">· {logs.length} saved this session</span>
           </div>
           <table className="tbl">
             <thead>
@@ -106,11 +119,11 @@ export function Production() {
         </div>
       )}
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KPI label="Produced Today" value={fmt(totalProd / 1000) + "k"} unit="sqm" delta="+4.2k vs target" trend="up" spark={[5, 6, 7, 9, 8, 10, 12]} color="var(--c-blue)" />
-        <KPI label="Remaining" value={fmt(totalRem / 1000) + "k"} unit="sqm" delta="across 25 SKUs" spark={[12, 10, 9, 8, 7, 6, 5]} color="var(--c-amber)" />
-        <KPI label="On-Time %" value="94" unit="%" delta="+2.1% MoM" trend="up" spark={[6, 7, 8, 9, 8, 9, 10]} color="var(--c-green)" />
-        <KPI label="Yield (Premium)" value="88.4" unit="%" delta="-0.8% vs avg" trend="down" spark={[9, 8, 9, 7, 8, 7, 8]} color="var(--c-violet)" />
+      {/* Live-computed only — no daily/on-time/yield tracking exists yet. */}
+      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <KPI label="Produced (active jobs)" value={fmt(totalProd)} unit="sqm" color="var(--c-blue)" />
+        <KPI label="Remaining" value={fmt(totalRem)} unit="sqm" delta={`across ${prodOrders.length} jobs`} color="var(--c-amber)" />
+        <KPI label="Active jobs" value={String(prodOrders.length)} color="var(--c-green)" />
       </div>
 
       <div className="sec-title">
@@ -150,15 +163,11 @@ export function Production() {
                 <th className="num" style={{ textAlign: "right" }}>
                   Produced
                 </th>
-                <th className="num" style={{ textAlign: "right" }}>
-                  Today
-                </th>
                 <th>Progress</th>
-                <th>Last update</th>
               </tr>
             </thead>
             <tbody>
-              {grouped[size].slice(0, 8).map((o) => (
+              {grouped[size].map((o) => (
                 <tr key={o.id}>
                   <td>
                     <span className="design-name">{o.design}</span>
@@ -174,9 +183,6 @@ export function Production() {
                   <td className="num" style={{ color: "var(--c-blue)" }}>
                     {fmt(o.producedQty)}
                   </td>
-                  <td className="num" style={{ color: "var(--c-green)" }}>
-                    +{fmt(Math.round(o.producedQty * 0.12))}
-                  </td>
                   <td style={{ width: 160 }}>
                     <div className="row" style={{ gap: 8 }}>
                       <ProgressBar value={o.producedQty} max={o.orderQty} color="var(--c-blue)" height={5} />
@@ -185,7 +191,6 @@ export function Production() {
                       </span>
                     </div>
                   </td>
-                  <td className="muted mono">26/4 · 14:32</td>
                 </tr>
               ))}
             </tbody>

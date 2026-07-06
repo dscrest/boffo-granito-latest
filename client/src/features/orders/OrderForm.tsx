@@ -196,7 +196,7 @@ export function OrderForm({
           </div>
           <div>
             <div className="ttl">New Order</div>
-            <div className="sub2">Sales order · local draft — not yet saved to database</div>
+            <div className="sub2">Sales order · saves to the database on submit</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕

@@ -19,6 +19,7 @@ export interface PalletizableItem {
   orderItemId: string; // OrderItem ROWID → close-pallet line.order_item
   designId: string; // Design ROWID
   designLabel: string;
+  sizeId: string; // Size ROWID via Design.size ("" when unset)
   ordered: number; // ordered_qty_boxes (confirmed demand)
   available: number; // produced − palletized (boxes free to palletize NOW)
   produced: number;
@@ -28,6 +29,7 @@ export interface PalletizableItem {
 export interface PalletizableOrder {
   salesOrderId: string; // SalesOrder ROWID → close-pallet sales_order
   label: string; // "PO-123 · Acme"
+  portOfDischarge: string; // destination for container matching ("" when unset)
   items: PalletizableItem[];
 }
 
@@ -60,9 +62,9 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
 }> {
   const [items, sos, customers, designs] = await Promise.all([
     listAll("OrderItem"),
-    listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer"] }),
+    listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer", "port_of_discharge"] }),
     listAll("Customer", { columns: ["name"] }),
-    listAll("Design", { columns: ["design_name"] }),
+    listAll("Design", { columns: ["design_name", "size"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 
@@ -71,7 +73,11 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   const custName = new Map<string, string>();
   (customers.rows || []).forEach((c) => custName.set(String(c.ROWID), str(c.name)));
   const designName = new Map<string, string>();
-  (designs.rows || []).forEach((d) => designName.set(String(d.ROWID), str(d.design_name)));
+  const designSize = new Map<string, string>();
+  (designs.rows || []).forEach((d) => {
+    designName.set(String(d.ROWID), str(d.design_name));
+    designSize.set(String(d.ROWID), str(d.size));
+  });
 
   const preset = opts?.includeOrderId;
   const byOrder = new Map<string, PalletizableOrder>();
@@ -91,13 +97,19 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       const so = soById.get(soId);
       const po = so ? str(so.po_number) || str(so.order_number) : soId;
       const party = so ? custName.get(str(so.customer)) || "" : "";
-      byOrder.set(soId, { salesOrderId: soId, label: party ? `${po} · ${party}` : po, items: [] });
+      byOrder.set(soId, {
+        salesOrderId: soId,
+        label: party ? `${po} · ${party}` : po,
+        portOfDischarge: so ? str(so.port_of_discharge) : "",
+        items: [],
+      });
     }
     const designId = str(it.design);
     byOrder.get(soId)!.items.push({
       orderItemId: String(it.ROWID),
       designId,
       designLabel: designName.get(designId) || designId,
+      sizeId: designSize.get(designId) || "",
       ordered,
       available,
       produced,
@@ -186,6 +198,20 @@ function bust<T>(p: Promise<T>): Promise<T> {
 
 export function closePallet(input: ClosePalletInput) {
   return bust(op<{ ROWID: string; boxes_packed: number; lines: number }>("close-pallet", input));
+}
+
+/* ---- production-log: OrderItemEvent + produced bump (+ stage po→prod) ---- */
+export interface ProductionLogInput {
+  order_item: string; // OrderItem ROWID
+  qty_boxes: number;
+  production_date?: string;
+  shift?: string;
+  performed_by?: string;
+  note?: string;
+}
+
+export function logProduction(input: ProductionLogInput) {
+  return bust(op<{ produced_qty_boxes: number; stage: string }>("production-log", input));
 }
 
 /* ---- load-container: palletized → loaded ---- */

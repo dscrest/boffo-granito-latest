@@ -7,7 +7,7 @@
    auto-dismiss after a few seconds, errors dim the screen and stay
    until closed. Click a popup (or its ✕) to dismiss.
    ============================================================ */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type ToastKind = "success" | "error" | "info";
 interface ToastItem {
@@ -35,6 +35,8 @@ const ICON: Record<ToastKind, string> = { success: "✓", error: "!", info: "i" 
 
 export function ToastHost() {
   const [items, setItems] = useState<ToastItem[]>([]);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const add = (t: ToastItem) => {
@@ -50,14 +52,31 @@ export function ToastHost() {
     };
   }, []);
 
-  if (items.length === 0) return null;
   const hasError = items.some((t) => t.kind === "error");
+
+  // Errors dim the screen and block pointer input — take keyboard focus too
+  // (✕ or Esc dismisses), then restore it where the user was.
+  useEffect(() => {
+    if (hasError) {
+      if (!restoreRef.current) restoreRef.current = document.activeElement as HTMLElement | null;
+      hostRef.current?.querySelector<HTMLButtonElement>(".toast.error .toast-x")?.focus();
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setItems((p) => p.filter((x) => x.kind !== "error"));
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }
+    restoreRef.current?.focus();
+    restoreRef.current = null;
+  }, [hasError]);
+
+  if (items.length === 0) return null;
   const dismiss = (id: number) => setItems((p) => p.filter((x) => x.id !== id));
 
   return (
-    <div className={`toast-host${hasError ? " has-error" : ""}`} role="status" aria-live="polite">
+    <div ref={hostRef} className={`toast-host${hasError ? " has-error" : ""}`} role="status" aria-live="polite">
       {items.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`} onClick={() => dismiss(t.id)}>
+        <div key={t.id} className={`toast ${t.kind}`} role={t.kind === "error" ? "alert" : undefined} onClick={() => dismiss(t.id)}>
           <span className="toast-ico" aria-hidden="true">{ICON[t.kind]}</span>
           <span className="toast-msg">{t.msg}</span>
           <button

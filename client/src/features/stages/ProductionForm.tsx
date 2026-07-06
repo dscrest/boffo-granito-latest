@@ -1,9 +1,9 @@
 /* ============================================================
    Log Production form — records a production update against an
-   active order/job. Maps to the Catalyst `OrderItemEvent`
-   (event_type=production_update, qty_delta) + bumps
-   `OrderItem.produced_qty_boxes`. FRONTEND-ONLY: emits a
-   ProductionLog to Production's local state (no DB writes yet).
+   active order/job via the data-ops `production-log` saga
+   (OrderItemEvent event_type=production_update + bumps
+   `OrderItem.produced_qty_boxes`, po→prod stage step).
+   Parent's onSave does the write; the form holds open while busy.
    Reuses shared form/modal CSS (df-*, form-*).
    ============================================================ */
 import { useState } from "react";
@@ -36,7 +36,7 @@ export function ProductionForm({
 }: {
   /** Live active jobs (stage prod/packing) passed down from Production. */
   jobs: Order[];
-  onSave: (l: ProductionLog) => void;
+  onSave: (l: ProductionLog) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [v, setV] = useState({
@@ -47,19 +47,22 @@ export function ProductionForm({
     performed_by: "",
     note: "",
   });
+  const [busy, setBusy] = useState(false);
   const set = (k: string, val: string) => setV((p) => ({ ...p, [k]: val }));
 
   const job = jobs.find((o) => o.id === v.order);
   const missing = !v.order || !v.qty_delta.trim() || (parseInt(v.qty_delta, 10) || 0) <= 0;
 
-  const submit = () => {
-    if (missing || !job) return;
-    onSave({
+  const submit = async () => {
+    if (missing || !job || busy) return;
+    setBusy(true);
+    await onSave({
       ...v,
       _id: newId(),
       orderLabel: `${job.poNumber} · ${job.party}`,
       design: job.design,
     });
+    setBusy(false);
   };
 
   return (
@@ -71,7 +74,7 @@ export function ProductionForm({
           </div>
           <div>
             <div className="ttl">Log Production</div>
-            <div className="sub2">Production update · local draft — not yet saved to database</div>
+            <div className="sub2">Production update · records to the order item and audit log</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕
@@ -144,9 +147,9 @@ export function ProductionForm({
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing} onClick={submit}>
+          <button className="hbtn primary" disabled={missing || busy} onClick={submit}>
             <Icon name="check" size={13} />
-            Log production
+            {busy ? "Saving…" : "Log production"}
           </button>
         </div>
       </div>

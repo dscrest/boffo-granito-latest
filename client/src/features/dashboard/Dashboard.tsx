@@ -129,8 +129,6 @@ export function Dashboard() {
           <div className="sub row">
             <span className="live-dot" />
             Live
-            <span className="dim">·</span>
-            <span>Plant: Morbi · Shift A</span>
           </div>
         </div>
         <div className="right">
@@ -279,7 +277,7 @@ export function Dashboard() {
             <Icon name="factory" size={13} />
             <span className="title">Production Progress</span>
             <div className="right">
-              <span className="muted">Today · Plant Morbi</span>
+              <span className="muted">Active jobs</span>
             </div>
           </div>
           {showSkeleton ? (

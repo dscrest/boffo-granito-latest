@@ -927,6 +927,49 @@ async function closePallet(catalyst, ds, body) {
   return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
 }
 
+/* 3a2. Production log — OrderItemEvent + OrderItem.produced bump (+ stage po→prod).
+   body: { order_item, qty_boxes, production_date?, shift?, performed_by?, note? } */
+app.post("/production-log", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "OrderItemEvent", operation: "production-log", payload: body },
+      async () => {
+        if (!body.order_item) throw badRequest("order_item is required");
+        const qty = nonNeg(body.qty_boxes, "qty_boxes");
+        if (qty <= 0) throw badRequest("qty_boxes must be > 0");
+        const oiMap = await loadOrderItems(catalyst, [body.order_item], "ROWID, ordered_qty_boxes, produced_qty_boxes, stage");
+        const oi = oiMap.get(String(body.order_item));
+        if (!oi) throw badRequest(`OrderItem not found: ${body.order_item}`, 404);
+        const ordered = Number(oi.ordered_qty_boxes) || 0;
+        const produced = Number(oi.produced_qty_boxes) || 0;
+        if (produced + qty > ordered) {
+          throw badRequest(`Producing ${qty} exceeds ordered (${produced}+${qty} > ${ordered})`, 409);
+        }
+        const noteBits = [body.shift, body.production_date, body.note].map((s) => String(s || "").trim()).filter(Boolean);
+        const ev = await ds.table("OrderItemEvent").insertRow({
+          order_item: String(body.order_item),
+          event_type: "production_update",
+          qty_delta: qty,
+          performed_by: String(body.performed_by || ""),
+          note: noteBits.join(" · "),
+        });
+        // Never regress a later stage — only po steps forward to prod here.
+        const patch = { ROWID: String(body.order_item), produced_qty_boxes: produced + qty };
+        if (String(oi.stage || "po") === "po") patch.stage = "prod";
+        await ds.table("OrderItem").updateRow(patch);
+        return { rowid: ev.ROWID, data: { produced_qty_boxes: produced + qty, stage: patch.stage || oi.stage } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 /* 3c. Load container — ContainerLoading + batch status + OrderItem.loaded + events.
    body: { container, batches: [batchId | {batch, position}], loaded_by? } */
 app.post("/load-container", async (req, res) => {

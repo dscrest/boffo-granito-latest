@@ -146,6 +146,33 @@ export function deleteContainer(rowid: string) {
   return bust(remove("Container", rowid));
 }
 
+/* ---- Current fill (loaded boxes per container, from ContainerLoading) ----
+   Read-only ground truth of what is physically loaded NOW — unlike
+   fitSuggest, whose `used` includes hypothetical new assignments. */
+export async function listContainerFill(): Promise<{
+  ok: boolean;
+  loadedBoxes: Map<string, number>; // container ROWID → sum of boxes_packed
+  error?: string;
+}> {
+  const [loadings, batches] = await Promise.all([
+    listAll("ContainerLoading", { columns: ["container", "batch"] }),
+    listAll("PalletisedBatch", { columns: ["boxes_packed"] }),
+  ]);
+  if (!loadings.ok || !batches.ok)
+    return { ok: false, loadedBoxes: new Map(), error: loadings.error || batches.error };
+
+  const boxesByBatch = new Map<string, number>();
+  (batches.rows || []).forEach((b) => boxesByBatch.set(String(b.ROWID), num(b.boxes_packed)));
+
+  const loadedBoxes = new Map<string, number>();
+  for (const r of loadings.rows || []) {
+    const cid = str(r.container);
+    if (!cid) continue;
+    loadedBoxes.set(cid, (loadedBoxes.get(cid) || 0) + (boxesByBatch.get(str(r.batch)) || 0));
+  }
+  return { ok: true, loadedBoxes };
+}
+
 /* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
 
 export interface BulkResult {

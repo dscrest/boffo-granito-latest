@@ -36,6 +36,7 @@ const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => (
 const Reports = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.Reports })));
 const PalletPacking = lazy(() => import("@/features/stages/PalletPacking").then((m) => ({ default: m.PalletPacking })));
 const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
+const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
@@ -116,6 +117,7 @@ function navTree(): NavNode[] {
         { id: "qc", label: "Quality Control", icon: "shield-check" },
         { id: "containers", label: "Containers", icon: "truck" },
         { id: "fit", label: "Fit Suggester", icon: "kanban" },
+        { id: "loadplan", label: "Load Planner", icon: "truck" },
         { id: "loading", label: "Loading", icon: "truck" },
         { id: "final", label: "Final Loading", icon: "invoice" },
         { id: "invoices", label: "Invoices", icon: "invoice" },
@@ -158,6 +160,7 @@ const VIEW_LABELS: Record<string, [string, string]> = {
   qc: ["Stages", "Quality Control"],
   containers: ["Stages", "Containers"],
   fit: ["Stages", "Fit Suggester"],
+  loadplan: ["Stages", "Load Planner"],
   loading: ["Stages", "Loading"],
   final: ["Stages", "Final Loading"],
   invoices: ["Stages", "Invoices"],
@@ -458,6 +461,7 @@ export default function App() {
             <Route path="/qc" element={<QC />} />
             <Route path="/containers" element={<Containers />} />
             <Route path="/fit" element={<FitSuggest />} />
+            <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalletPacking />} />
             <Route path="/loading" element={<Loading />} />

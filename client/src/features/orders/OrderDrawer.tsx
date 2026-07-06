@@ -8,6 +8,7 @@ import { fmt, finishClass, pct } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { AdvanceButton } from "./AdvanceButton";
+import { EmptyState } from "@/ui/States";
 
 export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose: () => void }) {
   // Live orders (cache-first, so opening the drawer costs no extra fetch).
@@ -70,9 +71,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
             </div>
           </div>
           <div className="actions">
-            <span className="li-badge">
-              <Icon name="docs" size={10} /> PI · PO {order.stage === "final" && "· INV"}
-            </span>
             <AdvanceButton order={order} className="hbtn primary" verbose />
             <button
               className="hbtn primary"
@@ -86,12 +84,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
               <Icon name="palette" size={13} />
               Send to Palletisation
             </button>
-            <button className="iconbtn" title="Print">
-              <Icon name="download" size={14} />
-            </button>
-            <button className="iconbtn" title="More">
-              <Icon name="more" size={14} />
-            </button>
             <button className="iconbtn" title="Close" onClick={onClose} style={{ fontSize: 16 }}>
               ×
             </button>
@@ -102,12 +94,8 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
           <div className="stage-timeline">
             {STAGES.map((s, i) => {
               const cls = i < stageIdx ? "done" : i === stageIdx ? "curr" : "";
-              const when =
-                i < stageIdx
-                  ? ["24 Apr", "02 May", "15 May", "22 May", "24 May"][i]
-                  : i === stageIdx
-                    ? "In progress"
-                    : "—";
+              // No per-stage timestamps in the DB yet — say Done/In progress, never invent dates.
+              const when = i < stageIdx ? "Done" : i === stageIdx ? "In progress" : "—";
               return (
                 <div className={`stage-step ${cls}`} key={s.id}>
                   <div className="ring">{i < stageIdx ? <Icon name="check" size={11} /> : i + 1}</div>
@@ -145,7 +133,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 {pct(totals.palletized, totals.qty)}
                 <small>%</small>
               </div>
-              <div className="sub">{Math.ceil(totals.palletized / 60 / 32)} pallets packed</div>
+              <div className="sub">{Math.ceil(totals.palletized / 60 / order.boxesPerPallet)} pallets packed</div>
             </div>
             <div className="mini-stat">
               <div className="l">Loaded</div>
@@ -153,23 +141,30 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 {pct(totals.loaded, totals.qty)}
                 <small>%</small>
               </div>
-              <div className="sub">{order.invoice || "pending invoice"}</div>
+              <div className="sub">{order.invoice || "—"}</div>
             </div>
           </div>
 
-          <div className="dtabs">
-            <div className={`tab ${tab === "overview" ? "active" : ""}`} onClick={() => setTab("overview")}>
-              Line items <span className="ct">{lineItems.length}</span>
-            </div>
-            <div className={`tab ${tab === "packing" ? "active" : ""}`} onClick={() => setTab("packing")}>
-              Packing &amp; pallets
-            </div>
-            <div className={`tab ${tab === "docs" ? "active" : ""}`} onClick={() => setTab("docs")}>
-              Documents <span className="ct">{order.stage === "final" ? 3 : 2}</span>
-            </div>
-            <div className={`tab ${tab === "activity" ? "active" : ""}`} onClick={() => setTab("activity")}>
-              Activity
-            </div>
+          <div className="dtabs" role="tablist">
+            {(
+              [
+                ["overview", <>Line items <span className="ct">{lineItems.length}</span></>],
+                ["packing", "Packing & pallets"],
+                ["docs", "Documents"],
+                ["activity", "Activity"],
+              ] as [string, React.ReactNode][]
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={`tab ${tab === id ? "active" : ""}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
 
           {tab === "overview" && <OverviewTab order={order} lineItems={lineItems} />}
@@ -246,19 +241,20 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
           <Icon name="docs" size={12} />
           Order specs
         </div>
+        {/* Real SalesOrder/OrderItem fields only — no invented doc refs or shipping terms. */}
         <div className="spec-grid">
           <Spec l="PO Number" v={order.poNumber} mono />
-          <Spec l="PI Reference" v={`PI-${order.poNumber.replace("/", "-")}`} mono />
           <Spec l="Party" v={`${order.flag} ${order.party}`} />
           <Spec l="Country" v={order.country} />
           <Spec l="Order Date" v={order.orderDate} mono />
           <Spec l="Due Date" v={order.dueDate} mono />
-          <Spec l="Days from PI" v={`${order.daysFromPI} days`} />
+          <Spec l="Shipment Date" v={order.shipmentDate || "—"} mono />
           <Spec l="Priority" v={order.priority.toUpperCase()} />
-          <Spec l="Brand" v={order.brand} />
+          <Spec l="Brand" v={order.brand || "—"} />
+          <Spec l="Box Branding" v={order.boxBranding || "—"} />
+          <Spec l="Salesperson" v={order.salesperson || "—"} />
           <Spec l="Boxes / Pallet" v={order.boxesPerPallet} />
-          <Spec l="Incoterm" v="FOB Mundra" />
-          <Spec l="Container" v="40 HC" />
+          <Spec l="Currency Total" v={order.totalAmount ? fmt(order.totalAmount) : "—"} mono />
         </div>
       </div>
     </div>
@@ -317,137 +313,67 @@ function PackingTab({
           <Icon name="truck" size={12} />
           Shipment
         </div>
+        {/* Truck/seal/ETA aren't captured per order yet (they live on Container
+            loading) — show "—" rather than inventing them. */}
         <div className="spec-grid">
-          <Spec l="Truck No." v={order.stage === "loading" || order.stage === "final" ? "TR-MH-04 GH 2384" : "—"} mono />
-          <Spec l="Dock" v={order.stage === "loading" ? "Dock 2" : order.stage === "final" ? "Departed" : "—"} />
-          <Spec l="Invoice No." v={order.invoice || "pending"} mono />
-          <Spec l="Container Seal" v={order.stage === "final" ? "SEAL-88421" : "—"} mono />
+          <Spec l="Invoice No." v={order.invoice || "—"} mono />
           <Spec l="Loaded Pallets" v={`${loaded} of ${palletsTotal}`} />
           <Spec l="Loaded Boxes" v={fmt(loaded * order.boxesPerPallet)} />
-          <Spec l="Net Weight" v={`${fmt(loaded * order.boxesPerPallet * 28)} kg`} />
-          <Spec l="ETA Port" v={order.stage === "final" ? "28 May · Mundra" : "—"} />
+          <Spec l="Truck No." v="—" mono />
+          <Spec l="Container Seal" v="—" mono />
+          <Spec l="ETA Port" v="—" />
         </div>
       </div>
     </div>
   );
 }
 
-function DocsTab({ order }: { order: Order }) {
-  const docs = [
-    { kind: "Proforma Invoice", no: `PI-${order.poNumber.replace("/", "-")}`, date: order.orderDate, status: "signed", size: "142 KB" },
-    { kind: "Purchase Order", no: order.poNumber, date: order.orderDate, status: "received", size: "208 KB" },
-    ...(order.stage === "final"
-      ? [{ kind: "Commercial Invoice", no: order.invoice!, date: order.dueDate, status: "issued", size: "188 KB" }]
-      : []),
-    { kind: "Packing List", no: `PL-${order.poNumber.replace("/", "-")}`, date: order.dueDate, status: order.stage === "final" ? "final" : "draft", size: "96 KB" },
-  ];
-  const isFinal = (s: string) => s === "final" || s === "signed" || s === "issued";
+/* Docs/Activity: no document store or per-order event feed is wired yet.
+   Honest empty states until those APIs exist — never invented rows. */
+function DocsTab(_props: { order: Order }) {
   return (
     <div className="dpanel">
       <div className="head">
         <Icon name="docs" size={12} />
         Documents
       </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Number</th>
-            <th>Date</th>
-            <th>Status</th>
-            <th>Size</th>
-            <th style={{ width: 60 }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.map((d, i) => (
-            <tr key={i}>
-              <td>{d.kind}</td>
-              <td className="mono" style={{ color: "var(--fg)" }}>
-                {d.no}
-              </td>
-              <td className="mono muted">{d.date}</td>
-              <td>
-                <span
-                  className="pill"
-                  style={{
-                    color: isFinal(d.status) ? "var(--c-green)" : "var(--muted)",
-                    borderColor: isFinal(d.status) ? "oklch(0.55 0.16 150 / 0.35)" : "var(--border-2)",
-                    background: isFinal(d.status) ? "oklch(0.55 0.16 150 / 0.10)" : "var(--panel-2)",
-                  }}
-                >
-                  {d.status}
-                </span>
-              </td>
-              <td className="muted mono">{d.size}</td>
-              <td style={{ textAlign: "right" }}>
-                <button className="iconbtn" style={{ width: 26, height: 26, display: "inline-grid" }}>
-                  <Icon name="download" size={12} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <EmptyState
+        icon="docs"
+        title="No documents attached"
+        hint="Document storage isn't connected yet — PI, PO and packing list files will appear here once it is."
+      />
     </div>
   );
 }
 
 function ActivityTab({ order }: { order: Order }) {
-  const timeline = [
-    { time: order.orderDate, who: "Kavita", action: "created PO", detail: `${order.poNumber} · ${order.party}`, tag: "po" },
-    { time: "02 May · 11:24", who: "Kavita", action: "confirmed PI", detail: `PI-${order.poNumber.replace("/", "-")} · signed by buyer`, tag: "po" },
-    ...(order.stage !== "po"
-      ? [
-          { time: "08 May · 07:30", who: "Ramesh", action: "started production", detail: `${order.design} · ${order.size}`, tag: "production" },
-          { time: "15 May · 14:32", who: "Ramesh", action: "updated production", detail: `${fmt(order.producedQty)} sqm produced`, tag: "production" },
-        ]
-      : []),
-    ...(["packing", "loading", "final"].includes(order.stage)
-      ? [
-          { time: "18 May · 09:10", who: "Priya", action: "started packing", detail: `${order.boxesPerPallet} boxes/pallet · ${order.pallets} pallets planned`, tag: "packing" },
-          { time: "22 May · 16:48", who: "Priya", action: "closed pallet batch", detail: `[${order.boxesPerPallet}x${order.pallets}] · 26-04-2026`, tag: "packing" },
-        ]
-      : []),
-    ...(["loading", "final"].includes(order.stage)
-      ? [
-          { time: "24 May · 11:15", who: "Anil", action: "truck assigned", detail: "TR-MH-04 GH 2384 · Dock 2", tag: "loading" },
-          { time: "24 May · 13:50", who: "Anil", action: "loaded", detail: `${order.invoice || "EX pending"} · ${fmt(order.loadedQty)} sqm`, tag: "loading" },
-        ]
-      : []),
-    ...(order.stage === "final"
-      ? [{ time: "25 May · 09:00", who: "Suresh", action: "invoice issued", detail: `${order.invoice} · sent to buyer`, tag: "final" }]
-      : []),
-  ].reverse();
-
   return (
     <div className="dpanel">
       <div className="head">
         <Icon name="clock" size={12} />
         Timeline
-        <span className="right">{timeline.length} events</span>
       </div>
       <div className="activity">
-        {timeline.map((a, i) => {
-          const stageColor =
-            ({ production: "blue", packing: "violet", loading: "cyan", po: "amber", final: "green" } as Record<string, string>)[a.tag] ||
-            "blue";
-          return (
-            <div className="item" key={i}>
-              <div className="time">{a.time}</div>
-              <div className="indicator">
-                <span className={`dot ${stageColor}`} />
-              </div>
-              <div className="body">
-                <div>
-                  <span className="who">{a.who}</span> <span className="action">{a.action}</span>
-                </div>
-                <div className="detail">{a.detail}</div>
-              </div>
+        <div className="item">
+          <div className="time">{order.orderDate}</div>
+          <div className="indicator">
+            <span className="dot amber" />
+          </div>
+          <div className="body">
+            <div>
+              <span className="action">PO created</span>
             </div>
-          );
-        })}
+            <div className="detail">
+              {order.poNumber} · {order.party}
+            </div>
+          </div>
+        </div>
       </div>
+      <EmptyState
+        icon="clock"
+        title="Detailed activity coming soon"
+        hint="Stage updates are recorded in the audit log; the per-order feed isn't connected here yet."
+      />
     </div>
   );
 }

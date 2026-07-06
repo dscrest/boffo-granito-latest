@@ -69,7 +69,9 @@ export function ConvertDialog({
     const soNumber = res.data?.order_number || "Master Order";
     toast.success(`Quote converted to ${soNumber}`);
     onConverted(quote.id, soNumber);
-    location.hash = "#/orders";
+    // Land on the orders list — new SO has 0 progress so the default
+    // "least progress first" sort surfaces it at the top.
+    location.hash = "#/byorder";
   };
 
   return (
