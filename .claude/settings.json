@@ -40,7 +40,16 @@
       "Skill(run:*)",
       "Bash(lsof -iTCP -sTCP:LISTEN -P)",
       "Bash(echo \"tsc exit: $?\")",
-      "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"client/src\",\"total_score\":27,\"p0_count\":1,\"p1_count\":2}' node .claude/skills/impeccable/scripts/critique-storage.mjs write client-src \"/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/c0d0d5de-8add-4cb6-98de-5273a7601cb5/scratchpad/critique-body.md\")"
+      "Bash(IMPECCABLE_CRITIQUE_META='{\"target\":\"client/src\",\"total_score\":27,\"p0_count\":1,\"p1_count\":2}' node .claude/skills/impeccable/scripts/critique-storage.mjs write client-src \"/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/c0d0d5de-8add-4cb6-98de-5273a7601cb5/scratchpad/critique-body.md\")",
+      "Bash(perl -pi -e 's/<span className=\"dim\">\\\\{notice\\\\}<\\\\/span>/<span className=\"muted\">{notice}<\\\\/span>/' client/src/features/orders/ByOrderView.tsx client/src/features/stages/PalletPacking.tsx client/src/features/stages/FinalLoading.tsx)",
+      "Bash(echo \"tsc-exit:$?\")",
+      "Bash(echo \"tsc:$?\")",
+      "Bash(grep -l playwright client/package.json package.json)",
+      "Bash(ls node_modules/.bin/playwright client/node_modules/.bin/playwright)",
+      "Bash(npx --no-install playwright --version)",
+      "Bash(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i playwright --no-fund --no-audit)",
+      "Bash(find /Users/octfistechnollp/Library/Caches/ms-playwright/chromium-1228 -name Chromium -path *MacOS*)",
+      "Bash(node drive.js packing)"
     ]
   }
 }
