@@ -90,14 +90,14 @@ export function PalletPacking() {
       {/* Live figures computed from the loaded orders — no placeholder numbers. */}
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <KPI label="Packing Jobs" value={String(packable.length)} delta="in packing, loading & final" color="var(--c-violet)" />
-        <KPI label="Palletized" value={fmt(packable.reduce((s, o) => s + o.palletizedQty, 0))} unit="sqm" color="var(--c-violet)" />
+        <KPI label="Palletized" value={fmt(packable.reduce((s, o) => s + o.palletizedQty, 0))} unit="boxes" color="var(--c-violet)" />
         <KPI
           label="Remaining to Pack"
           value={fmt(packable.reduce((s, o) => s + Math.max(o.orderQty - o.palletizedQty, 0), 0))}
-          unit="sqm"
+          unit="boxes"
           color="var(--c-amber)"
         />
-        <KPI label="Loaded" value={fmt(packable.reduce((s, o) => s + o.loadedQty, 0))} unit="sqm" color="var(--c-green)" />
+        <KPI label="Loaded" value={fmt(packable.reduce((s, o) => s + o.loadedQty, 0))} unit="boxes" color="var(--c-green)" />
       </div>
 
       <div className="fbar" style={{ marginTop: 14 }}>
@@ -133,24 +133,24 @@ export function PalletPacking() {
               <th>Size</th>
               <th>Finish</th>
               <th className="num" style={{ textAlign: "right" }}>
-                Box/Pallet
+                Boxes / Pallet
               </th>
               <th className="num" style={{ textAlign: "right" }}>
-                Pallet Qty
+                Pallets
               </th>
               <th className="num" style={{ textAlign: "right" }}>
-                Total Boxes
+                Ordered (boxes)
               </th>
               <th className="num" style={{ textAlign: "right" }}>
-                Loaded
+                Loaded (boxes)
               </th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {pager.slice(items).map((o, i) => {
-              const loaded = Math.floor(o.loadedQty / 60);
-              const total = Math.ceil(o.orderQty / 60);
+              const loaded = o.loadedQty;
+              const total = o.orderQty;
               const palletQty = Math.ceil(total / o.boxesPerPallet);
               const status = o.loadedQty >= o.orderQty ? "final" : o.palletizedQty >= o.orderQty * 0.85 ? "loading" : "packing";
               return (

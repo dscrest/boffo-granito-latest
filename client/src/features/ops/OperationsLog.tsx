@@ -7,22 +7,37 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-// Toggleable columns (Time always shown).
-const OPS_COLUMNS: ColumnDef[] = [
-  { key: "table", label: "Table" },
-  { key: "operation", label: "Operation" },
-  { key: "status", label: "Status" },
-  { key: "ms", label: "ms" },
-  { key: "row", label: "Row" },
-  { key: "actor", label: "Actor" },
-  { key: "detail", label: "Detail / Error" },
+// Toggleable + reorderable columns (Time pinned outside the map).
+// occurred_at already carries the row timestamp, so no Created/Modified here.
+const OPS_COLUMNS: ColumnDef<DSRow>[] = [
+  { key: "table", label: "Table", className: "mono", render: (r) => str(r.table_name) },
+  { key: "operation", label: "Operation", render: (r) => str(r.operation) },
+  {
+    key: "status",
+    label: "Status",
+    render: (r) => {
+      const status = str(r.status);
+      return <span className={`chip qstatus ${status === "success" ? "q-converted" : "q-rejected"}`}>{status || "—"}</span>;
+    },
+  },
+  { key: "ms", label: "ms", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(Number(r.duration_ms) || 0) },
+  { key: "row", label: "Row", className: "mono muted", render: (r) => str(r.entity_rowid) || "—" },
+  { key: "actor", label: "Actor", className: "muted", render: (r) => str(r.actor) },
+  {
+    key: "detail",
+    label: "Detail / Error",
+    className: "muted",
+    style: { maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+    render: (r) =>
+      str(r.status) === "success" ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>,
+  },
 ];
 
 export function OperationsLog() {
@@ -31,7 +46,7 @@ export function OperationsLog() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [opF, setOpF] = useState("");
-  const { hidden, toggle, show } = useHiddenColumns("opsTableColumns");
+  const { ordered, visible, hidden, toggle, move } = useColumns("opsTableColumns", OPS_COLUMNS, []);
 
   const load = async () => {
     setLoading(true);
@@ -100,7 +115,7 @@ export function OperationsLog() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={OPS_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       <div className="card">
@@ -112,43 +127,25 @@ export function OperationsLog() {
             <thead>
               <tr>
                 <th>Time</th>
-                {show("table") && <th>Table</th>}
-                {show("operation") && <th>Operation</th>}
-                {show("status") && <th>Status</th>}
-                {show("ms") && <th className="num" style={{ textAlign: "right" }}>ms</th>}
-                {show("row") && <th>Row</th>}
-                {show("actor") && <th>Actor</th>}
-                {show("detail") && <th>Detail / Error</th>}
+                {visible.map((c) => (
+                  <th key={c.key} style={c.style}>{c.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {pager.slice(filtered).map((r) => {
-                const status = str(r.status);
-                const ok = status === "success";
-                return (
-                  <tr key={String(r.ROWID)}>
-                    <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
-                    {show("table") && <td className="mono">{str(r.table_name)}</td>}
-                    {show("operation") && <td>{str(r.operation)}</td>}
-                    {show("status") && (
-                      <td>
-                        <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{status || "—"}</span>
-                      </td>
-                    )}
-                    {show("ms") && <td className="num mono">{fmt(Number(r.duration_ms) || 0)}</td>}
-                    {show("row") && <td className="mono muted">{str(r.entity_rowid) || "—"}</td>}
-                    {show("actor") && <td className="muted">{str(r.actor)}</td>}
-                    {show("detail") && (
-                      <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+              {pager.slice(filtered).map((r) => (
+                <tr key={String(r.ROWID)}>
+                  <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
+                  {visible.map((c) => (
+                    <td key={c.key} className={c.className} style={c.style}>
+                      {c.render!(r)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
               {!loading && !error && rows.length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={visible.length + 1}>
                     <EmptyState
                       icon="docs"
                       title="No operations logged yet"

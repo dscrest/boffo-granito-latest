@@ -26,6 +26,7 @@ export interface InvoiceRow {
   orderNumber: string;
   customerName: string;
   createdTime: string;
+  modifiedTime: string;
 }
 
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
@@ -81,6 +82,7 @@ async function fetchInvoices(): Promise<{ ok: boolean; invoices: InvoiceRow[]; e
       orderNumber: so ? str(so.order_number) : "",
       customerName: so ? custName.get(str(so.customer)) || "" : "",
       createdTime: str(iv.CREATEDTIME),
+      modifiedTime: str(iv.MODIFIEDTIME),
     };
   });
 

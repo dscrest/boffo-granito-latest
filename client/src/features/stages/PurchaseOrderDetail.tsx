@@ -32,7 +32,7 @@ export function PurchaseOrderDetail() {
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "stage", label: "Stage", value: head.stage },
     { key: "skus", label: "SKUs", value: String(items.length) },
-    { key: "totalQty", label: "Total Qty (sqm)", value: fmt(totalQty) },
+    { key: "totalQty", label: "Total Qty (boxes)", value: fmt(totalQty) },
   ];
 
   return (
@@ -42,6 +42,8 @@ export function PurchaseOrderDetail() {
       subtitle={`${head.flag} ${head.party} · ${items.length} SKUs`}
       fields={fields}
       hiddenStorageKey="poDetailFields"
+      created={head.createdTime}
+      modified={head.modifiedTime}
     >
       <div className="card">
         <div style={{ overflow: "auto" }}>

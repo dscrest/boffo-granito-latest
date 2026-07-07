@@ -95,6 +95,8 @@ export function OrderDetail() {
       hiddenStorageKey="orderDetailFields"
       activityTable="SalesOrder"
       entityId={head.salesOrderId}
+      created={head.createdTime}
+      modified={head.modifiedTime}
     >
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>

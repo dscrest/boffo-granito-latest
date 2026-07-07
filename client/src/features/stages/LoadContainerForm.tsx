@@ -130,7 +130,7 @@ export function LoadContainerForm({
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th style={{ width: 32 }}></th>
+                      <th style={{ width: 32 }}>Pick</th>
                       <th>Batch</th>
                       <th>Design</th>
                       <th className="num" style={{ textAlign: "right" }}>Boxes</th>

@@ -108,6 +108,8 @@ export interface CustomerRow {
   active: boolean;
   /** Contact person + structured billing/shipping address columns. */
   extras: CustomerExtras;
+  createdTime: string; // Catalyst CREATEDTIME
+  modifiedTime: string; // Catalyst MODIFIEDTIME
 }
 
 /** Mock-shaped view for screens still typed against data.ts Party. */
@@ -194,6 +196,8 @@ async function fetchCustomers(): Promise<{
       extras: Object.fromEntries(
         CUSTOMER_EXTRA_FIELDS.map((k) => [k, str(c[k])]),
       ) as CustomerExtras,
+      createdTime: str(c.CREATEDTIME),
+      modifiedTime: str(c.MODIFIEDTIME),
     };
   });
 

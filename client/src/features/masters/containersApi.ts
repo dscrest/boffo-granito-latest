@@ -31,6 +31,8 @@ export interface ContainerRow {
   portOfLoading: string;
   portOfDischarge: string;
   status: string;
+  createdTime: string; // Catalyst CREATEDTIME
+  modifiedTime: string; // Catalyst MODIFIEDTIME
 }
 
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate.
@@ -79,6 +81,8 @@ async function fetchContainers(): Promise<{
     portOfLoading: str(c.port_of_loading),
     portOfDischarge: str(c.port_of_discharge),
     status: str(c.status) || "planned",
+    createdTime: str(c.CREATEDTIME),
+    modifiedTime: str(c.MODIFIEDTIME),
   }));
 
   return { ok: true, containers: rows };

@@ -242,7 +242,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       const catalyst = init(req);
       const users = rowList(
         await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, email, name, active, role, CREATEDTIME FROM AppUser WHERE deleted_at is null ORDER BY email`,
+          `SELECT ROWID, email, name, active, role, CREATEDTIME, MODIFIEDTIME FROM AppUser WHERE deleted_at is null ORDER BY email`,
         ),
       );
       const roles = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, name FROM Role`));
@@ -256,6 +256,8 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
           active: String(u.active) === "true",
           role: u.role ? String(u.role) : null,
           roleName: u.role ? roleName.get(String(u.role)) || "" : "",
+          createdTime: u.CREATEDTIME ? String(u.CREATEDTIME) : "",
+          modifiedTime: u.MODIFIEDTIME ? String(u.MODIFIEDTIME) : "",
         })),
       });
     } catch (err) {

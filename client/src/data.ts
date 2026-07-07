@@ -72,6 +72,9 @@ export interface Order {
   taxType?: TaxType;
   taxPct?: number;
   taxAmount?: number;
+  /** Catalyst row timestamps (SalesOrder header). */
+  createdTime?: string;
+  modifiedTime?: string;
 }
 
 export interface Activity {
@@ -173,6 +176,9 @@ export interface Quote {
   soId?: string | null;
   /** Public share-link token ("" until first shared). */
   shareToken?: string;
+  /** Raw Catalyst CREATEDTIME / MODIFIEDTIME (for the Created/Modified grid columns). */
+  createdTime?: string;
+  modifiedTime?: string;
 }
 
 // Payment terms now come from the live PaymentTerm master (useMasters().paymentTerms).

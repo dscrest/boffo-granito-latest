@@ -40,9 +40,11 @@ const REASON_LABEL: Record<string, string> = {
   no_space: "no space",
 };
 
-/** Bars shown per card, in display order. Weight included so it lights up
-    the moment per-box weight + container max_weight are calibrated. */
-const BAR_DIMS: FitDim[] = ["slots", "area", "weight", "boxes"];
+/** Bars shown per card, in display order. Area (m²) dropped from display —
+    indicators are box-based; the server still caps by area if configured.
+    Weight included so it lights up the moment per-box weight + container
+    max_weight are calibrated. */
+const BAR_DIMS: FitDim[] = ["slots", "weight", "boxes"];
 
 function CapBar({ c, dim }: { c: FitContainer; dim: FitDim }) {
   const pct = c.utilization[`${dim}_pct`];

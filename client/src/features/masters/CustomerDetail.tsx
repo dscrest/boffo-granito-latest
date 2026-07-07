@@ -55,7 +55,7 @@ export function CustomerDetail() {
     { key: "shipping", label: "Shipping Address", value: composeAddress(party.extras, "shipping") || "—" },
     { key: "active", label: "Active", value: party.active ? "Yes" : "No" },
     { key: "orders", label: "Open Orders", value: String(orders.length) },
-    { key: "totalQty", label: "Total Qty (sqm)", value: fmt(totalQty) },
+    { key: "totalQty", label: "Total Qty (boxes)", value: fmt(totalQty) },
   ];
 
   return (
@@ -67,6 +67,8 @@ export function CustomerDetail() {
       hiddenStorageKey="customerDetailFields"
       activityTable="Customer"
       entityId={party.id}
+      created={party.createdTime}
+      modified={party.modifiedTime}
     >
       <div className="card">
         <div style={{ overflow: "auto" }}>

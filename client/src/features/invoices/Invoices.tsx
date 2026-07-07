@@ -7,10 +7,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDateTime } from "@/lib/format";
 import { listContainers, type ContainerRow } from "@/features/masters/containersApi";
 import {
   deleteInvoice,
@@ -19,14 +20,26 @@ import {
   type InvoiceRow,
 } from "./invoicesApi";
 
-// Toggleable columns (Invoice # + actions always shown).
-const INVOICE_COLUMNS: ColumnDef[] = [
-  { key: "date", label: "Date" },
-  { key: "container", label: "Container" },
-  { key: "masterOrder", label: "Master Order" },
-  { key: "customer", label: "Customer" },
-  { key: "amount", label: "Amount" },
-  { key: "status", label: "Status" },
+// Toggleable + reorderable columns (Invoice # + actions pinned outside the map).
+const INVOICE_COLUMNS: ColumnDef<InvoiceRow>[] = [
+  { key: "date", label: "Date", className: "mono muted", render: (r) => r.invoiceDate || "—" },
+  { key: "container", label: "Container", className: "mono", render: (r) => r.containerNumber || "—" },
+  { key: "masterOrder", label: "Master Order", className: "mono muted", render: (r) => r.orderNumber || "multi" },
+  { key: "customer", label: "Customer", render: (r) => r.customerName || "—" },
+  {
+    key: "amount",
+    label: "Amount",
+    className: "num mono",
+    style: { textAlign: "right" },
+    render: (r) => (
+      <>
+        {r.currency} {fmt(r.totalAmount)}
+      </>
+    ),
+  },
+  { key: "status", label: "Status", render: (r) => <span className="chip">{r.status}</span> },
+  { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];
 
 export function Invoices() {
@@ -36,7 +49,8 @@ export function Invoices() {
   const [showGen, setShowGen] = useState(false);
   const [query, setQuery] = useState("");
   const [statusF, setStatusF] = useState("");
-  const { hidden, toggle, show } = useHiddenColumns("invoicesTableColumns");
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const { ordered, visible, hidden, toggle, move } = useColumns("invoicesTableColumns", INVOICE_COLUMNS, ["created", "modified"]);
 
   const load = () => {
     setLoading(true);
@@ -52,9 +66,24 @@ export function Invoices() {
   };
   useEffect(load, []);
 
+  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  const filterFields = useMemo<FilterField<InvoiceRow>[]>(() => {
+    const opts = (get: (r: InvoiceRow) => string) => [...new Set(invoices.map(get).filter(Boolean))].sort();
+    return [
+      { key: "invoiceNumber", label: "Invoice #", type: "text", get: (r) => r.invoiceNumber },
+      { key: "container", label: "Container", type: "text", get: (r) => r.containerNumber },
+      { key: "masterOrder", label: "Master Order", type: "text", get: (r) => r.orderNumber },
+      { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customerName), get: (r) => r.customerName },
+      { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.status), get: (r) => r.status },
+      { key: "amount", label: "Amount", type: "numrange", get: (r) => r.totalAmount },
+      { key: "date", label: "Invoice Date Between", type: "daterange", get: (r) => r.invoiceDate },
+      { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
+    ];
+  }, [invoices]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return invoices.filter((r) => {
+    const base = invoices.filter((r) => {
       if (statusF && r.status !== statusF) return false;
       if (!q) return true;
       return (
@@ -64,9 +93,10 @@ export function Invoices() {
         r.customerName.toLowerCase().includes(q)
       );
     });
-  }, [invoices, query, statusF]);
+    return applyFilters(base, criteria, filterFields);
+  }, [invoices, query, statusF, criteria, filterFields]);
 
-  const pager = usePagination(rows.length, "invoicesPageSize", `${query}|${statusF}`);
+  const pager = usePagination(rows.length, "invoicesPageSize", `${query}|${statusF}|${JSON.stringify(criteria)}`);
   const statusOptions = useMemo(() => [...new Set(invoices.map((r) => r.status).filter(Boolean))].sort(), [invoices]);
 
   const onPdf = async (row: InvoiceRow) => {
@@ -126,7 +156,8 @@ export function Invoices() {
             onChange={(e) => setQuery(e.target.value)}
             style={{ width: 240 }}
           />
-          <ColumnPicker columns={INVOICE_COLUMNS} hidden={hidden} onToggle={toggle} />
+          <AdvancedFilterButton title="Invoices" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           <button className="hbtn primary" onClick={() => setShowGen(true)}>
             <Icon name="plus" size={13} />
             Generate
@@ -145,33 +176,21 @@ export function Invoices() {
               <thead>
                 <tr>
                   <th>Invoice #</th>
-                  {show("date") && <th>Date</th>}
-                  {show("container") && <th>Container</th>}
-                  {show("masterOrder") && <th>Master Order</th>}
-                  {show("customer") && <th>Customer</th>}
-                  {show("amount") && <th className="num" style={{ textAlign: "right" }}>Amount</th>}
-                  {show("status") && <th>Status</th>}
-                  <th style={{ width: 40 }} />
+                  {visible.map((c) => (
+                    <th key={c.key} style={c.style}>{c.label}</th>
+                  ))}
+                  <th style={{ width: 40 }}>Open</th>
                 </tr>
               </thead>
               <tbody>
                 {pager.slice(rows).map((r) => (
                   <tr key={r.id}>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.invoiceNumber}</td>
-                    {show("date") && <td className="mono muted">{r.invoiceDate || "—"}</td>}
-                    {show("container") && <td className="mono">{r.containerNumber || "—"}</td>}
-                    {show("masterOrder") && <td className="mono muted">{r.orderNumber || "multi"}</td>}
-                    {show("customer") && <td>{r.customerName || "—"}</td>}
-                    {show("amount") && (
-                      <td className="num mono">
-                        {r.currency} {fmt(r.totalAmount)}
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(r)}
                       </td>
-                    )}
-                    {show("status") && (
-                      <td>
-                        <span className="chip">{r.status}</span>
-                      </td>
-                    )}
+                    ))}
                     <td>
                       <button className="btn" onClick={() => void onPdf(r)} title="Download PDF">
                         <Icon name="download" size={12} />
@@ -184,7 +203,7 @@ export function Invoices() {
                 ))}
                 {rows.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={8} style={{ padding: 0 }}>
+                    <td colSpan={visible.length + 2} style={{ padding: 0 }}>
                       <EmptyState
                         icon="invoice"
                         title={query ? "No invoices match the search" : "No invoices yet"}

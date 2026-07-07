@@ -65,7 +65,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 order.design
               ) : (
                 <>
-                  {lineItems.length} line items · {fmt(totals.qty)} sqm total
+                  {lineItems.length} line items · {fmt(totals.qty)} boxes total
                 </>
               )}
             </div>
@@ -111,11 +111,9 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
               <div className="l">Order Qty</div>
               <div className="v">
                 {fmt(totals.qty)}
-                <small>sqm</small>
+                <small>boxes</small>
               </div>
-              <div className="sub">
-                {totals.boxes} boxes · {totals.pallets} pallets
-              </div>
+              <div className="sub">{totals.pallets} pallets</div>
             </div>
             <div className="mini-stat">
               <div className="l">Produced</div>
@@ -124,7 +122,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 <small>%</small>
               </div>
               <div className="sub">
-                {fmt(totals.produced)} of {fmt(totals.qty)} sqm
+                {fmt(totals.produced)} of {fmt(totals.qty)} boxes
               </div>
             </div>
             <div className="mini-stat">
@@ -133,7 +131,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 {pct(totals.palletized, totals.qty)}
                 <small>%</small>
               </div>
-              <div className="sub">{Math.ceil(totals.palletized / 60 / order.boxesPerPallet)} pallets packed</div>
+              <div className="sub">{Math.ceil(totals.palletized / order.boxesPerPallet)} pallets packed</div>
             </div>
             <div className="mini-stat">
               <div className="l">Loaded</div>
@@ -197,10 +195,10 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
               <th>Size</th>
               <th>Finish</th>
               <th className="num" style={{ textAlign: "right" }}>
-                Ordered
+                Ordered (boxes)
               </th>
               <th className="num" style={{ textAlign: "right" }}>
-                Produced
+                Produced (boxes)
               </th>
               <th>Progress</th>
               <th>Stage</th>
@@ -268,9 +266,9 @@ function PackingTab({
   order: Order;
   totals: { qty: number; palletized: number; loaded: number };
 }) {
-  const palletsTotal = Math.max(1, Math.ceil(totals.qty / 60 / order.boxesPerPallet));
-  const packed = Math.ceil(totals.palletized / 60 / order.boxesPerPallet);
-  const loaded = Math.ceil(totals.loaded / 60 / order.boxesPerPallet);
+  const palletsTotal = Math.max(1, Math.ceil(totals.qty / order.boxesPerPallet));
+  const packed = Math.ceil(totals.palletized / order.boxesPerPallet);
+  const loaded = Math.ceil(totals.loaded / order.boxesPerPallet);
   const cells = Array.from({ length: palletsTotal }, (_, i) => {
     if (i < loaded) return "loaded";
     if (i < packed) return "packed";

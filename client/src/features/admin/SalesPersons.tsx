@@ -11,9 +11,10 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { apiGet } from "@/lib/api";
+import { fmtDateTime } from "@/lib/format";
 import {
   listSalesPersons,
   createSalesPerson,
@@ -40,14 +41,7 @@ interface Draft {
 
 const EMPTY: Draft = { rowid: null, name: "", email: "", phone: "", region: "", active: true, app_user: "" };
 
-// Toggleable columns (Name + # always shown).
-const SP_COLUMNS: ColumnDef[] = [
-  { key: "email", label: "Email" },
-  { key: "mobile", label: "Mobile" },
-  { key: "region", label: "Region" },
-  { key: "linkedUser", label: "Linked user" },
-  { key: "status", label: "Status" },
-];
+const dash = <span className="dim">—</span>;
 
 export function SalesPersonsAdmin() {
   const [rows, setRows] = useState<SalesPersonRow[]>([]);
@@ -58,7 +52,6 @@ export function SalesPersonsAdmin() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [statusF, setStatusF] = useState("");
-  const { hidden, toggle, show } = useHiddenColumns("salesPersonsTableColumns");
 
   const load = async () => {
     setLoading(true);
@@ -92,6 +85,37 @@ export function SalesPersonsAdmin() {
     () => users.map((u) => ({ value: u.rowid, label: u.name || u.email, hint: u.email })),
     [users],
   );
+
+  // Toggleable + reorderable columns (# pinned outside the map). Defined in
+  // the component because "Linked user" resolves names via the users map.
+  const spColumns = useMemo<ColumnDef<SalesPersonRow>[]>(
+    () => [
+      { key: "name", label: "Name", render: (s) => <span style={{ color: "var(--fg)" }}>{s.name}</span> },
+      { key: "email", label: "Email", render: (s) => s.email || dash },
+      { key: "mobile", label: "Mobile", render: (s) => s.phone || dash },
+      { key: "region", label: "Region", render: (s) => s.region || dash },
+      {
+        key: "linkedUser",
+        label: "Linked user",
+        render: (s) =>
+          userName.get(s.appUserId) ? <span className="chip">{userName.get(s.appUserId)}</span> : <span className="dim">unlinked</span>,
+      },
+      {
+        key: "status",
+        label: "Status",
+        render: (s) =>
+          s.active ? (
+            <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+          ) : (
+            <span className="chip" style={{ color: "var(--dim)" }}>inactive</span>
+          ),
+      },
+      { key: "created", label: "Created", className: "muted mono", render: (s) => fmtDateTime(s.createdTime) },
+      { key: "modified", label: "Modified", className: "muted mono", render: (s) => fmtDateTime(s.modifiedTime) },
+    ],
+    [userName],
+  );
+  const { ordered, visible, hidden, toggle, move } = useColumns("salesPersonsTableColumns", spColumns, ["created", "modified"]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -262,7 +286,7 @@ export function SalesPersonsAdmin() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={SP_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       <div className="card">
@@ -274,12 +298,9 @@ export function SalesPersonsAdmin() {
               <thead>
                 <tr>
                   <th style={{ width: 36, textAlign: "center" }}>#</th>
-                  <th>Name</th>
-                  {show("email") && <th>Email</th>}
-                  {show("mobile") && <th>Mobile</th>}
-                  {show("region") && <th>Region</th>}
-                  {show("linkedUser") && <th>Linked user</th>}
-                  {show("status") && <th>Status</th>}
+                  {visible.map((c) => (
+                    <th key={c.key} style={c.style}>{c.label}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -302,27 +323,16 @@ export function SalesPersonsAdmin() {
                     title="Edit sales person"
                   >
                     <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
-                    <td style={{ color: "var(--fg)" }}>{s.name}</td>
-                    {show("email") && <td>{s.email || <span className="dim">—</span>}</td>}
-                    {show("mobile") && <td>{s.phone || <span className="dim">—</span>}</td>}
-                    {show("region") && <td>{s.region || <span className="dim">—</span>}</td>}
-                    {show("linkedUser") && (
-                      <td>{userName.get(s.appUserId) ? <span className="chip">{userName.get(s.appUserId)}</span> : <span className="dim">unlinked</span>}</td>
-                    )}
-                    {show("status") && (
-                      <td>
-                        {s.active ? (
-                          <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
-                        ) : (
-                          <span className="chip" style={{ color: "var(--dim)" }}>inactive</span>
-                        )}
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(s)}
                       </td>
-                    )}
+                    ))}
                   </tr>
                 ))}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={7}>
+                    <td colSpan={visible.length + 1}>
                       <EmptyState icon="users" title="No sales persons" hint="Click New sales person to add one." />
                     </td>
                   </tr>

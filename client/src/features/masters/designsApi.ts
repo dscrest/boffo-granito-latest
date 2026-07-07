@@ -79,6 +79,8 @@ export interface DesignRow {
   booksItemId: string;
   imageUrl: string;
   images: string[]; // #12: File Store image ids
+  createdTime: string; // Catalyst CREATEDTIME
+  modifiedTime: string; // Catalyst MODIFIEDTIME
 }
 
 /* Per-lookup natural-key column (see schema gotchas). */
@@ -172,6 +174,25 @@ async function fetchDesigns(): Promise<{
   const br = labelMap(lookups.brands);
   const gr = labelMap(lookups.grades);
 
+  // PartyBrand name → seq_code (needed by the SKU fallback below and the form).
+  for (const r of partyBrand.rows || []) {
+    if (r.name) lookups.partyBrandSeq[str(r.name)] = str(r.seq_code);
+  }
+
+  /* Rows saved before the SKU formula (2026-07-04) have a blank `sku`
+     column; derive it from the same seq_code segments so the grid /
+     detail / search always show a SKU. Same order as DesignForm.computeSku:
+     Short-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand], "00" unset. */
+  const seqMap = (opts: LookupOption[]) => new Map(opts.map((o) => [o.id, o.seqCode || ""]));
+  const seqs = [seqMap(lookups.sizes), seqMap(lookups.finishes), seqMap(lookups.categories), seqMap(lookups.glazes), seqMap(lookups.brands), seqMap(lookups.grades)];
+  const fallbackSku = (d: DSRow, fkIds: string[]): string => {
+    const code = (s?: string) => (s || "").trim() || "00";
+    const parts = [code(str(d.seq_code)), ...fkIds.map((id, i) => code(seqs[i].get(id)))];
+    const pb = str(d.party_brand_name).trim();
+    if (pb) parts.push(code(lookups.partyBrandSeq[pb]));
+    return parts.join("-");
+  };
+
   const rows: DesignRow[] = (designs.rows || []).map((d) => {
     const sizeId = str(d.size);
     const finishId = str(d.finish);
@@ -184,7 +205,7 @@ async function fetchDesigns(): Promise<{
       designName: str(d.design_name),
       baseDesignName: str(d.base_design_name),
       uniqueName: str(d.unique_name),
-      sku: str(d.sku),
+      sku: str(d.sku) || fallbackSku(d, [sizeId, finishId, categoryId, glazeId, brandId, gradeId]),
       seqCode: str(d.seq_code),
       partyBrandName: str(d.party_brand_name),
       collectionName: str(d.collection_name),
@@ -214,6 +235,8 @@ async function fetchDesigns(): Promise<{
       booksItemId: str(d.books_item_id),
       imageUrl: str(d.image_url),
       images: parseImages(str(d.image_urls)),
+      createdTime: str(d.CREATEDTIME),
+      modifiedTime: str(d.MODIFIEDTIME),
     };
   });
 
@@ -222,9 +245,6 @@ async function fetchDesigns(): Promise<{
   lookups.partyBrands = [...new Set([...masterBrands, ...rows.map((r) => r.partyBrandName).filter(Boolean)])].sort(
     (a, b) => a.localeCompare(b),
   );
-  for (const r of partyBrand.rows || []) {
-    if (r.name) lookups.partyBrandSeq[str(r.name)] = str(r.seq_code);
-  }
 
   return { ok: true, designs: rows, lookups };
 }

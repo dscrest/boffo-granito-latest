@@ -53,10 +53,9 @@ export function Dashboard() {
         { header: "Size", value: (o) => o.size },
         { header: "Finish", value: (o) => o.finish },
         { header: "Stage", value: (o) => o.stage },
-        { header: "Order Qty (sqm)", value: (o) => o.orderQty },
-        { header: "Produced Qty", value: (o) => o.producedQty },
+        { header: "Order Qty (boxes)", value: (o) => o.orderQty },
+        { header: "Produced Qty (boxes)", value: (o) => o.producedQty },
         { header: "Pallets", value: (o) => (o.boxesPerPallet > 0 ? Math.ceil(o.palletizedQty / o.boxesPerPallet) : 0) },
-        { header: "Boxes", value: (o) => o.totalBoxes },
         { header: "Order Date", value: (o) => o.orderDate },
         { header: "Due Date", value: (o) => o.dueDate },
       ],
@@ -157,8 +156,8 @@ export function Dashboard() {
         <SkeletonRows rows={1} height={88} />
       ) : (
       <div className="kpi-grid">
-        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="sqm" delta={`${orders.length} active orders`} />
-        <KPI label="In Production" value={fmt(totalProd)} unit="sqm" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
+        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="boxes" delta={`${orders.length} active orders`} />
+        <KPI label="In Production" value={fmt(totalProd)} unit="boxes" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
         <KPI label="Pallets Packed" value={fmt(packedPallets)} unit="pallets" delta={`${fmt(totalPal)} boxes total`} color="var(--c-violet)" />
         <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} color="var(--c-cyan)" />
         <KPI label="Loaded" value={fmt(loadedPallets)} unit="pallets" delta={`${fmt(loadedBoxes)} boxes loaded`} color="var(--c-green)" />
@@ -168,7 +167,7 @@ export function Dashboard() {
       <div className="sec-title">
         <h2>Pipeline</h2>
         <span className="meta">
-          {orders.length} active orders · {fmt(totalQty)} sqm in flight
+          {orders.length} active orders · {fmt(totalQty)} boxes in flight
         </span>
         <div className="right row" style={{ gap: 14 }}>
           <span className="row">
@@ -197,7 +196,7 @@ export function Dashboard() {
               {s.label}
             </div>
             <div className="val">{byStage[s.id].count}</div>
-            <div className="sub">{fmt(byStage[s.id].qty)} sqm</div>
+            <div className="sub">{fmt(byStage[s.id].qty)} boxes</div>
             {i < STAGES.length - 1 && <Icon name="chev-r" size={16} className="arrow" />}
           </div>
         ))}

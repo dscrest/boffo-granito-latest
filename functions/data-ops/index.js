@@ -163,6 +163,9 @@ function resolve(map, name) {
    OperationLog wrapper — records every mutating op's outcome.
    ---------------------------------------------------------------- */
 async function currentActor(catalyst) {
+  // App session user first (email of whoever holds the X-App-Token).
+  const appUser = catalyst.__req && catalyst.__req.appUser;
+  if (appUser && (appUser.email || appUser.name)) return String(appUser.email || appUser.name);
   try {
     const u = await catalyst.userManagement().getCurrentUser();
     return u && (u.email_id || u.user_id) ? String(u.email_id || u.user_id) : "system";
@@ -237,7 +240,12 @@ async function withOpLog(catalyst, meta, fn) {
    Helpers
    ---------------------------------------------------------------- */
 function init(req) {
-  return catalystSDK.initialize(req);
+  const c = catalystSDK.initialize(req);
+  // Carry the request so currentActor() can read the app session user
+  // (req.appUser, set by the appauth guard) — Catalyst's getCurrentUser()
+  // only knows Zoho platform logins and reports "system" for app tokens.
+  c.__req = req;
+  return c;
 }
 
 function rowList(zcqlRows) {
@@ -1462,7 +1470,9 @@ app.get("/:table", async (req, res) => {
     const order = req.query.order ? ` ORDER BY ${req.query.order}` : "";
     // Optional column projection (?columns=a,b,c). Identifiers only — anything
     // else falls back to SELECT *. ROWID is always included so joins keep working.
-    let cols = "*";
+    // CREATEDTIME/MODIFIEDTIME ride along on every query: ZCQL's SELECT *
+    // omits them, and the client shows Created/Modified everywhere (2026-07).
+    let cols = "*, CREATEDTIME, MODIFIEDTIME";
     if (req.query.columns) {
       const ids = String(req.query.columns)
         .split(",")
@@ -1470,6 +1480,7 @@ app.get("/:table", async (req, res) => {
         .filter(Boolean);
       if (ids.length && ids.every((c) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(c))) {
         if (!ids.includes("ROWID")) ids.unshift("ROWID");
+        for (const t of ["CREATEDTIME", "MODIFIEDTIME"]) if (!ids.includes(t)) ids.push(t);
         cols = ids.join(", ");
       }
     }
@@ -1492,7 +1503,7 @@ app.get("/:table/:rowid", async (req, res) => {
     const rows = rowList(
       await catalyst
         .zcql()
-        .executeZCQLQuery(`SELECT * FROM ${table} WHERE ROWID = ${req.params.rowid}`),
+        .executeZCQLQuery(`SELECT *, CREATEDTIME, MODIFIEDTIME FROM ${table} WHERE ROWID = ${req.params.rowid}`),
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: "not found" });
     res.json({ ok: true, row: rows[0] });
@@ -1723,7 +1734,7 @@ app.post("/seed/masters", async (req, res) => {
             coverage_sqft: Number(d.coverage_sqft) || 0,
             rate_per_sqft: Number(d.rate_per_sqft) || 0,
             rate_per_sqmt: Number(d.rate_per_sqmt) || 0,
-            status: "Continue",
+            status: "Active",
           })),
         );
       out.Design = { added: add.length, total: exD.size + add.length };

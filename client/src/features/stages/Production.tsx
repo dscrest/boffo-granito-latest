@@ -121,8 +121,8 @@ export function Production() {
 
       {/* Live-computed only — no daily/on-time/yield tracking exists yet. */}
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-        <KPI label="Produced (active jobs)" value={fmt(totalProd)} unit="sqm" color="var(--c-blue)" />
-        <KPI label="Remaining" value={fmt(totalRem)} unit="sqm" delta={`across ${prodOrders.length} jobs`} color="var(--c-amber)" />
+        <KPI label="Produced (active jobs)" value={fmt(totalProd)} unit="boxes" color="var(--c-blue)" />
+        <KPI label="Remaining" value={fmt(totalRem)} unit="boxes" delta={`across ${prodOrders.length} jobs`} color="var(--c-amber)" />
         <KPI label="Active jobs" value={String(prodOrders.length)} color="var(--c-green)" />
       </div>
 
@@ -146,7 +146,7 @@ export function Production() {
           <div className="card-head">
             <span className={`chip size ${size.startsWith("200") || size.startsWith("75") ? "b" : ""}`}>{size}</span>
             <span className="muted">
-              · {grouped[size].length} jobs · {fmt(grouped[size].reduce((s, o) => s + o.orderQty, 0))} sqm
+              · {grouped[size].length} jobs · {fmt(grouped[size].reduce((s, o) => s + o.orderQty, 0))} boxes
             </span>
             <div className="right muted">Tap a row to log production</div>
           </div>
@@ -158,10 +158,10 @@ export function Production() {
                 <th>Party</th>
                 <th>PO</th>
                 <th className="num" style={{ textAlign: "right" }}>
-                  Ordered
+                  Ordered (boxes)
                 </th>
                 <th className="num" style={{ textAlign: "right" }}>
-                  Produced
+                  Produced (boxes)
                 </th>
                 <th>Progress</th>
               </tr>

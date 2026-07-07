@@ -1,10 +1,11 @@
 /* ============================================================
    Item (Design) detail — Zoho-Inventory-style split view (#13/#14).
    Left: resizable, searchable list of Unique Item Names (+ SKU).
-   Right: header with Edit / More (Delete, Mark as Discontinued) / ✕,
+   Right: header with Edit / More (Delete, Mark as Inactive) / ✕,
    Primary Details, and the Inventory Image Upload manager (#12) —
    Front / Rear / Other slots, positional over image_urls
-   (front = [0], rear = [1], other = rest).
+   (front = [0], rear = [1], other = rest). One "Add Image" button
+   fills slots in order; Front/Rear are preview + delete only.
    Renders instantly from the designs cache — no skeleton flash when
    navigating between items or returning to the tab.
    ============================================================ */
@@ -18,6 +19,8 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
+import { ActivityLog } from "@/features/common/RecordDetail";
+import { fmtDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, invalidateDesigns, listDesigns, type DesignRow } from "./designsApi";
 
 const MAX_IMAGES = 5;
@@ -29,7 +32,7 @@ const ZOHO_STUB_FIELDS = ["HSN Code", "Unit", "Tax Preference", "Inventory Accou
 function DetailRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
   return (
     <div style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
-      <span className="dim" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>{label}</span>
+      <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>{label}</span>
       <span className={dim ? "dim" : ""} style={{ minWidth: 0, overflowWrap: "anywhere" }}>{value}</span>
     </div>
   );
@@ -93,25 +96,24 @@ function MoreMenu({ items }: { items: { label: string; danger?: boolean; onClick
   );
 }
 
-/** One image slot: preview + delete when filled, an upload tile when empty. */
+/** One image slot: preview + delete when filled, a passive placeholder when
+    empty (uploads all go through the single "Add Image" button). */
 function ImageSlot({
   label,
   imageId,
   busy,
   size = 110,
-  onUpload,
   onDelete,
 }: {
   label: string;
   imageId?: string;
   busy: boolean;
   size?: number;
-  onUpload?: (f: File) => void;
   onDelete?: () => void;
 }) {
   return (
     <div>
-      <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>{label}</div>
+      <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>{label}</div>
       {imageId ? (
         <div style={{ position: "relative", width: size }}>
           <img
@@ -132,26 +134,14 @@ function ImageSlot({
             </button>
           )}
         </div>
-      ) : onUpload ? (
-        <label
-          className="btn"
-          style={{ width: size, height: size, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, borderStyle: "dashed", cursor: busy ? "wait" : "pointer" }}
+      ) : (
+        <div
+          className="dim"
+          style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center", border: "1px dashed var(--border)", borderRadius: 8, fontSize: "var(--t-sm)" }}
         >
-          <Icon name="plus" size={14} />
-          <span style={{ fontSize: "var(--t-sm)" }}>{busy ? "Uploading…" : "Upload"}</span>
-          <input
-            type="file"
-            accept="image/*"
-            disabled={busy}
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUpload(f);
-              e.target.value = "";
-            }}
-          />
-        </label>
-      ) : null}
+          No image
+        </div>
+      )}
     </div>
   );
 }
@@ -163,7 +153,8 @@ export function ItemDetail() {
   // Seed from cache so switching items / returning to the tab never flashes a skeleton.
   const [designs, setDesigns] = useState<DesignRow[] | null>(() => cachedDesigns());
   const [q, setQ] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // status toggle / delete
+  const [imgBusy, setImgBusy] = useState(false); // image upload/save only — keeps slots calm during status changes
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
@@ -185,7 +176,7 @@ export function ItemDetail() {
   /** Persist a new image list (positional: [front, rear, ...other]). */
   const saveImages = async (next: string[]) => {
     if (!design) return;
-    setBusy(true);
+    setImgBusy(true);
     const res = await update("Design", design.id, {
       image_urls: JSON.stringify(next),
       image_url: next[0] || "",
@@ -193,7 +184,7 @@ export function ItemDetail() {
     if (!res.ok) toast.error(res.error || "Could not save images");
     invalidateDesigns();
     await refresh();
-    setBusy(false);
+    setImgBusy(false);
   };
 
   const uploadTo = async (slot: number, f: File) => {
@@ -202,7 +193,7 @@ export function ItemDetail() {
       toast.info(`Only ${MAX_IMAGES} images allowed`);
       return;
     }
-    setBusy(true);
+    setImgBusy(true);
     try {
       const fileId = await uploadDesignImage(f);
       const next = [...design.images];
@@ -210,7 +201,7 @@ export function ItemDetail() {
       await saveImages(next);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Upload failed");
-      setBusy(false);
+      setImgBusy(false);
     }
   };
 
@@ -236,7 +227,9 @@ export function ItemDetail() {
 
   const onToggleStatus = async () => {
     if (!design) return;
-    const next = design.status === "Discontinued" ? "Continue" : "Discontinued";
+    // Active/Inactive (renamed from Continue/Discontinued 2026-07); tolerate legacy values.
+    const inactive = design.status === "Inactive" || design.status === "Discontinued";
+    const next = inactive ? "Active" : "Inactive";
     setBusy(true);
     const res = await update("Design", design.id, { status: next });
     setBusy(false);
@@ -251,7 +244,7 @@ export function ItemDetail() {
 
   const moreItems = [
     ...(canUpdate() && design
-      ? [{ label: design.status === "Discontinued" ? "Mark as Continue" : "Mark as Discontinued", onClick: () => void onToggleStatus() }]
+      ? [{ label: design.status === "Inactive" || design.status === "Discontinued" ? "Mark as Active" : "Mark as Inactive", onClick: () => void onToggleStatus() }]
       : []),
     ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDeleteItem() }] : []),
   ];
@@ -273,7 +266,8 @@ export function ItemDetail() {
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
-          height: "calc(100vh - 120px)",
+          /* header-h + 12px sticky top + 12px bottom gap = flush with viewport bottom */
+          height: "calc(100vh - var(--header-h) - 24px)",
           position: "sticky",
           top: 12,
         }}
@@ -362,7 +356,7 @@ export function ItemDetail() {
               <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
                 SKU: <span className="mono">{design.sku || "—"}</span>
                 {design.status && (
-                  <span className={design.status === "Discontinued" ? "dim" : ""} style={{ marginLeft: 10 }}>
+                  <span className={design.status === "Inactive" || design.status === "Discontinued" ? "dim" : ""} style={{ marginLeft: 10 }}>
                     · {design.status}
                   </span>
                 )}
@@ -390,6 +384,8 @@ export function ItemDetail() {
                   value={design.coverageSqm ? `${design.coverageSqm} m² · ${design.coverageSqft} ft²` : "—"}
                 />
                 <DetailRow label="Pcs / Box" value={design.pcsPerBox ? String(design.pcsPerBox) : "—"} />
+                <DetailRow label="Created" value={fmtDateTime(design.createdTime)} />
+                <DetailRow label="Modified" value={fmtDateTime(design.modifiedTime)} />
                 {/* STUB: Zoho Books mapping — blocked on reference. */}
                 {ZOHO_STUB_FIELDS.map((f) => (
                   <DetailRow key={f} label={f} value="—" dim />
@@ -400,36 +396,78 @@ export function ItemDetail() {
               <div
                 style={{ flex: "0 1 340px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: 14, alignSelf: "flex-start" }}
               >
+                {/* One "Add Image" button (2026-07 request) — fills slots in order. */}
                 <div style={{ display: "flex", gap: 18, marginBottom: 14 }}>
                   <ImageSlot
                     label="Front View"
                     imageId={design.images[0]}
-                    busy={busy}
-                    onUpload={(f) => void uploadTo(0, f)}
+                    busy={imgBusy}
                     onDelete={() => void deleteAt(0)}
                   />
                   <ImageSlot
                     label="Rear View"
                     imageId={design.images[1]}
-                    busy={busy}
-                    onUpload={(f) => void uploadTo(1, f)}
+                    busy={imgBusy}
                     onDelete={() => void deleteAt(1)}
                   />
                 </div>
-                <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
+                {/* List rows (2026-07 request) — tiny inline preview + open/delete, not thumbnail tiles. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {design.images.slice(2).map((imgId, i) => (
-                    <ImageSlot
+                    <div
                       key={imgId + i}
-                      label=""
-                      imageId={imgId}
-                      busy={busy}
-                      size={64}
-                      onDelete={() => void deleteAt(i + 2)}
-                    />
+                      className="row"
+                      style={{ gap: 8, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 8 }}
+                    >
+                      <img
+                        src={designImageUrl(imgId)}
+                        alt={`Image ${i + 3}`}
+                        style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)", flexShrink: 0 }}
+                      />
+                      <a
+                        href={designImageUrl(imgId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open full image"
+                        style={{ fontSize: "var(--t-sm)", color: "var(--fg-2)", textDecoration: "none" }}
+                      >
+                        Image {i + 3}
+                      </a>
+                      <div style={{ flex: 1 }} />
+                      <button
+                        type="button"
+                        className="btn x"
+                        disabled={imgBusy}
+                        onClick={() => void deleteAt(i + 2)}
+                        title="Delete image"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
+                  {design.images.slice(2).length === 0 && (
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "2px 0" }}>No other images</div>
+                  )}
                   {design.images.length < MAX_IMAGES && (
-                    <ImageSlot label="" busy={busy} size={64} onUpload={(f) => void uploadTo(design.images.length, f)} />
+                    <label
+                      className="btn"
+                      style={{ alignSelf: "flex-start", marginTop: 4, cursor: imgBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
+                    >
+                      <Icon name="plus" size={12} />
+                      {imgBusy ? "Uploading…" : "Add Image"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={imgBusy}
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) void uploadTo(design.images.length, f);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
                   )}
                 </div>
                 <div className="dim" style={{ marginTop: 10, fontSize: "var(--t-sm)" }}>
@@ -444,7 +482,7 @@ export function ItemDetail() {
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th>PO Number</th>
+                      {/* PO Number column hidden per request 2026-07 — restore when POs go live. */}
                       <th>Party</th>
                       <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
                       <th>Stage</th>
@@ -453,7 +491,6 @@ export function ItemDetail() {
                   <tbody>
                     {orders.map((o) => (
                       <tr key={o.id}>
-                        <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
                         <td>{o.flag} {o.party}</td>
                         <td className="num mono">{fmt(o.orderQty)}</td>
                         <td>{o.stage}</td>
@@ -461,7 +498,7 @@ export function ItemDetail() {
                     ))}
                     {orders.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                        <td colSpan={3} className="muted" style={{ textAlign: "center", padding: 18 }}>
                           No orders use this item.
                         </td>
                       </tr>
@@ -476,6 +513,10 @@ export function ItemDetail() {
                 Open quantity across orders: {fmt(openQty)}
               </div>
             )}
+
+            {/* Audit trail (#10.2): who created / changed this item, from OperationLog. */}
+            <div className="form-section-title" style={{ margin: "16px 0 8px" }}>Activity</div>
+            <ActivityLog table="Design" entityId={design.id} />
           </>
         )}
       </div>

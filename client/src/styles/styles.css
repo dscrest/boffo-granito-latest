@@ -3,6 +3,13 @@
    Color tokens, typography, components
    ============================================================ */
 
+/* Zoho Puvi (2026-07 request) — self-hosted from client/public/fonts,
+   Inter stays in the stack as fallback while Puvi loads. */
+@font-face { font-family: 'Zoho Puvi'; src: url('/fonts/Zoho_Puvi_Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Zoho Puvi'; src: url('/fonts/Zoho_Puvi_Medium.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Zoho Puvi'; src: url('/fonts/Zoho_Puvi_Semibold.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Zoho Puvi'; src: url('/fonts/Zoho_Puvi_Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+
 :root {
   /* Neutrals */
   --bg:           #f6f7f9;
@@ -40,7 +47,7 @@
   --header-h:     52px;
 
   /* Typography */
-  --font-sans: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-sans: 'Zoho Puvi', 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
 
   /* Sizes (compact) */
@@ -120,20 +127,11 @@ a { color: inherit; text-decoration: none; }
   background: var(--panel);
   position: sticky; top: 0; z-index: 20;
 }
-.header .crumbs {
-  display: flex; align-items: center; gap: 8px;
-  font-size: var(--t-md);
-  color: var(--muted);
-}
-.header .crumbs .cur { color: var(--fg); }
-.header .crumbs .crumb-link {
-  color: var(--muted); text-decoration: none; cursor: pointer;
-}
-.header .crumbs .crumb-link:hover { color: var(--fg); text-decoration: underline; }
-.header .crumbs .crumb-link.cur { color: var(--fg); }
+/* Search leads the header (breadcrumbs removed 2026-07-06); margin-right
+   pushes the icon buttons to the right edge. */
 .header .search {
   position: relative;
-  flex: 1; max-width: 460px; margin-left: auto;
+  flex: 1; max-width: 460px; margin-right: auto;
 }
 .header .search input {
   width: 100%;
@@ -387,7 +385,10 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px solid var(--border);
   font-size: var(--t-md);
 }
-.card-head .title { font-weight: 600; color: var(--fg); }
+/* Bare .title (record/item name headers, e.g. ItemDetail): prominent by
+   default (2026-07 request). Scoped variants below re-scale as needed. */
+.title { font-size: var(--t-xl); font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.card-head .title { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
 .card-head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; color: var(--muted); }
 .card-body { padding: 14px; }
 

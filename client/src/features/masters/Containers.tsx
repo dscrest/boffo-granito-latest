@@ -12,9 +12,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDateTime } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { ContainerForm } from "./ContainerForm";
 import { LoadBoard } from "./LoadBoard";
@@ -34,15 +34,41 @@ const STATUS_COLOR: Record<string, string> = {
   dispatched: "var(--c-green)",
 };
 
-// Toggleable columns (Container No. + checkbox/# always shown).
-const CONTAINER_COLUMNS: ColumnDef[] = [
-  { key: "type", label: "Type" },
-  { key: "vessel", label: "Vessel" },
-  { key: "capBoxes", label: "Cap. Boxes" },
-  { key: "capPallets", label: "Cap. Pallets" },
-  { key: "etd", label: "ETD" },
-  { key: "discharge", label: "Discharge" },
-  { key: "status", label: "Status" },
+const dash = <span className="dim">—</span>;
+
+// Toggleable + reorderable columns (checkbox/# pinned outside the map).
+const CONTAINER_COLUMNS: ColumnDef<ContainerRow>[] = [
+  {
+    key: "number",
+    label: "Container No.",
+    className: "mono",
+    render: (r) => <span style={{ color: "var(--fg)" }}>{r.containerNumber}</span>,
+  },
+  { key: "type", label: "Type", render: (r) => (r.containerType ? <span className="chip">{r.containerType}</span> : dash) },
+  { key: "vessel", label: "Vessel", className: "muted", render: (r) => r.vesselName || dash },
+  {
+    key: "capBoxes",
+    label: "Cap. Boxes",
+    className: "num mono",
+    style: { textAlign: "right" },
+    render: (r) => (r.capacityBoxes > 0 ? fmt(r.capacityBoxes) : dash),
+  },
+  {
+    key: "capPallets",
+    label: "Cap. Pallets",
+    className: "num mono",
+    style: { textAlign: "right" },
+    render: (r) => (r.capacityPallets > 0 ? fmt(r.capacityPallets) : dash),
+  },
+  { key: "etd", label: "ETD", className: "mono muted", render: (r) => r.etd || dash },
+  { key: "discharge", label: "Discharge", className: "muted", render: (r) => r.portOfDischarge || dash },
+  {
+    key: "status",
+    label: "Status",
+    render: (r) => <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }}>{r.status}</span>,
+  },
+  { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];
 
 export function Containers() {
@@ -55,7 +81,7 @@ export function Containers() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ row: ContainerRow | null } | null>(null); // null=closed, {row:null}=new
-  const { hidden, toggle, show } = useHiddenColumns("containersTableColumns");
+  const { ordered, visible, hidden, toggle, move } = useColumns("containersTableColumns", CONTAINER_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -223,7 +249,7 @@ export function Containers() {
           </select>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder="Search container…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <ColumnPicker columns={CONTAINER_COLUMNS} hidden={hidden} onToggle={toggle} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         </div>
       )}
 
@@ -244,14 +270,9 @@ export function Containers() {
                   />
                 </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
-                <th>Container No.</th>
-                {show("type") && <th>Type</th>}
-                {show("vessel") && <th>Vessel</th>}
-                {show("capBoxes") && <th className="num" style={{ textAlign: "right" }}>Cap. Boxes</th>}
-                {show("capPallets") && <th className="num" style={{ textAlign: "right" }}>Cap. Pallets</th>}
-                {show("etd") && <th>ETD</th>}
-                {show("discharge") && <th>Discharge</th>}
-                {show("status") && <th>Status</th>}
+                {visible.map((c) => (
+                  <th key={c.key} style={c.style}>{c.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -273,24 +294,17 @@ export function Containers() {
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
                     </td>
                     <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{r.containerNumber}</td>
-                    {show("type") && <td>{r.containerType ? <span className="chip">{r.containerType}</span> : <span className="dim">—</span>}</td>}
-                    {show("vessel") && <td className="muted">{r.vesselName || <span className="dim">—</span>}</td>}
-                    {show("capBoxes") && <td className="num mono">{r.capacityBoxes > 0 ? fmt(r.capacityBoxes) : <span className="dim">—</span>}</td>}
-                    {show("capPallets") && <td className="num mono">{r.capacityPallets > 0 ? fmt(r.capacityPallets) : <span className="dim">—</span>}</td>}
-                    {show("etd") && <td className="mono muted">{r.etd || <span className="dim">—</span>}</td>}
-                    {show("discharge") && <td className="muted">{r.portOfDischarge || <span className="dim">—</span>}</td>}
-                    {show("status") && (
-                      <td>
-                        <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }}>{r.status}</span>
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(r)}
                       </td>
-                    )}
+                    ))}
                   </tr>
                 );
               })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={visible.length + 2}>
                     {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

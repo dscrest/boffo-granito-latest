@@ -94,7 +94,7 @@ export function QuickView({
         </div>
         <div className="right">
           <span>
-            {totals.items} items · {fmt(totals.qty)} sqm
+            {totals.items} items · {fmt(totals.qty)} boxes
           </span>
         </div>
       </div>
@@ -138,7 +138,7 @@ export function QuickView({
                 </div>
                 <div className="qline">
                   <span className="mono">{fmt(li.orderQty)}</span>
-                  <span>sqm ordered</span>
+                  <span>boxes ordered</span>
                   {li.stage !== "po" && (
                     <>
                       <span>·</span>

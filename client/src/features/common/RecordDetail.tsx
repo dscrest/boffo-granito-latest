@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { list, type DSRow } from "@/lib/dataOps";
+import { fmtDateTime } from "@/lib/format";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -19,6 +20,74 @@ export interface RecordField {
   label: string;
   value: string;
   wide?: boolean;
+}
+
+/** OperationLog history for one table (optionally one row) — the app's audit
+    trail. Shared by RecordDetail's Activity tab and ItemDetail. */
+export function ActivityLog({ table, entityId }: { table: string; entityId?: string }) {
+  const [acts, setActs] = useState<DSRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
+      if (!alive) return;
+      setLoading(false);
+      setActs(
+        (res.rows || []).filter((r) => {
+          if (str(r.table_name) !== table) return false;
+          return entityId ? str(r.entity_rowid) === entityId : true;
+        }),
+      );
+    });
+    return () => {
+      alive = false;
+    };
+  }, [table, entityId]);
+
+  return (
+    <div className="card">
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Operation</th>
+              <th>Status</th>
+              <th>Actor</th>
+              <th>Detail / Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {acts.map((r) => {
+              const ok = str(r.status) === "success";
+              return (
+                <tr key={String(r.ROWID)}>
+                  <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
+                  <td>{str(r.operation)}</td>
+                  <td>
+                    <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{str(r.status) || "—"}</span>
+                  </td>
+                  <td className="muted">{str(r.actor)}</td>
+                  <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+            {!loading && acts.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                  No activity recorded yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 export function RecordDetail({
@@ -30,6 +99,8 @@ export function RecordDetail({
   hiddenStorageKey,
   activityTable,
   entityId,
+  created,
+  modified,
   children,
 }: {
   backTo: string;
@@ -40,6 +111,8 @@ export function RecordDetail({
   hiddenStorageKey: string;
   activityTable?: string; // OperationLog table_name; omit → no Activity tab
   entityId?: string; // when set, Activity also matches entity_rowid
+  created?: string; // raw CREATEDTIME — appended as a "Created" field
+  modified?: string; // raw MODIFIEDTIME — appended as a "Modified" field
   children?: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -54,27 +127,6 @@ export function RecordDetail({
     }
   });
 
-  const [acts, setActs] = useState<DSRow[]>([]);
-  const [actsLoading, setActsLoading] = useState(false);
-
-  useEffect(() => {
-    if (tab !== "activity" || !activityTable) return;
-    let alive = true;
-    setActsLoading(true);
-    void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
-      if (!alive) return;
-      setActsLoading(false);
-      const rows = (res.rows || []).filter((r) => {
-        if (str(r.table_name) !== activityTable) return false;
-        return entityId ? str(r.entity_rowid) === entityId : true;
-      });
-      setActs(rows);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [tab, activityTable, entityId]);
-
   const toggleField = (key: string) => {
     const next = new Set(hidden);
     next.has(key) ? next.delete(key) : next.add(key);
@@ -82,7 +134,13 @@ export function RecordDetail({
     localStorage.setItem(hiddenStorageKey, JSON.stringify([...next]));
   };
 
-  const visible = useMemo(() => fields.filter((f) => !hidden.has(f.key)), [fields, hidden]);
+  const allFields = useMemo(() => {
+    const extra: RecordField[] = [];
+    if (created) extra.push({ key: "CREATEDTIME", label: "Created", value: fmtDateTime(created) });
+    if (modified) extra.push({ key: "MODIFIEDTIME", label: "Modified", value: fmtDateTime(modified) });
+    return [...fields, ...extra];
+  }, [fields, created, modified]);
+  const visible = useMemo(() => allFields.filter((f) => !hidden.has(f.key)), [allFields, hidden]);
 
   return (
     <div>
@@ -114,7 +172,7 @@ export function RecordDetail({
               </button>
               {fieldsOpen && (
                 <div className="card" style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 30, padding: 8, width: 220, maxHeight: 320, overflow: "auto" }}>
-                  {fields.map((f) => (
+                  {allFields.map((f) => (
                     <label key={f.key} className="row" style={{ gap: 8, padding: "4px 6px", cursor: "pointer" }}>
                       <input type="checkbox" checked={!hidden.has(f.key)} onChange={() => toggleField(f.key)} />
                       <span>{f.label}</span>
@@ -143,48 +201,7 @@ export function RecordDetail({
         </>
       )}
 
-      {tab === "activity" && activityTable && (
-        <div className="card">
-          <div style={{ overflow: "auto" }}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Operation</th>
-                  <th>Status</th>
-                  <th>Actor</th>
-                  <th>Detail / Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {acts.map((r) => {
-                  const ok = str(r.status) === "success";
-                  return (
-                    <tr key={String(r.ROWID)}>
-                      <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
-                      <td>{str(r.operation)}</td>
-                      <td>
-                        <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{str(r.status) || "—"}</span>
-                      </td>
-                      <td className="muted">{str(r.actor)}</td>
-                      <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!actsLoading && acts.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                      No activity recorded yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {tab === "activity" && activityTable && <ActivityLog table={activityTable} entityId={entityId} />}
     </div>
   );
 }

@@ -89,7 +89,7 @@ export function Loading() {
               <th>Design</th>
               <th>Size</th>
               <th className="num" style={{ textAlign: "right" }}>
-                Palletized (sqm)
+                Palletized (boxes)
               </th>
               <th>Status</th>
             </tr>

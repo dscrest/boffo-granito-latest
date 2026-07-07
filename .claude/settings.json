@@ -49,7 +49,16 @@
       "Bash(npx --no-install playwright --version)",
       "Bash(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i playwright --no-fund --no-audit)",
       "Bash(find /Users/octfistechnollp/Library/Caches/ms-playwright/chromium-1228 -name Chromium -path *MacOS*)",
-      "Bash(node drive.js packing)"
+      "Bash(node drive.js packing)",
+      "Bash(curl -sL \"https://www.zoho.com/typefaces/puvi/\" -o /private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/f7a0ed47-00f0-4a6d-876d-290c0b225789/scratchpad/puvi.html)",
+      "Bash(npm init *)",
+      "Bash(npm i *)",
+      "Bash(npx playwright *)",
+      "Bash(node smoke.mjs)",
+      "Bash(node smoke2.mjs)",
+      "mcp__claude_ai_Catalyst_Zoho__CatalystbyZoho_Delete_File",
+      "Bash(curl -s -X PATCH -H 'X-App-Token: ZZT-actor-check-20260706' -H 'Content-Type: application/json' -d '{\"status\":\"Inactive\"}' https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/server/data-ops/Design/69851000000049901)",
+      "Bash(python3 -c \"import json,sys; r=json.load\\(sys.stdin\\)['rows'][0]; print\\('actor:', r['actor'], '| op:', r['operation'], '| table:', r['table_name'], '| payload:', r['payload_summary'][:60]\\)\")"
     ]
   }
 }

@@ -87,7 +87,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     const orderQty = num(it.ordered_qty_boxes);
     // Boxes/pallet by size (mirrors prototype: wide 200x1200 fits 38, else 32).
     const boxesPerPallet = sizeStr === "200x1200" ? 38 : 32;
-    const totalBoxes = Math.ceil(orderQty / 60);
+    // ordered_qty_boxes IS the box count — no unit conversion.
+    const totalBoxes = orderQty;
     return {
       id: String(it.ROWID),
       salesOrderId: str(it.sales_order),
@@ -127,6 +128,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       taxType: so ? toTaxType(so.tax_type) : "None",
       taxPct: so ? num(so.tax_pct) : 0,
       taxAmount: so ? num(so.tax_amount) : 0,
+      createdTime: so ? str(so.CREATEDTIME) : "",
+      modifiedTime: so ? str(so.MODIFIEDTIME) : "",
     };
   });
 

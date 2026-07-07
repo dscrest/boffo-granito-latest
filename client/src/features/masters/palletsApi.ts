@@ -44,6 +44,8 @@ export interface PalletRow {
   totalSqmPerContainer: number;
   totalSqftPerContainer: number;
   totalBoxWeightPerContainer: number;
+  createdTime: string; // Catalyst CREATEDTIME
+  modifiedTime: string; // Catalyst MODIFIEDTIME
 }
 
 function sizeLabelOf(r: DSRow): string {
@@ -129,6 +131,8 @@ async function fetchPallets(): Promise<{
       totalSqmPerContainer: totalBoxesPerContainer * coverageSqm,
       totalSqftPerContainer: totalBoxesPerContainer * coverageSqft,
       totalBoxWeightPerContainer: totalBoxesPerContainer * boxWeightKg,
+      createdTime: str(p.CREATEDTIME),
+      modifiedTime: str(p.MODIFIEDTIME),
     };
   });
 

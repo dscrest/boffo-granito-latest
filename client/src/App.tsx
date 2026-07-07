@@ -143,32 +143,6 @@ function filterTreeByRole(nodes: NavNode[]): NavNode[] {
     .filter((n) => (n.children ? n.children.length > 0 : !n.id || hasFeature(n.id)));
 }
 
-/* breadcrumb [section, page] per route id, mirrors the tree hierarchy. */
-const VIEW_LABELS: Record<string, [string, string]> = {
-  dashboard: ["Workspace", "Dashboard"],
-  design: ["Items", "Items"],
-  masters: ["Settings", "Masters"],
-  prod: ["Items", "Production"],
-  pallets: ["Items", "Pallet Master"],
-  packing: ["Sales", "Palletization"],
-  quotes: ["Sales", "Quotes"],
-  parties: ["Sales", "Customers"],
-  kanban: ["Master Orders", "Pipeline"],
-  byorder: ["Master Orders", "By Order"],
-  orders: ["Master Orders", "All Orders"],
-  po: ["Stages", "Purchase Orders"],
-  qc: ["Stages", "Quality Control"],
-  containers: ["Stages", "Containers"],
-  fit: ["Stages", "Fit Suggester"],
-  loadplan: ["Stages", "Load Planner"],
-  loading: ["Stages", "Loading"],
-  final: ["Stages", "Final Loading"],
-  invoices: ["Stages", "Invoices"],
-  reports: ["Reports", "Quantity Reports"],
-  ops: ["Reports", "Audit Log"],
-  users: ["Settings", "Users"],
-};
-
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
 function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] = []): string[] | null {
   for (const n of nodes) {
@@ -176,19 +150,6 @@ function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] =
     if (n.children) {
       const found = ancestorsOf(id, n.children, [...trail, n.label]);
       if (found) return found;
-    }
-  }
-  return null;
-}
-
-/* First navigable leaf route id under a top-level section label — used so the
-   section breadcrumb links somewhere sensible (e.g. "Sales" → /parties). */
-function firstLeafOf(label: string, nodes: NavNode[] = navTree()): string | null {
-  for (const n of nodes) {
-    if (n.label === label) {
-      const dive = (x: NavNode): string | null =>
-        x.id ? x.id : x.children?.map(dive).find(Boolean) ?? null;
-      return dive(n);
     }
   }
   return null;
@@ -363,9 +324,6 @@ export default function App() {
     return c;
   }, [liveQuoteCount, liveOrders, masterCounts]);
 
-  const crumbs = VIEW_LABELS[baseId] || ["", ""];
-  const sectionHref = firstLeafOf(crumbs[0]);
-
   return (
     <div className={`app ${collapsed ? "collapsed" : ""}`}>
       <aside className="sidebar">
@@ -407,20 +365,7 @@ export default function App() {
       </aside>
 
       <header className="header">
-        <div className="crumbs">
-          <Icon name="chev-r" size={12} style={{ opacity: 0.4 }} />
-          {sectionHref ? (
-            <NavLink to={`/${sectionHref}`} className="crumb-link">{crumbs[0]}</NavLink>
-          ) : (
-            <span>{crumbs[0]}</span>
-          )}
-          <Icon name="chev-r" size={12} style={{ opacity: 0.4 }} />
-          {baseId ? (
-            <NavLink to={`/${baseId}`} className="crumb-link cur">{crumbs[1]}</NavLink>
-          ) : (
-            <span className="cur">{crumbs[1]}</span>
-          )}
-        </div>
+        {/* Breadcrumbs removed 2026-07-06 — the sidebar shows location; search leads the header. */}
         <GlobalSearch />
         <NotificationBell />
         <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/masters")}>

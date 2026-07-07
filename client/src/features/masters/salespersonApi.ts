@@ -21,6 +21,8 @@ export interface SalesPersonRow {
   region: string;
   active: boolean;
   appUserId: string; // AppUser ROWID ("" if unset)
+  createdTime: string;
+  modifiedTime: string;
 }
 
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
@@ -55,6 +57,8 @@ async function fetchSalesPersons(): Promise<{ ok: boolean; salesPersons: SalesPe
     region: str(r.region),
     active: str(r.active) !== "false", // unset → active
     appUserId: str(r.app_user),
+    createdTime: str(r.CREATEDTIME),
+    modifiedTime: str(r.MODIFIEDTIME),
   }));
   return { ok: true, salesPersons };
 }

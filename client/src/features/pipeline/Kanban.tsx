@@ -133,7 +133,7 @@ const KanbanColumn = memo(function KanbanColumn({
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <span>{fmt(totalQty)} sqm</span>
+        <span>{fmt(totalQty)} boxes</span>
         <span className="mono">{orders.length > 0 ? `avg ${fmt(totalQty / orders.length)}` : "—"}</span>
       </div>
       <div className="col-list">
@@ -247,7 +247,7 @@ const KanbanCard = memo(function KanbanCard({
       <div className="meta">
         <span className="qty">
           {fmt(order.orderQty)}
-          <span className="muted"> sqm</span>
+          <span className="muted"> boxes</span>
         </span>
         <span style={{ marginLeft: "auto" }} className="muted mono">
           {order.dueDate}

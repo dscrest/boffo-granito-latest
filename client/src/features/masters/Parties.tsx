@@ -8,10 +8,11 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
-import { pct } from "@/lib/format";
+import { fmtDateTime, pct } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import { PartyForm } from "./PartyForm";
 import {
@@ -30,20 +31,38 @@ type Row = {
   flag: string;
   currency: string;
   paymentTerm: string;
+  handlingPerson: string;
   active: boolean;
   orders: number;
   qty: number;
   loaded: number;
+  createdTime: string;
+  modifiedTime: string;
 };
 
-// Toggleable columns (Name always shown).
-const PARTY_COLUMNS: ColumnDef[] = [
-  { key: "code", label: "Code" },
-  { key: "country", label: "Country" },
-  { key: "currency", label: "Currency" },
-  { key: "paymentTerm", label: "Payment Term" },
-  { key: "openOrders", label: "Open Orders" },
-  { key: "loaded", label: "Loaded" },
+// Toggleable + reorderable columns (Name pinned outside the map).
+const PARTY_COLUMNS: ColumnDef<Row>[] = [
+  { key: "code", label: "Code", className: "mono muted", render: (r) => r.code },
+  { key: "country", label: "Country", render: (r) => r.country },
+  { key: "currency", label: "Currency", className: "muted", render: (r) => r.currency },
+  { key: "paymentTerm", label: "Payment Term", className: "muted", render: (r) => r.paymentTerm },
+  { key: "openOrders", label: "Open Orders", className: "num mono", style: { textAlign: "right" }, render: (r) => r.orders },
+  {
+    key: "loaded",
+    label: "Loaded",
+    style: { width: 160 },
+    render: (r) =>
+      r.qty > 0 ? (
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <ProgressBar value={r.loaded} max={r.qty} color="var(--c-green)" height={4} />
+          <span className="mono muted" style={{ fontSize: "var(--t-sm)" }}>{pct(r.loaded, r.qty)}%</span>
+        </div>
+      ) : (
+        <span className="muted">—</span>
+      ),
+  },
+  { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];
 
 /* Generic filter: pick a field, then a value (values derived from live rows). */
@@ -65,7 +84,8 @@ export function PartiesView() {
   const [query, setQuery] = useState("");
   const [filterField, setFilterField] = useState<"" | keyof Row>("");
   const [filterValue, setFilterValue] = useState("");
-  const { hidden, toggle, show } = useHiddenColumns("partiesTableColumns");
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const { ordered, visible, hidden, toggle, move } = useColumns("partiesTableColumns", PARTY_COLUMNS, ["created", "modified"]);
 
   const load = () => {
     setLoading(true);
@@ -107,26 +127,51 @@ export function PartiesView() {
           flag: c.flag,
           currency: c.currency || "—",
           paymentTerm: c.paymentTermLabel || "—",
+          handlingPerson: c.handlingPersonLabel,
           active: c.active,
           orders: open.length,
           qty: open.reduce((s, o) => s + o.orderQty, 0),
           loaded: open.reduce((s, o) => s + o.loadedQty, 0),
+          createdTime: c.createdTime,
+          modifiedTime: c.modifiedTime,
         };
       }),
     [customers, orders],
   );
 
+  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  const filterFields = useMemo<FilterField<Row>[]>(() => {
+    const opts = (get: (r: Row) => string) => [...new Set(base.map(get).filter(Boolean))].sort();
+    const status = (r: Row) => (r.active ? "Active" : "Inactive");
+    return [
+      { key: "name", label: "Name", type: "text", get: (r) => r.name },
+      { key: "code", label: "Code", type: "text", get: (r) => r.code },
+      { key: "country", label: "Country", type: "multiselect", options: opts((r) => r.country), get: (r) => r.country },
+      { key: "status", label: "Working Status", type: "multiselect", options: opts(status), get: status },
+      { key: "handlingPerson", label: "Handling Person", type: "multiselect", options: opts((r) => r.handlingPerson), get: (r) => r.handlingPerson },
+      { key: "currency", label: "Currency", type: "multiselect", options: opts((r) => r.currency), get: (r) => r.currency },
+      { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
+    ];
+  }, [base]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return base.filter((r) => {
+    const quick = base.filter((r) => {
       if (filterField && filterValue && String(r[filterField]) !== filterValue) return false;
       if (!q) return true;
       return `${r.name} ${r.code} ${r.country}`.toLowerCase().includes(q);
     });
-  }, [base, query, filterField, filterValue]);
+    return applyFilters(quick, criteria, filterFields);
+  }, [base, query, filterField, filterValue, criteria, filterFields]);
 
-  const sort = useSortRows(rows, (r, k) => r[k as keyof Row] as string | number, "name");
-  const pager = usePagination(rows.length, "partiesPageSize", `${query}|${filterField}|${filterValue}`);
+  // Sort get handles column keys that don't map 1:1 onto Row fields.
+  const sort = useSortRows(
+    rows,
+    (r, k) =>
+      (k === "openOrders" ? r.orders : k === "created" ? r.createdTime : k === "modified" ? r.modifiedTime : (r[k as keyof Row] as string | number)),
+    "name",
+  );
+  const pager = usePagination(rows.length, "partiesPageSize", `${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
 
   const filterValues = useMemo(() => {
     if (!filterField) return [];
@@ -193,7 +238,8 @@ export function PartiesView() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={PARTY_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       {loading && customers.length === 0 ? (
@@ -205,12 +251,9 @@ export function PartiesView() {
             <thead>
               <tr>
                 <SortTh id="name" label="Name" sort={sort} />
-                {show("code") && <SortTh id="code" label="Code" sort={sort} />}
-                {show("country") && <SortTh id="country" label="Country" sort={sort} />}
-                {show("currency") && <SortTh id="currency" label="Currency" sort={sort} />}
-                {show("paymentTerm") && <SortTh id="paymentTerm" label="Payment Term" sort={sort} />}
-                {show("openOrders") && <SortTh id="orders" label="Open Orders" sort={sort} className="num" style={{ textAlign: "right" }} />}
-                {show("loaded") && <SortTh id="loaded" label="Loaded" sort={sort} style={{ width: 160 }} />}
+                {visible.map((c) => (
+                  <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -232,28 +275,16 @@ export function PartiesView() {
                       </span>
                     )}
                   </td>
-                  {show("code") && <td className="mono muted">{r.code}</td>}
-                  {show("country") && <td>{r.country}</td>}
-                  {show("currency") && <td className="muted">{r.currency}</td>}
-                  {show("paymentTerm") && <td className="muted">{r.paymentTerm}</td>}
-                  {show("openOrders") && <td className="num mono">{r.orders}</td>}
-                  {show("loaded") && (
-                    <td>
-                      {r.qty > 0 ? (
-                        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                          <ProgressBar value={r.loaded} max={r.qty} color="var(--c-green)" height={4} />
-                          <span className="mono muted" style={{ fontSize: "var(--t-sm)" }}>{pct(r.loaded, r.qty)}%</span>
-                        </div>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                  {visible.map((c) => (
+                    <td key={c.key} className={c.className} style={c.style}>
+                      {c.render!(r)}
                     </td>
-                  )}
+                  ))}
                 </tr>
               ))}
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={7} style={{ padding: 0 }}>
+                  <td colSpan={visible.length + 1} style={{ padding: 0 }}>
                     {customers.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter or search" />
                     ) : (

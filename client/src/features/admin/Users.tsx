@@ -8,9 +8,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { fmtDateTime } from "@/lib/format";
 
 interface UserRow {
   rowid: string;
@@ -19,6 +20,8 @@ interface UserRow {
   active: boolean;
   role: string | null;
   roleName: string;
+  createdTime: string;
+  modifiedTime: string;
 }
 
 interface RoleOption {
@@ -39,11 +42,29 @@ interface Draft {
 
 const EMPTY: Draft = { rowid: null, email: "", name: "", password: "", role: "", active: true };
 
-// Toggleable columns (Email + # always shown).
-const USER_COLUMNS: ColumnDef[] = [
-  { key: "name", label: "Name" },
-  { key: "role", label: "Role" },
-  { key: "status", label: "Status" },
+const dash = <span className="dim">—</span>;
+
+// Toggleable + reorderable columns (# pinned outside the map).
+const USER_COLUMNS: ColumnDef<UserRow>[] = [
+  { key: "email", label: "Email", className: "mono", render: (u) => <span style={{ color: "var(--fg)" }}>{u.email}</span> },
+  { key: "name", label: "Name", render: (u) => u.name || dash },
+  {
+    key: "role",
+    label: "Role",
+    render: (u) => (u.roleName ? <span className="chip">{u.roleName}</span> : <span className="dim">no role</span>),
+  },
+  {
+    key: "status",
+    label: "Status",
+    render: (u) =>
+      u.active ? (
+        <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+      ) : (
+        <span className="chip" style={{ color: "var(--dim)" }}>disabled</span>
+      ),
+  },
+  { key: "created", label: "Created", className: "muted mono", render: (u) => fmtDateTime(u.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (u) => fmtDateTime(u.modifiedTime) },
 ];
 
 export function UsersAdmin() {
@@ -55,7 +76,7 @@ export function UsersAdmin() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [roleF, setRoleF] = useState("");
-  const { hidden, toggle, show } = useHiddenColumns("usersTableColumns");
+  const { ordered, visible, hidden, toggle, move } = useColumns("usersTableColumns", USER_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -233,7 +254,7 @@ export function UsersAdmin() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={USER_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       <div className="card">
@@ -245,10 +266,9 @@ export function UsersAdmin() {
               <thead>
                 <tr>
                   <th style={{ width: 36, textAlign: "center" }}>#</th>
-                  <th>Email</th>
-                  {show("name") && <th>Name</th>}
-                  {show("role") && <th>Role</th>}
-                  {show("status") && <th>Status</th>}
+                  {visible.map((c) => (
+                    <th key={c.key} style={c.style}>{c.label}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -274,23 +294,16 @@ export function UsersAdmin() {
                     title="Edit user"
                   >
                     <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{u.email}</td>
-                    {show("name") && <td>{u.name || <span className="dim">—</span>}</td>}
-                    {show("role") && <td>{u.roleName ? <span className="chip">{u.roleName}</span> : <span className="dim">no role</span>}</td>}
-                    {show("status") && (
-                      <td>
-                        {u.active ? (
-                          <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
-                        ) : (
-                          <span className="chip" style={{ color: "var(--dim)" }}>disabled</span>
-                        )}
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(u)}
                       </td>
-                    )}
+                    ))}
                   </tr>
                 ))}
                 {!loading && users.length === 0 && (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={visible.length + 1}>
                       <EmptyState icon="users" title="No users" hint="Click New user to add one." />
                     </td>
                   </tr>

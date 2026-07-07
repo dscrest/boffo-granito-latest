@@ -5,10 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { SplitBar, StageBadge } from "@/ui/primitives";
-import { fmt, finishClass } from "@/lib/format";
+import { fmt, finishClass, fmtDateTime } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { createSalesOrder, listOrders, type NewSalesOrderInput } from "./ordersApi";
@@ -16,18 +17,49 @@ import { toast } from "@/ui/Toast";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
 import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
 
-// Toggleable columns (ID/PO + # and actions always shown).
-const ORDER_COLUMNS: ColumnDef[] = [
-  { key: "party", label: "Party" },
-  { key: "design", label: "Design" },
-  { key: "size", label: "Size" },
-  { key: "finish", label: "Finish" },
-  { key: "brand", label: "Brand" },
-  { key: "qty", label: "Order Qty" },
-  { key: "progress", label: "Progress" },
-  { key: "remaining", label: "Remaining" },
-  { key: "stage", label: "Stage" },
-  { key: "due", label: "Due" },
+// Toggleable + reorderable columns (# / ID / PO / Actions pinned outside the map).
+const ORDER_COLUMNS: ColumnDef<Order>[] = [
+  {
+    key: "party",
+    label: "Party",
+    render: (o) => (
+      <>
+        <span style={{ marginRight: 6 }}>{o.flag}</span>
+        {o.party}
+      </>
+    ),
+  },
+  { key: "design", label: "Design", render: (o) => <span className="design-name">{o.design}</span> },
+  {
+    key: "size",
+    label: "Size",
+    render: (o) => (
+      <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
+    ),
+  },
+  { key: "finish", label: "Finish", render: (o) => <span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span> },
+  { key: "brand", label: "Brand", render: (o) => <span className={`chip brand ${o.brand === "BIG" ? "big" : ""}`}>{o.brand}</span> },
+  { key: "qty", label: "Order Qty (boxes)", className: "num", style: { textAlign: "right" }, render: (o) => fmt(o.orderQty) },
+  {
+    key: "progress",
+    label: "Progress",
+    render: (o) => (
+      <div style={{ width: 140 }}>
+        <SplitBar produced={o.producedQty} palletized={o.palletizedQty} loaded={o.loadedQty} total={o.orderQty} />
+      </div>
+    ),
+  },
+  {
+    key: "remaining",
+    label: "Remaining (boxes)",
+    className: "num",
+    style: { textAlign: "right" },
+    render: (o) => fmt(o.orderQty - o.loadedQty),
+  },
+  { key: "stage", label: "Stage", render: (o) => <StageBadge stage={o.stage} /> },
+  { key: "due", label: "Due", className: "mono muted", render: (o) => o.dueDate },
+  { key: "created", label: "Created", className: "muted mono", render: (o) => fmtDateTime(o.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (o) => fmtDateTime(o.modifiedTime) },
 ];
 
 export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
@@ -66,7 +98,8 @@ export function OrdersTable() {
   const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const { hidden, toggle, show } = useHiddenColumns("ordersTableColumns");
+  const { ordered, visible, hidden, toggle, move } = useColumns("ordersTableColumns", ORDER_COLUMNS, ["created", "modified"]);
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,16 +153,34 @@ export function OrdersTable() {
     await load();
   };
 
+  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  const filterFields = useMemo<FilterField<Order>[]>(() => {
+    const opts = (get: (o: Order) => string) => [...new Set(orders.map(get).filter(Boolean))].sort();
+    return [
+      { key: "po", label: "PO Number", type: "text", get: (o) => o.poNumber },
+      { key: "design", label: "Design", type: "text", get: (o) => o.design },
+      { key: "party", label: "Party", type: "multiselect", options: opts((o) => o.party), get: (o) => o.party },
+      { key: "size", label: "Size", type: "multiselect", options: opts((o) => o.size), get: (o) => o.size },
+      { key: "finish", label: "Finish", type: "multiselect", options: opts((o) => o.finish), get: (o) => o.finish },
+      { key: "brand", label: "Brand", type: "multiselect", options: opts((o) => o.brand), get: (o) => o.brand },
+      { key: "stage", label: "Stage", type: "multiselect", options: opts((o) => o.stage), get: (o) => o.stage },
+      { key: "qty", label: "Order Qty (boxes)", type: "numrange", get: (o) => o.orderQty },
+      { key: "orderDate", label: "Order Date Between", type: "daterange", get: (o) => o.orderDate },
+      { key: "created", label: "Created Between", type: "daterange", get: (o) => o.createdTime || "" },
+    ];
+  }, [orders]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return orders.filter((o) => {
+    const base = orders.filter((o) => {
       if (tab !== "all" && o.stage !== tab) return false;
       if (!q) return true;
       return `${o.poNumber} ${o.party} ${o.design}`.toLowerCase().includes(q);
     });
-  }, [tab, orders, query]);
+    return applyFilters(base, criteria, filterFields);
+  }, [tab, orders, query, criteria, filterFields]);
 
-  const pager = usePagination(filtered.length, "ordersPageSize", `${tab}|${query}`);
+  const pager = usePagination(filtered.length, "ordersPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
 
   return (
     <div>
@@ -183,7 +234,8 @@ export function OrdersTable() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={ORDER_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <AdvancedFilterButton title="Orders" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       <div className="card">
@@ -197,22 +249,14 @@ export function OrdersTable() {
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
                 <th>ID</th>
                 <th>PO Number</th>
-                {show("party") && <th>Party</th>}
-                {show("design") && <th>Design</th>}
-                {show("size") && <th>Size</th>}
-                {show("finish") && <th>Finish</th>}
-                {show("brand") && <th>Brand</th>}
-                {show("qty") && <th className="num" style={{ textAlign: "right" }}>Order Qty</th>}
-                {show("progress") && <th>Progress</th>}
-                {show("remaining") && <th className="num" style={{ textAlign: "right" }}>Remaining</th>}
-                {show("stage") && <th>Stage</th>}
-                {show("due") && <th>Due</th>}
-                <th style={{ width: 90 }}></th>
+                {visible.map((c) => (
+                  <th key={c.key} style={c.style}>{c.label}</th>
+                ))}
+                <th style={{ width: 90 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {pager.slice(filtered).map((o, i) => {
-                const remaining = o.orderQty - o.loadedQty;
                 return (
                   <tr key={o.id}>
                     <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
@@ -227,29 +271,11 @@ export function OrdersTable() {
                       </button>
                     </td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
-                    {show("party") && (
-                      <td>
-                        <span style={{ marginRight: 6 }}>{o.flag}</span>
-                        {o.party}
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(o)}
                       </td>
-                    )}
-                    {show("design") && <td><span className="design-name">{o.design}</span></td>}
-                    {show("size") && (
-                      <td>
-                        <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
-                      </td>
-                    )}
-                    {show("finish") && <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>}
-                    {show("brand") && <td><span className={`chip brand ${o.brand === "BIG" ? "big" : ""}`}>{o.brand}</span></td>}
-                    {show("qty") && <td className="num">{fmt(o.orderQty)}</td>}
-                    {show("progress") && (
-                      <td style={{ width: 140 }}>
-                        <SplitBar produced={o.producedQty} palletized={o.palletizedQty} loaded={o.loadedQty} total={o.orderQty} />
-                      </td>
-                    )}
-                    {show("remaining") && <td className="num">{fmt(remaining)}</td>}
-                    {show("stage") && <td><StageBadge stage={o.stage} /></td>}
-                    {show("due") && <td className="mono muted">{o.dueDate}</td>}
+                    ))}
                     <td>
                       {o.salesOrderId && (
                         <button
@@ -268,7 +294,7 @@ export function OrdersTable() {
               })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={14}>
+                  <td colSpan={visible.length + 4}>
                     {orders.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

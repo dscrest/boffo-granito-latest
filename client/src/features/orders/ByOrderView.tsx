@@ -245,7 +245,7 @@ function ByOrderGroup({
               <div className="stat">
                 <div className="l">Order Qty</div>
                 <div className="v">
-                  {fmt(totals.qty)} <span style={{ color: "var(--muted)", fontFamily: "var(--font-sans)" }}>sqm</span>
+                  {fmt(totals.qty)} <span style={{ color: "var(--muted)", fontFamily: "var(--font-sans)" }}>boxes</span>
                 </div>
               </div>
               <div className="stat">
@@ -309,18 +309,19 @@ function ByOrderGroup({
                 <th>Finish</th>
                 <th>Brand</th>
                 <th className="num" style={{ textAlign: "right" }}>
-                  Ordered
+                  Ordered (boxes)
                 </th>
                 <th className="num" style={{ textAlign: "right" }}>
-                  Produced
+                  Produced (boxes)
                 </th>
                 <th className="num" style={{ textAlign: "right" }}>
-                  Loaded
+                  Loaded (boxes)
                 </th>
                 <th>Progress</th>
                 <th>Stage</th>
-                <th style={{ width: 100 }}></th>
-                <th style={{ width: 36 }}></th>
+                <th colSpan={2} style={{ width: 136 }}>
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>

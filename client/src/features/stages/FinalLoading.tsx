@@ -61,9 +61,8 @@ export function FinalLoading() {
     party: list[0].party,
     flag: list[0].flag,
     country: list[0].country,
-    pallets: list.reduce((s, o) => s + Math.ceil(o.orderQty / 60 / o.boxesPerPallet), 0),
-    boxes: list.reduce((s, o) => s + Math.ceil(o.orderQty / 60), 0),
-    qty: list.reduce((s, o) => s + o.orderQty, 0),
+    pallets: list.reduce((s, o) => s + Math.ceil(o.orderQty / o.boxesPerPallet), 0),
+    boxes: list.reduce((s, o) => s + o.orderQty, 0),
     items: list.length,
     date: list[0].dueDate,
   }));
@@ -98,7 +97,7 @@ export function FinalLoading() {
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <KPI label="Active Invoices" value={String(inv.length)} delta="awaiting dispatch" color="var(--c-green)" />
         <KPI label="Line Items" value={String(finals.length)} delta="in final stage" color="var(--c-green)" />
-        <KPI label="Final Qty" value={fmt(finals.reduce((s, o) => s + o.orderQty, 0))} unit="sqm" color="var(--c-cyan)" />
+        <KPI label="Final Qty" value={fmt(finals.reduce((s, o) => s + o.orderQty, 0))} unit="boxes" color="var(--c-cyan)" />
       </div>
 
       <div className="sec-title">
@@ -128,9 +127,6 @@ export function FinalLoading() {
               <th className="num" style={{ textAlign: "right" }}>
                 Boxes
               </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Qty (sqm)
-              </th>
               <th>Date</th>
               <th>Status</th>
             </tr>
@@ -148,7 +144,6 @@ export function FinalLoading() {
                 <td className="num">{i.items}</td>
                 <td className="num">{i.pallets}</td>
                 <td className="num">{fmt(i.boxes)}</td>
-                <td className="num">{fmt(i.qty)}</td>
                 <td className="mono muted">{i.date}</td>
                 <td>
                   <span className="stage green">
@@ -160,7 +155,7 @@ export function FinalLoading() {
             ))}
             {!loading && !error && inv.length === 0 && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={8}>
                   <EmptyState
                     icon="invoice"
                     title="No active invoices"

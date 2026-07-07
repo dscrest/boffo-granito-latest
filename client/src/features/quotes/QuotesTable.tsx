@@ -7,9 +7,10 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { fmt } from "@/lib/format";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
+import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
 import { cachedQuotes, createQuote, invalidateQuotes, listQuotes, type NewQuoteInput } from "./quotesApi";
@@ -39,16 +40,46 @@ const TABS: Array<{ id: string; label: string }> = [
   { id: "Converted", label: "Converted" },
 ];
 
-// Toggleable columns (Quote No always shown).
-const QUOTE_COLUMNS: ColumnDef[] = [
-  { key: "customer", label: "Customer" },
-  { key: "date", label: "Date" },
-  { key: "items", label: "Items" },
-  { key: "total", label: "Final Total" },
-  { key: "terms", label: "Terms" },
-  { key: "status", label: "Status" },
-  { key: "so", label: "SO" },
-];
+// Toggleable + reorderable columns (Quote No pinned outside the map).
+// Data-driven grid pattern (see DesignMaster): each ColumnDef carries its
+// own cell renderer; thead/tbody map over useColumns().visible.
+const linkStyle = { color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" } as const;
+
+function quoteColumns(navigate: (to: string) => void): ColumnDef<Quote>[] {
+  return [
+    { key: "customer", label: "Customer", render: (q) => q.customer },
+    { key: "date", label: "Date", className: "mono muted", render: (q) => q.quoteDate || "—" },
+    { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (q) => q.lines.length },
+    {
+      key: "total",
+      label: "Final Total",
+      className: "num mono",
+      style: { textAlign: "right" },
+      render: (q) => <>{q.currency} {fmt(quoteTotals(q).final)}</>,
+    },
+    { key: "terms", label: "Terms", className: "muted", render: (q) => q.paymentTerm || "—" },
+    {
+      key: "status",
+      label: "Status",
+      render: (q) => <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>,
+    },
+    {
+      key: "so",
+      label: "SO",
+      className: "mono muted",
+      render: (q) =>
+        q.soNumber && q.soId ? (
+          <button className="linkish" style={linkStyle} onClick={() => navigate(`/orders/${q.soId}`)} title="Open Master Order">
+            {q.soNumber}
+          </button>
+        ) : (
+          q.soNumber || "—"
+        ),
+    },
+    { key: "created", label: "Created", className: "muted mono", render: (q) => fmtDateTime(q.createdTime) },
+    { key: "modified", label: "Modified", className: "muted mono", render: (q) => fmtDateTime(q.modifiedTime) },
+  ];
+}
 
 export const convertible = (s: QuoteStatus) =>
   s === "Draft" || s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
@@ -81,8 +112,10 @@ export function QuotesTable() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
-  const { hidden, toggle, show } = useHiddenColumns("quotesTableColumns");
+  const COLS = useMemo(() => quoteColumns(navigate), [navigate]);
+  const { ordered, visible, hidden, toggle, move } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
@@ -126,17 +159,31 @@ export function QuotesTable() {
 
   const nextSeq = quotes.length + 1;
 
+  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  const filterFields = useMemo<FilterField<Quote>[]>(() => {
+    const opts = (get: (r: Quote) => string) => [...new Set(quotes.map(get).filter(Boolean))].sort();
+    return [
+      { key: "quoteNo", label: "Quote No", type: "text", get: (r) => r.quoteNo },
+      { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customer), get: (r) => r.customer },
+      { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.status), get: (r) => r.status },
+      { key: "total", label: "Final Total", type: "numrange", get: (r) => quoteTotals(r).final },
+      { key: "date", label: "Quote Date Between", type: "daterange", get: (r) => r.quoteDate },
+      { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime || "" },
+    ];
+  }, [quotes]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return quotes.filter((r) => {
+    const base = quotes.filter((r) => {
       if (tab !== "all" && !(r.status === tab || (tab === "Converted" && r.status === "PartiallyConverted")))
         return false;
       if (!q) return true;
       return `${r.quoteNo} ${r.customer}`.toLowerCase().includes(q);
     });
-  }, [tab, quotes, query]);
+    return applyFilters(base, criteria, filterFields);
+  }, [tab, quotes, query, criteria, filterFields]);
 
-  const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}`);
+  const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
 
   const tabCount = (id: string) =>
     id === "all"
@@ -192,7 +239,8 @@ export function QuotesTable() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={QUOTE_COLUMNS} hidden={hidden} onToggle={toggle} />
+        <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
       <div className="card">
@@ -204,62 +252,34 @@ export function QuotesTable() {
             <thead>
               <tr>
                 <th>Quote No</th>
-                {show("customer") && <th>Customer</th>}
-                {show("date") && <th>Date</th>}
-                {show("items") && <th className="num" style={{ textAlign: "right" }}>Items</th>}
-                {show("total") && <th className="num" style={{ textAlign: "right" }}>Final Total</th>}
-                {show("terms") && <th>Terms</th>}
-                {show("status") && <th>Status</th>}
-                {show("so") && <th>SO</th>}
+                {visible.map((c) => (
+                  <th key={c.key} style={c.style}>{c.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {pager.slice(filtered).map((q) => {
-                const totals = quoteTotals(q);
-                return (
-                  <tr key={q.id}>
-                    <td className="mono">
-                      <button
-                        className="linkish"
-                        style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                        onClick={() => navigate(`/quotes/${q.id}`)}
-                        title="Open details"
-                      >
-                        {q.quoteNo}
-                      </button>
+              {pager.slice(filtered).map((q) => (
+                <tr key={q.id}>
+                  <td className="mono">
+                    <button
+                      className="linkish"
+                      style={linkStyle}
+                      onClick={() => navigate(`/quotes/${q.id}`)}
+                      title="Open details"
+                    >
+                      {q.quoteNo}
+                    </button>
+                  </td>
+                  {visible.map((c) => (
+                    <td key={c.key} className={c.className} style={c.style}>
+                      {c.render!(q)}
                     </td>
-                    {show("customer") && <td>{q.customer}</td>}
-                    {show("date") && <td className="mono muted">{q.quoteDate || "—"}</td>}
-                    {show("items") && <td className="num mono">{q.lines.length}</td>}
-                    {show("total") && <td className="num mono">{q.currency} {fmt(totals.final)}</td>}
-                    {show("terms") && <td className="muted">{q.paymentTerm || "—"}</td>}
-                    {show("status") && (
-                      <td>
-                        <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>
-                      </td>
-                    )}
-                    {show("so") && (
-                      <td className="mono muted">
-                        {q.soNumber && q.soId ? (
-                          <button
-                            className="linkish"
-                            style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                            onClick={() => navigate(`/orders/${q.soId}`)}
-                            title="Open Master Order"
-                          >
-                            {q.soNumber}
-                          </button>
-                        ) : (
-                          q.soNumber || "—"
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+                  ))}
+                </tr>
+              ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={visible.length + 1}>
                     {quotes.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

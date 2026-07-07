@@ -43,7 +43,7 @@ export interface DesignValues {
   image_url: string;
 }
 
-const STATUSES = ["Continue", "Discontinued"];
+const STATUSES = ["Active", "Inactive"]; // renamed from Continue/Discontinued (2026-07)
 
 /* "datalist" = free-text value with a creatable Combobox over suggestions
    (party brand: the PartyBrand master ∪ legacy values already on designs). */
@@ -107,7 +107,7 @@ const REQUIRED = ALL_FIELDS.filter((f) => f.required).map((f) => f.key);
 
 export function blankDesign(): DesignValues {
   const v = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
-  v.status = "Continue"; // #10: new designs default to Continue
+  v.status = "Active"; // #10: new designs default to Active
   return v;
 }
 
@@ -228,7 +228,7 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
 
 /* Reusable sections grid + computed-key banner.
    Presentational: owns no save logic, just renders fields and reports edits.
-   `mode` drives the creation rules: status locked to Continue, no accounting
+   `mode` drives the creation rules: status locked to Active, no accounting
    stock at create (images live on the item detail screen now).
    Pallet association was removed from this form per the 2026-07-04 spec —
    the DesignPallet capability (designsApi.setDesignPallets) is kept for when
@@ -311,9 +311,9 @@ export function DesignFields({
                     {f.required && <span className="req"> *</span>}
                   </span>
                   {f.kind === "select" ? (
-                    // #4: status is locked to Continue while creating; edit mode unlocks it.
+                    // #4: status is locked to Active while creating; edit mode unlocks it.
                     f.key === "status" && mode === "create" ? (
-                      <input value="Continue" disabled title="Status is locked during creation — edit the item to change it" />
+                      <input value="Active" disabled title="Status is locked during creation — edit the item to change it" />
                     ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.

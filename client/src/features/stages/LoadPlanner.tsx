@@ -96,9 +96,9 @@ export function LoadPlanner() {
                 <th>Type</th>
                 <th>Status</th>
                 <th>Destination</th>
-                <th className="num" style={{ textAlign: "right" }}>Capacity</th>
-                <th className="num" style={{ textAlign: "right" }}>Loaded</th>
-                <th className="num" style={{ textAlign: "right" }}>Space left</th>
+                <th className="num" style={{ textAlign: "right" }}>Capacity (boxes)</th>
+                <th className="num" style={{ textAlign: "right" }}>Loaded (boxes)</th>
+                <th className="num" style={{ textAlign: "right" }}>Space left (boxes)</th>
                 <th style={{ width: 150 }}>Fill</th>
               </tr>
             </thead>
@@ -147,8 +147,8 @@ export function LoadPlanner() {
                 <th>Party</th>
                 <th>Design</th>
                 <th>Size</th>
-                <th className="num" style={{ textAlign: "right" }}>Ready to load</th>
-                <th className="num" style={{ textAlign: "right" }}>Awaiting palletization</th>
+                <th className="num" style={{ textAlign: "right" }}>Ready to load (boxes)</th>
+                <th className="num" style={{ textAlign: "right" }}>Awaiting palletization (boxes)</th>
               </tr>
             </thead>
             <tbody>

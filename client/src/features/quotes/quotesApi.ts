@@ -126,6 +126,8 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       soNumber: soByQuote.get(id)?.number || null,
       soId: soByQuote.get(id)?.id || null,
       shareToken: str(r.share_token),
+      createdTime: str(r.CREATEDTIME),
+      modifiedTime: str(r.MODIFIEDTIME),
     };
   });
 

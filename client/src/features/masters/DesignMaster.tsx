@@ -15,9 +15,10 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, useHiddenColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { finishClass } from "@/lib/format";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
+import { finishClass, fmtDateTime } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { DesignForm } from "./DesignForm";
 import {
@@ -30,15 +31,43 @@ import {
   type DesignRow,
 } from "./designsApi";
 
-// Toggleable columns (Design Name + checkbox/# always shown).
-const DESIGN_COLUMNS: ColumnDef[] = [
-  { key: "size", label: "Size" },
-  { key: "finish", label: "Finish" },
-  { key: "brand", label: "Brand" },
-  { key: "category", label: "Category" },
-  { key: "glaze", label: "Glaze" },
-  { key: "status", label: "Status" },
-  { key: "sku", label: "SKU" },
+const dash = <span className="dim">—</span>;
+
+// Toggleable + reorderable columns (checkbox/# pinned outside the map).
+// Reference implementation of the data-driven grid pattern: each ColumnDef
+// carries its own cell renderer; thead/tbody map over useColumns().visible.
+const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
+  { key: "name", label: "Design Name", render: (d) => <span className="design-name">{d.designName}</span> },
+  {
+    key: "size",
+    label: "Size",
+    render: (d) =>
+      d.sizeLabel ? (
+        <span className={`chip size ${d.sizeLabel.startsWith("200") || d.sizeLabel.startsWith("75") ? "b" : ""}`}>{d.sizeLabel}</span>
+      ) : (
+        dash
+      ),
+  },
+  {
+    key: "finish",
+    label: "Finish",
+    render: (d) => (d.finishLabel ? <span className={`chip finish ${finishClass(d.finishLabel)}`}>{d.finishLabel}</span> : dash),
+  },
+  {
+    key: "brand",
+    label: "Brand",
+    render: (d) => (d.brandLabel ? <span className={`chip brand ${d.brandLabel === "BIG" ? "big" : ""}`}>{d.brandLabel}</span> : dash),
+  },
+  { key: "category", label: "Category", className: "muted", render: (d) => d.categoryLabel || dash },
+  {
+    key: "glaze",
+    label: "Glaze",
+    render: (d) => (d.glazeLabel ? <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span> : dash),
+  },
+  { key: "status", label: "Status", className: "muted", render: (d) => d.status || dash },
+  { key: "sku", label: "SKU", className: "muted mono", render: (d) => d.sku || dash },
+  { key: "created", label: "Created", className: "muted mono", render: (d) => fmtDateTime(d.createdTime) },
+  { key: "modified", label: "Modified", className: "muted mono", render: (d) => fmtDateTime(d.modifiedTime) },
 ];
 
 const EMPTY_LOOKUPS: DesignLookups = {
@@ -102,8 +131,8 @@ function BulkEditModal({
                   value={status}
                   options={[
                     { value: "", label: "— leave unchanged —" },
-                    { value: "Continue", label: "Continue" },
-                    { value: "Discontinued", label: "Discontinued" },
+                    { value: "Active", label: "Active" },
+                    { value: "Inactive", label: "Inactive" },
                   ]}
                   onChange={setStatus}
                   placeholder="— leave unchanged —"
@@ -160,8 +189,9 @@ export function DesignMaster() {
   const [query, setQuery] = useState("");
   const [sizeF, setSizeF] = useState("");
   const [statusF, setStatusF] = useState("");
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const { hidden, toggle, show } = useHiddenColumns("designTableColumns");
+  const { ordered, visible, hidden, toggle, move } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
   const [showNew, setShowNew] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -184,9 +214,31 @@ export function DesignMaster() {
     void load();
   }, []);
 
+  // Filter options come from the live rows (DB-sourced), not static lists.
+  const sizeOptions = useMemo(() => [...new Set(rows.map((r) => r.sizeLabel).filter(Boolean))].sort(), [rows]);
+  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
+
+  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  const filterFields = useMemo<FilterField<DesignRow>[]>(() => {
+    const opts = (get: (r: DesignRow) => string) => [...new Set(rows.map(get).filter(Boolean))].sort();
+    return [
+      { key: "name", label: "Design Name", type: "text", get: (r) => `${r.designName} ${r.uniqueName}` },
+      { key: "sku", label: "SKU", type: "text", get: (r) => r.sku },
+      { key: "size", label: "Size", type: "multiselect", options: opts((r) => r.sizeLabel), get: (r) => r.sizeLabel },
+      { key: "finish", label: "Finish", type: "multiselect", options: opts((r) => r.finishLabel), get: (r) => r.finishLabel },
+      { key: "brand", label: "Brand", type: "multiselect", options: opts((r) => r.brandLabel), get: (r) => r.brandLabel },
+      { key: "category", label: "Category", type: "multiselect", options: opts((r) => r.categoryLabel), get: (r) => r.categoryLabel },
+      { key: "glaze", label: "Glaze", type: "multiselect", options: opts((r) => r.glazeLabel), get: (r) => r.glazeLabel },
+      { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.status), get: (r) => r.status },
+      { key: "rate", label: "Rate / ft²", type: "numrange", get: (r) => r.ratePerSqft },
+      { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
+      { key: "modified", label: "Modified Between", type: "daterange", get: (r) => r.modifiedTime },
+    ];
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
+    const base = rows.filter((r) => {
       if (sizeF && r.sizeLabel !== sizeF) return false;
       if (statusF && r.status !== statusF) return false;
       if (!q) return true;
@@ -195,13 +247,11 @@ export function DesignMaster() {
         .toLowerCase()
         .includes(q);
     });
-  }, [rows, query, sizeF, statusF]);
+    return applyFilters(base, criteria, filterFields);
+  }, [rows, query, sizeF, statusF, criteria, filterFields]);
 
-  const pager = usePagination(filtered.length, "designPageSize", `${query}|${sizeF}|${statusF}`);
+  const pager = usePagination(filtered.length, "designPageSize", `${query}|${sizeF}|${statusF}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(filtered);
-  // Filter options come from the live rows (DB-sourced), not static lists.
-  const sizeOptions = useMemo(() => [...new Set(rows.map((r) => r.sizeLabel).filter(Boolean))].sort(), [rows]);
-  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
@@ -351,7 +401,8 @@ export function DesignMaster() {
           </select>
           <div style={{ flex: 1 }} />
           <input type="text" placeholder="Search design…" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <ColumnPicker columns={DESIGN_COLUMNS} hidden={hidden} onToggle={toggle} />
+          <AdvancedFilterButton title="Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         </div>
       )}
 
@@ -372,14 +423,9 @@ export function DesignMaster() {
                   />
                 </th>
                 <th style={{ width: 36, textAlign: "center" }}>#</th>
-                <th>Design Name</th>
-                {show("size") && <th>Size</th>}
-                {show("finish") && <th>Finish</th>}
-                {show("brand") && <th>Brand</th>}
-                {show("category") && <th>Category</th>}
-                {show("glaze") && <th>Glaze</th>}
-                {show("status") && <th>Status</th>}
-                {show("sku") && <th>SKU</th>}
+                {visible.map((c) => (
+                  <th key={c.key} style={c.style}>{c.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -403,56 +449,17 @@ export function DesignMaster() {
                     <td className="muted mono" style={{ textAlign: "center" }}>
                       {pager.from + i}
                     </td>
-                    <td>
-                      <span className="design-name">{d.designName}</span>
-                    </td>
-                    {show("size") && (
-                      <td>
-                        {d.sizeLabel ? (
-                          <span className={`chip size ${d.sizeLabel.startsWith("200") || d.sizeLabel.startsWith("75") ? "b" : ""}`}>
-                            {d.sizeLabel}
-                          </span>
-                        ) : (
-                          <span className="dim">—</span>
-                        )}
+                    {visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(d)}
                       </td>
-                    )}
-                    {show("finish") && (
-                      <td>
-                        {d.finishLabel ? (
-                          <span className={`chip finish ${finishClass(d.finishLabel)}`}>{d.finishLabel}</span>
-                        ) : (
-                          <span className="dim">—</span>
-                        )}
-                      </td>
-                    )}
-                    {show("brand") && (
-                      <td>
-                        {d.brandLabel ? (
-                          <span className={`chip brand ${d.brandLabel === "BIG" ? "big" : ""}`}>{d.brandLabel}</span>
-                        ) : (
-                          <span className="dim">—</span>
-                        )}
-                      </td>
-                    )}
-                    {show("category") && <td className="muted">{d.categoryLabel || <span className="dim">—</span>}</td>}
-                    {show("glaze") && (
-                      <td>
-                        {d.glazeLabel ? (
-                          <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span>
-                        ) : (
-                          <span className="dim">—</span>
-                        )}
-                      </td>
-                    )}
-                    {show("status") && <td className="muted">{d.status || <span className="dim">—</span>}</td>}
-                    {show("sku") && <td className="muted mono">{d.sku || <span className="dim">—</span>}</td>}
+                    ))}
                   </tr>
                 );
               })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={visible.length + 2}>
                     {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

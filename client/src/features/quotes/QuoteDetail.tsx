@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDateTime } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
@@ -54,6 +54,8 @@ const FIELDS: FieldDef[] = [
   { key: "currency", label: "Currency", value: (q) => q.currency },
   { key: "soNumber", label: "Master Order", value: (q) => q.soNumber || "—" },
   { key: "customer", label: "Customer", value: (q) => q.customer || "—" },
+  { key: "created", label: "Created", value: (q) => fmtDateTime(q.createdTime) },
+  { key: "modified", label: "Modified", value: (q) => fmtDateTime(q.modifiedTime) },
   { key: "address", label: "Billing Address", value: (q) => q.address || "—", wide: true },
   { key: "remarks", label: "Remarks", value: (q) => q.remarks || "—", wide: true },
   { key: "customerNotes", label: "Customer Notes", value: (q) => q.customerNotes || "—", wide: true },
