@@ -21,7 +21,7 @@ import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { fmtDateTime } from "@/lib/format";
-import { cachedDesigns, deleteDesign, invalidateDesigns, listDesigns, type DesignRow } from "./designsApi";
+import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignRow } from "./designsApi";
 
 const MAX_IMAGES = 5;
 
@@ -191,9 +191,15 @@ export function ItemDetail() {
       image_urls: JSON.stringify(next),
       image_url: next[0] || "",
     });
-    if (!res.ok) toast.error(res.error || "Could not save images");
-    invalidateDesigns();
-    await refresh();
+    if (!res.ok) {
+      toast.error(res.error || "Could not save images");
+      setImgBusy(false);
+      return;
+    }
+    // Patch only the selected item — no full refetch (keeps the list + scroll put).
+    const patch: Partial<DesignRow> = { images: next, imageUrl: next[0] || "" };
+    setDesigns((prev) => (prev ? prev.map((d) => (d.id === design.id ? { ...d, ...patch } : d)) : prev));
+    patchDesignCache(design.id, patch);
     setImgBusy(false);
   };
 
@@ -258,8 +264,10 @@ export function ItemDetail() {
       return;
     }
     toast.success(`Marked as ${next}`);
-    invalidateDesigns();
-    await refresh();
+    // Patch only the selected item — no full refetch.
+    const patch: Partial<DesignRow> = { status: next };
+    setDesigns((prev) => (prev ? prev.map((d) => (d.id === design.id ? { ...d, ...patch } : d)) : prev));
+    patchDesignCache(design.id, patch);
   };
 
   const moreItems = [

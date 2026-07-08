@@ -125,6 +125,14 @@ export function invalidateDesigns(): void {
   cache.invalidate();
 }
 
+/** Patch one design in the cached snapshot in place — used by the item
+    detail so status/image edits update only the selected item, no refetch. */
+export function patchDesignCache(id: string, patch: Partial<DesignRow>): void {
+  cache.patch((v) =>
+    v.ok ? { ...v, designs: v.designs.map((d) => (d.id === id ? { ...d, ...patch } : d)) } : v,
+  );
+}
+
 /** All designs (FK labels hydrated) + six lookup lists. Cached + deduped. */
 export function listDesigns(): Promise<{
   ok: boolean;

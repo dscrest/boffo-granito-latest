@@ -101,7 +101,7 @@ export function DesignEdit() {
       return;
     }
     toast.success("Design updated");
-    navigate("/design");
+    navigate(`/design/${id}`);
   };
 
   const onDelete = async () => {

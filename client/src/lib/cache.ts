@@ -21,6 +21,9 @@ export interface ListCache<R extends { ok: boolean }> {
   isFresh(): boolean;
   /** Drop the snapshot so the next load() hits the network. */
   invalidate(): void;
+  /** Replace the snapshot in place (no fetch) and notify subscribers.
+      No-op if there is no snapshot yet. */
+  patch(fn: (value: R) => R): void;
   /** Subscribe to snapshot changes. Returns an unsubscribe fn. */
   subscribe(cb: Listener): () => void;
   /** Fresh-aware load: returns the snapshot inside the TTL, dedupes
@@ -60,6 +63,11 @@ export function createListCache<R extends { ok: boolean }>(
     isFresh: () => !!snapshot && Date.now() - snapshot.ts < ttl,
     invalidate() {
       snapshot = null;
+      notify();
+    },
+    patch(fn) {
+      if (!snapshot) return;
+      snapshot = { value: fn(snapshot.value), ts: snapshot.ts };
       notify();
     },
     subscribe(cb) {
