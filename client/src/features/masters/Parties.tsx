@@ -232,12 +232,15 @@ export function PartiesView() {
           </select>
         )}
         <div style={{ flex: 1 }} />
-        <input
-          type="text"
-          placeholder="Search name, code, country…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search name, code, country…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>

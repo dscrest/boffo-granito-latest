@@ -281,12 +281,15 @@ export function SalesPersonsAdmin() {
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
-        <input
-          type="text"
-          placeholder="Search name, email, region…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search name, email, region…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 

@@ -233,12 +233,15 @@ export function QuotesTable() {
           </select>
         </label>
         <div style={{ flex: 1 }} />
-        <input
-          type="text"
-          placeholder="Search quote no, customer…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search quote no, customer…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
         <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>

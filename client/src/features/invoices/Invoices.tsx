@@ -151,12 +151,16 @@ export function Invoices() {
               </option>
             ))}
           </select>
-          <input
-            placeholder="Search invoice / container / order…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ width: 240 }}
-          />
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder="Search invoice / container / order…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              style={{ width: 240 }}
+            />
+          </span>
           <AdvancedFilterButton title="Invoices" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           <button className="hbtn primary" onClick={() => setShowGen(true)}>

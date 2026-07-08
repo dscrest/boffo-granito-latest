@@ -143,12 +143,15 @@ export function PurchaseOrders() {
 
       <div className="fbar">
         <div style={{ flex: 1 }} />
-        <input
-          type="text"
-          placeholder="Search PO number, party…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search PO number, party…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>
 
