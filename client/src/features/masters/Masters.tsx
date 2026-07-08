@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
@@ -293,7 +294,7 @@ function MasterTable({ def }: { def: MasterDef }) {
 
   const removeSelected = async () => {
     const ids = [...selected];
-    if (!window.confirm(`Delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}?`)) return;
+    if (!(await confirmDialog({ message: `Delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}?`, danger: true }))) return;
     setBusy(true);
     const results = await Promise.all(ids.map((id) => deleteMaster(def.table, id)));
     setBusy(false);

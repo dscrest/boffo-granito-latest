@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -177,7 +178,7 @@ export function SalesPersonsAdmin() {
 
   const onDelete = async () => {
     if (!draft?.rowid) return;
-    if (!window.confirm(`Remove sales person "${draft.name}"?`)) return;
+    if (!(await confirmDialog({ message: `Remove sales person "${draft.name}"?`, danger: true }))) return;
     setBusy(true);
     try {
       await deleteSalesPerson(draft.rowid);

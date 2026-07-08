@@ -95,12 +95,12 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-/** Upload one image to File Store; returns its file id. */
-export async function uploadDesignImage(file: File): Promise<string> {
+/** Upload one image to File Store; returns its file id + stored filename. */
+export async function uploadDesignImage(file: File): Promise<{ id: string; name: string }> {
   const data = await fileToBase64(file);
-  const res = await apiPost<{ ok: boolean; id: string }>("data-ops/upload/design-image", {
+  const res = await apiPost<{ ok: boolean; id: string; name: string }>("data-ops/upload/design-image", {
     name: file.name,
     data,
   });
-  return res.id;
+  return { id: res.id, name: res.name || file.name };
 }

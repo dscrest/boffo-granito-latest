@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
@@ -204,7 +205,7 @@ export function QuoteDetail() {
 
   const onDelete = async () => {
     if (!quote) return;
-    if (!window.confirm(`Delete quote ${quote.quoteNo}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ message: `Delete quote ${quote.quoteNo}? This cannot be undone.`, danger: true }))) return;
     setBusy(`Deleting ${quote.quoteNo}…`);
     const res = await deleteQuote(quote.id);
     if (!res.ok) {

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import {
   DesignFields,
   blankDesign,
@@ -21,6 +22,7 @@ import {
   deleteDesign,
   listDesigns,
   updateDesign,
+  type DesignImage,
   type DesignLookups,
   type DesignRow,
 } from "./designsApi";
@@ -40,7 +42,7 @@ export function DesignEdit() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<DesignImage[]>([]);
   const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
   const [row, setRow] = useState<DesignRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +108,7 @@ export function DesignEdit() {
 
   const onDelete = async () => {
     if (!row) return;
-    if (!window.confirm(`Delete design "${row.designName}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ message: `Delete design "${row.designName}"? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     setError(null);
     const res = await deleteDesign(id);

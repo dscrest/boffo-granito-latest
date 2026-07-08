@@ -7,14 +7,15 @@ import { useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
+import type { DesignImage } from "@/features/masters/designsApi";
 
 export function ImageUploader({
   value,
   onChange,
   max = 5,
 }: {
-  value: string[];
-  onChange: (next: string[]) => void;
+  value: DesignImage[];
+  onChange: (next: DesignImage[]) => void;
   max?: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,7 +29,7 @@ export function ImageUploader({
       toast.info(`Only ${max} images allowed — extra files skipped.`);
     }
     setBusy(true);
-    const added: string[] = [];
+    const added: DesignImage[] = [];
     for (const f of picked) {
       if (!f.type.startsWith("image/")) {
         toast.error(`${f.name} is not an image`);
@@ -50,11 +51,11 @@ export function ImageUploader({
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        {value.map((id, i) => (
-          <div key={id + i} style={{ position: "relative" }}>
+        {value.map((img, i) => (
+          <div key={img.id + i} style={{ position: "relative" }}>
             <img
-              src={designImageUrl(id)}
-              alt={`design ${i + 1}`}
+              src={designImageUrl(img.id)}
+              alt={img.name || `design ${i + 1}`}
               style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
             />
             <button

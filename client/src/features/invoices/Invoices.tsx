@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -120,7 +121,7 @@ export function Invoices() {
   };
 
   const onDelete = async (row: InvoiceRow) => {
-    if (!window.confirm(`Delete invoice ${row.invoiceNumber}? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ message: `Delete invoice ${row.invoiceNumber}? This cannot be undone.`, danger: true }))) return;
     const res = await deleteInvoice(row.id);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");

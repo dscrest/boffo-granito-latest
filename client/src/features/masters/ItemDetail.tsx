@@ -17,11 +17,12 @@ import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import { update } from "@/lib/dataOps";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { fmtDateTime } from "@/lib/format";
-import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignRow } from "./designsApi";
+import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
 
 const MAX_IMAGES = 5;
 
@@ -106,6 +107,7 @@ function MoreMenu({ items }: { items: { label: string; danger?: boolean; onClick
 function ImageSlot({
   label,
   imageId,
+  name,
   busy,
   size = 110,
   onDelete,
@@ -113,13 +115,14 @@ function ImageSlot({
 }: {
   label: string;
   imageId?: string;
+  name?: string;
   busy: boolean;
   size?: number;
   onDelete?: () => void;
   onOpen?: () => void;
 }) {
   return (
-    <div>
+    <div style={{ maxWidth: size }}>
       <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>{label}</div>
       {imageId ? (
         <div style={{ position: "relative", width: size }}>
@@ -151,6 +154,15 @@ function ImageSlot({
           No image
         </div>
       )}
+      {name && (
+        <div
+          className="dim"
+          style={{ fontSize: "var(--t-sm)", marginTop: 4, maxWidth: size, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          title={name}
+        >
+          {name}
+        </div>
+      )}
     </div>
   );
 }
@@ -165,6 +177,7 @@ export function ItemDetail() {
   const [busy, setBusy] = useState(false); // status toggle / delete
   const [imgBusy, setImgBusy] = useState(false); // image upload/save only — keeps slots calm during status changes
   const [viewer, setViewer] = useState<number | null>(null); // lightbox: index into design.images
+  const [uploads, setUploads] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]); // per-file upload progress
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
@@ -184,12 +197,12 @@ export function ItemDetail() {
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
 
   /** Persist a new image list (positional: [front, rear, ...other]). */
-  const saveImages = async (next: string[]) => {
+  const saveImages = async (next: DesignImage[]) => {
     if (!design) return;
     setImgBusy(true);
     const res = await update("Design", design.id, {
       image_urls: JSON.stringify(next),
-      image_url: next[0] || "",
+      image_url: next[0]?.id || "",
     });
     if (!res.ok) {
       toast.error(res.error || "Could not save images");
@@ -197,7 +210,7 @@ export function ItemDetail() {
       return;
     }
     // Patch only the selected item — no full refetch (keeps the list + scroll put).
-    const patch: Partial<DesignRow> = { images: next, imageUrl: next[0] || "" };
+    const patch: Partial<DesignRow> = { images: next, imageUrl: next[0]?.id || "" };
     setDesigns((prev) => (prev ? prev.map((d) => (d.id === design.id ? { ...d, ...patch } : d)) : prev));
     patchDesignCache(design.id, patch);
     setImgBusy(false);
@@ -215,31 +228,39 @@ export function ItemDetail() {
     const picked = Array.from(files).slice(0, room);
     if (files.length > room) toast.info(`Only ${MAX_IMAGES} images allowed — extra files skipped.`);
     setImgBusy(true);
-    const added: string[] = [];
-    for (const f of picked) {
+    // Separate per-file progress (2026-07 request): each picked file shows
+    // pending → done/error while the batch uploads.
+    setUploads(picked.map((f) => ({ name: f.name, status: "pending" as const })));
+    const added: DesignImage[] = [];
+    for (let i = 0; i < picked.length; i++) {
+      const f = picked[i];
       if (!f.type.startsWith("image/")) {
         toast.error(`${f.name} is not an image`);
+        setUploads((p) => p.map((u, j) => (j === i ? { ...u, status: "error" } : u)));
         continue;
       }
       try {
         added.push(await uploadDesignImage(f));
+        setUploads((p) => p.map((u, j) => (j === i ? { ...u, status: "done" } : u)));
       } catch (e) {
         toast.error(e instanceof Error ? e.message : `Upload failed: ${f.name}`);
+        setUploads((p) => p.map((u, j) => (j === i ? { ...u, status: "error" } : u)));
       }
     }
     if (added.length) await saveImages([...design.images, ...added]);
     else setImgBusy(false);
+    window.setTimeout(() => setUploads([]), 1500);
   };
 
   const deleteAt = async (idx: number) => {
     if (!design) return;
-    if (!window.confirm("Delete this image?")) return;
+    if (!(await confirmDialog({ message: "Delete this image?", danger: true }))) return;
     await saveImages(design.images.filter((_, i) => i !== idx));
   };
 
   const onDeleteItem = async () => {
     if (!design) return;
-    if (!window.confirm(`Delete item "${design.uniqueName || design.designName}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({ message: `Delete item "${design.uniqueName || design.designName}"? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     const res = await deleteDesign(design.id);
     setBusy(false);
@@ -427,14 +448,16 @@ export function ItemDetail() {
                 <div style={{ display: "flex", gap: 18, marginBottom: 14 }}>
                   <ImageSlot
                     label="Front View"
-                    imageId={design.images[0]}
+                    imageId={design.images[0]?.id}
+                    name={design.images[0]?.name}
                     busy={imgBusy}
                     onDelete={() => void deleteAt(0)}
                     onOpen={design.images[0] ? () => setViewer(0) : undefined}
                   />
                   <ImageSlot
                     label="Rear View"
-                    imageId={design.images[1]}
+                    imageId={design.images[1]?.id}
+                    name={design.images[1]?.name}
                     busy={imgBusy}
                     onDelete={() => void deleteAt(1)}
                     onOpen={design.images[1] ? () => setViewer(1) : undefined}
@@ -443,15 +466,15 @@ export function ItemDetail() {
                 <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
                 {/* List rows (2026-07 request) — tiny inline preview + open/delete, not thumbnail tiles. */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {design.images.slice(2).map((imgId, i) => (
+                  {design.images.slice(2).map((img, i) => (
                     <div
-                      key={imgId + i}
+                      key={img.id + i}
                       className="row"
                       style={{ gap: 8, padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 8 }}
                     >
                       <img
-                        src={designImageUrl(imgId)}
-                        alt={`Image ${i + 3}`}
+                        src={designImageUrl(img.id)}
+                        alt={img.name || `Image ${i + 3}`}
                         onClick={() => setViewer(i + 2)}
                         title="Click to view"
                         style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)", flexShrink: 0, cursor: "zoom-in" }}
@@ -459,10 +482,10 @@ export function ItemDetail() {
                       <button
                         type="button"
                         onClick={() => setViewer(i + 2)}
-                        title="View image"
-                        style={{ fontSize: "var(--t-sm)", color: "var(--accent)", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+                        title={img.name || `Image ${i + 3}`}
+                        style={{ fontSize: "var(--t-sm)", color: "var(--accent)", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}
                       >
-                        Image {i + 3}
+                        {img.name || `Image ${i + 3}`}
                       </button>
                       <div style={{ flex: 1 }} />
                       <button
@@ -498,6 +521,19 @@ export function ItemDetail() {
                         }}
                       />
                     </label>
+                  )}
+                  {uploads.length > 0 && (
+                    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div className="muted" style={{ fontSize: "var(--t-sm)" }}>Uploading…</div>
+                      {uploads.map((u, i) => (
+                        <div key={i} style={{ fontSize: "var(--t-sm)", display: "flex", gap: 6, alignItems: "center" }}>
+                          <span style={{ width: 12, textAlign: "center", color: u.status === "done" ? "var(--c-green)" : u.status === "error" ? "var(--c-red)" : "var(--dim)" }}>
+                            {u.status === "done" ? "✓" : u.status === "error" ? "✗" : "…"}
+                          </span>
+                          <span className="dim" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <div className="dim" style={{ marginTop: 10, fontSize: "var(--t-sm)" }}>
@@ -577,8 +613,8 @@ export function ItemDetail() {
                   </button>
                 )}
                 <img
-                  src={designImageUrl(design.images[viewer])}
-                  alt={`Image ${viewer + 1}`}
+                  src={designImageUrl(design.images[viewer].id)}
+                  alt={design.images[viewer].name || `Image ${viewer + 1}`}
                   onClick={(e) => e.stopPropagation()}
                   style={{ maxWidth: "88vw", maxHeight: "84vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}
                 />

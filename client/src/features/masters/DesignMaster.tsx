@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -308,7 +309,7 @@ export function DesignMaster() {
   };
 
   const onBulkDelete = async () => {
-    if (!window.confirm(`Delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`))
+    if (!(await confirmDialog({ message: `Delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
       return;
     setBusy(true);
     setNotice(`Deleting ${ids.length} item${ids.length > 1 ? "s" : ""}…`);

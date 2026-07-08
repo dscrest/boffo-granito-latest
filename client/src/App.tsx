@@ -8,6 +8,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from 
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ToastHost } from "@/ui/Toast";
+import { ConfirmHost } from "@/ui/ConfirmDialog";
 import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
@@ -425,6 +426,7 @@ export default function App() {
         </ErrorBoundary>
       </main>
       <ToastHost />
+      <ConfirmHost />
     </div>
   );
 }

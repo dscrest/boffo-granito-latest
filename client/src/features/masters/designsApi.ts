@@ -42,6 +42,12 @@ export interface DesignLookups {
   partyBrandSeq: Record<string, string>;
 }
 
+/** One design image: File Store id + the original uploaded filename. */
+export interface DesignImage {
+  id: string;
+  name: string;
+}
+
 export interface DesignRow {
   id: string; // ROWID
   designName: string;
@@ -78,7 +84,7 @@ export interface DesignRow {
   accountingStock: number;
   booksItemId: string;
   imageUrl: string;
-  images: string[]; // #12: File Store image ids
+  images: DesignImage[]; // #12: File Store images (id + original filename)
   createdTime: string; // Catalyst CREATEDTIME
   modifiedTime: string; // Catalyst MODIFIEDTIME
 }
@@ -288,12 +294,20 @@ export interface DesignInput {
   image_urls: string; // #12: JSON array of File Store image ids
 }
 
-/** Parse the image_urls JSON column → string[] (tolerant of blank/legacy). */
-function parseImages(raw: string): string[] {
+/** Parse the image_urls JSON column → DesignImage[]. Tolerant of the legacy
+    format where entries were bare File Store id strings (name unknown → ""). */
+function parseImages(raw: string): DesignImage[] {
   if (!raw) return [];
   try {
     const v = JSON.parse(raw);
-    return Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((e) =>
+        typeof e === "string"
+          ? { id: e, name: "" }
+          : { id: String((e as { id?: unknown }).id ?? ""), name: String((e as { name?: unknown }).name ?? "") },
+      )
+      .filter((x) => x.id);
   } catch {
     return [];
   }

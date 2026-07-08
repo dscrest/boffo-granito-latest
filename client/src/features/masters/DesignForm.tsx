@@ -15,7 +15,7 @@ import { toast } from "@/ui/Toast";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { insert } from "@/lib/dataOps";
-import { invalidateDesigns, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
+import { invalidateDesigns, type DesignImage, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID.
    Coverage is NOT held here — it's derived from width/length/pcs. */
@@ -194,7 +194,7 @@ export function computeCoverage(v: DesignValues): { sqm: number; sqft: number } 
 }
 
 /** Convert form state → API DesignInput (numbers parsed, unique_name/sku/coverage computed). */
-export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string[] = []): DesignInput {
+export function toDesignInput(v: DesignValues, lk: DesignLookups, images: DesignImage[] = []): DesignInput {
   const cov = computeCoverage(v);
   return {
     design_name: v.design_name,
@@ -221,7 +221,7 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: string
     rate_per_sqft: numOr0(v.rate_per_sqft),
     rate_per_sqmt: numOr0(v.rate_per_sqmt),
     accounting_stock: numOr0(v.accounting_stock),
-    image_url: images[0] || v.image_url || "", // legacy single-image field = first image
+    image_url: images[0]?.id || v.image_url || "", // legacy single-image field = first image id
     image_urls: JSON.stringify(images),
   };
 }
