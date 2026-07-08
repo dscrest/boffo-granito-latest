@@ -25,9 +25,14 @@ import { cachedDesigns, deleteDesign, invalidateDesigns, listDesigns, type Desig
 
 const MAX_IMAGES = 5;
 
+/* Related-orders "Party" panel hidden per 2026-07 request — flip to true to
+   restore the Party / Order Qty / Stage table + open-quantity line. */
+const SHOW_PARTY_PANEL = false;
+
 /* STUB: Zoho Books field mapping — blocked on the Books item reference.
-   These render as placeholder rows until the mapping is confirmed. */
-const ZOHO_STUB_FIELDS = ["HSN Code", "Unit", "Tax Preference", "Inventory Account", "Valuation Method"];
+   HSN Code / Tax Preference / Inventory Account / Valuation Method removed
+   per 2026-07 request; only Unit remains as a placeholder row. */
+const ZOHO_STUB_FIELDS = ["Unit"];
 
 function DetailRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
   return (
@@ -104,12 +109,14 @@ function ImageSlot({
   busy,
   size = 110,
   onDelete,
+  onOpen,
 }: {
   label: string;
   imageId?: string;
   busy: boolean;
   size?: number;
   onDelete?: () => void;
+  onOpen?: () => void;
 }) {
   return (
     <div>
@@ -119,7 +126,9 @@ function ImageSlot({
           <img
             src={designImageUrl(imageId)}
             alt={label}
-            style={{ width: size, height: size, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
+            onClick={onOpen}
+            title={onOpen ? "Click to view" : undefined}
+            style={{ width: size, height: size, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)", cursor: onOpen ? "zoom-in" : "default" }}
           />
           {onDelete && (
             <button
@@ -155,6 +164,7 @@ export function ItemDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false); // status toggle / delete
   const [imgBusy, setImgBusy] = useState(false); // image upload/save only — keeps slots calm during status changes
+  const [viewer, setViewer] = useState<number | null>(null); // lightbox: index into design.images
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
@@ -187,22 +197,32 @@ export function ItemDetail() {
     setImgBusy(false);
   };
 
-  const uploadTo = async (slot: number, f: File) => {
-    if (!design) return;
-    if (design.images.length >= MAX_IMAGES) {
+  /** Multi-select upload (2026-07 request): pick many at once, fill the
+      remaining slots in order, cap at MAX_IMAGES, skip non-images. */
+  const uploadMany = async (files: FileList | null) => {
+    if (!design || !files || files.length === 0) return;
+    const room = MAX_IMAGES - design.images.length;
+    if (room <= 0) {
       toast.info(`Only ${MAX_IMAGES} images allowed`);
       return;
     }
+    const picked = Array.from(files).slice(0, room);
+    if (files.length > room) toast.info(`Only ${MAX_IMAGES} images allowed — extra files skipped.`);
     setImgBusy(true);
-    try {
-      const fileId = await uploadDesignImage(f);
-      const next = [...design.images];
-      next.splice(Math.min(slot, next.length), 0, fileId);
-      await saveImages(next);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
-      setImgBusy(false);
+    const added: string[] = [];
+    for (const f of picked) {
+      if (!f.type.startsWith("image/")) {
+        toast.error(`${f.name} is not an image`);
+        continue;
+      }
+      try {
+        added.push(await uploadDesignImage(f));
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : `Upload failed: ${f.name}`);
+      }
     }
+    if (added.length) await saveImages([...design.images, ...added]);
+    else setImgBusy(false);
   };
 
   const deleteAt = async (idx: number) => {
@@ -337,7 +357,7 @@ export function ItemDetail() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div
                   className="title"
-                  style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   title={design.uniqueName || design.designName}
                 >
                   {design.uniqueName || design.designName}
@@ -377,7 +397,6 @@ export function ItemDetail() {
                 <DetailRow label="Glaze" value={design.glazeLabel || "—"} />
                 <DetailRow label="Grade" value={design.gradeLabel || "—"} />
                 <DetailRow label="Status" value={design.status || "—"} />
-                <DetailRow label="Rate / ft²" value={design.ratePerSqft ? fmt(design.ratePerSqft) : "—"} />
                 <DetailRow label="Rate / m²" value={design.ratePerSqmt ? fmt(design.ratePerSqmt) : "—"} />
                 <DetailRow
                   label="Coverage / box"
@@ -403,12 +422,14 @@ export function ItemDetail() {
                     imageId={design.images[0]}
                     busy={imgBusy}
                     onDelete={() => void deleteAt(0)}
+                    onOpen={design.images[0] ? () => setViewer(0) : undefined}
                   />
                   <ImageSlot
                     label="Rear View"
                     imageId={design.images[1]}
                     busy={imgBusy}
                     onDelete={() => void deleteAt(1)}
+                    onOpen={design.images[1] ? () => setViewer(1) : undefined}
                   />
                 </div>
                 <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
@@ -423,17 +444,18 @@ export function ItemDetail() {
                       <img
                         src={designImageUrl(imgId)}
                         alt={`Image ${i + 3}`}
-                        style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)", flexShrink: 0 }}
+                        onClick={() => setViewer(i + 2)}
+                        title="Click to view"
+                        style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)", flexShrink: 0, cursor: "zoom-in" }}
                       />
-                      <a
-                        href={designImageUrl(imgId)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open full image"
-                        style={{ fontSize: "var(--t-sm)", color: "var(--fg-2)", textDecoration: "none" }}
+                      <button
+                        type="button"
+                        onClick={() => setViewer(i + 2)}
+                        title="View image"
+                        style={{ fontSize: "var(--t-sm)", color: "var(--accent)", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
                       >
                         Image {i + 3}
-                      </a>
+                      </button>
                       <div style={{ flex: 1 }} />
                       <button
                         type="button"
@@ -459,11 +481,11 @@ export function ItemDetail() {
                       <input
                         type="file"
                         accept="image/*"
+                        multiple
                         disabled={imgBusy}
                         style={{ display: "none" }}
                         onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void uploadTo(design.images.length, f);
+                          void uploadMany(e.target.files);
                           e.target.value = "";
                         }}
                       />
@@ -477,46 +499,96 @@ export function ItemDetail() {
               </div>
             </div>
 
-            <div className="card">
-              <div style={{ overflow: "auto" }}>
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      {/* PO Number column hidden per request 2026-07 — restore when POs go live. */}
-                      <th>Party</th>
-                      <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
-                      <th>Stage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map((o) => (
-                      <tr key={o.id}>
-                        <td>{o.flag} {o.party}</td>
-                        <td className="num mono">{fmt(o.orderQty)}</td>
-                        <td>{o.stage}</td>
-                      </tr>
-                    ))}
-                    {orders.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                          No orders use this item.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            {SHOW_PARTY_PANEL && (
+              <>
+                <div className="card">
+                  <div style={{ overflow: "auto" }}>
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          {/* PO Number column hidden per request 2026-07 — restore when POs go live. */}
+                          <th>Party</th>
+                          <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
+                          <th>Stage</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orders.map((o) => (
+                          <tr key={o.id}>
+                            <td>{o.flag} {o.party}</td>
+                            <td className="num mono">{fmt(o.orderQty)}</td>
+                            <td>{o.stage}</td>
+                          </tr>
+                        ))}
+                        {orders.length === 0 && (
+                          <tr>
+                            <td colSpan={3} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                              No orders use this item.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
 
-            {openQty > 0 && (
-              <div className="dim" style={{ marginTop: 8, fontSize: "var(--t-sm)" }}>
-                Open quantity across orders: {fmt(openQty)}
-              </div>
+                {openQty > 0 && (
+                  <div className="dim" style={{ marginTop: 8, fontSize: "var(--t-sm)" }}>
+                    Open quantity across orders: {fmt(openQty)}
+                  </div>
+                )}
+              </>
             )}
 
             {/* Audit trail (#10.2): who created / changed this item, from OperationLog. */}
             <div className="form-section-title" style={{ margin: "16px 0 8px" }}>Activity</div>
             <ActivityLog table="Design" entityId={design.id} />
+
+            {/* Image lightbox (2026-07 request): view + prev/next across all images. */}
+            {viewer !== null && design.images[viewer] && (
+              <div
+                onClick={() => setViewer(null)}
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <button
+                  className="btn x"
+                  onClick={(e) => { e.stopPropagation(); setViewer(null); }}
+                  title="Close"
+                  style={{ position: "absolute", top: 16, right: 16 }}
+                >
+                  ✕
+                </button>
+                {design.images.length > 1 && (
+                  <button
+                    className="btn"
+                    onClick={(e) => { e.stopPropagation(); setViewer((v) => (v === null ? 0 : (v - 1 + design.images.length) % design.images.length)); }}
+                    title="Previous"
+                    style={{ position: "absolute", left: 16, width: 40, height: 40, fontSize: 20, lineHeight: 1 }}
+                  >
+                    ‹
+                  </button>
+                )}
+                <img
+                  src={designImageUrl(design.images[viewer])}
+                  alt={`Image ${viewer + 1}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ maxWidth: "88vw", maxHeight: "84vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}
+                />
+                {design.images.length > 1 && (
+                  <button
+                    className="btn"
+                    onClick={(e) => { e.stopPropagation(); setViewer((v) => (v === null ? 0 : (v + 1) % design.images.length)); }}
+                    title="Next"
+                    style={{ position: "absolute", right: 16, bottom: "50%", width: 40, height: 40, fontSize: 20, lineHeight: 1 }}
+                  >
+                    ›
+                  </button>
+                )}
+                <div style={{ position: "absolute", bottom: 16, color: "#fff", fontSize: "var(--t-sm)" }}>
+                  {viewer + 1} / {design.images.length}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

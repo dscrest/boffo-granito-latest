@@ -214,27 +214,35 @@ export function DesignMaster() {
     void load();
   }, []);
 
-  // Filter options come from the live rows (DB-sourced), not static lists.
-  const sizeOptions = useMemo(() => [...new Set(rows.map((r) => r.sizeLabel).filter(Boolean))].sort(), [rows]);
+  // Size filter shows every master Size (create-time list), not just sizes
+  // already used by a design — union guards any legacy label still on a row.
+  const sizeOptions = useMemo(
+    () => [...new Set([...lookups.sizes.map((o) => o.label), ...rows.map((r) => r.sizeLabel)].filter(Boolean))].sort(),
+    [rows, lookups],
+  );
   const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
 
-  // Advanced search fields (magnifier button) — options DB-sourced from rows.
+  // Advanced search fields (magnifier button). Master-backed pickers
+  // (Size/Finish/Brand/Category/Glaze) list the full create-time master, not
+  // just values already on a design — union with row values covers legacy.
   const filterFields = useMemo<FilterField<DesignRow>[]>(() => {
     const opts = (get: (r: DesignRow) => string) => [...new Set(rows.map(get).filter(Boolean))].sort();
+    const uni = (master: { label: string }[], get: (r: DesignRow) => string) =>
+      [...new Set([...master.map((o) => o.label), ...rows.map(get)].filter(Boolean))].sort();
     return [
       { key: "name", label: "Design Name", type: "text", get: (r) => `${r.designName} ${r.uniqueName}` },
       { key: "sku", label: "SKU", type: "text", get: (r) => r.sku },
-      { key: "size", label: "Size", type: "multiselect", options: opts((r) => r.sizeLabel), get: (r) => r.sizeLabel },
-      { key: "finish", label: "Finish", type: "multiselect", options: opts((r) => r.finishLabel), get: (r) => r.finishLabel },
-      { key: "brand", label: "Brand", type: "multiselect", options: opts((r) => r.brandLabel), get: (r) => r.brandLabel },
-      { key: "category", label: "Category", type: "multiselect", options: opts((r) => r.categoryLabel), get: (r) => r.categoryLabel },
-      { key: "glaze", label: "Glaze", type: "multiselect", options: opts((r) => r.glazeLabel), get: (r) => r.glazeLabel },
+      { key: "size", label: "Size", type: "multiselect", options: uni(lookups.sizes, (r) => r.sizeLabel), get: (r) => r.sizeLabel },
+      { key: "finish", label: "Finish", type: "multiselect", options: uni(lookups.finishes, (r) => r.finishLabel), get: (r) => r.finishLabel },
+      { key: "brand", label: "Brand", type: "multiselect", options: uni(lookups.brands, (r) => r.brandLabel), get: (r) => r.brandLabel },
+      { key: "category", label: "Category", type: "multiselect", options: uni(lookups.categories, (r) => r.categoryLabel), get: (r) => r.categoryLabel },
+      { key: "glaze", label: "Glaze", type: "multiselect", options: uni(lookups.glazes, (r) => r.glazeLabel), get: (r) => r.glazeLabel },
       { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.status), get: (r) => r.status },
       { key: "rate", label: "Rate / ft²", type: "numrange", get: (r) => r.ratePerSqft },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
       { key: "modified", label: "Modified Between", type: "daterange", get: (r) => r.modifiedTime },
     ];
-  }, [rows]);
+  }, [rows, lookups]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -422,14 +430,13 @@ export function DesignMaster() {
                     title={allShownSelected ? "Deselect all" : "Select all"}
                   />
                 </th>
-                <th style={{ width: 36, textAlign: "center" }}>#</th>
                 {visible.map((c) => (
                   <th key={c.key} style={c.style}>{c.label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((d, i) => {
+              {pageRows.map((d) => {
                 const sel = selected.has(d.id);
                 return (
                   <tr
@@ -446,9 +453,6 @@ export function DesignMaster() {
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(d.id)} />
                     </td>
-                    <td className="muted mono" style={{ textAlign: "center" }}>
-                      {pager.from + i}
-                    </td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(d)}
@@ -459,7 +463,7 @@ export function DesignMaster() {
               })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 2}>
+                  <td colSpan={visible.length + 1}>
                     {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (
