@@ -1241,8 +1241,12 @@ a { color: inherit; text-decoration: none; }
 }
 /* Grid quick-search with a leading magnifier (mirrors the header search). */
 .gsearch { position: relative; display: inline-flex; align-items: center; }
-.gsearch > svg { position: absolute; left: 10px; color: var(--dim); pointer-events: none; }
-.gsearch > input { padding-left: 30px; }
+.gsearch > svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--dim); pointer-events: none;
+}
+/* Beat `.fbar input[type="text"]` (padding: 0 9px) — needs the icon gutter. */
+.fbar .gsearch input[type="text"] { padding-left: 30px; }
 /* ---- Shared form fields (New Design modal + master editors) ---- */
 .form-grid {
   display: grid;
