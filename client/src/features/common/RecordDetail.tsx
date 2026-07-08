@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { list, type DSRow } from "@/lib/dataOps";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime, fmtLocalDateTime } from "@/lib/format";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -54,7 +54,6 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
             <tr>
               <th>Time</th>
               <th>Operation</th>
-              <th>Status</th>
               <th>Actor</th>
               <th>Detail / Error</th>
             </tr>
@@ -64,11 +63,8 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
               const ok = str(r.status) === "success";
               return (
                 <tr key={String(r.ROWID)}>
-                  <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
+                  <td className="mono muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
                   <td>{str(r.operation)}</td>
-                  <td>
-                    <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{str(r.status) || "—"}</span>
-                  </td>
                   <td className="muted">{str(r.actor)}</td>
                   <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
@@ -78,7 +74,7 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
             })}
             {!loading && acts.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   No activity recorded yet.
                 </td>
               </tr>
