@@ -249,7 +249,7 @@ function FilterModal({
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="card modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={`Search ${title}`} style={{ maxWidth: 900 }}>
+      <div className="modal-panel filter-modal" ref={panelRef} role="dialog" aria-modal="true" aria-label={`Search ${title}`} style={{ maxWidth: 900 }}>
         <div className="row" style={{ marginBottom: 16 }}>
           <Icon name="search" size={14} />
           <span style={{ fontWeight: 600, fontSize: "var(--t-lg)" }}>Search {title}</span>

@@ -187,8 +187,6 @@ export function DesignMaster() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [sizeF, setSizeF] = useState("");
-  const [statusF, setStatusF] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { ordered, visible, hidden, toggle, move } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
@@ -213,14 +211,6 @@ export function DesignMaster() {
   useEffect(() => {
     void load();
   }, []);
-
-  // Size filter shows every master Size (create-time list), not just sizes
-  // already used by a design — union guards any legacy label still on a row.
-  const sizeOptions = useMemo(
-    () => [...new Set([...lookups.sizes.map((o) => o.label), ...rows.map((r) => r.sizeLabel)].filter(Boolean))].sort(),
-    [rows, lookups],
-  );
-  const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
 
   // Advanced search fields (magnifier button). Master-backed pickers
   // (Size/Finish/Brand/Category/Glaze) list the full create-time master, not
@@ -247,8 +237,6 @@ export function DesignMaster() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base = rows.filter((r) => {
-      if (sizeF && r.sizeLabel !== sizeF) return false;
-      if (statusF && r.status !== statusF) return false;
       if (!q) return true;
       return [r.designName, r.uniqueName, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
         .join(" ")
@@ -256,9 +244,9 @@ export function DesignMaster() {
         .includes(q);
     });
     return applyFilters(base, criteria, filterFields);
-  }, [rows, query, sizeF, statusF, criteria, filterFields]);
+  }, [rows, query, criteria, filterFields]);
 
-  const pager = usePagination(filtered.length, "designPageSize", `${query}|${sizeF}|${statusF}|${JSON.stringify(criteria)}`);
+  const pager = usePagination(filtered.length, "designPageSize", `${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(filtered);
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
@@ -391,24 +379,11 @@ export function DesignMaster() {
         </div>
       ) : (
         <div className="fbar">
-          <select value={sizeF} onChange={(e) => setSizeF(e.target.value)} title="Filter by size">
-            <option value="">All sizes</option>
-            {sizeOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
-            <option value="">All statuses</option>
-            {statusOptions.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
           <div style={{ flex: 1 }} />
-          <input type="text" placeholder="Search design…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input type="text" placeholder="Search items…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </span>
           <AdvancedFilterButton title="Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         </div>
