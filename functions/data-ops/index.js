@@ -441,7 +441,12 @@ app.post("/upload/design-image", async (req, res) => {
   try {
     const { name, data } = req.body || {};
     if (!data) throw badRequest("No image data");
-    const safeName = String(name || "image.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+    // Preserve the uploaded filename (req 2026-07-08): keep spaces, parens,
+    // and unicode; strip only path separators and control chars for safety.
+    const safeName =
+      String(name || "image.jpg")
+        .replace(/[\\/\x00-\x1f]/g, "")
+        .trim() || "image.jpg";
     const buf = Buffer.from(String(data), "base64");
     if (!buf.length) throw badRequest("Empty image");
     if (buf.length > 8 * 1024 * 1024) throw badRequest("Image exceeds 8MB");
