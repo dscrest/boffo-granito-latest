@@ -21,7 +21,7 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
-import { fmtDateTime } from "@/lib/format";
+import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
 
 const MAX_IMAGES = 5;
@@ -432,8 +432,8 @@ export function ItemDetail() {
                   value={design.coverageSqm ? `${design.coverageSqm} m² · ${design.coverageSqft} ft²` : "—"}
                 />
                 <DetailRow label="Pcs / Box" value={design.pcsPerBox ? String(design.pcsPerBox) : "—"} />
-                <DetailRow label="Created" value={fmtDateTime(design.createdTime)} />
-                <DetailRow label="Modified" value={fmtDateTime(design.modifiedTime)} />
+                <DetailRow label="Created" value={fmtLocalDateTime(design.createdTime)} />
+                <DetailRow label="Modified" value={fmtLocalDateTime(design.modifiedTime)} />
                 {/* STUB: Zoho Books mapping — blocked on reference. */}
                 {ZOHO_STUB_FIELDS.map((f) => (
                   <DetailRow key={f} label={f} value="—" dim />

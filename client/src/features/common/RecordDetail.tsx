@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { list, type DSRow } from "@/lib/dataOps";
-import { fmtDateTime, fmtLocalDateTime } from "@/lib/format";
+import { fmtDateTime, fmtLocalDateTime, actorName, describeChange } from "@/lib/format";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -54,20 +54,21 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
             <tr>
               <th>Time</th>
               <th>Operation</th>
-              <th>Actor</th>
-              <th>Detail / Error</th>
+              <th>User</th>
+              <th>Details</th>
             </tr>
           </thead>
           <tbody>
             {acts.map((r) => {
               const ok = str(r.status) === "success";
+              const detail = ok ? describeChange(str(r.operation), str(r.payload_summary)) : str(r.error_text);
               return (
                 <tr key={String(r.ROWID)}>
                   <td className="mono muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
                   <td>{str(r.operation)}</td>
-                  <td className="muted">{str(r.actor)}</td>
-                  <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
+                  <td className="muted">{actorName(str(r.actor))}</td>
+                  <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={detail}>
+                    {ok ? detail : <span style={{ color: "var(--c-red)" }}>{detail}</span>}
                   </td>
                 </tr>
               );

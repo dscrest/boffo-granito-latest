@@ -29,6 +29,76 @@ export function fmtLocalDateTime(s?: string): string {
   });
 }
 
+/* ------------------------------------------------------------------
+   Activity-log humanisers — OperationLog stores an actor email and a
+   raw JSON payload_summary. These turn both into something readable:
+   "prashant@octfis.com" → "Prashant", {"status":"Inactive"} →
+   "Status → Inactive".
+   ------------------------------------------------------------------ */
+
+/** OperationLog actor (email / user_id / "system") → short display name. */
+export function actorName(actor?: string): string {
+  const a = (actor || "").trim();
+  if (!a || a.toLowerCase() === "system") return "System";
+  const local = a.includes("@") ? a.slice(0, a.indexOf("@")) : a;
+  const name = local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+  return name || "System";
+}
+
+/** Nicer labels for known DB columns; everything else is title-cased. */
+const CHANGE_LABELS: Record<string, string> = {
+  image_urls: "Images",
+  image_url: "Image",
+  unique_name: "Unique Name",
+  design_name: "Design Name",
+  party_brand_name: "Party Brand",
+  rate_per_sqmt: "Rate / m²",
+  pcs_per_box: "Pcs / Box",
+  seq_code: "Short Code",
+  sku: "SKU",
+  hsn_code: "HSN Code",
+};
+/** Columns not worth surfacing in the activity feed. */
+const CHANGE_HIDDEN = new Set(["image_url", "modified_time", "created_time", "deleted_at", "ROWID"]);
+
+function changeLabel(k: string): string {
+  return CHANGE_LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function changeValue(k: string, v: unknown): string {
+  if (v == null || v === "") return "cleared";
+  const s = String(v);
+  // JSON blobs / very long values (image lists, etc.) aren't worth spelling out.
+  if (/image/i.test(k) || s.length > 48 || /^[[{]/.test(s.trim())) return "updated";
+  return s;
+}
+
+/** Raw OperationLog (operation, payload_summary) → human-readable summary,
+    e.g. "Status → Inactive, Size → 600x600". Falls back to the raw text
+    when the payload isn't parseable JSON (e.g. it was truncated). */
+export function describeChange(operation?: string, payloadSummary?: string): string {
+  const op = (operation || "").toLowerCase();
+  let payload: unknown = null;
+  try {
+    payload = payloadSummary ? JSON.parse(payloadSummary) : null;
+  } catch {
+    return payloadSummary || "—";
+  }
+  if (!payload || typeof payload !== "object") {
+    if (op === "delete") return "Deleted";
+    return payloadSummary || "—";
+  }
+  const parts = Object.entries(payload as Record<string, unknown>)
+    .filter(([k]) => !CHANGE_HIDDEN.has(k))
+    .map(([k, v]) => `${changeLabel(k)} → ${changeValue(k, v)}`);
+  if (parts.length === 0) return op === "delete" ? "Deleted" : op === "insert" ? "Created" : "—";
+  return parts.join(", ");
+}
+
 export function finishClass(f: string): string {
   const m: Record<string, string> = {
     Glossy: "glossy",

@@ -76,7 +76,7 @@ export function ConfirmHost() {
       style={{ zIndex: 200, alignItems: "center" }}
       onMouseDown={(e) => e.target === e.currentTarget && done(false)}
     >
-      <div className="modal-panel confirm-modal" role="alertdialog" aria-modal="true" aria-label={req.title || "Confirm"}>
+      <div className="modal-panel card confirm-modal" role="alertdialog" aria-modal="true" aria-label={req.title || "Confirm"}>
         <div className="confirm-head">
           <span className={`confirm-ico${req.danger ? " danger" : ""}`} aria-hidden="true">
             {req.danger ? "!" : "?"}
