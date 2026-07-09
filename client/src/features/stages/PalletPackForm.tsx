@@ -19,6 +19,7 @@ export function PalletPackForm({
   onSave,
   onClose,
   presetOrderId,
+  presetPalletId,
   preselectItemIds,
   autoFillAll,
 }: {
@@ -26,6 +27,8 @@ export function PalletPackForm({
   onClose: () => void;
   /** When set, scope the form to one confirmed Master Order (locked select). */
   presetOrderId?: string;
+  /** When set, scope the form to one Pallet spec (locked select). */
+  presetPalletId?: string;
   /** OrderItem ROWIDs to pre-fill to their full available qty on open. */
   preselectItemIds?: string[];
   /** Pre-fill every ready line to its available qty on open (full palletize). */
@@ -69,8 +72,12 @@ export function PalletPackForm({
       } else if (po.orders.length === 1) {
         setOrderId(po.orders[0].salesOrderId);
       }
+      // Launched from a Pallet's detail page — that spec is the batch's pallet.
+      if (presetPalletId && pl.ok && pl.pallets.some((p) => p.id === presetPalletId)) {
+        setPalletId(presetPalletId);
+      }
     })();
-  }, [presetOrderId]);
+  }, [presetOrderId, presetPalletId]);
 
   const order = useMemo(() => orders.find((o) => o.salesOrderId === orderId) || null, [orders, orderId]);
 
@@ -91,9 +98,11 @@ export function PalletPackForm({
   }, [order, pallets, boxesByItem]);
 
   // A previously chosen pallet that no longer matches the entered sizes clears.
+  // A locked pallet is exempt — the operator picked the spec, not the sizes.
   useEffect(() => {
+    if (presetPalletId) return;
     if (palletId && !filteredPallets.some((p) => p.id === palletId)) setPalletId("");
-  }, [filteredPallets, palletId]);
+  }, [filteredPallets, palletId, presetPalletId]);
 
   // Reset per-item boxes whenever the chosen order changes, then apply any
   // preselect / auto-fill-all requested by the launch point (Order detail).
@@ -158,6 +167,14 @@ export function PalletPackForm({
     () => (order?.items || []).filter((it) => it.available <= 0 && it.toProduce > 0).length,
     [order],
   );
+  // With the pallet locked the size filter can't narrow it to the boxed lines,
+  // so a mismatch is possible. Say so — but don't block: the operator chose this spec.
+  const sizeMismatch = useMemo(() => {
+    if (!presetPalletId || !pallet?.sizeId) return 0;
+    return (order?.items || []).filter(
+      (it) => (boxesByItem[it.orderItemId] || 0) > 0 && it.sizeId && it.sizeId !== pallet.sizeId,
+    ).length;
+  }, [presetPalletId, pallet, order, boxesByItem]);
   const missing = !orderId || !palletId || lines.length === 0;
 
   // Errors stay hidden until the first submit attempt, then update live.
@@ -242,17 +259,21 @@ export function PalletPackForm({
                     <span className="lbl">
                       Pallet<span className="req"> *</span>
                     </span>
-                    <Combobox
-                      value={palletId}
-                      options={filteredPallets.map((p) => ({
-                        value: p.id,
-                        label: p.name + (p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""),
-                        hint: p.sizeLabel,
-                      }))}
-                      onChange={setPalletId}
-                      placeholder="Search pallets…"
-                      invalid={!!palletErr}
-                    />
+                    {presetPalletId ? (
+                      <input value={pallet?.name || presetPalletId} readOnly disabled />
+                    ) : (
+                      <Combobox
+                        value={palletId}
+                        options={filteredPallets.map((p) => ({
+                          value: p.id,
+                          label: p.name + (p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""),
+                          hint: p.sizeLabel,
+                        }))}
+                        onChange={setPalletId}
+                        placeholder="Search pallets…"
+                        invalid={!!palletErr}
+                      />
+                    )}
                     {palletErr && <span className="field-err">{palletErr}</span>}
                   </label>
                   <label className="form-field">
@@ -358,6 +379,14 @@ export function PalletPackForm({
                       >
                         Send to production →
                       </button>
+                    </div>
+                  )}
+                  {sizeMismatch > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, fontSize: 12, color: "var(--c-amber)" }}>
+                      <span>
+                        {sizeMismatch} boxed item{sizeMismatch > 1 ? "s are" : " is"} a different size than this pallet
+                        {pallet?.sizeLabel ? ` (${pallet.sizeLabel})` : ""}.
+                      </span>
                     </div>
                   )}
                 </div>

@@ -19,6 +19,8 @@ import { canDelete, canUpdate } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
+import { PalletPackForm } from "@/features/stages/PalletPackForm";
+import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
 import { PalletForm } from "./PalletForm";
 import {
   cachedPalletOrders,
@@ -65,17 +67,18 @@ export function PalletDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [packing, setPacking] = useState(false);
 
   const refresh = () =>
     listPallets().then((res) => {
       setPallets(res.ok ? res.pallets : (cachedPallets() ?? []));
       if (res.ok) setSizes(res.sizes);
     });
+  const refreshOrders = () =>
+    listPalletOrders().then((res) => setPalletOrders(res.ok ? res.byPallet : (cachedPalletOrders() ?? {})));
   useEffect(() => {
     void refresh();
-    void listPalletOrders().then((res) =>
-      setPalletOrders(res.ok ? res.byPallet : (cachedPalletOrders() ?? {})),
-    );
+    void refreshOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -125,7 +128,24 @@ export function PalletDetail() {
     navigate("/pallets");
   };
 
-  const moreItems = canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : [];
+  // Pack an order onto this spec without leaving for the Palletization stage.
+  // The saga busts the pallet-orders cache, so Associated Orders refetches.
+  const onPalletize = async (input: ClosePalletInput) => {
+    const res = await closePallet(input);
+    if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
+      toast.error(res.error || "Close-pallet failed");
+      return;
+    }
+    setPacking(false);
+    toast.success(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    await refreshOrders();
+  };
+
+  const moreItems = [
+    { label: "Palletize Order", onClick: () => setPacking(true) },
+    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+  ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -155,6 +175,10 @@ export function PalletDetail() {
           onSave={onSave}
           onClose={() => setEditing(false)}
         />
+      )}
+
+      {packing && pallet && (
+        <PalletPackForm presetPalletId={pallet.id} onSave={onPalletize} onClose={() => setPacking(false)} />
       )}
 
       {/* Pallet list — fixed viewport height with its OWN scroll, sticky while
