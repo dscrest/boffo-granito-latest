@@ -48,6 +48,7 @@ const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) 
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
+const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
@@ -85,6 +86,10 @@ function navTree(): NavNode[] {
       icon: "tile",
       children: [
         { id: "design", label: "Items", icon: "tile" },
+        // Size Master owns per-box packing data (dims, pcs/box, coverage,
+        // box weight). Items and Pallet Master snapshot it — they never ask
+        // the operator for it twice. Moved here from Settings ▸ Masters.
+        { id: "sizes", label: "Size Master", icon: "tile" },
         // Pallet Master = the master of pallet formats (an Items master).
         // Palletization (Sales, id "packing") is the process that consumes it.
         { id: "pallets", label: "Pallet Master", icon: "palette" },
@@ -416,6 +421,7 @@ export default function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/pallets" element={<Pallets />} />
+            <Route path="/sizes" element={<Sizes />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/salespersons" element={isAdmin ? <SalesPersonsAdmin /> : <Navigate to="/dashboard" replace />} />

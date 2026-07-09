@@ -48,20 +48,9 @@ type Row = MasterRow;
 
 /* Column/field schema per master. Field keys match the Catalyst Data Store
    column names, so values pass straight through mastersApi to the table. */
+/* Size is NOT here: it outgrew the generic lookup editor (formula columns,
+   per-box packing data) and now has its own page at /sizes under Items. */
 const MASTERS: MasterDef[] = [
-  {
-    key: "size",
-    label: "Size",
-    icon: "tile",
-    table: "Size",
-    lead: "code",
-    fields: [
-      { key: "code", label: "Code", required: true },
-      { key: "width_mm", label: "Width (mm)", type: "number" },
-      { key: "length_mm", label: "Length (mm)", type: "number" },
-      { key: "seq_code", label: "Seq" },
-    ],
-  },
   {
     key: "finish",
     label: "Finish",
@@ -294,7 +283,7 @@ function MasterTable({ def }: { def: MasterDef }) {
 
   const removeSelected = async () => {
     const ids = [...selected];
-    if (!(await confirmDialog({ message: `Delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}?`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     const results = await Promise.all(ids.map((id) => deleteMaster(def.table, id)));
     setBusy(false);

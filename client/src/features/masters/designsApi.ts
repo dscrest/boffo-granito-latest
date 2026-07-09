@@ -18,8 +18,12 @@ export interface LookupOption {
   id: string; // parent ROWID (the value stored in the FK column)
   label: string;
   seqCode?: string; // stored SKU segment short code (Size/Finish/Category/Glaze)
-  widthMm?: number; // Size only: tile dimensions, used to auto-fill the form
+  // Size only: the packing data the Size master owns. The item form fills these
+  // in read-only from the picked size — the operator never types them twice.
+  widthMm?: number;
   lengthMm?: number;
+  pcsPerPacking?: number;
+  boxWeightKg?: number;
 }
 
 /* Whether to persist per-design width_mm/length_mm columns on the Design
@@ -109,6 +113,8 @@ function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
       if (withDims) {
         o.widthMm = num(r.width_mm);
         o.lengthMm = num(r.length_mm);
+        o.pcsPerPacking = num(r.pcs_per_packing);
+        o.boxWeightKg = num(r.box_weight_kg);
       }
       return o;
     })
@@ -158,7 +164,10 @@ async function fetchDesigns(): Promise<{
   // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
   const [designs, size, finish, category, glaze, brand, grade, partyBrand] = await Promise.all([
     listAll("Design", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code", "width_mm", "length_mm", "seq_code"] }),
+    list("Size", {
+      limit: 300,
+      columns: ["code", "width_mm", "length_mm", "seq_code", "pcs_per_packing", "box_weight_kg"],
+    }),
     list("Finish", { limit: 300, columns: ["name", "seq_code"] }),
     list("Category", { limit: 300, columns: ["name", "seq_code"] }),
     list("Glaze", { limit: 300, columns: ["name", "seq_code"] }),

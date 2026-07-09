@@ -144,13 +144,22 @@ Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewe
 |---|---|---|
 | name | varchar(50) | key column |
 
-### Size (76673000000050001) — keys on `code`, NOT name
+### Size (76673000000050001 · **live id 69851000000041006**) — keys on `code`, NOT name
 | Column | Type | Notes |
 |---|---|---|
-| code | varchar(50) | key column |
+| code | varchar(50) | key column · auto = `{width_mm}x{length_mm}` |
 | width_mm | int | |
 | length_mm | int | |
 | seq_code | varchar(10) | SKU segment |
+| tile_type | varchar(50) | added 2026-07-09 · e.g. GVT |
+| thickness_mm | double(2) | added 2026-07-09 · optional |
+| pcs_per_packing | int | added 2026-07-09 · pieces per box |
+| box_weight_kg | double(2) | added 2026-07-09 · manual |
+| sqm_per_box | double(4) | added 2026-07-09 · **computed on save** = `(width_mm/1000)*(length_mm/1000)*pcs_per_packing` |
+| sqft_per_box | double(4) | added 2026-07-09 · **computed on save** = `sqm_per_box * 10.7639` |
+| remark | varchar(255) | added 2026-07-09 (requested 1000, Catalyst capped at 255) |
+
+Size is the single source of truth for per-box packing data. `Pallet.coverage_sqm/coverage_sqft/box_weight_kg` and `Design.width_mm/length_mm/pcs_per_box/box_weight_kg` are **auto-filled snapshots** of the picked Size — never hand-entered.
 
 Values (`code` → width×length mm): 75x600, 98x600, 98x1200, 198x1200, 200x1200, 300x600, 400x1200, 600x600, 600x900, 600x1200, 800x800, 800x1600, 1200x1200, 1200x2780, 400x400.
 

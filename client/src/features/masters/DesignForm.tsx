@@ -57,6 +57,8 @@ interface FieldSpec {
   suggest?: "partyBrands"; // datalist suggestions (free-text + pick list)
   required?: boolean;
   suffix?: string;
+  /** Owned by the Size master — auto-filled from the picked Size, never typed. */
+  fromSize?: boolean;
 }
 
 const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
@@ -85,10 +87,10 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
   {
     title: "Dimensions & Coverage",
     fields: [
-      { key: "width_mm", label: "Width", kind: "number", suffix: "mm" },
-      { key: "length_mm", label: "Length", kind: "number", suffix: "mm" },
-      { key: "pcs_per_box", label: "Pcs / Box", kind: "number" },
-      { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg" },
+      { key: "width_mm", label: "Width", kind: "number", suffix: "mm", fromSize: true },
+      { key: "length_mm", label: "Length", kind: "number", suffix: "mm", fromSize: true },
+      { key: "pcs_per_box", label: "Pcs / Box", kind: "number", fromSize: true },
+      { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg", fromSize: true },
       { key: "random_faces", label: "Random Faces", kind: "number" },
     ],
   },
@@ -250,24 +252,29 @@ export function DesignFields({
   const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
   const cov = useMemo(() => computeCoverage(value), [value]);
 
-  // Auto-fill width/length from the chosen Size's dimensions when blank
-  // (covers edit-load when dims aren't persisted, and fresh size picks).
+  // Packing data is owned by the Size master — the item snapshots it. Fill any
+  // blank field from the chosen Size (covers edit-load of rows saved before
+  // Size carried this data, and fresh size picks).
   useEffect(() => {
-    if (!value.size || (value.width_mm && value.length_mm)) return;
+    if (!value.size) return;
     const opt = lookups.sizes.find((o) => o.id === value.size);
     if (!opt) return;
     if (!value.width_mm && opt.widthMm) onChange("width_mm", String(opt.widthMm));
     if (!value.length_mm && opt.lengthMm) onChange("length_mm", String(opt.lengthMm));
+    if (!value.pcs_per_box && opt.pcsPerPacking) onChange("pcs_per_box", String(opt.pcsPerPacking));
+    if (!value.box_weight_kg && opt.boxWeightKg) onChange("box_weight_kg", String(opt.boxWeightKg));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.size, lookups.sizes]);
 
-  // On an explicit Size change, overwrite width/length with that size's dims.
+  // On an explicit Size change, overwrite the packing snapshot with that size's.
   const handleField = (key: keyof DesignValues, val: string) => {
     onChange(key, val);
     if (key === "size") {
       const opt = lookups.sizes.find((o) => o.id === val);
       onChange("width_mm", opt?.widthMm ? String(opt.widthMm) : "");
       onChange("length_mm", opt?.lengthMm ? String(opt.lengthMm) : "");
+      onChange("pcs_per_box", opt?.pcsPerPacking ? String(opt.pcsPerPacking) : "");
+      onChange("box_weight_kg", opt?.boxWeightKg ? String(opt.boxWeightKg) : "");
     }
   };
 
@@ -349,6 +356,16 @@ export function DesignFields({
                         />
                       );
                     })()
+                  ) : f.fromSize ? (
+                    // Size master owns this value; editing it here would let the
+                    // item drift from the size it claims to be.
+                    <input
+                      value={value[f.key] || "—"}
+                      readOnly
+                      tabIndex={-1}
+                      style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                      title="From the selected Size — edit it in Size Master"
+                    />
                   ) : (
                     <input
                       className={err ? "error" : ""}

@@ -26,6 +26,8 @@ const PALLET_TYPES = [
 
 export interface PalletFormInitial extends Partial<PalletInput> {}
 
+const readOnlyStyle = { background: "var(--bg-2, transparent)", color: "var(--dim)" };
+
 const blank: PalletInput = {
   name: "",
   packing_details: "",
@@ -68,8 +70,14 @@ export function PalletForm({
   // Size comes from the Size master (FK in v.size). The label drives the name +
   // pallet_size_label. Legacy rows with only a pallet_size_label (no FK) keep
   // that label as a fallback until the operator re-picks a Size.
-  const sizeLabel =
-    sizeOptions.find((o) => o.id === v.size)?.label || initial?.pallet_size_label || "";
+  const picked = sizeOptions.find((o) => o.id === v.size);
+  const sizeLabel = picked?.label || initial?.pallet_size_label || "";
+
+  // Coverage + box weight are owned by the Size master. Once a Size is picked
+  // they mirror it; until then a legacy row keeps the values it was saved with.
+  const coverageSqm = picked ? picked.sqmPerBox : v.coverage_sqm;
+  const coverageSqft = picked ? picked.sqftPerBox : v.coverage_sqft;
+  const boxWeightKg = picked ? picked.boxWeightKg : v.box_weight_kg;
 
   // Packing detail auto-computes from arrangement A → "[30 * 18] = 540".
   const packing = useMemo(() => {
@@ -99,14 +107,15 @@ export function PalletForm({
   const isNewType = !!v.pallet_type.trim() && !typeOptions.includes(v.pallet_type.trim());
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
   const totalBoxes =
     v.boxes_per_pallet * v.pallets_per_container + v.b_boxes_per_pallet * v.b_pallets_per_container;
   const totalPallets = v.pallets_per_container + v.b_pallets_per_container;
   // Per spec: one loaded pallet = (box wt × boxes/pallet) + empty pallet wt.
-  const totalPalletWeight = v.box_weight_kg * v.boxes_per_pallet + v.empty_pallet_weight_kg;
-  const totalSqm = totalBoxes * v.coverage_sqm;
-  const totalSqft = totalBoxes * v.coverage_sqft;
-  const totalBoxWeight = totalBoxes * v.box_weight_kg;
+  const totalPalletWeight = boxWeightKg * v.boxes_per_pallet + v.empty_pallet_weight_kg;
+  const totalSqm = totalBoxes * coverageSqm;
+  const totalSqft = totalBoxes * coverageSqft;
+  const totalBoxWeight = totalBoxes * boxWeightKg;
 
   // 5.5: nothing is mandatory — submit always proceeds.
   const submit = () => {
@@ -116,6 +125,10 @@ export function PalletForm({
       packing_details: packing,
       pallet_size_label: sizeLabel,
       size: v.size,
+      // Snapshot the Size master's per-box figures onto this pallet row.
+      coverage_sqm: coverageSqm,
+      coverage_sqft: coverageSqft,
+      box_weight_kg: boxWeightKg,
     });
   };
 
@@ -198,40 +211,46 @@ export function PalletForm({
             </div>
           </div>
 
+          {/* Owned by the Size master — pick a Size above to fill these. */}
           <div className="form-section">
-            <div className="form-section-title">Coverage / Weight (per box)</div>
+            <div className="form-section-title">Coverage / Weight (per box) · from Size Master</div>
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Coverage (Sq.M.)</span>
                 <input
-                  type="number" min={0}
-                  step="0.01"
-                  value={v.coverage_sqm || ""}
-                  onChange={(e) => setNum("coverage_sqm", e.target.value)}
-                  placeholder="e.g. 1.44"
+                  value={coverageSqm > 0 ? String(r4(coverageSqm)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={readOnlyStyle}
+                  title="Total SQM per Box, from the selected Size"
                 />
               </label>
               <label className="form-field">
                 <span className="lbl">Coverage (Sq.Ft.)</span>
                 <input
-                  type="number" min={0}
-                  step="0.01"
-                  value={v.coverage_sqft || ""}
-                  onChange={(e) => setNum("coverage_sqft", e.target.value)}
-                  placeholder="e.g. 15.50"
+                  value={coverageSqft > 0 ? String(r2(coverageSqft)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={readOnlyStyle}
+                  title="Total SQFT per Box, from the selected Size"
                 />
               </label>
               <label className="form-field">
                 <span className="lbl">Box Weight (kg)</span>
                 <input
-                  type="number" min={0}
-                  step="0.01"
-                  value={v.box_weight_kg || ""}
-                  onChange={(e) => setNum("box_weight_kg", e.target.value)}
-                  placeholder="e.g. 27.5"
+                  value={boxWeightKg > 0 ? String(r2(boxWeightKg)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  style={readOnlyStyle}
+                  title="Box Weight, from the selected Size"
                 />
               </label>
             </div>
+            {v.size && coverageSqm === 0 && (
+              <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                This size has no packing data yet — set Pcs. per Packing and Box Weight in Size Master.
+              </span>
+            )}
           </div>
 
           <div className="form-section">

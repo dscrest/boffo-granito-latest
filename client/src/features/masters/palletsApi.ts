@@ -15,6 +15,11 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 export interface SizeOption {
   id: string; // Size ROWID
   label: string; // human label (code, falling back to name)
+  // Per-box packing data owned by the Size master. The pallet form shows these
+  // read-only and snapshots them onto the Pallet row on save.
+  sqmPerBox: number;
+  sqftPerBox: number;
+  boxWeightKg: number;
 }
 
 export interface PalletRow {
@@ -80,10 +85,10 @@ async function fetchPallets(): Promise<{
   sizes: SizeOption[];
   error?: string;
 }> {
-  // listAll pages past ZCQL's 300-row cap; Size projects its label columns.
+  // listAll pages past ZCQL's 300-row cap; Size projects its label + packing columns.
   const [pallets, sizes] = await Promise.all([
     listAll("Pallet", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code"] }),
+    list("Size", { limit: 300, columns: ["code", "sqm_per_box", "sqft_per_box", "box_weight_kg"] }),
   ]);
   if (!pallets.ok) return { ok: false, pallets: [], sizes: [], error: pallets.error };
 
@@ -91,7 +96,13 @@ async function fetchPallets(): Promise<{
   (sizes.rows || []).forEach((r) => sizeLabel.set(String(r.ROWID), sizeLabelOf(r)));
 
   const sizeOptions: SizeOption[] = (sizes.rows || [])
-    .map((r) => ({ id: String(r.ROWID), label: sizeLabelOf(r) }))
+    .map((r) => ({
+      id: String(r.ROWID),
+      label: sizeLabelOf(r),
+      sqmPerBox: num(r.sqm_per_box),
+      sqftPerBox: num(r.sqft_per_box),
+      boxWeightKg: num(r.box_weight_kg),
+    }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   const rows: PalletRow[] = (pallets.rows || []).map((p) => {
@@ -145,6 +156,9 @@ export interface PalletInput {
   size: string; // Size ROWID ("" = leave unset)
   pallet_type: string;
   pallet_size_label: string;
+  // Snapshotted from the picked Size on save — never hand-entered. Kept on the
+  // Pallet row so ZCQL reads need no join and historical pallets keep the
+  // numbers they were costed with, even if the Size master is later corrected.
   coverage_sqm: number;
   coverage_sqft: number;
   box_weight_kg: number;
