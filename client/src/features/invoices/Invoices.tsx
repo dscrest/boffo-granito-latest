@@ -121,7 +121,7 @@ export function Invoices() {
   };
 
   const onDelete = async (row: InvoiceRow) => {
-    if (!(await confirmDialog({ message: `Delete invoice ${row.invoiceNumber}? This cannot be undone.`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete invoice ${row.invoiceNumber}? This cannot be undone.`, danger: true }))) return;
     const res = await deleteInvoice(row.id);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");

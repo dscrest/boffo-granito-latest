@@ -108,7 +108,7 @@ export function DesignEdit() {
 
   const onDelete = async () => {
     if (!row) return;
-    if (!(await confirmDialog({ message: `Delete design "${row.designName}"? This cannot be undone.`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete design "${row.designName}"? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     setError(null);
     const res = await deleteDesign(id);

@@ -178,7 +178,7 @@ export function SalesPersonsAdmin() {
 
   const onDelete = async () => {
     if (!draft?.rowid) return;
-    if (!(await confirmDialog({ message: `Remove sales person "${draft.name}"?`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete sales person "${draft.name}"? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     try {
       await deleteSalesPerson(draft.rowid);

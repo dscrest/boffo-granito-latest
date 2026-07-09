@@ -254,13 +254,13 @@ export function ItemDetail() {
 
   const deleteAt = async (idx: number) => {
     if (!design) return;
-    if (!(await confirmDialog({ message: "Delete this image?", danger: true }))) return;
+    if (!(await confirmDialog({ message: "Are you sure you want to delete this image?", danger: true }))) return;
     await saveImages(design.images.filter((_, i) => i !== idx));
   };
 
   const onDeleteItem = async () => {
     if (!design) return;
-    if (!(await confirmDialog({ message: `Delete item "${design.uniqueName || design.designName}"? This cannot be undone.`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete item "${design.uniqueName || design.designName}"? This cannot be undone.`, danger: true }))) return;
     setBusy(true);
     const res = await deleteDesign(design.id);
     setBusy(false);

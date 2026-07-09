@@ -46,9 +46,15 @@
   --sidebar-w:    232px;
   --header-h:     52px;
 
-  /* Typography */
-  --font-sans: 'Zoho Puvi', 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  /* Typography — Zoho Puvi ONLY (2026-07-09 request). No second family.
+     Inter + IBM Plex Mono used to load from Google Fonts (link removed from
+     index.html); Puvi is self-hosted from public/fonts above.
+     `--font-mono` survives as a Puvi-first alias so the ~30 `.mono` call
+     sites keep `font-variant-numeric: tabular-nums` without a 30-file
+     rename. The trailing monospace fallback only ever applies if Puvi
+     itself fails to load — it never overrides Puvi. */
+  --font-sans: 'Zoho Puvi', system-ui, sans-serif;
+  --font-mono: 'Zoho Puvi', ui-monospace, monospace;
 
   /* Sizes (compact) */
   --t-xs: 10.5px;

@@ -309,7 +309,7 @@ export function DesignMaster() {
   };
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
+    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
       return;
     setBusy(true);
     setNotice(`Deleting ${ids.length} item${ids.length > 1 ? "s" : ""}…`);

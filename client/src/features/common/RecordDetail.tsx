@@ -64,7 +64,7 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
               const detail = ok ? describeChange(str(r.operation), str(r.payload_summary)) : str(r.error_text);
               return (
                 <tr key={String(r.ROWID)}>
-                  <td className="mono muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
+                  <td className="muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
                   <td>{str(r.operation)}</td>
                   <td className="muted">{actorName(str(r.actor))}</td>
                   <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={detail}>

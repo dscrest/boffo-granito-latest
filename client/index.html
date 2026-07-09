@@ -4,12 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BOFFO Order OS</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Fonts: Zoho Puvi only, self-hosted from public/fonts via @font-face in
+         styles.css. The Google Fonts link (Inter + IBM Plex Mono) was removed
+         2026-07-09 — nothing references those families any more, and dropping
+         it removes a render-blocking third-party request. -->
     <!-- Catalyst Web SDK (Embedded Auth). init.js is injected by Catalyst hosting and
          only resolves on the deployed domain; under `vite dev` it 404s and the app
          falls back to the dev auth stub. Verify the exact 4.x patch on first deploy. -->

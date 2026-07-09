@@ -157,7 +157,7 @@ export function Containers() {
   const ids = useMemo(() => [...selected], [selected]);
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Delete ${ids.length} selected container${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
+    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected container${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
       return;
     setBusy(true);
     setNotice(`Deleting ${ids.length} container${ids.length > 1 ? "s" : ""}…`);

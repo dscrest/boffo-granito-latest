@@ -2,7 +2,13 @@
    Imperative confirm modal — mirrors Toast's module-level pub/sub.
 
    Anywhere in the app:
-     if (!(await confirmDialog({ message: "Delete this?", danger: true }))) return;
+     if (!(await confirmDialog({ message: "Are you sure you want to delete X?", danger: true }))) return;
+
+   Message convention for destructive actions: always
+     "Are you sure you want to delete <subject>? This cannot be undone."
+   Name the subject (record no., item name, or "N selected rows") — a
+   generic "delete this?" hides which row is about to go, which is exactly
+   what the confirm exists to prevent.
 
    <ConfirmHost/> (mounted once in App) renders the designed modal.
    Enter = confirm, Esc / backdrop / Cancel = dismiss. Falls back to the

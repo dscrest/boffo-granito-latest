@@ -205,7 +205,7 @@ export function QuoteDetail() {
 
   const onDelete = async () => {
     if (!quote) return;
-    if (!(await confirmDialog({ message: `Delete quote ${quote.quoteNo}? This cannot be undone.`, danger: true }))) return;
+    if (!(await confirmDialog({ message: `Are you sure you want to delete quote ${quote.quoteNo}? This cannot be undone.`, danger: true }))) return;
     setBusy(`Deleting ${quote.quoteNo}…`);
     const res = await deleteQuote(quote.id);
     if (!res.ok) {
