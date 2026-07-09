@@ -49,6 +49,7 @@ const blank: PalletInput = {
 export function PalletForm({
   palletTypes = [],
   sizeOptions = [],
+  lockSize,
   initial,
   isEdit,
   onSave,
@@ -58,6 +59,8 @@ export function PalletForm({
   palletTypes?: string[];
   /** Live Size master options (FK ROWID + label), from the DB. */
   sizeOptions?: SizeOption[];
+  /** Locks the Size picker — used when the form is opened from a Size's detail page. */
+  lockSize?: boolean;
   initial?: PalletFormInitial;
   isEdit?: boolean;
   onSave: (input: PalletInput) => void;
@@ -169,12 +172,22 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Size</span>
-                <Combobox
-                  value={v.size}
-                  options={[{ value: "", label: "" }, ...sizeOptions.map((s) => ({ value: s.id, label: s.label }))]}
-                  onChange={(val) => setStr("size", val)}
-                  placeholder="Search size…"
-                />
+                {lockSize ? (
+                  <input
+                    value={sizeLabel || "—"}
+                    readOnly
+                    tabIndex={-1}
+                    style={readOnlyStyle}
+                    title="Size is fixed — opened from the Size master"
+                  />
+                ) : (
+                  <Combobox
+                    value={v.size}
+                    options={[{ value: "", label: "" }, ...sizeOptions.map((s) => ({ value: s.id, label: s.label }))]}
+                    onChange={(val) => setStr("size", val)}
+                    placeholder="Search size…"
+                  />
+                )}
               </label>
               <label className="form-field">
                 <span className="lbl">Pallet Type</span>

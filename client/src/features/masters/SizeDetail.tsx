@@ -17,7 +17,15 @@ import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedPallets, DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { SizeForm } from "./SizeForm";
-import { cachedPallets, listPallets, type PalletRow } from "./palletsApi";
+import { PalletForm } from "./PalletForm";
+import {
+  cachedPallets,
+  createPallet,
+  listPallets,
+  type PalletInput,
+  type PalletRow,
+  type SizeOption,
+} from "./palletsApi";
 import { cachedSizes, deleteSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -51,14 +59,22 @@ export function SizeDetail() {
   const [sizes, setSizes] = useState<SizeRow[] | null>(() => cachedSizes());
   // Pallets are read-only here — only to show the ones pointing at this size.
   const [pallets, setPallets] = useState<PalletRow[] | null>(() => cachedPallets());
+  // Size master options, as the pallet form wants them — listPallets() already returns these.
+  const [sizeOpts, setSizeOpts] = useState<SizeOption[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [creatingPallet, setCreatingPallet] = useState(false);
 
   const refresh = () => listSizes().then((res) => setSizes(res.ok ? res.sizes : (cachedSizes() ?? [])));
+  const refreshPallets = () =>
+    listPallets().then((res) => {
+      setPallets(res.ok ? res.pallets : (cachedPallets() ?? []));
+      if (res.ok) setSizeOpts(res.sizes);
+    });
   useEffect(() => {
     void refresh();
-    void listPallets().then((res) => setPallets(res.ok ? res.pallets : (cachedPallets() ?? [])));
+    void refreshPallets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -74,6 +90,7 @@ export function SizeDetail() {
 
   // Distinct types already saved, fed to the form so the picker can create-on-save.
   const tileTypes = [...new Set(sizes.map((s) => s.tileType).filter(Boolean))].sort();
+  const palletTypes = [...new Set((pallets ?? []).map((p) => p.palletType).filter(Boolean))].sort();
 
   const onSave = async (input: SizeInput) => {
     if (!size) return;
@@ -108,7 +125,24 @@ export function SizeDetail() {
     navigate("/sizes");
   };
 
-  const moreItems = canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : [];
+  // A pallet spec is always a spec *for a size* — offer the create right here,
+  // with this size locked in and its per-box packing data already mirrored.
+  const onCreatePallet = async (input: PalletInput) => {
+    const res = await createPallet(input);
+    if (!res.ok) {
+      // Keep the form open — closing here would discard everything typed.
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setCreatingPallet(false);
+    toast.success("Pallet saved");
+    await refreshPallets();
+  };
+
+  const moreItems = [
+    { label: "Create Pallet", onClick: () => setCreatingPallet(true) },
+    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+  ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -128,6 +162,23 @@ export function SizeDetail() {
           }}
           onSave={onSave}
           onClose={() => setEditing(false)}
+        />
+      )}
+
+      {creatingPallet && size && (
+        <PalletForm
+          lockSize
+          sizeOptions={sizeOpts}
+          palletTypes={palletTypes}
+          initial={{
+            size: size.id,
+            pallet_size_label: size.code,
+            coverage_sqm: size.sqmPerBox,
+            coverage_sqft: size.sqftPerBox,
+            box_weight_kg: size.boxWeightKg,
+          }}
+          onSave={onCreatePallet}
+          onClose={() => setCreatingPallet(false)}
         />
       )}
 
