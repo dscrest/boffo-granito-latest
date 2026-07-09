@@ -5,10 +5,11 @@
    (palletisation + container fit) reads these specs.
 
    Follows the master-page UI convention (see DesignMaster):
-   • NO inline row actions — row-click opens the edit form.
+   • NO inline row actions — row-click opens the pallet detail page.
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -18,15 +19,7 @@ import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { PalletForm } from "./PalletForm";
-import {
-  bulkDeletePallets,
-  createPallet,
-  listPallets,
-  updatePallet,
-  type PalletInput,
-  type PalletRow,
-  type SizeOption,
-} from "./palletsApi";
+import { bulkDeletePallets, createPallet, listPallets, type PalletInput, type PalletRow, type SizeOption } from "./palletsApi";
 
 const dash = <span className="dim">—</span>;
 
@@ -68,17 +61,16 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
 ];
 
 export function Pallets() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<PalletRow[]>([]);
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [typeF, setTypeF] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { ordered, visible, hidden, toggle, move } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);
-  const [editing, setEditing] = useState<{ row: PalletRow | null } | null>(null); // null=closed, {row:null}=new
+  const [showNew, setShowNew] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -100,35 +92,29 @@ export function Pallets() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (typeF && r.palletType !== typeF) return false;
-      if (!q) return true;
-      return (
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
         r.name.toLowerCase().includes(q) ||
         r.sizeLabel.toLowerCase().includes(q) ||
         r.palletType.toLowerCase().includes(q) ||
-        r.packingDetails.toLowerCase().includes(q)
-      );
-    });
-  }, [rows, query, typeF]);
+        r.packingDetails.toLowerCase().includes(q),
+    );
+  }, [rows, query]);
 
-  const pager = usePagination(filtered.length, "palletsPageSize", `${query}|${typeF}`);
+  const pager = usePagination(filtered.length, "palletsPageSize", query);
   const pageRows = pager.slice(filtered);
 
-  const onSave = async (input: PalletInput) => {
-    const target = editing?.row;
-    setNotice(target ? "Saving changes…" : "Saving pallet…");
-    const res = target ? await updatePallet(target.id, input) : await createPallet(input);
+  const onCreate = async (input: PalletInput) => {
+    const res = await createPallet(input);
     if (!res.ok) {
       // Keep the form open — closing here would discard everything typed.
-      setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    setEditing(null);
-    setNotice(`Pallet saved (#${res.rowid}).`);
-    toast.success(target ? "Pallet updated" : "Pallet saved");
+    setShowNew(false);
+    toast.success("Pallet saved");
     await load();
   };
 
@@ -156,7 +142,6 @@ export function Pallets() {
     if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected pallet${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
       return;
     setBusy(true);
-    setNotice(`Deleting ${ids.length} pallet${ids.length > 1 ? "s" : ""}…`);
     const res = await bulkDeletePallets(ids);
     setBusy(false);
     if (!res.ok) {
@@ -165,7 +150,6 @@ export function Pallets() {
     } else {
       toast.success(`${res.done} pallet${res.done === 1 ? "" : "s"} deleted`);
     }
-    setNotice(`Deleted ${res.done} pallet${res.done === 1 ? "" : "s"}.`);
     await load();
   };
 
@@ -175,58 +159,14 @@ export function Pallets() {
     [rows],
   );
 
-  const initial: Partial<PalletInput> | undefined = editing?.row
-    ? {
-        name: editing.row.name,
-        packing_details: editing.row.packingDetails,
-        size: editing.row.sizeId,
-        pallet_type: editing.row.palletType,
-        // Carries the "WxL" tile label the form parses back into Width/Length.
-        pallet_size_label: editing.row.palletSizeLabel || editing.row.sizeLabel,
-        coverage_sqm: editing.row.coverageSqm,
-        coverage_sqft: editing.row.coverageSqft,
-        box_weight_kg: editing.row.boxWeightKg,
-        boxes_per_pallet: editing.row.boxesPerPallet,
-        pallets_per_container: editing.row.palletsPerContainer,
-        empty_pallet_weight_kg: editing.row.emptyWeightKg,
-        b_boxes_per_pallet: editing.row.bBoxesPerPallet,
-        b_pallets_per_container: editing.row.bPalletsPerContainer,
-        b_pallet_weight: editing.row.bPalletWeightKg,
-        remarks: editing.row.remarks,
-      }
-    : undefined;
-
   return (
-    <div>
-      {editing && (
-        <PalletForm
-          palletTypes={palletTypes}
-          sizeOptions={sizes}
-          initial={initial}
-          isEdit={!!editing.row}
-          onSave={onSave}
-          onClose={() => setEditing(null)}
-        />
+    /* Column fills the scrollport exactly (.main pads 14px top + a 32px ::after),
+       so the grid card grows and its footer sits on the window edge — no dead
+       band under short tables. */
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
+      {showNew && (
+        <PalletForm palletTypes={palletTypes} sizeOptions={sizes} onSave={onCreate} onClose={() => setShowNew(false)} />
       )}
-
-      <div className="page-head">
-        <div>
-          <div className="title">Pallet Master</div>
-          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
-        </div>
-        <div className="right">
-          <button className="hbtn" onClick={() => void load()} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
-          {canUpdate() && (
-            <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
-              <Icon name="plus" size={13} />
-              New pallet
-            </button>
-          )}
-        </div>
-      </div>
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -248,25 +188,26 @@ export function Pallets() {
         </div>
       ) : (
         <div className="fbar">
-          <select value={typeF} onChange={(e) => setTypeF(e.target.value)} title="Filter by type">
-            <option value="">All types</option>
-            {palletTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+          {/* Type filter intentionally omitted for now — search covers it. */}
+          <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
           <div style={{ flex: 1 }} />
           <span className="gsearch">
             <Icon name="search" size={13} />
             <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          {canUpdate() && (
+            /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+              <Icon name="plus" size={13} />
+              New pallet
+            </button>
+          )}
         </div>
       )}
 
-      <div className="card">
-        <div style={{ overflow: "auto" }}>
+      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           {loading && rows.length === 0 ? (
             <SkeletonRows rows={6} />
           ) : (
@@ -294,14 +235,14 @@ export function Pallets() {
                   <tr
                     key={r.id}
                     tabIndex={0}
-                    onClick={() => setEditing({ row: r })}
+                    onClick={() => navigate(`/pallets/${r.id}`)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && e.target === e.currentTarget) setEditing({ row: r });
+                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/pallets/${r.id}`);
                     }}
                     style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
-                    title="Edit pallet"
+                    title="View pallet"
                   >
-                    {/* checkbox cell stops propagation so toggling never opens the form */}
+                    {/* checkbox cell stops propagation so toggling never navigates */}
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
                     </td>
@@ -325,7 +266,7 @@ export function Pallets() {
                         title="No pallets yet"
                         hint="Add your first pallet spec with New pallet"
                         action={
-                          <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
+                          <button className="hbtn primary" onClick={() => setShowNew(true)}>
                             New pallet
                           </button>
                         }

@@ -9,7 +9,7 @@
    Renders instantly from the designs cache — no skeleton flash when
    navigating between items or returning to the tab.
    ============================================================ */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
@@ -21,6 +21,7 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
+import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
 
@@ -34,73 +35,6 @@ const SHOW_PARTY_PANEL = false;
    HSN Code / Tax Preference / Inventory Account / Valuation Method removed
    per 2026-07 request; only Unit remains as a placeholder row. */
 const ZOHO_STUB_FIELDS = ["Unit"];
-
-function DetailRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
-  return (
-    <div style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
-      <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>{label}</span>
-      <span className={dim ? "dim" : ""} style={{ minWidth: 0, overflowWrap: "anywhere" }}>{value}</span>
-    </div>
-  );
-}
-
-/** "More ▾" actions dropdown (Zoho-style) — reuses the .hdr-menu styles. */
-function MoreMenu({ items }: { items: { label: string; danger?: boolean; onClick: () => void }[] }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  if (items.length === 0) return null;
-  return (
-    <div className="hdr-pop" ref={ref}>
-      <button className="hbtn" onClick={() => setOpen((v) => !v)} title="More actions">
-        More <Icon name="more" size={13} />
-      </button>
-      {open && (
-        <div className="hdr-menu" style={{ right: 0, width: 210, padding: 6 }}>
-          {items.map((it) => (
-            <button
-              key={it.label}
-              onClick={() => {
-                setOpen(false);
-                it.onClick();
-              }}
-              style={{
-                display: "block",
-                width: "100%",
-                textAlign: "left",
-                padding: "7px 10px",
-                border: "none",
-                background: "transparent",
-                borderRadius: 6,
-                cursor: "pointer",
-                color: it.danger ? "var(--c-red)" : "inherit",
-                font: "inherit",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** One image slot: preview + delete when filled, a passive placeholder when
     empty (uploads all go through the single "Add Image" button). */

@@ -8,10 +8,11 @@
    picked there.
 
    Follows the master-page UI convention (see DesignMaster):
-   • NO inline row actions — row-click opens the edit form.
+   • NO inline row actions — row-click opens the size detail page.
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -21,7 +22,7 @@ import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmtDateTime } from "@/lib/format";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { SizeForm } from "./SizeForm";
-import { bulkDeleteSizes, createSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
+import { bulkDeleteSizes, createSize, listSizes, type SizeInput, type SizeRow } from "./sizesApi";
 
 const dash = <span className="dim">—</span>;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -73,12 +74,11 @@ const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
 ];
 
 export function Sizes() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<SizeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [typeF, setTypeF] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { ordered, visible, hidden, toggle, move } = useColumns("sizesTableColumns", SIZE_COLUMNS, [
@@ -87,7 +87,7 @@ export function Sizes() {
     "created",
     "modified",
   ]);
-  const [editing, setEditing] = useState<{ row: SizeRow | null } | null>(null); // null=closed, {row:null}=new
+  const [showNew, setShowNew] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -108,35 +108,29 @@ export function Sizes() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (typeF && r.tileType !== typeF) return false;
-      if (!q) return true;
-      return (
+    if (!q) return rows;
+    return rows.filter(
+      (r) =>
         r.code.toLowerCase().includes(q) ||
         r.tileType.toLowerCase().includes(q) ||
         r.seqCode.toLowerCase().includes(q) ||
-        r.remark.toLowerCase().includes(q)
-      );
-    });
-  }, [rows, query, typeF]);
+        r.remark.toLowerCase().includes(q),
+    );
+  }, [rows, query]);
 
-  const pager = usePagination(filtered.length, "sizesPageSize", `${query}|${typeF}`);
+  const pager = usePagination(filtered.length, "sizesPageSize", query);
   const pageRows = pager.slice(filtered);
 
-  const onSave = async (input: SizeInput) => {
-    const target = editing?.row;
-    setNotice(target ? "Saving changes…" : "Saving size…");
-    const res = target ? await updateSize(target.id, input) : await createSize(input);
+  const onCreate = async (input: SizeInput) => {
+    const res = await createSize(input);
     if (!res.ok) {
       // Keep the form open — closing here would discard everything typed.
-      setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    setEditing(null);
-    setNotice(`Size saved (#${res.rowid}).`);
-    toast.success(target ? "Size updated" : "Size saved");
+    setShowNew(false);
+    toast.success("Size saved");
     await load();
   };
 
@@ -169,7 +163,6 @@ export function Sizes() {
     )
       return;
     setBusy(true);
-    setNotice(`Deleting ${ids.length} size${ids.length > 1 ? "s" : ""}…`);
     const res = await bulkDeleteSizes(ids);
     setBusy(false);
     if (!res.ok) {
@@ -178,56 +171,18 @@ export function Sizes() {
     } else {
       toast.success(`${res.done} size${res.done === 1 ? "" : "s"} deleted`);
     }
-    setNotice(`Deleted ${res.done} size${res.done === 1 ? "" : "s"}.`);
     await load();
   };
 
   // Distinct types already saved, fed to the form so the picker can create-on-save.
   const tileTypes = useMemo(() => [...new Set(rows.map((r) => r.tileType).filter(Boolean))].sort(), [rows]);
 
-  const initial: Partial<SizeInput> | undefined = editing?.row
-    ? {
-        width_mm: editing.row.widthMm,
-        length_mm: editing.row.lengthMm,
-        seq_code: editing.row.seqCode,
-        tile_type: editing.row.tileType,
-        thickness_mm: editing.row.thicknessMm,
-        pcs_per_packing: editing.row.pcsPerPacking,
-        box_weight_kg: editing.row.boxWeightKg,
-        remark: editing.row.remark,
-      }
-    : undefined;
-
   return (
-    <div>
-      {editing && (
-        <SizeForm
-          tileTypes={tileTypes}
-          initial={initial}
-          isEdit={!!editing.row}
-          onSave={onSave}
-          onClose={() => setEditing(null)}
-        />
-      )}
-
-      <div className="page-head">
-        <div>
-          <div className="title">Size Master</div>
-          <div className="sub">{loading ? "Loading…" : <span className="dim">{notice}</span>}</div>
-        </div>
-        <div className="right">
-          <button className="hbtn" onClick={() => void load()} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
-          {canUpdate() && (
-            <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
-              <Icon name="plus" size={13} />
-              New size
-            </button>
-          )}
-        </div>
-      </div>
+    /* Column fills the scrollport exactly (.main pads 14px top + a 32px ::after),
+       so the grid card grows and its footer sits on the window edge — no dead
+       band under short tables. */
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
+      {showNew && <SizeForm tileTypes={tileTypes} onSave={onCreate} onClose={() => setShowNew(false)} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -249,25 +204,26 @@ export function Sizes() {
         </div>
       ) : (
         <div className="fbar">
-          <select value={typeF} onChange={(e) => setTypeF(e.target.value)} title="Filter by type">
-            <option value="">All types</option>
-            {tileTypes.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+          {/* Type filter intentionally omitted for now — search covers it. */}
+          <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
           <div style={{ flex: 1 }} />
           <span className="gsearch">
             <Icon name="search" size={13} />
             <input type="text" placeholder="Search size…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          {canUpdate() && (
+            /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+              <Icon name="plus" size={13} />
+              New size
+            </button>
+          )}
         </div>
       )}
 
-      <div className="card">
-        <div style={{ overflow: "auto" }}>
+      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           {loading && rows.length === 0 ? (
             <SkeletonRows rows={6} />
           ) : (
@@ -282,7 +238,6 @@ export function Sizes() {
                       title={allShownSelected ? "Deselect all" : "Select all"}
                     />
                   </th>
-                  <th style={{ width: 36, textAlign: "center" }}>#</th>
                   {visible.map((c) => (
                     <th key={c.key} style={c.style}>
                       {c.label}
@@ -291,25 +246,22 @@ export function Sizes() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((r, i) => {
+                {pageRows.map((r) => {
                   const sel = selected.has(r.id);
                   return (
                     <tr
                       key={r.id}
                       tabIndex={0}
-                      onClick={() => setEditing({ row: r })}
+                      onClick={() => navigate(`/sizes/${r.id}`)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" && e.target === e.currentTarget) setEditing({ row: r });
+                        if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/sizes/${r.id}`);
                       }}
                       style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
-                      title="Edit size"
+                      title="View size"
                     >
-                      {/* checkbox cell stops propagation so toggling never opens the form */}
+                      {/* checkbox cell stops propagation so toggling never navigates */}
                       <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
-                      </td>
-                      <td className="muted mono" style={{ textAlign: "center" }}>
-                        {pager.from + i}
                       </td>
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
@@ -321,7 +273,7 @@ export function Sizes() {
                 })}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 2}>
+                    <td colSpan={visible.length + 1}>
                       {rows.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (
@@ -330,7 +282,7 @@ export function Sizes() {
                           title="No sizes yet"
                           hint="Add your first tile size with New size"
                           action={
-                            <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
+                            <button className="hbtn primary" onClick={() => setShowNew(true)}>
                               New size
                             </button>
                           }

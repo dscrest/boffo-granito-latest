@@ -48,7 +48,9 @@ const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) 
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
+const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
 const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
+const SizeDetail = lazy(() => import("@/features/masters/SizeDetail").then((m) => ({ default: m.SizeDetail })));
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
@@ -421,7 +423,9 @@ export default function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/pallets" element={<Pallets />} />
+            <Route path="/pallets/:id" element={<PalletDetail />} />
             <Route path="/sizes" element={<Sizes />} />
+            <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/salespersons" element={isAdmin ? <SalesPersonsAdmin /> : <Navigate to="/dashboard" replace />} />
