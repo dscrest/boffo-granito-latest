@@ -18,14 +18,17 @@ import { SkeletonRows, EmptyState } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
-import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
+import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { PalletForm } from "./PalletForm";
 import {
+  cachedPalletOrders,
   cachedPallets,
   deletePallet,
+  listPalletOrders,
   listPallets,
   updatePallet,
   type PalletInput,
+  type PalletOrder,
   type PalletRow,
   type SizeOption,
 } from "./palletsApi";
@@ -55,6 +58,10 @@ export function PalletDetail() {
   // Seed from cache so switching pallets / returning to the tab never flashes a skeleton.
   const [pallets, setPallets] = useState<PalletRow[] | null>(() => cachedPallets());
   const [sizes, setSizes] = useState<SizeOption[]>([]);
+  // Read-only here — which orders were packed on each pallet (PalletisedBatch).
+  const [palletOrders, setPalletOrders] = useState<Record<string, PalletOrder[]> | null>(() =>
+    cachedPalletOrders(),
+  );
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -66,12 +73,17 @@ export function PalletDetail() {
     });
   useEffect(() => {
     void refresh();
+    void listPalletOrders().then((res) =>
+      setPalletOrders(res.ok ? res.byPallet : (cachedPalletOrders() ?? {})),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (pallets === null) return <SkeletonRows rows={6} />;
 
   const pallet = pallets.find((p) => p.id === id) ?? null;
+  // null while the batch fetch is in flight; [] once we know this pallet has none.
+  const linkedOrders = palletOrders && (palletOrders[id] ?? []);
   const needle = q.trim().toLowerCase();
   const listed = needle
     ? pallets.filter((p) => `${p.name} ${p.sizeLabel} ${p.palletType}`.toLowerCase().includes(needle))
@@ -258,61 +270,70 @@ export function PalletDetail() {
                   .join("  ·  ") || "No size or type set"}
               </div>
 
-              <div style={{ maxWidth: 520 }}>
-                <Section
-                  title="Primary Details"
-                  rows={[
-                    text("Name", pallet.name),
-                    text("Size", pallet.sizeLabel),
-                    text("Pallet Size", pallet.palletSizeLabel),
-                    text("Type", pallet.palletType),
-                    text("Packing", pallet.packingDetails),
-                    num("Coverage (m² / box)", pallet.coverageSqm),
-                    num("Coverage (ft² / box)", pallet.coverageSqft),
-                    num("Box Weight (kg)", pallet.boxWeightKg),
-                  ]}
-                />
-
-                <Section
-                  title="Arrangement A"
-                  rows={[
-                    num("Boxes / Pallet", pallet.boxesPerPallet),
-                    num("Pallets / Container", pallet.palletsPerContainer),
-                    num("Empty Pallet Weight (kg)", pallet.emptyWeightKg),
-                  ]}
-                />
-
-                {/* Arrangement B only exists on mixed loads — hide the section entirely otherwise. */}
-                {(pallet.bBoxesPerPallet > 0 || pallet.bPalletsPerContainer > 0) && (
+              {/* Two columns: the pallet's own facts left, the orders packed on it
+                  right. Wraps instead of squashing once the pallet list is dragged wide. */}
+              <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div style={{ flex: "1 1 460px", maxWidth: 520, minWidth: 0 }}>
                   <Section
-                    title="Arrangement B"
+                    title="Primary Details"
                     rows={[
-                      num("Boxes / Pallet", pallet.bBoxesPerPallet),
-                      num("Pallets / Container", pallet.bPalletsPerContainer),
-                      num("Pallet Weight (kg)", pallet.bPalletWeightKg),
+                      text("Name", pallet.name),
+                      text("Size", pallet.sizeLabel),
+                      text("Pallet Size", pallet.palletSizeLabel),
+                      text("Type", pallet.palletType),
+                      text("Packing", pallet.packingDetails),
+                      num("Coverage (m² / box)", pallet.coverageSqm),
+                      num("Coverage (ft² / box)", pallet.coverageSqft),
+                      num("Box Weight (kg)", pallet.boxWeightKg),
                     ]}
                   />
-                )}
 
-                <Section
-                  title="Per Container (A + B)"
-                  rows={[
-                    num("Total Boxes", pallet.totalBoxesPerContainer),
-                    num("Total Pallets", pallet.totalPalletsPerContainer),
-                    num("Total Coverage (m²)", pallet.totalSqmPerContainer),
-                    num("Total Coverage (ft²)", pallet.totalSqftPerContainer),
-                    num("Total Box Weight (kg)", pallet.totalBoxWeightPerContainer),
-                  ]}
-                />
+                  <Section
+                    title="Arrangement A"
+                    rows={[
+                      num("Boxes / Pallet", pallet.boxesPerPallet),
+                      num("Pallets / Container", pallet.palletsPerContainer),
+                      num("Empty Pallet Weight (kg)", pallet.emptyWeightKg),
+                    ]}
+                  />
 
-                <Section
-                  title="Record"
-                  rows={[
-                    text("Remarks", pallet.remarks),
-                    ["Created", fmtLocalDateTime(pallet.createdTime), false],
-                    ["Modified", fmtLocalDateTime(pallet.modifiedTime), false],
-                  ]}
-                />
+                  {/* Arrangement B only exists on mixed loads — hide the section entirely otherwise. */}
+                  {(pallet.bBoxesPerPallet > 0 || pallet.bPalletsPerContainer > 0) && (
+                    <Section
+                      title="Arrangement B"
+                      rows={[
+                        num("Boxes / Pallet", pallet.bBoxesPerPallet),
+                        num("Pallets / Container", pallet.bPalletsPerContainer),
+                        num("Pallet Weight (kg)", pallet.bPalletWeightKg),
+                      ]}
+                    />
+                  )}
+
+                  <Section
+                    title="Per Container (A + B)"
+                    rows={[
+                      num("Total Boxes", pallet.totalBoxesPerContainer),
+                      num("Total Pallets", pallet.totalPalletsPerContainer),
+                      num("Total Coverage (m²)", pallet.totalSqmPerContainer),
+                      num("Total Coverage (ft²)", pallet.totalSqftPerContainer),
+                      num("Total Box Weight (kg)", pallet.totalBoxWeightPerContainer),
+                    ]}
+                  />
+
+                  <Section
+                    title="Record"
+                    rows={[
+                      text("Remarks", pallet.remarks),
+                      ["Created", fmtLocalDateTime(pallet.createdTime), false],
+                      ["Modified", fmtLocalDateTime(pallet.modifiedTime), false],
+                    ]}
+                  />
+                </div>
+
+                {/* marginTop matches the 14px a Section puts above its title. */}
+                <div style={{ flex: "1 1 320px", minWidth: 0, marginTop: 14 }}>
+                  <AssociatedOrders orders={linkedOrders} />
+                </div>
               </div>
             </div>
 

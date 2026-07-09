@@ -10,6 +10,7 @@ import { list, listAll, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import { invalidateContainers } from "@/features/masters/containersApi";
+import { invalidatePalletOrders } from "@/features/masters/palletsApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -188,6 +189,8 @@ function bustStageCaches(): void {
   loadableCache.invalidate();
   invalidateOrders();
   invalidateContainers();
+  // close-pallet inserts a PalletisedBatch — the pallet detail's order list is stale.
+  invalidatePalletOrders();
 }
 function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {

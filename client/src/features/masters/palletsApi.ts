@@ -150,6 +150,77 @@ async function fetchPallets(): Promise<{
   return { ok: true, pallets: rows, sizes: sizeOptions };
 }
 
+/* ---- orders packed on a pallet (PalletisedBatch.pallet → Pallet) ---- */
+
+export interface PalletOrder {
+  salesOrderId: string; // SalesOrder ROWID
+  orderNo: string; // order_number, falling back to po_number
+  boxes: number; // sum of boxes_packed across that order's batches
+}
+
+const ordersCache = createListCache(fetchPalletOrders);
+
+/** Last fetched pallet→orders map, or null if never fetched this session. */
+export function cachedPalletOrders(): Record<string, PalletOrder[]> | null {
+  return ordersCache.cached()?.byPallet ?? null;
+}
+/** Drop the cache so the next listPalletOrders() hits the network. */
+export function invalidatePalletOrders(): void {
+  ordersCache.invalidate();
+}
+
+/** Orders packed on each pallet, keyed by Pallet ROWID. Cached + deduped. */
+export function listPalletOrders(): Promise<{
+  ok: boolean;
+  byPallet: Record<string, PalletOrder[]>;
+  error?: string;
+}> {
+  return ordersCache.load();
+}
+
+async function fetchPalletOrders(): Promise<{
+  ok: boolean;
+  byPallet: Record<string, PalletOrder[]>;
+  error?: string;
+}> {
+  const [batches, sos] = await Promise.all([
+    listAll("PalletisedBatch", { columns: ["boxes_packed", "sales_order", "pallet"] }),
+    listAll("SalesOrder", { columns: ["order_number", "po_number"] }),
+  ]);
+  if (!batches.ok) return { ok: false, byPallet: {}, error: batches.error };
+
+  const orderNo = new Map<string, string>();
+  (sos.rows || []).forEach((s) =>
+    orderNo.set(String(s.ROWID), str(s.order_number) || str(s.po_number) || String(s.ROWID)),
+  );
+
+  // One pallet can hold many batches of the same order — collapse them into a
+  // single row per order and sum the boxes, else the list repeats order numbers.
+  const byPallet: Record<string, PalletOrder[]> = {};
+  const seen = new Map<string, PalletOrder>();
+  for (const b of batches.rows || []) {
+    const palletId = str(b.pallet);
+    const soId = str(b.sales_order);
+    if (!palletId || !soId) continue;
+    const key = `${palletId}|${soId}`;
+    const hit = seen.get(key);
+    if (hit) {
+      hit.boxes += num(b.boxes_packed);
+      continue;
+    }
+    const row: PalletOrder = {
+      salesOrderId: soId,
+      orderNo: orderNo.get(soId) || soId,
+      boxes: num(b.boxes_packed),
+    };
+    seen.set(key, row);
+    (byPallet[palletId] ||= []).push(row);
+  }
+  Object.values(byPallet).forEach((rows) => rows.sort((a, b) => a.orderNo.localeCompare(b.orderNo)));
+
+  return { ok: true, byPallet };
+}
+
 export interface PalletInput {
   name: string;
   packing_details: string;

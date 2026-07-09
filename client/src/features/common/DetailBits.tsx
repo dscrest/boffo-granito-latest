@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { SkeletonRows } from "@/ui/States";
-import type { PalletRow } from "@/features/masters/palletsApi";
+import type { PalletOrder, PalletRow } from "@/features/masters/palletsApi";
 
 export function DetailRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
   return (
@@ -151,6 +151,61 @@ export function AssociatedPallets({
             </div>
           </button>
         ))
+      )}
+    </>
+  );
+}
+
+/**
+ * Orders packed on the pallet being viewed (PalletisedBatch.pallet → Pallet),
+ * one row per order with its box total. `orders` is null while the cache is
+ * cold. Read-only: /orders/:id keys off an OrderItem, not a SalesOrder, so
+ * there is no id here to navigate with.
+ */
+export function AssociatedOrders({ orders }: { orders: PalletOrder[] | null }) {
+  const totalBoxes = orders?.reduce((sum, o) => sum + o.boxes, 0) ?? 0;
+
+  return (
+    <>
+      <div className="form-section-title" style={{ marginBottom: 8 }}>
+        Associated Orders
+        {orders && orders.length > 0 && <span className="dim"> ({orders.length})</span>}
+      </div>
+
+      {orders === null ? (
+        <SkeletonRows rows={2} />
+      ) : orders.length === 0 ? (
+        <div className="dim" style={{ padding: "6px 0" }}>No orders packed on this pallet.</div>
+      ) : (
+        <>
+          <div
+            className="muted"
+            style={{
+              display: "flex",
+              gap: 12,
+              padding: "6px 0",
+              borderBottom: "1px solid var(--border)",
+              fontSize: "var(--t-sm)",
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0 }}>Order</span>
+            <span style={{ flexShrink: 0 }}>Boxes</span>
+          </div>
+          {orders.map((o) => (
+            <div
+              key={o.salesOrderId}
+              style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}
+              title={`Order ${o.orderNo}`}
+            >
+              <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{o.orderNo}</span>
+              <span style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{nfmt(o.boxes)}</span>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 12, padding: "6px 0", fontWeight: 500 }}>
+            <span style={{ flex: 1, minWidth: 0 }}>Total</span>
+            <span style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{nfmt(totalBoxes)}</span>
+          </div>
+        </>
       )}
     </>
   );
