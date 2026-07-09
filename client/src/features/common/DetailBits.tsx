@@ -110,6 +110,7 @@ export function AssociatedPallets({
           <button
             key={p.id}
             type="button"
+            className="rel-row"
             onClick={() => onOpen(p.id)}
             style={{
               display: "block",
@@ -128,6 +129,7 @@ export function AssociatedPallets({
           >
             <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
               <span
+                className="linkish"
                 style={{ fontWeight: 500, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               >
                 {p.name || "—"}
@@ -159,10 +161,16 @@ export function AssociatedPallets({
 /**
  * Orders packed on the pallet being viewed (PalletisedBatch.pallet → Pallet),
  * one row per order with its box total. `orders` is null while the cache is
- * cold. Read-only: /orders/:id keys off an OrderItem, not a SalesOrder, so
- * there is no id here to navigate with.
+ * cold. `onOpen` receives a SalesOrder ROWID — /orders/:id resolves either that
+ * or an OrderItem id. Navigation stays with the caller, as above.
  */
-export function AssociatedOrders({ orders }: { orders: PalletOrder[] | null }) {
+export function AssociatedOrders({
+  orders,
+  onOpen,
+}: {
+  orders: PalletOrder[] | null;
+  onOpen: (salesOrderId: string) => void;
+}) {
   const totalBoxes = orders?.reduce((sum, o) => sum + o.boxes, 0) ?? 0;
 
   return (
@@ -195,9 +203,16 @@ export function AssociatedOrders({ orders }: { orders: PalletOrder[] | null }) {
             <div
               key={o.salesOrderId}
               style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}
-              title={`Order ${o.orderNo}`}
             >
-              <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{o.orderNo}</span>
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => onOpen(o.salesOrderId)}
+                title={`Open order ${o.orderNo}`}
+                style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+              >
+                {o.orderNo}
+              </button>
               <span style={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{nfmt(o.boxes)}</span>
             </div>
           ))}

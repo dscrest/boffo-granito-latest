@@ -332,7 +332,10 @@ export function PalletDetail() {
 
                 {/* marginTop matches the 14px a Section puts above its title. */}
                 <div style={{ flex: "1 1 320px", minWidth: 0, marginTop: 14 }}>
-                  <AssociatedOrders orders={linkedOrders} />
+                  <AssociatedOrders
+                    orders={linkedOrders}
+                    onOpen={(soId) => navigate(`/orders/${encodeURIComponent(soId)}`)}
+                  />
                 </div>
               </div>
             </div>

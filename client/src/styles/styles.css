@@ -1675,6 +1675,26 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   to { background-position: 0 0; }
 }
 
+/* ---------- text that navigates ---------- */
+/* A <button> that has to read as a link: strip the chrome, keep the semantics. */
+.linkish {
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.linkish:hover,
+.linkish:focus-visible { text-decoration: underline; }
+
+/* Related-list row: the whole row is the hit target, but only the record's
+   name underlines, so the row still reads as one link rather than many. */
+.rel-row:hover .linkish,
+.rel-row:focus-visible .linkish { text-decoration: underline; }
+
 /* ---------- form validation states ---------- */
 .form-field input.error,
 .form-field select.error,

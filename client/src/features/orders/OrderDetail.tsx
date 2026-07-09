@@ -32,8 +32,13 @@ export function OrderDetail() {
     void load();
   }, []);
 
-  // The clicked row is one OrderItem; the detail is its whole SalesOrder.
-  const head = useMemo(() => orders.find((o) => o.id === orderId) ?? null, [orders, orderId]);
+  // The clicked row is one OrderItem — or, from a pallet's related list, the
+  // SalesOrder itself. Either way the detail below is the whole SalesOrder.
+  const head = useMemo(
+    () =>
+      orders.find((o) => o.id === orderId) ?? orders.find((o) => o.salesOrderId === orderId) ?? null,
+    [orders, orderId],
+  );
   const items = useMemo(() => {
     if (!head) return [];
     return head.salesOrderId ? orders.filter((o) => o.salesOrderId === head.salesOrderId) : [head];
