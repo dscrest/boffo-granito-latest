@@ -1342,6 +1342,22 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 0 0 3px var(--accent-soft);
   background: var(--panel);
 }
+/* Checkboxes & radios are native controls (accent-color themed app-wide) —
+   undo the text-input skin the broad selectors above paint on them. */
+.form-field input[type="checkbox"],
+.form-field input[type="radio"],
+.modal-panel input[type="checkbox"],
+.modal-panel input[type="radio"] {
+  appearance: auto;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  flex: none;
+  cursor: pointer;
+}
 
 /* Auto-owned fields (formula-computed or locked): grey + dashed = "the app
    fills this, not you". Attribute-driven, so every readOnly/disabled input
