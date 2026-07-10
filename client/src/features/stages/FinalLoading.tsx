@@ -116,7 +116,7 @@ export function FinalLoading() {
           <thead>
             <tr>
               <th>Invoice No.</th>
-              <th>Party</th>
+              <th>Customer</th>
               <th>Country</th>
               <th className="num" style={{ textAlign: "right" }}>
                 Line Items

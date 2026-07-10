@@ -58,7 +58,8 @@ const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ de
 const SalesPersonsAdmin = lazy(() => import("@/features/admin/SalesPersons").then((m) => ({ default: m.SalesPersonsAdmin })));
 
 const TWEAK_DEFAULTS = {
-  accent: "oklch(0.55 0.16 150)",
+  // BOFFO brand orange (#EF7F1A) — must match --accent in styles.css.
+  accent: "oklch(0.71 0.17 55)",
   density: "compact" as "compact" | "spacious",
 };
 
@@ -124,7 +125,7 @@ function navTree(): NavNode[] {
       children: [
         { id: "po", label: "Purchase Orders", icon: "docs" },
         { id: "qc", label: "Quality Control", icon: "shield-check" },
-        { id: "containers", label: "Containers", icon: "truck" },
+        { id: "containers", label: "Container Master", icon: "truck" },
         { id: "fit", label: "Fit Suggester", icon: "kanban" },
         { id: "loadplan", label: "Load Planner", icon: "truck" },
         { id: "loading", label: "Loading", icon: "truck" },
@@ -343,7 +344,6 @@ export default function App() {
           <div className="logo-chip">
             <img src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
           </div>
-          <div className="ver">v4.0</div>
           <button
             type="button"
             className="collapse-btn"
@@ -352,7 +352,7 @@ export default function App() {
             aria-expanded={!collapsed}
             onClick={() => setCollapsed((v) => !v)}
           >
-            <Icon name={collapsed ? "chev-r" : "chev-l"} size={14} />
+            <Icon name="menu" size={14} />
           </button>
         </div>
 

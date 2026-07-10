@@ -162,7 +162,7 @@ export function DesignEdit() {
             </button>
             <div style={{ flex: 1 }} />
             <span className="df-req-note">
-              {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* indicates a mandatory field"}
+              {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
             </span>
             <button className="btn" disabled={busy} onClick={() => navigate("/design")}>
               Cancel

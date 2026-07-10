@@ -26,7 +26,7 @@ export function PurchaseOrderDetail() {
 
   const fields: RecordField[] = [
     { key: "po", label: "PO Number", value: poNumber },
-    { key: "party", label: "Party", value: `${head.flag} ${head.party}` },
+    { key: "party", label: "Customer", value: `${head.flag} ${head.party}` },
     { key: "country", label: "Country", value: head.country },
     { key: "date", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },

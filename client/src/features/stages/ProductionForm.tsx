@@ -143,7 +143,7 @@ export function ProductionForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* indicates a mandatory field</span>
+          <span className="df-req-note">* Indicates a mandatory field</span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>

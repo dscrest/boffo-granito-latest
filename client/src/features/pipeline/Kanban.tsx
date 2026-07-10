@@ -48,7 +48,7 @@ export function Kanban() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Orders Pipeline</div>
+          <div className="title">Pipeline</div>
           <div className="sub">
             Click the <Icon name="chev-r" size={11} style={{ verticalAlign: "middle" }} /> arrow on a card for quick line-items view ·
             click the card for full details. {orders.length} orders in flight.

@@ -47,7 +47,7 @@ export function Dashboard() {
       orders,
       [
         { header: "PO Number", value: (o) => o.poNumber },
-        { header: "Party", value: (o) => o.party },
+        { header: "Customer", value: (o) => o.party },
         { header: "Country", value: (o) => o.country },
         { header: "Design", value: (o) => o.design },
         { header: "Size", value: (o) => o.size },
@@ -215,7 +215,7 @@ export function Dashboard() {
               <thead>
                 <tr>
                   <th>PO / Invoice</th>
-                  <th>Party</th>
+                  <th>Customer</th>
                   <th>Design</th>
                   <th>Size</th>
                   <th className="num" style={{ textAlign: "right" }}>

@@ -69,7 +69,7 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
       // Short Code (seq_code) is no longer typed — designsApi.createDesign
       // assigns the next sequence in the background; edits keep the stored one.
       { key: "base_design_name", label: "Base Design Name" },
-      { key: "party_brand_name", label: "Party Brand Name", kind: "datalist", suggest: "partyBrands" },
+      { key: "party_brand_name", label: "Customer Brand Name", kind: "datalist", suggest: "partyBrands" },
       { key: "collection_name", label: "Collection" },
     ],
   },
@@ -285,7 +285,7 @@ export function DesignFields({
   const createPartyBrand = async (name: string) => {
     onChange("party_brand_name", name);
     const res = await insert("PartyBrand", { name });
-    if (!res.ok) toast.error(res.error || "Could not add the party brand to the master");
+    if (!res.ok) toast.error(res.error || "Could not add the customer brand to the master");
     else invalidateDesigns(); // next lookup fetch includes the new brand
   };
 
@@ -443,7 +443,7 @@ export function DesignForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* indicates a mandatory field"}
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel

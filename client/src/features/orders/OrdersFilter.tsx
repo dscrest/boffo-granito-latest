@@ -97,7 +97,7 @@ export function OrdersFilter({
         type="text"
         value={st.search}
         onChange={(e) => onChange({ ...st, search: e.target.value })}
-        placeholder="Search PO, design, party…"
+        placeholder="Search PO, design, customer…"
       />
     </div>
   );

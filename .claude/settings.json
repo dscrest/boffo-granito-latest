@@ -78,7 +78,26 @@
       "Bash(sips -g pixelWidth boffo.png)",
       "Bash(node -e ' *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code} %{url_effective}\\\\n\" http://localhost:4173/app/index.html http://localhost:4173/index.html http://localhost:4173/)",
-      "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless=new --disable-gpu --screenshot=/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/7d7e86b6-8894-4d4e-a457-b83fda79644c/scratchpad/login2.png --window-size=1280,800 --virtual-time-budget=15000 --run-all-compositor-stages-before-draw http://localhost:4173/)"
+      "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless=new --disable-gpu --screenshot=/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/7d7e86b6-8894-4d4e-a457-b83fda79644c/scratchpad/login2.png --window-size=1280,800 --virtual-time-budget=15000 --run-all-compositor-stages-before-draw http://localhost:4173/)",
+      "Bash(git log *)",
+      "Bash(ls /Users/octfistechnollp/oct-dev-projects/boffo-granito-latest/client/node_modules/.bin/ 2>/dev/null | grep -i \"playwright\\\\|puppeteer\"; ls /Users/octfistechnollp/oct-dev-projects/boffo-granito-latest/node_modules/.bin 2>/dev/null | grep -i \"playwright\\\\|puppeteer\"; which chrome chromium 2>/dev/null; ls \"/Applications/Google Chrome.app\" >/dev/null 2>&1 && echo chrome-app-present)",
+      "Read(//Applications/Google Chrome.app/**)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless --disable-gpu --window-size=1280,700 --screenshot=/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/535ae07f-a95c-4787-9c45-a1f3e302d9ba/scratchpad/modal-700.png --virtual-time-budget=2000 file:///private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/535ae07f-a95c-4787-9c45-a1f3e302d9ba/scratchpad/modal-test.html)",
+      "Bash(sed -i '' 's/style=\"max-width:640px\"//' /private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/535ae07f-a95c-4787-9c45-a1f3e302d9ba/scratchpad/modal-test.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless --disable-gpu --window-size=1280,600 --screenshot=/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/535ae07f-a95c-4787-9c45-a1f3e302d9ba/scratchpad/modal-wide-600.png --virtual-time-budget=2000 file:///private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/535ae07f-a95c-4787-9c45-a1f3e302d9ba/scratchpad/modal-test.html)",
+      "Bash(grep -nE \"#[0-9a-fA-F]{3,6}\\\\b|oklch\\\\\\(0\\\\.55 0\\\\.16 150\" /Users/octfistechnollp/oct-dev-projects/boffo-granito-latest/client/src/styles/styles.css)",
+      "Bash(echo \"tsc: $?\")",
+      "Bash(sed -i '' 's|<th>Party</th>|<th>Customer</th>|' features/stages/PalletPacking.tsx features/stages/FinalLoading.tsx features/stages/Production.tsx features/stages/QC.tsx features/stages/Loading.tsx features/dashboard/Dashboard.tsx features/stages/LoadPlanner.tsx features/masters/ItemDetail.tsx)",
+      "Bash(sed -i '' 's|label: \"Party\"|label: \"Customer\"|' features/stages/PurchaseOrders.tsx features/orders/OrdersTable.tsx features/stages/PurchaseOrderDetail.tsx features/orders/OrderDetail.tsx)",
+      "Bash(sed -i '' 's|header: \"Party\"|header: \"Customer\"|' features/dashboard/Dashboard.tsx)",
+      "Bash(sed -i '' 's|l=\"Party\"|l=\"Customer\"|' features/orders/OrderDrawer.tsx)",
+      "Bash(sed -i '' 's|Sort: Party A-Z|Sort: Customer A-Z|' features/orders/ByOrderView.tsx)",
+      "Bash(sed -i '' 's|<div className=\"title\">Orders Pipeline</div>|<div className=\"title\">Pipeline</div>|' features/pipeline/Kanban.tsx)",
+      "Bash(sed -i '' 's|<div className=\"title\">Orders — by PO</div>|<div className=\"title\">By Order</div>|' features/orders/ByOrderView.tsx)",
+      "Bash(sed -i '' 's|<div className=\"title\">Reports</div>|<div className=\"title\">Quantity Reports</div>|' features/reports/Reports.tsx)",
+      "Bash(sed -i '' 's|<div className=\"title\">Container-Fit Suggester</div>|<div className=\"title\">Fit Suggester</div>|' features/stages/FitSuggest.tsx)",
+      "Bash(sed -i '' 's|{ id: \"containers\", label: \"Containers\", icon: \"truck\" }|{ id: \"containers\", label: \"Container Master\", icon: \"truck\" }|' App.tsx)",
+      "Bash(xargs sed -i '' 's|\\\\* indicates a mandatory field|* Indicates a mandatory field|g')"
     ]
   }
 }

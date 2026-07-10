@@ -227,7 +227,7 @@ export function UsersAdmin() {
             </label>
           </div>
           <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="df-req-note">* indicates a mandatory field</span>
+            <span className="df-req-note">* Indicates a mandatory field</span>
             <button className="btn" onClick={() => setDraft(null)}>
               Cancel
             </button>

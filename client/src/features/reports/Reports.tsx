@@ -98,7 +98,7 @@ export function Reports() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Reports</div>
+          <div className="title">Quantity Reports</div>
           <div className="sub">Ordered vs produced vs remaining · ready pallets — live data</div>
         </div>
       </div>
@@ -121,7 +121,7 @@ export function Reports() {
                   <thead>
                     <tr>
                       <th>{tab === "item" ? "Design" : "PO Number"}</th>
-                      <th>{tab === "item" ? "Spec" : "Party"}</th>
+                      <th>{tab === "item" ? "Spec" : "Customer"}</th>
                       <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>

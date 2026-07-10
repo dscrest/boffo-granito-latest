@@ -86,7 +86,6 @@ export function SizeForm({
         role="dialog"
         aria-modal="true"
         className="modal-panel card df-modal"
-        style={{ maxWidth: 640 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="df-head">
@@ -241,7 +240,10 @@ export function SizeForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* indicates a mandatory field</span>
+          <span className="df-req-note">
+            * Indicates a mandatory field
+            <span className="df-fx-note">ƒx Indicates a formula field (auto-calculated)</span>
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>

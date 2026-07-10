@@ -388,7 +388,7 @@ export function QuoteForm({
                 {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
               </span>
             ) : (
-              "* indicates a mandatory field · ≥1 line item"
+              "* Indicates a mandatory field · ≥1 line item"
             )}
           </span>
           <button className="btn" onClick={onClose}>

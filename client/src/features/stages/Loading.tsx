@@ -85,7 +85,7 @@ export function Loading() {
             <tr>
               <th>Sequence</th>
               <th>PO / Invoice</th>
-              <th>Party</th>
+              <th>Customer</th>
               <th>Design</th>
               <th>Size</th>
               <th className="num" style={{ textAlign: "right" }}>

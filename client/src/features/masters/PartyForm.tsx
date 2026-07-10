@@ -186,11 +186,11 @@ export function PartyForm({
                 </select>
               </label>
               <label className="form-field">
-                <span className="lbl">Main Party Name</span>
+                <span className="lbl">Main Customer Name</span>
                 <input
                   value={x.main_party_name}
                   onChange={(e) => setExtra("main_party_name", e.target.value)}
-                  placeholder="Parent / group party"
+                  placeholder="Parent / group customer"
                 />
               </label>
               <label className="form-field">
@@ -318,7 +318,7 @@ export function PartyForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* indicates a mandatory field</span>
+          <span className="df-req-note">* Indicates a mandatory field</span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>

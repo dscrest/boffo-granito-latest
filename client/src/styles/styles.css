@@ -11,23 +11,33 @@
 @font-face { font-family: 'Zoho Puvi'; src: url('/fonts/Zoho_Puvi_Bold.woff2') format('woff2'); font-weight: 700; font-display: swap; }
 
 :root {
-  /* Neutrals */
-  --bg:           #f6f7f9;
+  /* Neutrals — warm stone grays (2026-07-10 brand pass: inner pages follow
+     the login's boffogranito.com palette; the old cool blue-grays are gone). */
+  --bg:           #f7f5f2;
   --panel:        #ffffff;
-  --panel-2:      #f1f3f6;
-  --elevated:     #eaecf0;
-  --border:       #e6e8ec;
-  --border-2:     #d7dbe1;
-  --hover:        #f0f2f5;
-  --sidebar-bg:   #eef0f3;   /* left panel — light gray, distinct from white content */
+  --panel-2:      #f4f1ec;
+  --elevated:     #ece7e0;
+  --border:       #e9e4dc;
+  --border-2:     #dcd4c8;
+  --hover:        #f3efe9;
+  --sidebar-bg:   #171110;   /* left panel — warm near-black, same family as the login (#130e0d) */
+
+  /* Sidebar (dark surface) companions — mirror login.css --lg-* tokens */
+  --sb-fg:        #f5f1ec;
+  --sb-muted:     #b3a89e;
+  --sb-dim:       #8a7d70;
+  --sb-hover:     rgba(255, 255, 255, 0.06);
+  --sb-active:    #2a211a;
+  --sb-border:    rgba(255, 255, 255, 0.09);
 
   /* Text — muted/dim darkened 2026-07-03 for WCAG AA (muted ≥4.5:1 on
-     --panel-2 at 10px headers; dim was 2.6:1 and used for real content). */
-  --fg:           #0f1419;
-  --fg-2:         #3a424d;
-  --muted:        #5f6773;
-  --dim:          #7d8694;
-  --faint:        #c8ced6;
+     --panel-2 at 10px headers; dim was 2.6:1 and used for real content).
+     Warm-shifted 2026-07-10 at the same lightness, so contrast holds. */
+  --fg:           #17110c;
+  --fg-2:         #463d33;
+  --muted:        #695d50;
+  --dim:          #86796a;
+  --faint:        #d4cbbe;
 
   /* Accents — for stage / status (darker for light bg readability) */
   --c-amber:      oklch(0.62 0.16 70);     /* PO          */
@@ -37,10 +47,15 @@
   --c-green:      oklch(0.55 0.16 150);    /* Final / OK  */
   --c-red:        oklch(0.58 0.20 25);     /* Danger      */
 
-  /* Accent (primary) — exposed to Tweaks */
-  --accent:       oklch(0.55 0.16 150);
-  --accent-fg:    #ffffff;
-  --accent-soft:  oklch(0.55 0.16 150 / 0.10);
+  /* Accent (primary) — exposed to Tweaks. BOFFO brand orange (#EF7F1A,
+     sampled from the logo — see login.css). White text fails contrast on
+     it, so accent-fg is near-black like the login CTA. */
+  --accent:       oklch(0.71 0.17 55);
+  --accent-fg:    #170f0b;
+  --accent-soft:  oklch(0.71 0.17 55 / 0.12);
+  /* Darker orange for accent-colored TEXT on light surfaces (≥4.5:1);
+     the bright accent is reserved for fills, borders and indicators. */
+  --accent-ink:   oklch(0.56 0.15 55);
 
   /* Layout */
   --sidebar-w:    232px;
@@ -116,8 +131,8 @@ input { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d2d6dd; border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: #b8bec8; }
+::-webkit-scrollbar-thumb { background: #d9d1c5; border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: #c3b7a6; }
 
 /* ---------- app shell ---------- */
 /* Shell is locked to the viewport: sidebar and header never move,
@@ -200,7 +215,7 @@ a { color: inherit; text-decoration: none; }
 .header .hbtn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
 .header .avatar {
   width: 28px; height: 28px; border-radius: 50%;
-  background: linear-gradient(135deg, oklch(0.6 0.15 285), oklch(0.7 0.14 200));
+  background: linear-gradient(135deg, oklch(0.71 0.17 55), oklch(0.55 0.15 35));
   display: grid; place-items: center;
   font-size: 11px; font-weight: 600; color: #fff;
 }
@@ -233,83 +248,74 @@ a { color: inherit; text-decoration: none; }
 }
 .hdr-menu-item:hover { background: var(--hover); color: var(--fg); }
 
-/* ---------- sidebar ---------- */
+/* ---------- sidebar ----------
+   Dark warm surface matching the login screen (2026-07-10): near-black
+   ground, light warm type, brand orange as the only accent. */
 .sidebar {
   background: var(--sidebar-bg);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--sb-border);
   display: flex; flex-direction: column;
   font-size: var(--t-md);
+  /* Light-on-dark reads thinner than dark-on-light; bold the whole rail. */
+  font-weight: 600;
 }
 .sidebar .brand {
   display: flex; align-items: center; gap: 10px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--sb-border);
   height: var(--header-h);
 }
 .sidebar .brand .mark {
   width: 26px; height: 26px; border-radius: 6px;
-  background: #0f1419; color: #fff;
+  background: var(--accent); color: var(--accent-fg);
   display: none; /* compact fallback — shown only when collapsed */
   place-items: center;
   font-weight: 800; font-size: 13px; letter-spacing: -0.04em;
 }
-/* Full white+orange logo, on a near-black chip so the white wordmark reads. */
+/* Full white+orange logo — the sidebar is now dark itself, no chip needed. */
 .sidebar .brand .logo-chip {
   flex: 0 1 auto; min-width: 0;
-  background: #130e0d;
-  border-radius: 7px;
-  padding: 6px 9px;
   display: flex; align-items: center;
 }
 .sidebar .brand .logo-chip img {
   display: block;
   width: 100%; max-width: 118px; height: auto;
 }
-.sidebar .brand .ver {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--dim);
-  padding: 2px 6px;
-  border: 1px solid var(--border-2);
-  border-radius: 3px;
-}
 .sidebar .group { padding: 14px 10px 6px; }
 .sidebar .group-title {
   font-size: 9.5px; font-weight: 600; letter-spacing: 0.12em;
-  color: var(--dim); text-transform: uppercase;
+  color: var(--sb-dim); text-transform: uppercase;
   padding: 4px 8px 8px;
 }
 .sidebar .item {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px;
   border-radius: 5px;
-  color: var(--fg-2);
+  color: var(--sb-muted);
   cursor: pointer;
   position: relative;
 }
-.sidebar .item:hover { background: #e3e6ea; color: var(--fg); }
+.sidebar .item:hover { background: var(--sb-hover); color: var(--sb-fg); }
 .sidebar .item.active {
-  background: #ffffff; color: var(--fg);
-  box-shadow: 0 1px 2px rgba(15, 20, 25, 0.06);
+  background: var(--sb-active); color: var(--sb-fg);
 }
 .sidebar .item.active::before {
   content: ''; position: absolute; left: -10px; top: 6px; bottom: 6px; width: 2px;
   background: var(--accent); border-radius: 2px;
 }
-.sidebar .item .ic { width: 14px; height: 14px; color: var(--muted); }
-.sidebar .item.active .ic { color: var(--fg); }
+.sidebar .item .ic { width: 14px; height: 14px; color: var(--sb-dim); }
+.sidebar .item.active .ic { color: var(--sb-fg); }
 .sidebar .item .count {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--muted);
-  background: var(--panel-2);
+  color: var(--sb-muted);
+  background: var(--sb-hover);
   padding: 1px 6px;
   border-radius: 3px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--sb-border);
 }
-.sidebar .item.active .count { color: var(--fg); border-color: var(--border-2); }
+.sidebar .item.active .count { color: var(--sb-fg); border-color: var(--sb-border); }
 
 /* collapsible parent rows */
 .sidebar .item.parent {
@@ -317,44 +323,47 @@ a { color: inherit; text-decoration: none; }
   background: none;
   border: 0;
   font: inherit;
-  color: var(--fg-2);
+  color: var(--sb-muted);
   text-align: left;
 }
 .sidebar .item.parent .chev {
   margin-left: auto;
-  color: var(--dim);
+  color: var(--sb-dim);
   transition: transform 0.15s ease;
 }
 .sidebar .item.parent.open .chev { transform: rotate(90deg); }
-.sidebar .item.parent.open { color: var(--fg); }
+.sidebar .item.parent.open { color: var(--sb-fg); }
 .sidebar .subnav { display: flex; flex-direction: column; }
 
 .sidebar .foot {
   margin-top: auto;
   padding: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--sb-border);
   font-size: 11px;
-  color: var(--muted);
+  color: var(--sb-dim);
 }
 .sidebar .foot .row { display: flex; align-items: center; gap: 8px; }
-.sidebar .foot .row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-green); box-shadow: 0 0 0 3px oklch(0.55 0.16 150 / 0.15); }
+/* Live/online dot stays green — it's a status semantic, not the brand accent. */
+.sidebar .foot .row .dot { width: 6px; height: 6px; border-radius: 50%; background: oklch(0.72 0.17 150); box-shadow: 0 0 0 3px oklch(0.72 0.17 150 / 0.2); }
 
 /* ---------- collapsible sidebar (icon rail) ---------- */
 .sidebar .brand .collapse-btn {
   margin-left: auto;
   display: grid; place-items: center;
   width: 24px; height: 24px;
-  border: 1px solid var(--border-2); border-radius: 5px;
-  background: none; color: var(--muted); cursor: pointer;
+  border: 1px solid var(--sb-border); border-radius: 5px;
+  background: none; color: var(--sb-muted); cursor: pointer;
 }
-.sidebar .brand .collapse-btn:hover { background: var(--hover); color: var(--fg); }
+.sidebar .brand .collapse-btn:hover { background: var(--sb-hover); color: var(--sb-fg); }
+/* Dark-surface scrollbar for the sidebar (global thumb is light-theme). */
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-color: var(--sidebar-bg); }
+.sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
 
 .app.collapsed { grid-template-columns: 60px 1fr; }
 .app.collapsed .sidebar .brand {
   flex-direction: column; gap: 8px; height: auto; padding: 12px 8px;
 }
-.app.collapsed .sidebar .brand .logo-chip,
-.app.collapsed .sidebar .brand .ver { display: none; }
+.app.collapsed .sidebar .brand .logo-chip { display: none; }
 .app.collapsed .sidebar .brand .mark { display: grid; }
 .app.collapsed .sidebar .brand .collapse-btn { margin-left: 0; }
 
@@ -546,7 +555,7 @@ a { color: inherit; text-decoration: none; }
   /* pointer, not grab: cards open a drawer; there is no drag-and-drop. */
   cursor: pointer;
 }
-.kcard:hover { background: var(--elevated); border-color: #2c3645; }
+.kcard:hover { background: var(--elevated); border-color: #c4b8a8; }
 .kcard .top { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
 .kcard .top .po { color: var(--fg-2); }
 .kcard .top .pri { margin-left: auto; }
@@ -1481,7 +1490,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   width: 3px;
   height: 14px;
   border-radius: 2px;
-  background: linear-gradient(var(--accent), oklch(0.6 0.15 235));
+  background: linear-gradient(var(--accent), oklch(0.55 0.16 35));
 }
 
 /* ---- New Design modal chrome ---- */
@@ -1506,8 +1515,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   display: grid;
   place-items: center;
   flex: none;
-  color: #fff;
-  background: linear-gradient(140deg, var(--accent), oklch(0.55 0.15 200));
+  color: var(--accent-fg);
+  background: linear-gradient(140deg, var(--accent), oklch(0.58 0.17 42));
   box-shadow: 0 4px 12px var(--accent-soft);
 }
 .df-head .ttl { font-size: 15.5px; font-weight: 700; color: var(--fg); line-height: 1.2; }
@@ -1538,6 +1547,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .df-foot .spacer { flex: 1; }
 /* Persistent rule #11: the "* required" footer note is red in every form. */
 .df-req-note { font-size: var(--t-sm); color: var(--c-red); margin-right: auto; }
+/* Companion legend for ƒx formula fields — muted, not red. */
+.df-fx-note { display: block; color: var(--muted); }
 
 /* ---- Order line items ---- */
 .ord-line {
@@ -1747,7 +1758,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* ---------- text that navigates ---------- */
 /* A <button> that has to read as a link: strip the chrome, keep the semantics. */
 .linkish {
-  color: var(--accent);
+  color: var(--accent-ink);
   background: none;
   border: 0;
   padding: 0;

@@ -86,7 +86,7 @@ export function LoadPlanner() {
       {loading ? (
         <SkeletonRows rows={4} />
       ) : active.length === 0 ? (
-        <EmptyState title="No active containers" hint="Add containers in Stages → Containers." />
+        <EmptyState title="No active containers" hint="Add containers in Stages → Container Master." />
       ) : (
         <div className="card" style={{ overflowX: "auto" }}>
           <table className="tbl">
@@ -144,7 +144,7 @@ export function LoadPlanner() {
             <thead>
               <tr>
                 <th>PO</th>
-                <th>Party</th>
+                <th>Customer</th>
                 <th>Design</th>
                 <th>Size</th>
                 <th className="num" style={{ textAlign: "right" }}>Ready to load (boxes)</th>

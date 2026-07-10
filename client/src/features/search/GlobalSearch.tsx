@@ -152,7 +152,7 @@ export function GlobalSearch() {
       <input
         ref={inputRef}
         value={q}
-        placeholder="Search PO, design, party, invoice…"
+        placeholder="Search PO, design, customer, invoice…"
         onChange={(e) => {
           setQ(e.target.value);
           setOpen(true);

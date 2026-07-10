@@ -173,7 +173,7 @@ export function LoadContainerForm({
             ) : pickedIds.length > 0 ? (
               `${pickedIds.length} pallet${pickedIds.length > 1 ? "s" : ""} · ${pickedBoxes} boxes`
             ) : (
-              "* indicates a mandatory field"
+              "* Indicates a mandatory field"
             )}
           </span>
           <button className="btn" onClick={onClose}>

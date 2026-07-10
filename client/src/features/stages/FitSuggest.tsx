@@ -98,7 +98,7 @@ export function FitSuggest() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Container-Fit Suggester</div>
+          <div className="title">Fit Suggester</div>
           <div className="sub">
             {loading
               ? "Computing…"

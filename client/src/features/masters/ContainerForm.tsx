@@ -203,7 +203,7 @@ export function ContainerForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* indicates a mandatory field"}
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel

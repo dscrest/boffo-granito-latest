@@ -80,7 +80,7 @@ export function PalletForm({
   const coverageSqft = picked ? picked.sqftPerBox : v.coverage_sqft;
   const boxWeightKg = picked ? picked.boxWeightKg : v.box_weight_kg;
 
-  // Packing detail auto-computes from arrangement A → "[30 * 18] = 540".
+  // Packing detail is formula-owned → "[30 * 18] = 540" from the arrangement.
   const packing = useMemo(() => {
     const product = v.boxes_per_pallet * v.pallets_per_container;
     return v.boxes_per_pallet && v.pallets_per_container
@@ -109,17 +109,20 @@ export function PalletForm({
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const r4 = (n: number) => Math.round(n * 10000) / 10000;
-  const totalBoxes =
-    v.boxes_per_pallet * v.pallets_per_container + v.b_boxes_per_pallet * v.b_pallets_per_container;
-  const totalPallets = v.pallets_per_container + v.b_pallets_per_container;
+  const totalBoxes = v.boxes_per_pallet * v.pallets_per_container;
+  const totalPallets = v.pallets_per_container;
   // Per spec: one loaded pallet = (box wt × boxes/pallet) + empty pallet wt.
   const totalPalletWeight = boxWeightKg * v.boxes_per_pallet + v.empty_pallet_weight_kg;
   const totalSqm = totalBoxes * coverageSqm;
   const totalSqft = totalBoxes * coverageSqft;
   const totalBoxWeight = totalBoxes * boxWeightKg;
 
-  // 5.5: nothing is mandatory — submit always proceeds.
+  // Size is the one hard requirement — every pallet spec is a spec *for a
+  // size*; without the FK the name, coverage and weight are all blank.
+  const canSave = !!v.size;
+
   const submit = () => {
+    if (!canSave) return;
     onSave({
       ...v,
       name: v.name.trim(),
@@ -137,7 +140,7 @@ export function PalletForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="palette" size={18} />
@@ -158,7 +161,9 @@ export function PalletForm({
               {/* Inputs first, derived Name last — you pick Size & Type,
                   the name falls out. */}
               <label className="form-field">
-                <span className="lbl">Size</span>
+                <span className="lbl">
+                  Size<span className="req"> *</span>
+                </span>
                 {lockSize ? (
                   <input
                     value={sizeLabel || "—"}
@@ -197,8 +202,6 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Packing Details</span>
-                {/* ponytail: auto from Boxes/Pallet × Pallets/Container; add an
-                    override only if operators ever need custom packing notes. */}
                 <input
                   value={packing || "—"}
                   readOnly
@@ -265,7 +268,7 @@ export function PalletForm({
           </div>
 
           <div className="form-section">
-            <div className="form-section-title">Arrangement A</div>
+            <div className="form-section-title">Arrangement</div>
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Boxes / Pallet</span>
@@ -297,43 +300,6 @@ export function PalletForm({
               </label>
             </div>
           </div>
-
-          {/* #15: Arrangement B (mixed loads) hidden for now — fields keep their
-              defaults (0/blank) so saves still succeed. Uncomment to restore.
-          <div className="form-section">
-            <div className="form-section-title">Arrangement B (mixed loads — optional)</div>
-            <div className="form-grid">
-              <label className="form-field">
-                <span className="lbl">B · Boxes / Pallet</span>
-                <input
-                  type="number" min={0}
-                  value={v.b_boxes_per_pallet || ""}
-                  onChange={(e) => setNum("b_boxes_per_pallet", e.target.value)}
-                  placeholder="e.g. 32"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">B · Pallets / Container</span>
-                <input
-                  type="number" min={0}
-                  value={v.b_pallets_per_container || ""}
-                  onChange={(e) => setNum("b_pallets_per_container", e.target.value)}
-                  placeholder="e.g. 5"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">B · Pallet Weight (kg)</span>
-                <input
-                  type="number" min={0}
-                  step="0.01"
-                  value={v.b_pallet_weight || ""}
-                  onChange={(e) => setNum("b_pallet_weight", e.target.value)}
-                  placeholder="optional"
-                />
-              </label>
-            </div>
-          </div>
-          */}
 
           <div className="form-section">
             <div className="form-section-title">Per Container (computed)</div>
@@ -413,11 +379,14 @@ export function PalletForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">Name auto-generates — no required fields</span>
+          <span className="df-req-note">
+            * Indicates a mandatory field
+            <span className="df-fx-note">ƒx Indicates a formula field (auto-calculated)</span>
+          </span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" onClick={submit}>
+          <button className="hbtn primary" onClick={submit} disabled={!canSave}>
             <Icon name="check" size={13} />
             Save
           </button>

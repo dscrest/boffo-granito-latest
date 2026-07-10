@@ -21,7 +21,7 @@ import { closePallet, type ClosePalletInput } from "@/features/stages/palletisat
 const ORDER_COLUMNS: ColumnDef<Order>[] = [
   {
     key: "party",
-    label: "Party",
+    label: "Customer",
     render: (o) => (
       <>
         <span style={{ marginRight: 6 }}>{o.flag}</span>
@@ -159,7 +159,7 @@ export function OrdersTable() {
     return [
       { key: "po", label: "PO Number", type: "text", get: (o) => o.poNumber },
       { key: "design", label: "Design", type: "text", get: (o) => o.design },
-      { key: "party", label: "Party", type: "multiselect", options: opts((o) => o.party), get: (o) => o.party },
+      { key: "party", label: "Customer", type: "multiselect", options: opts((o) => o.party), get: (o) => o.party },
       { key: "size", label: "Size", type: "multiselect", options: opts((o) => o.size), get: (o) => o.size },
       { key: "finish", label: "Finish", type: "multiselect", options: opts((o) => o.finish), get: (o) => o.finish },
       { key: "brand", label: "Brand", type: "multiselect", options: opts((o) => o.brand), get: (o) => o.brand },
@@ -232,7 +232,7 @@ export function OrdersTable() {
           <Icon name="search" size={13} />
           <input
             type="text"
-            placeholder="Search PO, party, design…"
+            placeholder="Search PO, customer, design…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />

@@ -49,6 +49,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "arrow-down": return <svg {...common}><path d="M12 5v14M5 12l7 7 7-7"/></svg>;
     case "chev-r": return <svg {...common}><path d="m9 6 6 6-6 6"/></svg>;
     case "chev-l": return <svg {...common}><path d="m15 6-6 6 6 6"/></svg>;
+    case "menu": return <svg {...common}><path d="M4 6h16M4 12h10M4 18h16"/></svg>;
     case "edit": return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
     case "check": return <svg {...common}><path d="M5 13l4 4L19 7"/></svg>;
     case "alert": return <svg {...common}><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>;

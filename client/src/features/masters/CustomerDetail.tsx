@@ -38,7 +38,7 @@ const text = (label: string, s: string): Detail => [label, s || "Not set", !s];
 const rows = (c: CustomerRow): Detail[] => [
   text("Name", c.name),
   text("Code", c.code),
-  text("Main Party", c.extras.main_party_name),
+  text("Main Customer", c.extras.main_party_name),
   text("Country", c.country),
   text("Working Status", c.extras.working_status),
   text("Handling Person", c.handlingPersonLabel),
@@ -87,6 +87,8 @@ export function CustomerDetail() {
   const party = customers.find((c) => c.code === code) ?? null;
   const orders = party ? allOrders.filter((o) => o.partyCode === party.code) : [];
   const totalQty = orders.reduce((s, o) => s + o.orderQty, 0);
+  // 10 most recent transactions, shown beside Primary Details.
+  const recent = [...orders].sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? "")).slice(0, 10);
   const needle = q.trim().toLowerCase();
   const listed = needle
     ? customers.filter((c) => `${c.name} ${c.code} ${c.country}`.toLowerCase().includes(needle))
@@ -257,47 +259,52 @@ export function CustomerDetail() {
                     <DetailRow key={label} label={label} value={value} dim={unset} />
                   ))}
                 </div>
-              </div>
-            </div>
 
-            {/* The customer's open orders — rows open the Master Order. */}
-            <div className="card" style={{ marginBottom: 12 }}>
-              <div className="form-section-title" style={{ margin: "4px 0 8px" }}>
-                Associated Orders {orders.length > 0 && <span className="dim">({orders.length} · {fmt(totalQty)} boxes)</span>}
-              </div>
-              <div style={{ overflow: "auto" }}>
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>PO Number</th>
-                      <th>Design</th>
-                      <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
-                      <th>Stage</th>
-                      <th>Due</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.map((o) => (
-                      <tr
-                        key={o.id}
-                        style={{ cursor: "pointer" }}
-                        title="Open order details"
-                        onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
-                      >
-                        <td className="mono" style={{ color: "var(--accent)" }}>{o.poNumber}</td>
-                        <td>{o.design}</td>
-                        <td className="num mono">{fmt(o.orderQty)}</td>
-                        <td>{o.stage}</td>
-                        <td className="mono muted">{o.dueDate}</td>
-                      </tr>
-                    ))}
-                    {orders.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>No orders for this customer.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                {/* The customer's 10 most recent orders — rows open the Master Order. */}
+                <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                  <div className="form-section-title" style={{ marginBottom: 8 }}>
+                    Associated Orders {orders.length > 0 && <span className="dim">({orders.length} · {fmt(totalQty)} boxes)</span>}
+                  </div>
+                  <div style={{ overflow: "auto" }}>
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>PO Number</th>
+                          <th>Design</th>
+                          <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
+                          <th>Stage</th>
+                          <th>Due</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recent.map((o) => (
+                          <tr
+                            key={o.id}
+                            style={{ cursor: "pointer" }}
+                            title="Open order details"
+                            onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
+                          >
+                            <td className="mono" style={{ color: "var(--accent)" }}>{o.poNumber}</td>
+                            <td>{o.design}</td>
+                            <td className="num mono">{fmt(o.orderQty)}</td>
+                            <td>{o.stage}</td>
+                            <td className="mono muted">{o.dueDate}</td>
+                          </tr>
+                        ))}
+                        {orders.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>No orders for this customer.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {orders.length > recent.length && (
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
+                      Showing the 10 most recent of {orders.length} orders.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

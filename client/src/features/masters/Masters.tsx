@@ -101,7 +101,7 @@ const MASTERS: MasterDef[] = [
   },
   {
     key: "party_brand",
-    label: "Party Brand",
+    label: "Customer Brand",
     icon: "flag",
     table: "PartyBrand",
     lead: "name",
@@ -193,7 +193,7 @@ function MasterEditor({
         ))}
       </div>
       <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <span className="df-req-note">* indicates a mandatory field</span>
+        <span className="df-req-note">* Indicates a mandatory field</span>
         <button className="btn" onClick={onCancel}>
           Cancel
         </button>

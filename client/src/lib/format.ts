@@ -55,7 +55,7 @@ const CHANGE_LABELS: Record<string, string> = {
   image_url: "Image",
   unique_name: "Unique Name",
   design_name: "Design Name",
-  party_brand_name: "Party Brand",
+  party_brand_name: "Customer Brand",
   rate_per_sqmt: "Rate / m²",
   pcs_per_box: "Pcs / Box",
   seq_code: "Short Code",

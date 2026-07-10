@@ -79,7 +79,7 @@ export function OrderDetail() {
 
   const fields: RecordField[] = [
     { key: "poNumber", label: "PO Number", value: head.poNumber },
-    { key: "party", label: "Party", value: `${head.flag} ${head.party}` },
+    { key: "party", label: "Customer", value: `${head.flag} ${head.party}` },
     { key: "country", label: "Country", value: head.country },
     { key: "skus", label: "Line Items", value: String(items.length) },
     { key: "totalOrdered", label: "Total Order Qty", value: fmt(totalOrdered) },

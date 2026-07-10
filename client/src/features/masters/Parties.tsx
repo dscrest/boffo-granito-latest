@@ -177,21 +177,12 @@ export function PartiesView() {
   }, [base, filterField]);
 
   return (
-    <div>
+    /* Column fills the scrollport exactly (same as Sizes) so the grid card
+       grows and its footer sits on the window edge — no dead band below. */
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
       {showForm && (
         <PartyForm paymentTerms={paymentTerms} salesPersons={salesPersons} onSave={onSave} onClose={() => setShowForm(false)} />
       )}
-      <div className="page-head">
-        <div>
-          <div className="title">Customers</div>
-        </div>
-        <div className="right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            New
-          </button>
-        </div>
-      </div>
 
       {error && <ErrorCard message={error} onRetry={load} />}
 
@@ -234,13 +225,18 @@ export function PartiesView() {
         </span>
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
+        <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
+          <Icon name="plus" size={13} />
+          New customer
+        </button>
       </div>
 
       {loading && customers.length === 0 ? (
         <SkeletonRows rows={6} />
       ) : (
-      <div className="card">
-        <div style={{ overflow: "auto" }}>
+      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           <table className="tbl">
             <thead>
               <tr>

@@ -61,7 +61,7 @@ function QCSection({
               <th>Design</th>
               <th>Size</th>
               <th>Finish</th>
-              <th>Party</th>
+              <th>Customer</th>
               <th>PO</th>
               {checks.map((c) => (
                 <th key={c} style={{ textAlign: "center" }}>{c}</th>

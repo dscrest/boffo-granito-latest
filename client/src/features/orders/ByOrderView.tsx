@@ -150,7 +150,7 @@ export function ByOrderView() {
       {showForm && <OrderForm onSave={onSaveOrder} onClose={() => setShowForm(false)} />}
       <div className="page-head">
         <div>
-          <div className="title">Orders — by PO</div>
+          <div className="title">By Order</div>
           <div className="sub">
             {visible.length} POs · {visible.reduce((s, g) => s + g.items.length, 0)} line items · grouped view of the pipeline
             {notice && <> · <span className="muted">{notice}</span></>}
@@ -179,7 +179,7 @@ export function ByOrderView() {
         >
           <option value="progress">Sort: Least progress first</option>
           <option value="qty">Sort: Largest qty</option>
-          <option value="party">Sort: Party A-Z</option>
+          <option value="party">Sort: Customer A-Z</option>
         </select>
       </div>
 

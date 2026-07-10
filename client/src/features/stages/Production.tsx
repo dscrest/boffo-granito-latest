@@ -155,7 +155,7 @@ export function Production() {
               <tr>
                 <th>Design</th>
                 <th>Finish</th>
-                <th>Party</th>
+                <th>Customer</th>
                 <th>PO</th>
                 <th className="num" style={{ textAlign: "right" }}>
                   Ordered (boxes)
@@ -175,9 +175,7 @@ export function Production() {
                   <td>
                     <span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span>
                   </td>
-                  <td>
-                    {o.flag} {o.party}
-                  </td>
+                  <td>{o.party}</td>
                   <td className="mono">{o.poNumber}</td>
                   <td className="num">{fmt(o.orderQty)}</td>
                   <td className="num" style={{ color: "var(--c-blue)" }}>

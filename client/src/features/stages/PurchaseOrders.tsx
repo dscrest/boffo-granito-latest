@@ -32,7 +32,7 @@ interface PORow {
 const PO_COLUMNS: ColumnDef<PORow>[] = [
   {
     key: "party",
-    label: "Party",
+    label: "Customer",
     render: (p) => (
       <>
         {p.flag} {p.party}{" "}
@@ -147,7 +147,7 @@ export function PurchaseOrders() {
           <Icon name="search" size={13} />
           <input
             type="text"
-            placeholder="Search PO number, party…"
+            placeholder="Search PO number, customer…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />

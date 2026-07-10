@@ -114,7 +114,7 @@ export function PalletPacking() {
         <div style={{ flex: 1 }} />
         <input
           type="text"
-          placeholder="Search PO, design, party…"
+          placeholder="Search PO, design, customer…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -127,7 +127,7 @@ export function PalletPacking() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Party</th>
+              <th>Customer</th>
               <th>PO Number</th>
               <th>Design</th>
               <th>Size</th>

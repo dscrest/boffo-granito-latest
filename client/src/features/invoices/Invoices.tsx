@@ -337,7 +337,7 @@ function GenerateDialog({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && !containerId ? <span className="field-err">Select a container</span> : "* indicates a mandatory field"}
+            {showErrors && !containerId ? <span className="field-err">Select a container</span> : "* Indicates a mandatory field"}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel

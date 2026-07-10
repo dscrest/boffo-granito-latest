@@ -242,7 +242,7 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
         {/* Real SalesOrder/OrderItem fields only — no invented doc refs or shipping terms. */}
         <div className="spec-grid">
           <Spec l="PO Number" v={order.poNumber} mono />
-          <Spec l="Party" v={`${order.flag} ${order.party}`} />
+          <Spec l="Customer" v={`${order.flag} ${order.party}`} />
           <Spec l="Country" v={order.country} />
           <Spec l="Order Date" v={order.orderDate} mono />
           <Spec l="Due Date" v={order.dueDate} mono />

@@ -352,7 +352,7 @@ export function ItemDetail() {
                 <DetailRow label="SKU" value={design.sku || "—"} />
                 <DetailRow label="Short Code" value={design.seqCode || "—"} />
                 <DetailRow label="Design Name" value={design.designName || "—"} />
-                <DetailRow label="Party Brand" value={design.partyBrandName || "—"} />
+                <DetailRow label="Customer Brand" value={design.partyBrandName || "—"} />
                 <DetailRow label="Size" value={design.sizeLabel || "—"} />
                 <DetailRow label="Finish" value={design.finishLabel || "—"} />
                 <DetailRow label="Brand" value={design.brandLabel || "—"} />
@@ -485,7 +485,7 @@ export function ItemDetail() {
                       <thead>
                         <tr>
                           {/* PO Number column hidden per request 2026-07 — restore when POs go live. */}
-                          <th>Party</th>
+                          <th>Customer</th>
                           <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
                           <th>Stage</th>
                         </tr>
