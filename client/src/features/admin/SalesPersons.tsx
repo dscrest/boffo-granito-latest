@@ -258,6 +258,7 @@ export function SalesPersonsAdmin() {
             </label>
           </div>
           <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <span className="df-req-note">* indicates a mandatory field</span>
             {draft.rowid && (
               <button className="btn" style={{ color: "var(--c-red)" }} disabled={busy} onClick={() => void onDelete()}>
                 Delete

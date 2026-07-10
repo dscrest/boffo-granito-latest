@@ -66,7 +66,8 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     title: "Identity",
     fields: [
       { key: "design_name", label: "Design Name", required: true },
-      { key: "seq_code", label: "Short Code", suffix: "SKU" },
+      // Short Code (seq_code) is no longer typed — designsApi.createDesign
+      // assigns the next sequence in the background; edits keep the stored one.
       { key: "base_design_name", label: "Base Design Name" },
       { key: "party_brand_name", label: "Party Brand Name", kind: "datalist", suggest: "partyBrands" },
       { key: "collection_name", label: "Collection" },
@@ -109,6 +110,7 @@ const REQUIRED = ALL_FIELDS.filter((f) => f.required).map((f) => f.key);
 
 export function blankDesign(): DesignValues {
   const v = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
+  v.seq_code = ""; // no longer a rendered field — assigned on create by designsApi
   v.status = "Active"; // #10: new designs default to Active
   return v;
 }
@@ -441,7 +443,7 @@ export function DesignForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* required"}
+            {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* indicates a mandatory field"}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel

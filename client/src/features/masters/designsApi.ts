@@ -9,6 +9,7 @@
    ============================================================ */
 import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { nextSeqCode } from "@/lib/seq";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -359,7 +360,14 @@ function bust<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-export function createDesign(input: DesignInput) {
+export async function createDesign(input: DesignInput) {
+  // Short code is assigned here, not typed. The SKU's first segment is always
+  // the design short code ("00" while blank) — swap in the generated one.
+  if (!input.seq_code.trim()) {
+    const res = await listDesigns();
+    const seq = nextSeqCode(res.designs.map((d) => d.seqCode));
+    input = { ...input, seq_code: seq, sku: [seq, ...input.sku.split("-").slice(1)].join("-") };
+  }
   return bust(insert("Design", toPayload(input)));
 }
 

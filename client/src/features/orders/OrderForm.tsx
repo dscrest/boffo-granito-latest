@@ -411,7 +411,7 @@ export function OrderForm({
                 {validLines.length === 0 ? "Add at least one line with a design + quantity" : "Fill the required fields above"}
               </span>
             ) : (
-              "* required · ≥1 line item"
+              "* indicates a mandatory field · ≥1 line item"
             )}
           </span>
           <button className="btn" onClick={onClose}>
@@ -419,7 +419,7 @@ export function OrderForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            Save order
+            Save
           </button>
         </div>
       </div>

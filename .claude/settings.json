@@ -58,7 +58,16 @@
       "Bash(node smoke2.mjs)",
       "mcp__claude_ai_Catalyst_Zoho__CatalystbyZoho_Delete_File",
       "Bash(curl -s -X PATCH -H 'X-App-Token: ZZT-actor-check-20260706' -H 'Content-Type: application/json' -d '{\"status\":\"Inactive\"}' https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/server/data-ops/Design/69851000000049901)",
-      "Bash(python3 -c \"import json,sys; r=json.load\\(sys.stdin\\)['rows'][0]; print\\('actor:', r['actor'], '| op:', r['operation'], '| table:', r['table_name'], '| payload:', r['payload_summary'][:60]\\)\")"
+      "Bash(python3 -c \"import json,sys; r=json.load\\(sys.stdin\\)['rows'][0]; print\\('actor:', r['actor'], '| op:', r['operation'], '| table:', r['table_name'], '| payload:', r['payload_summary'][:60]\\)\")",
+      "Bash(git -C /Users/octfistechnollp/oct-dev-projects/boffo-granito-latest fetch --all --prune)",
+      "Bash(git -C /Users/octfistechnollp/oct-dev-projects/boffo-granito-latest pull)",
+      "Bash(npm ls *)",
+      "Read(//Applications/**)",
+      "Bash(node drive.mjs)",
+      "Bash(grep -n 'className=\"calc\"\\\\|readOnly$\\\\|readOnly\\\\b' features/masters/PalletForm.tsx)",
+      "Bash(perl -0pi -e 's/\\\\{ key: \"seq_code\", label: \"Seq\" \\\\}/{ key: \"seq_code\", label: \"Seq\", auto: true }/g' features/masters/Masters.tsx)",
+      "Bash(perl -pi -e 's/\"\\\\* required\"/\"* indicates a mandatory field\"/g' features/invoices/Invoices.tsx features/stages/LoadContainerForm.tsx features/stages/PalletPackForm.tsx features/stages/DispatchForm.tsx features/masters/DesignEdit.tsx features/stages/ProductionForm.tsx)",
+      "Bash(perl -0pi -e 's/\\(<div className=\"right\" style=\\\\{\\\\{ marginTop: 14, display: \"flex\", gap: 8, justifyContent: \"flex-end\" \\\\}\\\\}>\\\\n\\)/$1            <span className=\"df-req-note\">* indicates a mandatory field<\\\\/span>\\\\n/' features/admin/SalesPersons.tsx features/admin/Users.tsx)"
     ]
   }
 }

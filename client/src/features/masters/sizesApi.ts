@@ -11,6 +11,7 @@
    ============================================================ */
 import { listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { nextSeqCode } from "@/lib/seq";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -130,7 +131,12 @@ function bust<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-export function createSize(input: SizeInput) {
+export async function createSize(input: SizeInput) {
+  // Short code is assigned here, not typed — next sequence across the master.
+  if (!input.seq_code.trim()) {
+    const res = await listSizes();
+    input = { ...input, seq_code: nextSeqCode(res.sizes.map((s) => s.seqCode)) };
+  }
   return bust(insert("Size", toPayload(input)));
 }
 

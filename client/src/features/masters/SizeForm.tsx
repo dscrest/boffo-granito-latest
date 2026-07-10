@@ -10,6 +10,7 @@
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { sizeCodeOf, sqftPerBoxOf, sqmPerBoxOf, type SizeInput } from "./sizesApi";
 
@@ -33,8 +34,6 @@ const blank: SizeInput = {
   box_weight_kg: 0,
   remark: "",
 };
-
-const readOnlyStyle = { background: "var(--bg-2, transparent)", color: "var(--dim)" };
 
 export function SizeForm({
   tileTypes = [],
@@ -107,21 +106,12 @@ export function SizeForm({
           <div className="form-section">
             <div className="form-section-title">Identity</div>
             <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Size</span>
-                <input
-                  value={code}
-                  readOnly
-                  disabled
-                  placeholder="Auto-generated from Width × Length"
-                  title="Auto-generated — fill Width & Length below"
-                />
-                <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                  Auto-generated from Width × Length — not editable
-                </span>
-              </label>
+              {/* Inputs first, derived Size after — you type Width & Length,
+                  the name falls out. */}
               <label className="form-field">
-                <span className="lbl">Width (mm)</span>
+                <span className="lbl">
+                  Width (mm)<span className="req"> *</span>
+                </span>
                 <input
                   type="number"
                   min={0}
@@ -131,7 +121,9 @@ export function SizeForm({
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">Length (mm)</span>
+                <span className="lbl">
+                  Length (mm)<span className="req"> *</span>
+                </span>
                 <input
                   type="number"
                   min={0}
@@ -140,19 +132,31 @@ export function SizeForm({
                   placeholder="e.g. 600"
                 />
               </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Size</span>
+                <input
+                  value={code}
+                  readOnly
+                  tabIndex={-1}
+                  className="calc"
+                  placeholder="Auto-generated from Width × Length"
+                  title="Formula field: Width × Length — filled automatically"
+                />
+              </label>
               <label className="form-field">
                 <span className="lbl">Type</span>
-                <input
-                  list="tile-type-list"
+                <Combobox
                   value={v.tile_type}
-                  onChange={(e) => setStr("tile_type", e.target.value)}
-                  placeholder="e.g. GVT"
+                  options={[
+                    { value: "", label: "" },
+                    ...(isNewType ? [v.tile_type.trim()] : [])
+                      .concat(typeOptions)
+                      .map((t) => ({ value: t, label: t })),
+                  ]}
+                  onChange={(val) => setStr("tile_type", val)}
+                  onCreate={(name) => setStr("tile_type", name)}
+                  placeholder="Select or create type…"
                 />
-                <datalist id="tile-type-list">
-                  {typeOptions.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
                 {isNewType && (
                   <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
                     + New type — created when you save
@@ -168,14 +172,6 @@ export function SizeForm({
                   value={v.thickness_mm || ""}
                   onChange={(e) => setNum("thickness_mm", e.target.value)}
                   placeholder="Optional"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Short Code</span>
-                <input
-                  value={v.seq_code}
-                  onChange={(e) => setStr("seq_code", e.target.value)}
-                  placeholder="SKU segment"
                 />
               </label>
             </div>
@@ -211,8 +207,8 @@ export function SizeForm({
                   value={sqmPerBox > 0 ? String(r4(sqmPerBox)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={readOnlyStyle}
-                  title="(Width/1000) × (Length/1000) × Pcs. per Packing"
+                  className="calc"
+                  title="Formula field: (Width/1000) × (Length/1000) × Pcs. per Packing"
                 />
               </label>
               <label className="form-field">
@@ -221,8 +217,8 @@ export function SizeForm({
                   value={sqftPerBox > 0 ? String(r2(sqftPerBox)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={readOnlyStyle}
-                  title="Total SQM per Box × 10.7639"
+                  className="calc"
+                  title="Formula field: Total SQM per Box × 10.7639"
                 />
               </label>
             </div>
@@ -245,13 +241,13 @@ export function SizeForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">Width and Length are required</span>
+          <span className="df-req-note">* indicates a mandatory field</span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
           <button className="hbtn primary" onClick={submit} disabled={!canSave}>
             <Icon name="check" size={13} />
-            {isEdit ? "Save changes" : "Save size"}
+            Save
           </button>
         </div>
       </div>

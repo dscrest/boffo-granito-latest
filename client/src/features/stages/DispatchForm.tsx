@@ -114,7 +114,7 @@ export function DispatchForm({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && !containerId ? <span className="field-err">Select a container to dispatch</span> : "* required"}
+            {showErrors && !containerId ? <span className="field-err">Select a container to dispatch</span> : "* indicates a mandatory field"}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel

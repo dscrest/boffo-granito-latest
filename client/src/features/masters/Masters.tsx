@@ -14,6 +14,7 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
+import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
 
 /* Admin areas that have their own dedicated pages (not local-draft lookup
@@ -31,6 +32,8 @@ interface Field {
   type?: FieldType; // default "text"
   options?: string[]; // for type "select"
   required?: boolean;
+  /** Background-assigned (e.g. seq_code): shown in the table, never typed. */
+  auto?: boolean;
 }
 
 interface MasterDef {
@@ -59,7 +62,7 @@ const MASTERS: MasterDef[] = [
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -70,7 +73,7 @@ const MASTERS: MasterDef[] = [
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -81,7 +84,7 @@ const MASTERS: MasterDef[] = [
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -93,7 +96,7 @@ const MASTERS: MasterDef[] = [
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "internal_or_external", label: "Type", type: "select", options: ["Internal", "External"] },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -104,7 +107,7 @@ const MASTERS: MasterDef[] = [
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -115,7 +118,7 @@ const MASTERS: MasterDef[] = [
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
-      { key: "seq_code", label: "Seq" },
+      { key: "seq_code", label: "Seq", auto: true },
     ],
   },
   {
@@ -163,7 +166,7 @@ function MasterEditor({
         {isEdit ? "Edit" : "New"} {def.label}
       </div>
       <div className="form-grid">
-        {def.fields.map((f) => (
+        {def.fields.filter((f) => !f.auto).map((f) => (
           <label key={f.key} className="form-field">
             <span className="lbl">
               {f.label}
@@ -190,6 +193,7 @@ function MasterEditor({
         ))}
       </div>
       <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <span className="df-req-note">* indicates a mandatory field</span>
         <button className="btn" onClick={onCancel}>
           Cancel
         </button>
@@ -248,6 +252,10 @@ function MasterTable({ def }: { def: MasterDef }) {
 
   const save = async (vals: Record<string, string>) => {
     const editId = editing?.id;
+    // Auto fields (seq_code) are assigned in the background on create.
+    if (!editId && def.fields.some((f) => f.key === "seq_code" && f.auto) && !vals.seq_code?.trim()) {
+      vals = { ...vals, seq_code: nextSeqCode(rows.map((r) => r.seq_code)) };
+    }
     setBusy(true);
     const res = editId
       ? await updateMaster(def.table, editId, vals)

@@ -486,7 +486,7 @@ a { color: inherit; text-decoration: none; }
   font-size: 10.5px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--fg-2);
   padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
@@ -1295,7 +1295,8 @@ a { color: inherit; text-decoration: none; }
   box-sizing: border-box;
   height: 35px;
   padding: 0 11px;
-  background: var(--panel-2);
+  /* White = typable. Grey is reserved for auto-owned fields (see [readonly] below). */
+  background: var(--panel);
   color: var(--fg);
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -1320,6 +1321,55 @@ a { color: inherit; text-decoration: none; }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
   background: var(--panel);
+}
+
+/* Auto-owned fields (formula-computed or locked): grey + dashed = "the app
+   fills this, not you". Attribute-driven, so every readOnly/disabled input
+   in a form inherits it without per-field styling. */
+.form-field input[readonly],
+.form-field input[disabled],
+.modal-panel input[readonly],
+.modal-panel input[disabled] {
+  background-color: var(--panel-2);
+  color: var(--muted);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.form-field input[readonly]:hover,
+.form-field input[disabled]:hover,
+.form-field input[readonly]:focus,
+.modal-panel input[readonly]:hover,
+.modal-panel input[disabled]:hover,
+.modal-panel input[readonly]:focus {
+  border-color: var(--border);
+  box-shadow: none;
+  background-color: var(--panel-2);
+}
+/* Formula fields additionally carry an ƒx marker: value is computed. */
+.form-field input.calc,
+.modal-panel input.calc {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='12' viewBox='0 0 18 12'><text x='1' y='10' font-family='Georgia,serif' font-style='italic' font-size='11' fill='%23848a96'>fx</text></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 32px;
+}
+
+/* Required fields are flagged inside the box (red asterisk, top-right), not
+   on the label — the `.req` span in the label stays in the markup as the
+   marker `:has()` keys off, but is visually hidden. */
+.form-field > .lbl .req { display: none; }
+.form-field:has(> .lbl .req) input:not([readonly]):not([disabled]),
+.form-field:has(> .lbl .req) .combo-input {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23dc3b42' stroke-width='3.2' stroke-linecap='round'><path d='M12 4v16M5.1 8l13.8 8M18.9 8 5.1 16'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px top 7px;
+  padding-right: 26px;
+}
+.form-field:has(> .lbl .req) select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23dc3b42' stroke-width='3.2' stroke-linecap='round'><path d='M12 4v16M5.1 8l13.8 8M18.9 8 5.1 16'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 26px top 7px, right 10px center;
 }
 
 /* ---------- native date inputs ----------
@@ -1395,7 +1445,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qt-totals .row.charge select { text-align: left; width: 78px; }
 .qt-totals .row.charge .lbl-wrap { display: flex; align-items: center; gap: 6px; }
 
-.form-section { margin-bottom: 18px; }
+/* Sections are contained cards, so field groups read as distinct blocks. */
+.form-section {
+  margin-bottom: 14px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel-2) 40%, var(--panel));
+}
+.form-section:last-child { margin-bottom: 0; }
 .form-section-title {
   display: flex;
   align-items: center;

@@ -318,13 +318,13 @@ export function PartyForm({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">* required</span>
+          <span className="df-req-note">* indicates a mandatory field</span>
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
           <button className="hbtn primary" disabled={missing} onClick={submit}>
             <Icon name="check" size={13} />
-            {isEdit ? "Update customer" : "Save customer"}
+            Save
           </button>
         </div>
       </div>

@@ -158,8 +158,13 @@ export function ColumnPicker({
 
   return (
     <div className="hdr-pop" ref={ref}>
-      <button className="btn" onClick={() => setOpen((v) => !v)} title="Show / hide / reorder columns">
-        <Icon name="settings" size={12} /> Columns
+      <button
+        className="btn"
+        onClick={() => setOpen((v) => !v)}
+        title="Columns — show / hide / reorder"
+        aria-label="Columns — show / hide / reorder"
+      >
+        <Icon name="columns" size={14} />
       </button>
       {open && (
         <div className="hdr-menu" style={{ width: onMove ? 236 : 200, padding: 6, maxHeight: 320, overflow: "auto" }}>

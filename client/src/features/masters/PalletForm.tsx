@@ -26,8 +26,6 @@ const PALLET_TYPES = [
 
 export interface PalletFormInitial extends Partial<PalletInput> {}
 
-const readOnlyStyle = { background: "var(--bg-2, transparent)", color: "var(--dim)" };
-
 const blank: PalletInput = {
   name: "",
   packing_details: "",
@@ -157,19 +155,8 @@ export function PalletForm({
           <div className="form-section">
             <div className="form-section-title">Identity</div>
             <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Name</span>
-                <input
-                  value={v.name}
-                  readOnly
-                  disabled
-                  placeholder="Auto-generated from Size, packing & type"
-                  title="Auto-generated — fill Size, packing & type below"
-                />
-                <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                  Auto-generated from the fields below — not editable
-                </span>
-              </label>
+              {/* Inputs first, derived Name last — you pick Size & Type,
+                  the name falls out. */}
               <label className="form-field">
                 <span className="lbl">Size</span>
                 {lockSize ? (
@@ -177,7 +164,6 @@ export function PalletForm({
                     value={sizeLabel || "—"}
                     readOnly
                     tabIndex={-1}
-                    style={readOnlyStyle}
                     title="Size is fixed — opened from the Size master"
                   />
                 ) : (
@@ -191,17 +177,18 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Pallet Type</span>
-                <input
-                  list="pallet-type-list"
+                <Combobox
                   value={v.pallet_type}
-                  onChange={(e) => setStr("pallet_type", e.target.value)}
-                  placeholder="e.g. Junglee"
+                  options={[
+                    { value: "", label: "" },
+                    ...(isNewType ? [v.pallet_type.trim()] : [])
+                      .concat(typeOptions)
+                      .map((t) => ({ value: t, label: t })),
+                  ]}
+                  onChange={(val) => setStr("pallet_type", val)}
+                  onCreate={(name) => setStr("pallet_type", name)}
+                  placeholder="Select or create type…"
                 />
-                <datalist id="pallet-type-list">
-                  {typeOptions.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
                 {isNewType && (
                   <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
                     + New type — created when you save
@@ -216,9 +203,20 @@ export function PalletForm({
                   value={packing || "—"}
                   readOnly
                   tabIndex={-1}
-                  title="Boxes/Pallet × Pallets/Container"
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                  className="calc"
+                  title="Formula field: Boxes/Pallet × Pallets/Container"
                   placeholder="e.g. [32 * 30] = 960"
+                />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Name</span>
+                <input
+                  value={v.name}
+                  readOnly
+                  tabIndex={-1}
+                  className="calc"
+                  placeholder="Auto-generated from Size, packing & type"
+                  title="Formula field: Size - Packing Detail - Type"
                 />
               </label>
             </div>
@@ -234,8 +232,8 @@ export function PalletForm({
                   value={coverageSqm > 0 ? String(r4(coverageSqm)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={readOnlyStyle}
-                  title="Total SQM per Box, from the selected Size"
+                  className="calc"
+                  title="Formula field: Total SQM per Box, from the selected Size"
                 />
               </label>
               <label className="form-field">
@@ -244,8 +242,8 @@ export function PalletForm({
                   value={coverageSqft > 0 ? String(r2(coverageSqft)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={readOnlyStyle}
-                  title="Total SQFT per Box, from the selected Size"
+                  className="calc"
+                  title="Formula field: Total SQFT per Box, from the selected Size"
                 />
               </label>
               <label className="form-field">
@@ -254,8 +252,8 @@ export function PalletForm({
                   value={boxWeightKg > 0 ? String(r2(boxWeightKg)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={readOnlyStyle}
-                  title="Box Weight, from the selected Size"
+                  className="calc"
+                  title="Formula field: Box Weight, from the selected Size"
                 />
               </label>
             </div>
@@ -346,8 +344,8 @@ export function PalletForm({
                   value={totalBoxes > 0 ? String(totalBoxes) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="A boxes×pallets + B boxes×pallets"
+                  className="calc"
+                  title="Formula field: A boxes×pallets + B boxes×pallets"
                 />
               </label>
               <label className="form-field">
@@ -356,8 +354,8 @@ export function PalletForm({
                   value={totalPallets > 0 ? String(totalPallets) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="A pallets + B pallets"
+                  className="calc"
+                  title="Formula field: A pallets + B pallets"
                 />
               </label>
               <label className="form-field">
@@ -366,8 +364,8 @@ export function PalletForm({
                   value={totalPalletWeight > 0 ? String(r2(totalPalletWeight)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="(Box weight × Boxes/Pallet) + Empty pallet weight"
+                  className="calc"
+                  title="Formula field: (Box weight × Boxes/Pallet) + Empty pallet weight"
                 />
               </label>
               <label className="form-field">
@@ -376,8 +374,8 @@ export function PalletForm({
                   value={totalSqm > 0 ? String(r2(totalSqm)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="Total Boxes × Coverage Sq.M"
+                  className="calc"
+                  title="Formula field: Total Boxes × Coverage Sq.M"
                 />
               </label>
               <label className="form-field">
@@ -386,8 +384,8 @@ export function PalletForm({
                   value={totalSqft > 0 ? String(r2(totalSqft)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="Total Boxes × Coverage Sq.Ft"
+                  className="calc"
+                  title="Formula field: Total Boxes × Coverage Sq.Ft"
                 />
               </label>
               <label className="form-field">
@@ -396,8 +394,8 @@ export function PalletForm({
                   value={totalBoxWeight > 0 ? String(r2(totalBoxWeight)) : "—"}
                   readOnly
                   tabIndex={-1}
-                  style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
-                  title="Total Boxes × Box weight"
+                  className="calc"
+                  title="Formula field: Total Boxes × Box weight"
                 />
               </label>
             </div>
@@ -421,7 +419,7 @@ export function PalletForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            {isEdit ? "Save changes" : "Save pallet"}
+            Save
           </button>
         </div>
       </div>

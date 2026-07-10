@@ -388,7 +388,7 @@ export function QuoteForm({
                 {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
               </span>
             ) : (
-              "* required · ≥1 line item"
+              "* indicates a mandatory field · ≥1 line item"
             )}
           </span>
           <button className="btn" onClick={onClose}>
@@ -396,7 +396,7 @@ export function QuoteForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            {editing ? "Update quote" : "Save quote"}
+            Save
           </button>
         </div>
       </div>

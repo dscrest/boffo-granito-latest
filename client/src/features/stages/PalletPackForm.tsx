@@ -438,7 +438,7 @@ export function PalletPackForm({
             ) : totalBoxes > 0 ? (
               `${totalBoxes} boxes · ${lines.length} item${lines.length > 1 ? "s" : ""}`
             ) : (
-              "* required"
+              "* indicates a mandatory field"
             )}
           </span>
           <button className="btn" onClick={onClose}>
