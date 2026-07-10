@@ -1,12 +1,12 @@
 /* ============================================================
-   Quote detail — read-only record page (Books-parity).
+   Quote detail — same split view as the Item (Design) detail page.
 
-   Route: /quotes/:id. Replaces the old "click row → edit modal" flow.
-   Top toolbar carries the actions that used to be inline in the table
-   rows (Edit / Convert to Sales Order / Print / Delete). Two tabs:
-   Details (header fields + line items) and Activity Log (this quote's
-   OperationLog entries). A Fields menu show/hides Details rows,
-   persisted per-browser in localStorage.
+   Route: /quotes/:id. Left: resizable, searchable list of quotes.
+   Right: header card with the quote number in big type + status chip,
+   status-transition / Edit / Convert buttons, a More menu (Print /
+   PDF / Share / Delete) and ✕ close. Two tabs: Details (header fields
+   + line items) and Activity Log. A Fields menu show/hides Details
+   rows, persisted per-browser in localStorage.
 
    Reuses the existing QuoteForm / QuotePrint / ConvertDialog modals and
    the quotesApi cache — no new backend.
@@ -16,6 +16,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
+import { canDelete } from "@/lib/auth";
+import { MoreMenu } from "@/features/common/DetailBits";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
@@ -86,6 +88,7 @@ export function QuoteDetail() {
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"details" | "activity">("details");
+  const [listQ, setListQ] = useState("");
 
   const [editing, setEditing] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -248,8 +251,20 @@ export function QuoteDetail() {
   });
   const canConvert = convertible(quote.status);
 
+  const needle = listQ.trim().toLowerCase();
+  const listed = needle
+    ? quotes.filter((x) => `${x.quoteNo} ${x.customer}`.toLowerCase().includes(needle))
+    : quotes;
+
+  const moreItems = [
+    { label: "Print Quote", onClick: () => setPrinting(true) },
+    { label: "Download PDF", onClick: () => void onPdf() },
+    { label: "Copy Share Link", onClick: () => void onShare() },
+    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+  ];
+
   return (
-    <div>
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {editing && (
         <QuoteForm nextSeq={0} initial={quote} onSave={onEditSave} onClose={() => setEditing(false)} />
       )}
@@ -265,29 +280,81 @@ export function QuoteDetail() {
         />
       )}
 
-      {/* Toolbar */}
-      <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
-          <button className="hbtn" onClick={() => navigate("/quotes")} title="Back to Quotes">
-            <Icon name="chev-l" size={13} />
-          </button>
-          <div>
-            <div className="title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {quote.quoteNo}
-              <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`}>{STATUS_LABEL[quote.status]}</span>
-            </div>
-            <div className="sub">
-              {quote.customer} · Total {quote.currency} {fmt(totals.net)}
-              {busy && (
-                <>
-                  {" · "}
-                  <span className="dim">{busy}</span>
-                </>
-              )}
-            </div>
-          </div>
+      {/* Quote list — fixed viewport height with its OWN scroll, sticky while
+          the detail scrolls. Drag the bottom-right corner to resize the width. */}
+      <div
+        className="card"
+        style={{
+          width: 300,
+          minWidth: 220,
+          maxWidth: 420,
+          flexShrink: 0,
+          padding: 0,
+          resize: "horizontal",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100vh - var(--header-h) - 46px)",
+          position: "sticky",
+          top: 0,
+        }}
+      >
+        <div style={{ padding: 10, borderBottom: "1px solid var(--border)" }}>
+          <input
+            type="text"
+            placeholder="Search quotes…"
+            value={listQ}
+            onChange={(e) => setListQ(e.target.value)}
+            style={{ width: "100%" }}
+          />
         </div>
-        <div className="right">
+        <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
+          {listed.map((x) => {
+            const cur = x.id === id;
+            return (
+              <button
+                key={x.id}
+                type="button"
+                onClick={() => navigate(`/quotes/${x.id}`)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "9px 12px",
+                  border: "none",
+                  borderBottom: "1px solid var(--border)",
+                  background: cur ? "var(--accent-soft)" : "transparent",
+                  cursor: "pointer",
+                  font: "inherit",
+                }}
+                title={x.quoteNo}
+              >
+                <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {x.quoteNo}
+                </div>
+                <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+                  {[x.customer, STATUS_LABEL[x.status]].filter(Boolean).join("  ·  ")}
+                </div>
+              </button>
+            );
+          })}
+          {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching quotes</div>}
+        </div>
+      </div>
+
+      {/* Detail panel */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Header inside a card so it top-aligns with the quote list (Zoho-style). */}
+      <div className="card" style={{ padding: 16, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div
+            className="title"
+            style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }}
+            title={quote.quoteNo}
+          >
+            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{quote.quoteNo}</span>
+            <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`}>{STATUS_LABEL[quote.status]}</span>
+          </div>
           {/* #16: status transitions (Zoho Books style). */}
           {quote.status === "Draft" && (
             <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Sent", "Marked as sent")} title="Mark as sent">
@@ -315,18 +382,19 @@ export function QuoteDetail() {
           >
             <Icon name="arrow-r" size={13} /> Convert to Master Order
           </button>
-          <button className="hbtn" onClick={() => setPrinting(true)} title="Print / PDF">
-            <Icon name="printer" size={13} /> Print Quote
+          <MoreMenu items={moreItems} />
+          <button className="btn x" onClick={() => navigate("/quotes")} title="Close">
+            <Icon name="x" size={13} />
           </button>
-          <button className="hbtn" onClick={() => void onPdf()} title="Download PDF">
-            <Icon name="download" size={13} /> PDF
-          </button>
-          <button className="hbtn" disabled={!!busy} onClick={() => void onShare()} title="Copy public share link">
-            <Icon name="docs" size={13} /> Share
-          </button>
-          <button className="hbtn" disabled={!!busy} onClick={() => void onDelete()} title="Delete quote" style={{ color: "var(--c-red)" }}>
-            <Icon name="x" size={13} /> Delete
-          </button>
+        </div>
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
+          {quote.customer} · Total {quote.currency} {fmt(totals.net)}
+          {busy && (
+            <>
+              {" · "}
+              <span className="dim">{busy}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -508,6 +576,7 @@ export function QuoteDetail() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

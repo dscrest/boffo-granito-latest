@@ -69,7 +69,15 @@ function quoteColumns(navigate: (to: string) => void): ColumnDef<Quote>[] {
       className: "mono muted",
       render: (q) =>
         q.soNumber && q.soId ? (
-          <button className="linkish" style={linkStyle} onClick={() => navigate(`/orders/${q.soId}`)} title="Open Master Order">
+          <button
+            className="linkish"
+            style={linkStyle}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/orders/${q.soId}`);
+            }}
+            title="Open Master Order"
+          >
             {q.soNumber}
           </button>
         ) : (
@@ -120,7 +128,6 @@ export function QuotesTable() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
@@ -142,16 +149,13 @@ export function QuotesTable() {
   const onSave = async (q: Quote) => {
     setShowForm(false);
     setSaving(true);
-    setNotice("Saving quote…");
     const res = await createQuote(quoteToInput(q));
     setSaving(false);
     if (!res.ok) {
-      setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    setNotice(`Quote saved (#${res.rowid}).`);
     toast.success(`Quote saved (#${res.rowid})`);
     invalidateQuotes();
     await load();
@@ -197,21 +201,8 @@ export function QuotesTable() {
       <div className="page-head">
         <div>
           <div className="title">Quotes</div>
-          <div className="sub">
-            {loading ? "Loading…" : "Raised → shared → converted to Master Order"}
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
-          </div>
         </div>
         <div className="right">
-          <button className="hbtn" onClick={() => void load()} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
           <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             {saving ? "Saving…" : "New Quote"}
@@ -262,17 +253,17 @@ export function QuotesTable() {
             </thead>
             <tbody>
               {pager.slice(filtered).map((q) => (
-                <tr key={q.id}>
-                  <td className="mono">
-                    <button
-                      className="linkish"
-                      style={linkStyle}
-                      onClick={() => navigate(`/quotes/${q.id}`)}
-                      title="Open details"
-                    >
-                      {q.quoteNo}
-                    </button>
-                  </td>
+                <tr
+                  key={q.id}
+                  tabIndex={0}
+                  onClick={() => navigate(`/quotes/${q.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/quotes/${q.id}`);
+                  }}
+                  style={{ cursor: "pointer" }}
+                  title="View quote"
+                >
+                  <td className="mono">{q.quoteNo}</td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
                       {c.render!(q)}

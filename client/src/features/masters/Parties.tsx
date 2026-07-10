@@ -28,7 +28,6 @@ type Row = {
   code: string;
   name: string;
   country: string;
-  flag: string;
   currency: string;
   paymentTerm: string;
   handlingPerson: string;
@@ -124,7 +123,6 @@ export function PartiesView() {
           code: c.code,
           name: c.name,
           country: c.country || "—",
-          flag: c.flag,
           currency: c.currency || "—",
           paymentTerm: c.paymentTermLabel || "—",
           handlingPerson: c.handlingPersonLabel,
@@ -178,8 +176,6 @@ export function PartiesView() {
     return [...new Set(base.map((r) => String(r[filterField])).filter(Boolean))].sort();
   }, [base, filterField]);
 
-  const countries = new Set(customers.map((c) => c.country).filter(Boolean)).size;
-
   return (
     <div>
       {showForm && (
@@ -188,13 +184,8 @@ export function PartiesView() {
       <div className="page-head">
         <div>
           <div className="title">Customers</div>
-          <div className="sub">{loading ? "Loading…" : `Buyers across ${countries} countries`}</div>
         </div>
         <div className="right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button className="hbtn" onClick={load} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
           <button className="hbtn primary" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New
@@ -261,17 +252,18 @@ export function PartiesView() {
             </thead>
             <tbody>
               {pager.slice(sort.sorted).map((r) => (
-                <tr key={r.key}>
+                <tr
+                  key={r.key}
+                  tabIndex={0}
+                  onClick={() => navigate(`/parties/${encodeURIComponent(r.code)}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/parties/${encodeURIComponent(r.code)}`);
+                  }}
+                  style={{ cursor: "pointer" }}
+                  title="View customer"
+                >
                   <td>
-                    {r.flag}{" "}
-                    <button
-                      className="linkish"
-                      style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                      onClick={() => navigate(`/parties/${encodeURIComponent(r.code)}`)}
-                      title="Open details"
-                    >
-                      {r.name}
-                    </button>
+                    {r.name}
                     {!r.active && (
                       <span className="chip" style={{ marginLeft: 6 }}>
                         inactive
