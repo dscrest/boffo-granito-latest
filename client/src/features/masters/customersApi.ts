@@ -33,6 +33,7 @@ export function isoInfo(iso: string): { country: string; flag: string } {
 export interface PaymentTermOption {
   id: string; // PaymentTerm ROWID
   label: string;
+  email?: string; // SalesPerson options only — matches the logged-in user
 }
 
 /* Books-parity extras: contact person + structured billing/shipping
@@ -44,6 +45,8 @@ export const CUSTOMER_EXTRA_FIELDS = [
   "main_party_name",
   "working_status",
   "handling_person",
+  "company_name",
+  "customer_type", // "business" | "individual" (stored lowercase)
   "contact_salutation",
   "contact_first_name",
   "contact_last_name",
@@ -156,14 +159,14 @@ async function fetchCustomers(): Promise<{
   const [customers, terms, reps] = await Promise.all([
     listAll("Customer", { order: "ROWID desc" }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
-    list("SalesPerson", { limit: 300, columns: ["name"] }),
+    list("SalesPerson", { limit: 300, columns: ["name", "email"] }),
   ]);
   if (!customers.ok)
     return { ok: false, customers: [], paymentTerms: [], salesPersons: [], error: customers.error };
 
   const toOptions = (rows: DSRow[] | undefined): PaymentTermOption[] =>
     (rows || [])
-      .map((r) => ({ id: String(r.ROWID), label: str(r.name) || String(r.ROWID) }))
+      .map((r) => ({ id: String(r.ROWID), label: str(r.name) || String(r.ROWID), email: str(r.email) }))
       .sort((a, b) => a.label.localeCompare(b.label));
 
   const termLabel = new Map<string, string>();

@@ -14,6 +14,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
+import { STAGES } from "@/data";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
@@ -36,12 +37,13 @@ type Detail = [string, string, boolean];
 const text = (label: string, s: string): Detail => [label, s || "Not set", !s];
 
 const rows = (c: CustomerRow): Detail[] => [
-  text("Name", c.name),
-  text("Code", c.code),
+  text("Display Name", c.name),
+  text("Company Name", c.extras.company_name),
+  text("Customer Type", c.extras.customer_type && c.extras.customer_type[0].toUpperCase() + c.extras.customer_type.slice(1)),
+  text("Customer Number", c.code),
   text("Main Customer", c.extras.main_party_name),
   text("Country", c.country),
-  text("Working Status", c.extras.working_status),
-  text("Handling Person", c.handlingPersonLabel),
+  text("Sales Person", c.handlingPersonLabel),
   text("Currency", c.currency),
   text("Payment Term", c.paymentTermLabel),
   text("Port of Discharge", c.portOfDischarge),
@@ -87,8 +89,23 @@ export function CustomerDetail() {
   const party = customers.find((c) => c.code === code) ?? null;
   const orders = party ? allOrders.filter((o) => o.partyCode === party.code) : [];
   const totalQty = orders.reduce((s, o) => s + o.orderQty, 0);
+  // One row per PO (SalesOrder) — its design lines collapse into a single
+  // entry: qty summed, stage = the least-advanced line's stage.
+  const stageRank = (s: string | undefined) => Math.max(0, STAGES.findIndex((st) => st.id === s));
+  const byPo = new Map<string, (typeof orders)[number] & { designs: string[] }>();
+  for (const o of orders) {
+    const poKey = o.salesOrderId || o.id; // lines without a parent SO stay separate
+    const g = byPo.get(poKey);
+    if (!g) byPo.set(poKey, { ...o, designs: [o.design] });
+    else {
+      g.designs.push(o.design);
+      g.orderQty += o.orderQty;
+      if (stageRank(o.stage) < stageRank(g.stage)) g.stage = o.stage;
+    }
+  }
+  const poRows = [...byPo.values()];
   // 10 most recent transactions, shown beside Primary Details.
-  const recent = [...orders].sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? "")).slice(0, 10);
+  const recent = poRows.sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? "")).slice(0, 10);
   const needle = q.trim().toLowerCase();
   const listed = needle
     ? customers.filter((c) => `${c.name} ${c.code} ${c.country}`.toLowerCase().includes(needle))
@@ -249,7 +266,7 @@ export function CustomerDetail() {
                 </button>
               </div>
               <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                {[party.code, `${orders.length} orders`, !party.active && "Inactive"].filter(Boolean).join("  ·  ")}
+                {[party.code, `${poRows.length} orders`, !party.active && "Inactive"].filter(Boolean).join("  ·  ")}
               </div>
 
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginTop: 14 }}>
@@ -263,7 +280,7 @@ export function CustomerDetail() {
                 {/* The customer's 10 most recent orders — rows open the Master Order. */}
                 <div style={{ flex: "1 1 380px", minWidth: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: 8 }}>
-                    Associated Orders {orders.length > 0 && <span className="dim">({orders.length} · {fmt(totalQty)} boxes)</span>}
+                    Associated Orders {poRows.length > 0 && <span className="dim">({poRows.length} · {fmt(totalQty)} boxes)</span>}
                   </div>
                   <div style={{ overflow: "auto" }}>
                     <table className="tbl">
@@ -285,13 +302,13 @@ export function CustomerDetail() {
                             onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
                           >
                             <td className="mono" style={{ color: "var(--accent)" }}>{o.poNumber}</td>
-                            <td>{o.design}</td>
+                            <td>{o.designs.length > 1 ? `${o.designs.length} designs` : o.designs[0]}</td>
                             <td className="num mono">{fmt(o.orderQty)}</td>
                             <td>{o.stage}</td>
                             <td className="mono muted">{o.dueDate}</td>
                           </tr>
                         ))}
-                        {orders.length === 0 && (
+                        {poRows.length === 0 && (
                           <tr>
                             <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>No orders for this customer.</td>
                           </tr>
@@ -299,9 +316,9 @@ export function CustomerDetail() {
                       </tbody>
                     </table>
                   </div>
-                  {orders.length > recent.length && (
+                  {poRows.length > recent.length && (
                     <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
-                      Showing the 10 most recent of {orders.length} orders.
+                      Showing the 10 most recent of {poRows.length} orders.
                     </div>
                   )}
                 </div>

@@ -13,6 +13,7 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
 import { fmtDateTime, pct } from "@/lib/format";
+import { nextCustomerCode } from "@/lib/seq";
 import { useOrders } from "@/features/orders/useOrders";
 import { PartyForm } from "./PartyForm";
 import {
@@ -146,7 +147,7 @@ export function PartiesView() {
       { key: "code", label: "Code", type: "text", get: (r) => r.code },
       { key: "country", label: "Country", type: "multiselect", options: opts((r) => r.country), get: (r) => r.country },
       { key: "status", label: "Working Status", type: "multiselect", options: opts(status), get: status },
-      { key: "handlingPerson", label: "Handling Person", type: "multiselect", options: opts((r) => r.handlingPerson), get: (r) => r.handlingPerson },
+      { key: "handlingPerson", label: "Sales Person", type: "multiselect", options: opts((r) => r.handlingPerson), get: (r) => r.handlingPerson },
       { key: "currency", label: "Currency", type: "multiselect", options: opts((r) => r.currency), get: (r) => r.currency },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
     ];
@@ -181,7 +182,13 @@ export function PartiesView() {
        grows and its footer sits on the window edge — no dead band below. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
       {showForm && (
-        <PartyForm paymentTerms={paymentTerms} salesPersons={salesPersons} onSave={onSave} onClose={() => setShowForm(false)} />
+        <PartyForm
+          paymentTerms={paymentTerms}
+          salesPersons={salesPersons}
+          initial={{ code: nextCustomerCode(customers.map((c) => c.code)) }}
+          onSave={onSave}
+          onClose={() => setShowForm(false)}
+        />
       )}
 
       {error && <ErrorCard message={error} onRetry={load} />}

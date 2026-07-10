@@ -97,7 +97,8 @@
       "Bash(sed -i '' 's|<div className=\"title\">Reports</div>|<div className=\"title\">Quantity Reports</div>|' features/reports/Reports.tsx)",
       "Bash(sed -i '' 's|<div className=\"title\">Container-Fit Suggester</div>|<div className=\"title\">Fit Suggester</div>|' features/stages/FitSuggest.tsx)",
       "Bash(sed -i '' 's|{ id: \"containers\", label: \"Containers\", icon: \"truck\" }|{ id: \"containers\", label: \"Container Master\", icon: \"truck\" }|' App.tsx)",
-      "Bash(xargs sed -i '' 's|\\\\* indicates a mandatory field|* Indicates a mandatory field|g')"
+      "Bash(xargs sed -i '' 's|\\\\* indicates a mandatory field|* Indicates a mandatory field|g')",
+      "Bash(npx tsx -e ' *)"
     ]
   }
 }
