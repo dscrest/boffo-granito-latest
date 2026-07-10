@@ -326,7 +326,9 @@ export function DesignMaster() {
   };
 
   return (
-    <div>
+    /* Same shell as Sizes: column fills the scrollport so the grid footer
+       sits on the window edge — no dead band above or below the table. */
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
       {showNew && <DesignForm lookups={lookups} onSave={onCreate} onClose={() => setShowNew(false)} />}
       {showBulk && (
         <BulkEditModal
@@ -337,23 +339,6 @@ export function DesignMaster() {
           onClose={() => setShowBulk(false)}
         />
       )}
-
-      <div className="page-head">
-        <div>
-          {/* Counts live in the grid footer; the sub line only carries status. */}
-          <div className="sub">
-            {loading ? "Loading…" : <span className="dim">{notice}</span>}
-          </div>
-        </div>
-        <div className="right">
-          {canUpdate() && (
-            <button className="hbtn primary" onClick={() => setShowNew(true)}>
-              <Icon name="plus" size={13} />
-              New Item
-            </button>
-          )}
-        </div>
-      </div>
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -380,6 +365,7 @@ export function DesignMaster() {
         </div>
       ) : (
         <div className="fbar">
+          <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : notice}</span>
           <div style={{ flex: 1 }} />
           <span className="gsearch">
             <Icon name="search" size={13} />
@@ -387,11 +373,18 @@ export function DesignMaster() {
           </span>
           <AdvancedFilterButton title="Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          {canUpdate() && (
+            /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+              <Icon name="plus" size={13} />
+              New Item
+            </button>
+          )}
         </div>
       )}
 
-      <div className="card">
-        <div style={{ overflow: "auto" }}>
+      <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           {loading && rows.length === 0 ? (
             <SkeletonRows rows={6} />
           ) : (

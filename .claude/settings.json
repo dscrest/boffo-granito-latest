@@ -67,7 +67,18 @@
       "Bash(grep -n 'className=\"calc\"\\\\|readOnly$\\\\|readOnly\\\\b' features/masters/PalletForm.tsx)",
       "Bash(perl -0pi -e 's/\\\\{ key: \"seq_code\", label: \"Seq\" \\\\}/{ key: \"seq_code\", label: \"Seq\", auto: true }/g' features/masters/Masters.tsx)",
       "Bash(perl -pi -e 's/\"\\\\* required\"/\"* indicates a mandatory field\"/g' features/invoices/Invoices.tsx features/stages/LoadContainerForm.tsx features/stages/PalletPackForm.tsx features/stages/DispatchForm.tsx features/masters/DesignEdit.tsx features/stages/ProductionForm.tsx)",
-      "Bash(perl -0pi -e 's/\\(<div className=\"right\" style=\\\\{\\\\{ marginTop: 14, display: \"flex\", gap: 8, justifyContent: \"flex-end\" \\\\}\\\\}>\\\\n\\)/$1            <span className=\"df-req-note\">* indicates a mandatory field<\\\\/span>\\\\n/' features/admin/SalesPersons.tsx features/admin/Users.tsx)"
+      "Bash(perl -0pi -e 's/\\(<div className=\"right\" style=\\\\{\\\\{ marginTop: 14, display: \"flex\", gap: 8, justifyContent: \"flex-end\" \\\\}\\\\}>\\\\n\\)/$1            <span className=\"df-req-note\">* indicates a mandatory field<\\\\/span>\\\\n/' features/admin/SalesPersons.tsx features/admin/Users.tsx)",
+      "Bash(git push *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/index.html)",
+      "Bash(curl -s https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/server/api-health/)",
+      "WebFetch(domain:boffogranito.com)",
+      "Bash(curl -sL -o boffo.png https://boffogranito.com/assets/img/boffo.png)",
+      "Bash(curl -s https://boffogranito.com/ -o home.html)",
+      "Bash(grep -oiE '\\(#[0-9a-f]{3,8}\\)' home.html)",
+      "Bash(sips -g pixelWidth boffo.png)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{url_effective}\\\\n\" http://localhost:4173/app/index.html http://localhost:4173/index.html http://localhost:4173/)",
+      "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless=new --disable-gpu --screenshot=/private/tmp/claude-501/-Users-octfistechnollp-oct-dev-projects-boffo-granito-latest/7d7e86b6-8894-4d4e-a457-b83fda79644c/scratchpad/login2.png --window-size=1280,800 --virtual-time-budget=15000 --run-all-compositor-stages-before-draw http://localhost:4173/)"
     ]
   }
 }

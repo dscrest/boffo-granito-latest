@@ -6,6 +6,7 @@
      (see lib/auth.ts). Themed via login.css. */
 import { useEffect, useState } from "react";
 import { checkSession, signIn, type SessionUser } from "./lib/auth";
+import boffoLogo from "./assets/boffo-logo.png";
 import "./styles/login.css";
 
 type Status = "checking" | "anon" | "authed";
@@ -76,11 +77,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <div className="boffo-auth-pane">
             <form className="boffo-auth-form" onSubmit={onSubmit}>
               <div className="boffo-auth-brand">
-                <div className="mark">B</div>
-                <div className="wordmark">
-                  <span className="name">BOFFO</span>
-                  <span className="sub">Order OS</span>
-                </div>
+                {/* White + orange brand logo (boffogranito.com asset) — the
+                    login theme is dark so the white wordmark reads. */}
+                <img className="logo" src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
+                <span className="sub">Order OS</span>
               </div>
 
               <h1 className="boffo-auth-h1">Welcome back</h1>

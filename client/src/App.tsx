@@ -14,6 +14,7 @@ import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
 import { checkSession, hasFeature, type SessionUser } from "@/lib/auth";
 import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
+import boffoLogo from "@/assets/boffo-logo.png";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
 import { cachedCustomers, subscribeCustomers } from "@/features/masters/customersApi";
@@ -336,8 +337,12 @@ export default function App() {
     <div className={`app ${collapsed ? "collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
+          {/* Expanded: full white+orange logo on a dark chip (it needs a dark
+              ground). Collapsed: the compact "B" mark (CSS swaps them). */}
           <div className="mark">B</div>
-          <div className="name">BOFFO</div>
+          <div className="logo-chip">
+            <img src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
+          </div>
           <div className="ver">v4.0</div>
           <button
             type="button"

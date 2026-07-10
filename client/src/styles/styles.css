@@ -249,11 +249,21 @@ a { color: inherit; text-decoration: none; }
 .sidebar .brand .mark {
   width: 26px; height: 26px; border-radius: 6px;
   background: #0f1419; color: #fff;
-  display: grid; place-items: center;
+  display: none; /* compact fallback — shown only when collapsed */
+  place-items: center;
   font-weight: 800; font-size: 13px; letter-spacing: -0.04em;
 }
-.sidebar .brand .name {
-  font-weight: 700; letter-spacing: 0.08em; font-size: 12.5px;
+/* Full white+orange logo, on a near-black chip so the white wordmark reads. */
+.sidebar .brand .logo-chip {
+  flex: 0 1 auto; min-width: 0;
+  background: #130e0d;
+  border-radius: 7px;
+  padding: 6px 9px;
+  display: flex; align-items: center;
+}
+.sidebar .brand .logo-chip img {
+  display: block;
+  width: 100%; max-width: 118px; height: auto;
 }
 .sidebar .brand .ver {
   margin-left: auto;
@@ -343,8 +353,9 @@ a { color: inherit; text-decoration: none; }
 .app.collapsed .sidebar .brand {
   flex-direction: column; gap: 8px; height: auto; padding: 12px 8px;
 }
-.app.collapsed .sidebar .brand .name,
+.app.collapsed .sidebar .brand .logo-chip,
 .app.collapsed .sidebar .brand .ver { display: none; }
+.app.collapsed .sidebar .brand .mark { display: grid; }
 .app.collapsed .sidebar .brand .collapse-btn { margin-left: 0; }
 
 .app.collapsed .sidebar .group { padding: 14px 8px 6px; }

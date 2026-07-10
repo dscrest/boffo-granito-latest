@@ -1,9 +1,21 @@
-/* Login screen styling. Kept separate from the prototype's styles.css (untouched).
-   Two-column split: the sign-in form (left) and a branded illustration panel
-   (right). Themes both the BOFFO wrapper and the Catalyst embedded sign-in form,
-   which renders its markup inside #login. Uses the app's design tokens. */
+/* Login screen styling. Kept separate from the app's styles.css.
+   Dark brand theme matched to boffogranito.com: near-black ground,
+   white type, BOFFO orange (#EF7F1A — sampled from the logo) as the
+   single accent. Two-column split: sign-in form (left) and a branded
+   illustration panel (right). Tokens are scoped to .boffo-auth so the
+   app's light theme is untouched. */
 
 .boffo-auth {
+  --lg-bg: #130e0d;
+  --lg-panel: #1c1512;
+  --lg-panel-2: #262019;
+  --lg-border: rgba(255, 255, 255, 0.1);
+  --lg-fg: #f5f1ec;
+  --lg-muted: #b3a89e;
+  --lg-dim: #8a8078;
+  --lg-accent: #ef7f1a;
+  --lg-accent-soft: rgba(239, 127, 26, 0.22);
+
   /* Fill the dynamic viewport (100dvh tracks mobile browser chrome). */
   min-height: 100dvh;
   width: 100%;
@@ -11,8 +23,9 @@
   padding: 24px;
   overflow-x: hidden;
   background:
-    radial-gradient(1100px 560px at 100% -10%, var(--accent-soft), transparent 60%),
-    var(--bg);
+    radial-gradient(1100px 560px at 100% -10%, var(--lg-accent-soft), transparent 60%),
+    var(--lg-bg);
+  color: var(--lg-fg);
   font-family: var(--font-sans);
 }
 
@@ -20,6 +33,9 @@
 .boffo-auth--center {
   align-items: center;
   justify-content: center;
+}
+.boffo-auth--center .mono {
+  color: var(--lg-dim) !important;
 }
 
 /* The split card: form pane + illustration pane, side by side. */
@@ -29,11 +45,11 @@
   margin: auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-border);
   border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(15, 20, 25, 0.04), 0 18px 50px rgba(15, 20, 25, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.55);
 }
 
 /* ---------- Left: form pane ---------- */
@@ -50,52 +66,37 @@
 
 .boffo-auth-brand {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
   margin-bottom: 34px;
 }
-.boffo-auth-brand .mark {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 18px;
-}
-.boffo-auth-brand .wordmark {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
-}
-.boffo-auth-brand .name {
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: -0.2px;
-  color: var(--fg);
+.boffo-auth-brand .logo {
+  width: 190px;
+  height: auto;
+  display: block;
 }
 .boffo-auth-brand .sub {
   font-size: 11px;
-  color: var(--muted);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lg-dim);
 }
 
 .boffo-auth-h1 {
   font-size: 30px;
   font-weight: 700;
   letter-spacing: -0.6px;
-  color: var(--fg);
+  color: var(--lg-fg);
   margin: 0 0 8px;
 }
 .boffo-auth-tag {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--lg-muted);
   line-height: 1.5;
   margin: 0 0 22px;
 }
 
-/* "Sign in with Zoho" — the single primary CTA (full-page hosted Zoho login). */
+/* Primary CTA — brand orange with dark text (white fails contrast on it). */
 .boffo-zoho-btn {
   width: 100%;
   height: 48px;
@@ -103,32 +104,36 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--lg-accent);
   border-radius: 10px;
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: var(--lg-accent);
+  color: #170f0b;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
   transition: filter 0.15s, box-shadow 0.15s;
 }
 .boffo-zoho-btn:hover {
-  filter: brightness(0.96);
+  filter: brightness(1.07);
 }
 .boffo-zoho-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--lg-accent-soft);
 }
 .boffo-zoho-btn svg {
   flex-shrink: 0;
+}
+.boffo-zoho-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Sub-line under the CTA. */
 .boffo-auth-hint {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--dim);
+  color: var(--lg-dim);
   line-height: 1.5;
 }
 
@@ -138,13 +143,13 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--dim);
+  color: var(--lg-dim);
 }
 .boffo-auth-foot .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--lg-accent);
 }
 
 /* ---------- Right: illustration panel ---------- */
@@ -156,7 +161,7 @@
   padding: 40px;
   overflow: hidden;
   background:
-    radial-gradient(120% 120% at 20% 0%, oklch(0.62 0.16 150), oklch(0.5 0.15 152) 60%, oklch(0.42 0.13 153));
+    radial-gradient(120% 120% at 20% 0%, #4a2a11, #2c1a0e 60%, #1a110b);
 }
 /* Faint dot texture over the gradient. */
 .boffo-auth-art::before {
@@ -192,7 +197,6 @@
   }
 }
 
-
 /* Email/password fields for the app-level login form. */
 .boffo-auth-field {
   display: flex;
@@ -204,28 +208,33 @@
 .boffo-auth-field span {
   font-size: 12px;
   font-weight: 600;
-  color: var(--fg-2, #555);
+  color: var(--lg-muted);
 }
 .boffo-auth-field input {
   height: 44px;
   padding: 0 12px;
-  border: 1px solid var(--line, #d9d9d9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
-  background: var(--bg, #fff);
-  color: var(--fg, #111);
+  background: var(--lg-panel-2);
+  color: var(--lg-fg);
   font: inherit;
+}
+.boffo-auth-field input::placeholder {
+  color: var(--lg-dim);
 }
 .boffo-auth-field input:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft, rgba(0, 0, 0, 0.08));
+  border-color: var(--lg-accent);
+  box-shadow: 0 0 0 3px var(--lg-accent-soft);
+}
+/* Keep autofilled fields on-theme (WebKit paints them light by default). */
+.boffo-auth-field input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--lg-panel-2) inset;
+  -webkit-text-fill-color: var(--lg-fg);
+  caret-color: var(--lg-fg);
 }
 .boffo-auth-error {
   margin: 0 0 12px;
   font-size: 13px;
-  color: var(--c-red, #c0392b);
-}
-.boffo-zoho-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
+  color: #ff9d85;
 }
