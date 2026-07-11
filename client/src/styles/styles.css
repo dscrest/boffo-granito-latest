@@ -594,7 +594,8 @@ a { color: inherit; text-decoration: none; }
 .fbar .btn:hover { background: var(--hover); color: var(--fg); }
 .fbar .btn.active { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
 .fbar .btn .ic { width: 12px; height: 12px; }
-.fbar input[type="text"] {
+.fbar input[type="text"],
+.page-head .right input[type="text"] {
   height: 26px;
   background: var(--panel-2);
   border: 1px solid var(--border-2);
@@ -605,6 +606,28 @@ a { color: inherit; text-decoration: none; }
   outline: none;
   width: 220px;
 }
+/* Bare filter/sort selects share the 26px control skin (native chrome
+   clashes with the bar) — house chevron replaces the platform arrow. */
+.fbar select,
+.page-head .right select {
+  height: 26px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  padding: 0 24px 0 9px;
+  font-size: var(--t-sm);
+  color: var(--fg-2);
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.fbar select:hover,
+.page-head .right select:hover { background-color: var(--hover); color: var(--fg); }
+.fbar select:focus,
+.page-head .right select:focus { border-color: var(--accent); }
 
 /* Section title */
 .sec-title { display: flex; align-items: baseline; gap: 12px; margin: 18px 0 10px; }
@@ -1287,8 +1310,9 @@ a { color: inherit; text-decoration: none; }
   position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
   color: var(--dim); pointer-events: none;
 }
-/* Beat `.fbar input[type="text"]` (padding: 0 9px) — needs the icon gutter. */
-.fbar .gsearch input[type="text"] { padding-left: 30px; }
+/* Beat the shared 26px skin (padding: 0 9px) — needs the icon gutter. */
+.fbar .gsearch input[type="text"],
+.page-head .right .gsearch input[type="text"] { padding-left: 30px; }
 /* ---- Shared form fields (New Design modal + master editors) ---- */
 .form-grid {
   display: grid;
@@ -1794,7 +1818,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* ---------- form validation states ---------- */
 .form-field input.error,
 .form-field select.error,
-.form-field textarea.error { border-color: var(--c-red); }
+.form-field textarea.error,
+.contact-grid input.error { border-color: var(--c-red); }
 .form-field input.error:focus,
 .form-field select.error:focus,
 .form-field textarea.error:focus { box-shadow: 0 0 0 3px oklch(0.58 0.2 25 / 0.12); }

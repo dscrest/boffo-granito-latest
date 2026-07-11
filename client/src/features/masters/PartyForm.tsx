@@ -48,6 +48,13 @@ const COUNTRY_OPTIONS = COUNTRY_CODES.map((iso) => {
   return { value: iso, label: `${flag} ${country}` };
 }).sort((a, b) => a.label.localeCompare(b.label));
 
+/* Address "Country/Region": typable pick list storing the display name
+   (billing_country / shipping_country are free-text varchar columns). */
+const COUNTRY_NAME_OPTIONS = COUNTRY_CODES.map((iso) => {
+  const { country, flag } = isoInfo(iso);
+  return { value: country, label: `${flag} ${country}` };
+}).sort((a, b) => a.value.localeCompare(b.value));
+
 const CURRENCIES = ["EUR", "USD", "INR"];
 const SALUTATIONS = ["Mr.", "Mrs.", "Ms.", "Dr."];
 
@@ -177,9 +184,10 @@ export function PartyForm({
   // Books-style tab strip below the always-visible Customer section. All
   // form state lives up here, so switching tabs never loses anything.
   const [tab, setTab] = useState<"other" | "address" | "contacts">("other");
-  const [contacts, setContacts] = useState<ContactDraft[]>(() =>
-    parseContacts((initial?.contact_persons as string) ?? ""),
-  );
+  const [contacts, setContacts] = useState<ContactDraft[]>(() => {
+    const parsed = parseContacts((initial?.contact_persons as string) ?? "");
+    return parsed.length ? parsed : [emptyContact()]; // one visible row for data entry
+  });
   // "Same as billing": on for a new customer; on edit, only when shipping
   // already mirrors billing (or is empty).
   const [sameAsBilling, setSameAsBilling] = useState(() =>
@@ -216,10 +224,16 @@ export function PartyForm({
 
   const missing = !v.name.trim();
   const emailBad = !!x.contact_email.trim() && !EMAIL_RE.test(x.contact_email.trim());
-  // Contact-person emails validate from lifted state, so an error on a
-  // hidden tab still blocks Save (footer note names the tab).
-  const contactEmailBad = contacts.some((c) => c.email.trim() && !EMAIL_RE.test(c.email.trim()));
-  const blocked = missing || emailBad || contactEmailBad;
+  // Contact-person rows: fully blank rows are ignored (dropped on save), but
+  // a row someone started needs a first name, a valid email and a phone.
+  // Validated from lifted state, so errors on a hidden tab still block Save.
+  const rowHasData = (c: ContactDraft) =>
+    !!(c.first_name.trim() || c.last_name.trim() || c.email.trim() || c.work.num || c.mobile.num);
+  const rowInvalid = (c: ContactDraft) =>
+    rowHasData(c) &&
+    (!c.first_name.trim() || !EMAIL_RE.test(c.email.trim()) || !(c.work.num || c.mobile.num));
+  const contactBad = contacts.some(rowInvalid);
+  const blocked = missing || emailBad || contactBad;
 
   // Display Name suggestions à la Books: company + contact permutations.
   // The current value must always be an option or the Combobox shows blank.
@@ -259,6 +273,22 @@ export function PartyForm({
     <div style={{ display: "grid", gap: 8 }}>
       {ADDRESS_KEYS.map((k) => {
         const key = `${prefix}_${k}` as keyof CustomerExtras;
+        if (k === "country") {
+          return (
+            // Combobox has no disabled prop — block interaction via the wrapper
+            // (the shipping column is already dimmed while "same as billing").
+            <div key={key} className="form-field" style={disabled ? { pointerEvents: "none" } : undefined}>
+              <span className="lbl">{ADDRESS_LABELS[k]}</span>
+              <Combobox
+                value={x[key]}
+                options={COUNTRY_NAME_OPTIONS}
+                onChange={(val) => setExtra(key, val)}
+                onCreate={(label) => setExtra(key, label)}
+                placeholder="Select or type a country"
+              />
+            </div>
+          );
+        }
         return (
           <label key={key} className="form-field">
             <span className="lbl">{ADDRESS_LABELS[k]}</span>
@@ -368,29 +398,6 @@ export function PartyForm({
                   title="System-assigned customer number"
                 />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Primary Contact</span>
-                <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr", gap: 6 }}>
-                  <select value={x.contact_salutation} onChange={(e) => setExtra("contact_salutation", e.target.value)}>
-                    <option value="">Salutation</option>
-                    {SALUTATIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={x.contact_first_name}
-                    onChange={(e) => setExtra("contact_first_name", e.target.value)}
-                    placeholder="First Name"
-                  />
-                  <input
-                    value={x.contact_last_name}
-                    onChange={(e) => setExtra("contact_last_name", e.target.value)}
-                    placeholder="Last Name"
-                  />
-                </div>
-              </label>
               <label className="form-field">
                 <span className="lbl">Company Name</span>
                 <input
@@ -411,6 +418,29 @@ export function PartyForm({
                   placeholder="Select or type to add"
                   invalid={missing}
                 />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Primary Contact</span>
+                <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr", gap: 6 }}>
+                  <select value={x.contact_salutation} onChange={(e) => setExtra("contact_salutation", e.target.value)} title="Salutation">
+                    <option value=""></option>
+                    {SALUTATIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={x.contact_first_name}
+                    onChange={(e) => setExtra("contact_first_name", e.target.value)}
+                    placeholder="First Name"
+                  />
+                  <input
+                    value={x.contact_last_name}
+                    onChange={(e) => setExtra("contact_last_name", e.target.value)}
+                    placeholder="Last Name"
+                  />
+                </div>
               </label>
               <label className="form-field">
                 <span className="lbl">Email Address</span>
@@ -445,7 +475,9 @@ export function PartyForm({
                   onClick={() => setTab(id)}
                 >
                   {label}
-                  {id === "contacts" && contacts.length > 0 && <span className="ct">{contacts.length}</span>}
+                  {id === "contacts" && contacts.filter(rowHasData).length > 0 && (
+                    <span className="ct">{contacts.filter(rowHasData).length}</span>
+                  )}
                 </button>
               ),
             )}
@@ -557,87 +589,79 @@ export function PartyForm({
           {tab === "contacts" && (
           <div className="form-section">
             <div className="form-section-title">Contact Persons</div>
-            {contacts.length === 0 ? (
-              <div className="dim" style={{ padding: "6px 0 10px" }}>
-                No additional contact persons. The primary contact is captured in the Customer section above.
+            {/* Channels (Email/SMS) column hidden for now per request — the
+                ch_email/ch_sms fields stay in state and persist unchanged. */}
+            <div style={{ overflowX: "auto" }}>
+              <div className="contact-grid" style={{ minWidth: 800, display: "grid", gridTemplateColumns: "80px 1fr 1fr 1.3fr 170px 170px 30px", gap: 6, alignItems: "center" }}>
+                {["Salutation", "First Name", "Last Name", "Email Address", "Work Phone", "Mobile", ""].map((h, i) => (
+                  <span key={i} className="lbl">{h}</span>
+                ))}
+                {contacts.map((c, i) => {
+                  const started = rowHasData(c);
+                  const phoneCell = (
+                    p: { dial: string; num: string },
+                    setP: (p: { dial: string; num: string }) => void,
+                    label: string,
+                  ) => (
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <select
+                        value={p.dial}
+                        aria-label={`${label} dial code`}
+                        onChange={(e) => setP({ ...p, dial: e.target.value })}
+                        style={{ flex: "0 0 64px", width: 64 }}
+                      >
+                        {DIAL_CODES.map((d) => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={p.num}
+                        inputMode="numeric"
+                        maxLength={10}
+                        aria-label={label}
+                        className={started && !(c.work.num || c.mobile.num) ? "error" : undefined}
+                        onChange={(e) => setP({ ...p, num: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                        style={{ flex: 1, minWidth: 0 }}
+                      />
+                    </div>
+                  );
+                  return (
+                    // eslint-disable-next-line react/no-array-index-key
+                    <React.Fragment key={i}>
+                      <select value={c.salutation} onChange={(e) => setContact(i, { salutation: e.target.value })}>
+                        <option value=""></option>
+                        {SALUTATIONS.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <input
+                        value={c.first_name}
+                        placeholder="First Name"
+                        className={started && !c.first_name.trim() ? "error" : undefined}
+                        onChange={(e) => setContact(i, { first_name: e.target.value })}
+                      />
+                      <input value={c.last_name} placeholder="Last Name" onChange={(e) => setContact(i, { last_name: e.target.value })} />
+                      <input
+                        type="email"
+                        className={started && !EMAIL_RE.test(c.email.trim()) ? "error" : undefined}
+                        value={c.email}
+                        placeholder="name@company.com"
+                        onChange={(e) => setContact(i, { email: e.target.value })}
+                      />
+                      {phoneCell(c.work, (p) => setContact(i, { work: p }), "Work Phone")}
+                      {phoneCell(c.mobile, (p) => setContact(i, { mobile: p }), "Mobile")}
+                      <button
+                        className="btn x"
+                        title="Remove contact person"
+                        onClick={() => setContacts((cs) => cs.filter((_, j) => j !== i))}
+                      >
+                        ✕
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
               </div>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <div style={{ minWidth: 940, display: "grid", gridTemplateColumns: "92px 1fr 1fr 1.3fr 170px 170px 140px 30px", gap: 6, alignItems: "center" }}>
-                  {["Salutation", "First Name", "Last Name", "Email Address", "Work Phone", "Mobile", "Channels", ""].map((h, i) => (
-                    <span key={i} className="lbl">{h}</span>
-                  ))}
-                  {contacts.map((c, i) => {
-                    const bad = !!c.email.trim() && !EMAIL_RE.test(c.email.trim());
-                    const phoneCell = (
-                      p: { dial: string; num: string },
-                      setP: (p: { dial: string; num: string }) => void,
-                      label: string,
-                    ) => (
-                      <div style={{ display: "flex", gap: 4 }}>
-                        <select
-                          value={p.dial}
-                          aria-label={`${label} dial code`}
-                          onChange={(e) => setP({ ...p, dial: e.target.value })}
-                          style={{ flex: "0 0 64px", width: 64 }}
-                        >
-                          {DIAL_CODES.map((d) => (
-                            <option key={d} value={d}>{d}</option>
-                          ))}
-                        </select>
-                        <input
-                          value={p.num}
-                          inputMode="numeric"
-                          maxLength={10}
-                          aria-label={label}
-                          onChange={(e) => setP({ ...p, num: e.target.value.replace(/\D/g, "").slice(0, 10) })}
-                          style={{ flex: 1, minWidth: 0 }}
-                        />
-                      </div>
-                    );
-                    return (
-                      // eslint-disable-next-line react/no-array-index-key
-                      <React.Fragment key={i}>
-                        <select value={c.salutation} onChange={(e) => setContact(i, { salutation: e.target.value })}>
-                          <option value=""></option>
-                          {SALUTATIONS.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                        <input value={c.first_name} placeholder="First Name" onChange={(e) => setContact(i, { first_name: e.target.value })} />
-                        <input value={c.last_name} placeholder="Last Name" onChange={(e) => setContact(i, { last_name: e.target.value })} />
-                        <input
-                          type="email"
-                          className={bad ? "error" : undefined}
-                          value={c.email}
-                          placeholder="name@company.com"
-                          onChange={(e) => setContact(i, { email: e.target.value })}
-                        />
-                        {phoneCell(c.work, (p) => setContact(i, { work: p }), "Work Phone")}
-                        {phoneCell(c.mobile, (p) => setContact(i, { mobile: p }), "Mobile")}
-                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                            <input type="checkbox" checked={c.ch_email} onChange={(e) => setContact(i, { ch_email: e.target.checked })} />
-                            Email
-                          </label>
-                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                            <input type="checkbox" checked={c.ch_sms} onChange={(e) => setContact(i, { ch_sms: e.target.checked })} />
-                            SMS
-                          </label>
-                        </div>
-                        <button
-                          className="btn x"
-                          title="Remove contact person"
-                          onClick={() => setContacts((cs) => cs.filter((_, j) => j !== i))}
-                        >
-                          ✕
-                        </button>
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            </div>
             <button className="hbtn" style={{ marginTop: 10 }} onClick={() => setContacts((cs) => [...cs, emptyContact()])}>
               <Icon name="plus" size={13} />
               Add Contact Person
@@ -648,8 +672,10 @@ export function PartyForm({
 
         <div className="df-foot">
           <span className="df-req-note">* Indicates a mandatory field</span>
-          {contactEmailBad && (
-            <span style={{ fontSize: 11, color: "var(--c-red)" }}>Fix the invalid email on the Contact Persons tab</span>
+          {contactBad && (
+            <span style={{ fontSize: 11, color: "var(--c-red)" }}>
+              Contact Persons tab: each contact needs a first name, valid email and a phone number
+            </span>
           )}
           <button className="btn" onClick={onClose}>
             Cancel
