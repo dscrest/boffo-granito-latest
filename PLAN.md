@@ -7,7 +7,12 @@ Status legend: 🟢 net-new · 🟡 small change to existing · ✅ already exis
 - #2 ✅ done — dashboard already matches the screenshot (verified; no change).
 - #3 ✅ done — salesperson defaults to the rep linked to the logged-in user.
 - #4 ✅ done — already existed on OrderDetail; relabeled to "Send to Palletisation".
-- #5 ✅ frontend done — width/length + auto-name + creatable type + no required. **Needs your OK** for two live-DB schema changes (see note under #5).
+- #5 ✅ done — shipped **without** new DB columns: size comes from the Size picker and persists
+  as the existing `pallet_size_label`; pallet types are the distinct `pallet_type` values
+  (creatable Combobox, no PalletType table). Auto-name + no-required shipped as planned.
+
+> **2026-07-11:** this round is complete. Later rounds are planned per-batch in
+> `docs/plans/` and `docs/superpowers/plans/`; shipped work is recorded in `docs/CHANGES.md`.
 
 ---
 

@@ -83,6 +83,7 @@ export function QuoteDetail() {
   // Details | PDF segmented toggle (Books-style inline document preview).
   const [view, setView] = useState<"details" | "pdf">("details");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [pdfErr, setPdfErr] = useState<string | null>(null);
   const [listQ, setListQ] = useState("");
 
   const [editing, setEditing] = useState(false);
@@ -157,29 +158,41 @@ export function QuoteDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // PDF preview: render the real pdfmake document (same as Download PDF)
-  // to a data URL when the PDF view opens; regenerated after edits.
+  // PDF preview: pregenerate the real pdfmake document (same as Download
+  // PDF) in the background as soon as a quote is selected, so the PDF
+  // toggle shows an already-built blob instantly. Keyed by id+modifiedTime:
+  // edits regenerate, toggling Details|PDF does not. The short debounce
+  // keeps quick surfing through the left list from churning out PDFs; the
+  // previous blob is revoked on replace, so at most one is ever live.
   useEffect(() => {
-    if (tab !== "details" || view !== "pdf" || !quote) return;
+    if (!quote) return;
     let alive = true;
-    setPdfUrl(null);
-    void (async () => {
-      try {
-        const [{ buildQuoteDoc }, { pdfDataUrl }] = await Promise.all([
-          import("./quotePdf"),
-          import("@/lib/pdf"),
-        ]);
-        const url = await pdfDataUrl(buildQuoteDoc(quote));
-        if (alive) setPdfUrl(url);
-      } catch (e) {
-        if (alive) toast.error(e instanceof Error ? e.message : "PDF preview failed");
-      }
-    })();
+    setPdfErr(null);
+    setPdfUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const [{ buildQuoteDoc }, { pdfBlobUrl }] = await Promise.all([
+            import("./quotePdf"),
+            import("@/lib/pdf"),
+          ]);
+          const url = await pdfBlobUrl(await buildQuoteDoc(quote));
+          if (alive) setPdfUrl(url);
+          else URL.revokeObjectURL(url);
+        } catch (e) {
+          if (alive) setPdfErr(e instanceof Error ? e.message : "PDF preview failed");
+        }
+      })();
+    }, 300);
     return () => {
       alive = false;
+      clearTimeout(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, view, quote?.id, quote?.modifiedTime]);
+  }, [quote?.id, quote?.modifiedTime]);
 
   const onEditSave = async (q: Quote) => {
     setEditing(false);
@@ -435,6 +448,8 @@ export function QuoteDetail() {
               title={`${quote.quoteNo} PDF`}
               style={{ width: "100%", height: "calc(100vh - var(--header-h) - 220px)", minHeight: 480, border: 0, display: "block" }}
             />
+          ) : pdfErr ? (
+            <div style={{ padding: 24, color: "var(--c-red)" }}>{pdfErr}</div>
           ) : (
             <div className="muted mono" style={{ padding: 24 }}>Rendering PDF…</div>
           )}

@@ -4,6 +4,10 @@
 > June 2026). Companion to `BOFFO_Architecture.md` (decisions), `BOFFO_Build_Plan.md` (phases),
 > `BoffoExport_Tracker.md` (spec). This is the build contract — implementation follows after sign-off.
 
+> **Status 2026-07-11:** §0's verified Catalyst facts remain accurate and in force (sagas,
+> app-layer uniqueness, 30s timeout). For current table/column truth use `DATASTORE-SCHEMA.md`;
+> for build-vs-plan divergences see `BOFFO_Architecture.md` → "Status vs. reality".
+
 ---
 
 ## 0. Verified Catalyst facts that shape this plan

@@ -44,10 +44,12 @@ export async function downloadPdf(doc: TDocumentDefinitions, filename: string): 
   pdfMake.createPdf(doc).download(filename);
 }
 
-/** Render the document to a data: URL for inline preview (iframe src). */
-export async function pdfDataUrl(doc: TDocumentDefinitions): Promise<string> {
+/** Render the document to a blob: URL for inline preview (iframe src) —
+    much lighter than a base64 data: URL. Caller revokes when replacing. */
+export async function pdfBlobUrl(doc: TDocumentDefinitions): Promise<string> {
   const pdfMake = await getPdfMake();
-  return pdfMake.createPdf(doc).getDataUrl();
+  const blob = await pdfMake.createPdf(doc).getBlob();
+  return URL.createObjectURL(blob);
 }
 
 /* ---------------- shared look & feel ---------------- */

@@ -4,6 +4,11 @@
 > **Hosting:** Zoho Catalyst (Functions + Data Store)
 > **Existing artifact:** Working React HTML prototype (`BOFFO_Order_OS.html` and its `.jsx` modules)
 
+> **⚠️ Historical (pre-build) document — 2026-07-11.** The caveats in §0 were resolved in
+> `BOFFO_Technical_Plan.md` §0; the live schema is `DATASTORE-SCHEMA.md` (source of truth);
+> build divergences (single `data-ops` function, app-level auth, live Catalyst project) are
+> listed in `BOFFO_Architecture.md` → "Status vs. reality".
+
 ---
 
 ## 0. Honest Caveats (read before acting)

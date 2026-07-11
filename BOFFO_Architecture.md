@@ -5,6 +5,24 @@
 > the product owner. Next step after this: the **technical plan** (ZCQL column types, function
 > contracts, Zod schemas, phase task breakdown), then development.
 
+## Status vs. reality (2026-07-11)
+
+The decisions below are the locked historical record; where the build diverged, reality wins:
+
+- **Catalyst project** — `boffo-latest-project` was **deleted 2026-07-04**. Live project:
+  `boffo-granito-export-tracker` (projectId `69851000000043001`, org OCTFIS `925638796`).
+- **Functions layout** — shipped as a **single router function** `functions/data-ops`
+  (plus `functions/api-health`), not the per-resource `api-*` functions sketched below.
+- **Auth** — Catalyst Embedded Auth was **not** used. App-level auth instead: `Role` /
+  `AppUser` / `AuthSession` tables managed via data-ops `/auth/*` (bearer tokens).
+  Shipped roles: **Admin / Editor / Viewer** (feature-list + can_update/can_delete flags),
+  not the five-role list below.
+- **Schema source of truth** — `DATASTORE-SCHEMA.md` (live snapshot), not the plan docs.
+- **Open questions (§ below) — all answered** in `BOFFO_Technical_Plan.md` §0: no
+  multi-row transactions (→ compensating-action sagas), no compound unique indexes
+  (→ app-layer enforcement), Advanced I/O timeout 30s.
+- `BoffoExport_Tracker.md` is no longer in the repo; `PRODUCT.md` is the product reference.
+
 ## What BOFFO is
 Order-tracking system for a ceramic/porcelain **tile exporter** (Plant Morbi). Tracks the physical
 pipeline end to end:

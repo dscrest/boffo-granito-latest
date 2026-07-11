@@ -1,5 +1,52 @@
 # Changes
 
+## 2026-07-11 — Quotation redesign (Books parity)
+
+- **Quotes list** — page heading removed, New Quote moved to the fbar (masters
+  layout); row checkboxes with a bulk status-change + delete bar (DesignMaster
+  pattern).
+- **Quote detail** — tabs Details / Orders / Activity; a Details | PDF
+  segmented toggle renders the real pdfmake document inline; Convert to Master
+  Order moved into the More menu; shared `ActivityLog` replaces the bespoke
+  table.
+- **quotesApi** — collects ALL SalesOrders per quote (`sos[]`) instead of a
+  last-write-wins single SO; feeds the Orders tab.
+- **PDF fix** — pdfmake 0.3.x font VFS registration (Download PDF failed with
+  "Roboto-Medium.ttf not found"); new `pdfDataUrl()` for previews.
+
+## 2026-07-10/11 — Customer master redesign (Books parity)
+
+- **Form** — Books-style field order (Company/Display Name above Primary
+  Contact), contact-person rows with validation (started row requires first
+  name, valid email, phone; save blocked otherwise), address Country/Region as
+  a typable Combobox with the full country list, phones digits-only capped at
+  10\. New `Customer.contact_persons` JSON column (see DATASTORE-SCHEMA.md).
+- **Detail** — editable primary details, contacts & addresses; Contact Persons
+  tab; More-menu actions; status locked at create; quote deep-link; Associated
+  Orders grouped by PO and kept beside Primary Details on normal widths.
+- **Fix** — radio/checkbox exempted from the shared input skin.
+
+## 2026-07-10 — Brand palette + uniform form/grid pass
+
+- Brand palette from boffogranito.com: orange accent, warm neutrals, dark
+  sidebar; brand logo + dark login theme.
+- Uniform form & grid design pass across Size/Pallet masters and all forms.
+
+## 2026-07-09 — Size & Pallet masters: own pages + detail views
+
+- **Size Master** — own page with packing data (`tile_type`, `thickness_mm`,
+  `pcs_per_packing`, `box_weight_kg`, remark) and computed `sqm_per_box` /
+  `sqft_per_box` on save; Size is now the single source of truth for per-box
+  packing (new columns in DATASTORE-SCHEMA.md).
+- **Detail pages** — Size and Pallet get detail pages; Associated Pallets on
+  Size detail, Associated Orders (order number + boxes) on Pallet detail;
+  More > Create Pallet (from Size) and More > Palletize Order (from Pallet).
+- **Related lists** — rows link to the records they name.
+- **Activity log + confirm dialog** — readable details, unified date format;
+  destructive confirms use explicit wording; Puvi-only fonts.
+- The 2026-07-08 deferred item is closed: `.gsearch` magnifier adopted on the
+  remaining 8 grids.
+
 ## 2026-07-08 — Item master + grid UI batch
 
 Design/UI changes apply across every grid via shared surfaces (global CSS,
