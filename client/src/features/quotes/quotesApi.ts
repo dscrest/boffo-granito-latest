@@ -68,7 +68,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
     listAll("Customer", { columns: ["name", "code"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
     listAll("Design", { columns: ["design_name"] }),
-    listAll("SalesOrder", { columns: ["quote", "order_number"] }),
+    listAll("SalesOrder", { columns: ["quote", "order_number", "order_date", "total_amount", "status"] }),
     list("SalesPerson", { limit: 300, columns: ["name"] }),
   ]);
   if (!q.ok) return { ok: false, quotes: [], error: q.error };
@@ -92,10 +92,19 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
     (linesByQuote.get(qid) || linesByQuote.set(qid, []).get(qid)!).push(line);
   });
 
-  // SalesOrder number + ROWID by source quote (for the SO column + link).
-  const soByQuote = new Map<string, { number: string; id: string }>();
+  // ALL SalesOrders per source quote (partial conversions can create several);
+  // sos[0] feeds the legacy soNumber/soId fields, the full list feeds the Orders tab.
+  const soByQuote = new Map<string, NonNullable<Quote["sos"]>>();
   (sos.rows || []).forEach((s) => {
-    if (s.quote) soByQuote.set(str(s.quote), { number: str(s.order_number), id: String(s.ROWID) });
+    if (!s.quote) return;
+    const ref = {
+      id: String(s.ROWID),
+      number: str(s.order_number),
+      date: str(s.order_date),
+      status: str(s.status),
+      total: num(s.total_amount),
+    };
+    (soByQuote.get(str(s.quote)) || soByQuote.set(str(s.quote), []).get(str(s.quote))!).push(ref);
   });
 
   const quotes: Quote[] = (q.rows || []).map((r) => {
@@ -123,8 +132,9 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       taxPct: num(r.tax_pct),
       taxAmount: num(r.tax_amount),
       lines: linesByQuote.get(id) || [],
-      soNumber: soByQuote.get(id)?.number || null,
-      soId: soByQuote.get(id)?.id || null,
+      soNumber: soByQuote.get(id)?.[0]?.number || null,
+      soId: soByQuote.get(id)?.[0]?.id || null,
+      sos: soByQuote.get(id) || [],
       shareToken: str(r.share_token),
       createdTime: str(r.CREATEDTIME),
       modifiedTime: str(r.MODIFIEDTIME),

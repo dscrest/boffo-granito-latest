@@ -233,14 +233,9 @@ export function CustomerDetail() {
           top: 0,
         }}
       >
-        <div style={{ padding: 10, borderBottom: "1px solid var(--border)" }}>
-          <input
-            type="text"
-            placeholder="Search customers…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            style={{ width: "100%" }}
-          />
+        <div className="lp-search">
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search customers…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
           {listed.map((c) => {

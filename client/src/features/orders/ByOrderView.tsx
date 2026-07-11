@@ -172,11 +172,7 @@ export function ByOrderView() {
       <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
       <div className="fbar">
         <div style={{ flex: 1 }} />
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          style={{ height: 26, padding: "0 8px", borderRadius: 5, border: "1px solid var(--border-2)", background: "var(--panel-2)", color: "var(--fg-2)", fontSize: 11.5 }}
-        >
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} title="Sort orders">
           <option value="progress">Sort: Least progress first</option>
           <option value="qty">Sort: Largest qty</option>
           <option value="party">Sort: Customer A-Z</option>

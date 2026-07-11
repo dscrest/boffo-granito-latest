@@ -18,12 +18,6 @@ export interface OrdersFilterState {
 
 export const EMPTY_FILTER: OrdersFilterState = { field: "none", value: "", search: "" };
 
-const selStyle: React.CSSProperties = {
-  height: 26, padding: "0 8px", borderRadius: 5,
-  border: "1px solid var(--border-2)", background: "var(--panel-2)",
-  color: "var(--fg-2)", fontSize: 11.5,
-};
-
 /** Filter + free-text search applied to a flat Order list. */
 export function applyOrderFilter(orders: Order[], st: OrdersFilterState): Order[] {
   let arr = orders;
@@ -75,7 +69,7 @@ export function OrdersFilter({
       <select
         value={st.field}
         onChange={(e) => onChange({ ...st, field: e.target.value as FilterField, value: "" })}
-        style={selStyle}
+        title="Filter by field"
       >
         <option value="none">No filter</option>
         <option value="customer">Customer</option>

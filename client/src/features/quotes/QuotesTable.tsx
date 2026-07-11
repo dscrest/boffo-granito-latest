@@ -6,14 +6,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
+import { canDelete, canUpdate } from "@/lib/auth";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
-import { cachedQuotes, createQuote, invalidateQuotes, listQuotes, type NewQuoteInput } from "./quotesApi";
+import { cachedQuotes, createQuote, deleteQuote, invalidateQuotes, listQuotes, updateQuote, type NewQuoteInput } from "./quotesApi";
 
 export const STATUS_CHIP: Record<QuoteStatus, string> = {
   Draft: "q-draft",
@@ -147,6 +149,11 @@ export function QuotesTable() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Bulk selection (same master-page convention as DesignMaster).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState<"" | QuoteStatus>("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const load = async () => {
     setLoading(true);
     const res = await listQuotes();
@@ -206,6 +213,70 @@ export function QuotesTable() {
   }, [tab, quotes, query, criteria, filterFields]);
 
   const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
+  const pageRows = pager.slice(filtered);
+
+  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
+  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
+
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const next = new Set(p);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelected((p) => {
+      const next = new Set(p);
+      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
+      else pageRows.forEach((r) => next.add(r.id));
+      return next;
+    });
+
+  const ids = useMemo(() => [...selected], [selected]);
+
+  const onBulkStatus = async () => {
+    if (!bulkStatus) return;
+    // Converted quotes keep their derived status — skip them.
+    const targets = quotes.filter(
+      (q) => selected.has(q.id) && q.status !== "Converted" && q.status !== "PartiallyConverted",
+    );
+    const skipped = ids.length - targets.length;
+    setBulkBusy(true);
+    let done = 0;
+    let failed = 0;
+    for (const q of targets) {
+      const res = await updateQuote(q.id, { status: bulkStatus });
+      if (res.ok) done += 1;
+      else failed += 1;
+    }
+    setBulkBusy(false);
+    if (failed) toast.error(`${done} updated, ${failed} failed`);
+    else toast.success(`${done} quote${done === 1 ? "" : "s"} marked ${bulkStatus}${skipped ? ` (${skipped} converted skipped)` : ""}`);
+    setSelected(new Set());
+    setBulkStatus("");
+    invalidateQuotes();
+    await load();
+  };
+
+  const onBulkDelete = async () => {
+    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected quote${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
+      return;
+    setBulkBusy(true);
+    let done = 0;
+    let failed = 0;
+    for (const rowid of ids) {
+      const res = await deleteQuote(rowid);
+      if (res.ok) done += 1;
+      else failed += 1;
+    }
+    setBulkBusy(false);
+    if (failed) toast.error(`${done} deleted, ${failed} failed`);
+    else toast.success(`${done} quote${done === 1 ? "" : "s"} deleted`);
+    setSelected(new Set());
+    invalidateQuotes();
+    await load();
+  };
 
   const tabCount = (id: string) =>
     id === "all"
@@ -226,44 +297,67 @@ export function QuotesTable() {
         />
       )}
 
-      <div className="page-head">
-        <div>
-          <div className="title">Quotes</div>
-        </div>
-        <div className="right">
-          <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            {saving ? "Saving…" : "New Quote"}
-          </button>
-        </div>
-      </div>
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
-      <div className="fbar" style={{ marginBottom: 12 }}>
-        <label className="form-field" style={{ width: 240 }}>
-          <span className="lbl">Filter by status</span>
-          <select value={tab} onChange={(e) => setTab(e.target.value)}>
+      {/* Bulk action bar replaces the filter bar while a selection is active. */}
+      {ids.length > 0 ? (
+        <div className="fbar" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {ids.length} selected
+          </span>
+          {canUpdate() && (
+            <>
+              <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value as "" | QuoteStatus)} disabled={bulkBusy} title="Bulk status change">
+                <option value="">Change status…</option>
+                <option value="Draft">Draft</option>
+                <option value="Sent">Sent</option>
+                <option value="Accepted">Accepted</option>
+                <option value="Rejected">Rejected</option>
+              </select>
+              <button className="btn" onClick={() => void onBulkStatus()} disabled={!bulkStatus || bulkBusy}>
+                Apply
+              </button>
+            </>
+          )}
+          {canDelete() && (
+            <button className="btn" onClick={() => void onBulkDelete()} disabled={bulkBusy}>
+              Delete
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : (
+        <div className="fbar" style={{ marginBottom: 12 }}>
+          <Icon name="filter" size={12} />
+          <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
             {TABS.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label} ({tabCount(t.id)})
               </option>
             ))}
           </select>
-        </label>
-        <div style={{ flex: 1 }} />
-        <span className="gsearch">
-          <Icon name="search" size={13} />
-          <input
-            type="text"
-            placeholder="Search quote no, customer…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </span>
-        <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-      </div>
+          <div style={{ flex: 1 }} />
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder="Search quote no, customer…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </span>
+          <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
+            <Icon name="plus" size={13} />
+            {saving ? "Saving…" : "New Quote"}
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
@@ -273,6 +367,9 @@ export function QuotesTable() {
           <table className="tbl">
             <thead>
               <tr>
+                <th style={{ width: 34, textAlign: "center" }}>
+                  <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
+                </th>
                 <th>Quote No</th>
                 {visible.map((c) => (
                   <th key={c.key} style={c.style}>{c.label}</th>
@@ -280,7 +377,7 @@ export function QuotesTable() {
               </tr>
             </thead>
             <tbody>
-              {pager.slice(filtered).map((q) => (
+              {pageRows.map((q) => (
                 <tr
                   key={q.id}
                   tabIndex={0}
@@ -288,9 +385,12 @@ export function QuotesTable() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/quotes/${q.id}`);
                   }}
-                  style={{ cursor: "pointer" }}
+                  style={{ cursor: "pointer", background: selected.has(q.id) ? "var(--accent-soft)" : undefined }}
                   title="View quote"
                 >
+                  <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(q.id)} onChange={() => toggleOne(q.id)} />
+                  </td>
                   <td className="mono">{q.quoteNo}</td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
@@ -301,7 +401,7 @@ export function QuotesTable() {
               ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 1}>
+                  <td colSpan={visible.length + 2}>
                     {quotes.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

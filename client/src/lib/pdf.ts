@@ -16,11 +16,22 @@ async function getPdfMake() {
         import("pdfmake/build/pdfmake"),
         import("pdfmake/build/vfs_fonts"),
       ]);
-      // 0.2.x exposes { vfs }; older builds expose { pdfMake: { vfs } }.
-      const vfs =
-        (fonts as { vfs?: Record<string, string> }).vfs ??
-        (fonts as { pdfMake?: { vfs: Record<string, string> } }).pdfMake?.vfs;
-      if (vfs) (pdfMake as unknown as { vfs: Record<string, string> }).vfs = vfs;
+      // 0.3.x exports the vfs object directly (module default); 0.2.x exposes
+      // { vfs }; older builds expose { pdfMake: { vfs } }.
+      const f = fonts as {
+        vfs?: Record<string, string>;
+        pdfMake?: { vfs: Record<string, string> };
+        default?: Record<string, string>;
+      };
+      const vfs = f.vfs ?? f.pdfMake?.vfs ?? f.default;
+      const pm = pdfMake as unknown as {
+        vfs?: Record<string, string>;
+        addVirtualFileSystem?: (v: Record<string, string>) => void;
+      };
+      if (vfs) {
+        if (pm.addVirtualFileSystem) pm.addVirtualFileSystem(vfs);
+        else pm.vfs = vfs;
+      }
       return pdfMake;
     })();
   }
@@ -31,6 +42,12 @@ async function getPdfMake() {
 export async function downloadPdf(doc: TDocumentDefinitions, filename: string): Promise<void> {
   const pdfMake = await getPdfMake();
   pdfMake.createPdf(doc).download(filename);
+}
+
+/** Render the document to a data: URL for inline preview (iframe src). */
+export async function pdfDataUrl(doc: TDocumentDefinitions): Promise<string> {
+  const pdfMake = await getPdfMake();
+  return pdfMake.createPdf(doc).getDataUrl();
 }
 
 /* ---------------- shared look & feel ---------------- */

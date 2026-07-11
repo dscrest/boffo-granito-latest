@@ -3,10 +3,12 @@
 
    Route: /quotes/:id. Left: resizable, searchable list of quotes.
    Right: header card with the quote number in big type + status chip,
-   status-transition / Edit / Convert buttons, a More menu (Print /
-   PDF / Share / Delete) and ✕ close. Two tabs: Details (header fields
-   + line items) and Activity Log. A Fields menu show/hides Details
-   rows, persisted per-browser in localStorage.
+   status-transition / Edit buttons, a More menu (Convert / Print /
+   PDF / Share / Delete) and ✕ close. Tabs: Details (header fields
+   + line items, with a Details|PDF preview toggle), Orders (Master
+   Orders converted from this quote) and Activity. The shared
+   ColumnPicker show/hides and reorders Details rows, persisted
+   per-browser in localStorage.
 
    Reuses the existing QuoteForm / QuotePrint / ConvertDialog modals and
    the quotesApi cache — no new backend.
@@ -18,8 +20,9 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { canDelete } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { ActivityLog } from "@/features/common/RecordDetail";
 import { fmt, fmtDateTime } from "@/lib/format";
-import { list, type DSRow } from "@/lib/dataOps";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
@@ -41,10 +44,10 @@ import {
   updateQuoteWithItems,
 } from "./quotesApi";
 
-const str = (v: unknown) => (v == null ? "" : String(v));
-
-/* Details rows, in display order. `key` is the localStorage toggle id. */
-type FieldDef = { key: string; label: string; value: (q: Quote) => string; wide?: boolean };
+/* Details rows, in display order. `key` is the localStorage toggle id.
+   Extends ColumnDef so the shared ColumnPicker (same icon-only control as
+   the list grids) drives show/hide + reorder. */
+type FieldDef = ColumnDef<Quote> & { value: (q: Quote) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
   { key: "quoteNo", label: "Quote Number", value: (q) => q.quoteNo },
   { key: "status", label: "Status", value: (q) => STATUS_LABEL[q.status] },
@@ -68,17 +71,6 @@ const FIELDS: FieldDef[] = [
 /* #19: these render in a card BELOW the line-item table, not in the header grid. */
 const NOTE_KEYS = new Set(["remarks", "customerNotes", "terms"]);
 
-const HIDDEN_KEY = "quoteDetailFields"; // stores JSON array of hidden field keys
-
-function loadHidden(): Set<string> {
-  try {
-    const raw = localStorage.getItem(HIDDEN_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
-
 export function QuoteDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -87,7 +79,10 @@ export function QuoteDetail() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"details" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "orders" | "activity">("details");
+  // Details | PDF segmented toggle (Books-style inline document preview).
+  const [view, setView] = useState<"details" | "pdf">("details");
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [listQ, setListQ] = useState("");
 
   const [editing, setEditing] = useState(false);
@@ -95,11 +90,9 @@ export function QuoteDetail() {
   const [converting, setConverting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const [hidden, setHidden] = useState<Set<string>>(loadHidden);
-  const [fieldsOpen, setFieldsOpen] = useState(false);
-
-  const [acts, setActs] = useState<DSRow[]>([]);
-  const [actsLoading, setActsLoading] = useState(false);
+  /* Same show/hide + reorder control as the list grids; legacy hidden-only
+     arrays stored under this key migrate inside useColumns. */
+  const fields = useColumns("quoteDetailFields", FIELDS);
 
   const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
 
@@ -164,31 +157,29 @@ export function QuoteDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Activity log: OperationLog rows for this quote, loaded when tab opens.
+  // PDF preview: render the real pdfmake document (same as Download PDF)
+  // to a data URL when the PDF view opens; regenerated after edits.
   useEffect(() => {
-    if (tab !== "activity") return;
+    if (tab !== "details" || view !== "pdf" || !quote) return;
     let alive = true;
-    setActsLoading(true);
-    void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
-      if (!alive) return;
-      setActsLoading(false);
-      const rows = (res.rows || []).filter((r) => str(r.entity_rowid) === id);
-      setActs(rows);
-    });
+    setPdfUrl(null);
+    void (async () => {
+      try {
+        const [{ buildQuoteDoc }, { pdfDataUrl }] = await Promise.all([
+          import("./quotePdf"),
+          import("@/lib/pdf"),
+        ]);
+        const url = await pdfDataUrl(buildQuoteDoc(quote));
+        if (alive) setPdfUrl(url);
+      } catch (e) {
+        if (alive) toast.error(e instanceof Error ? e.message : "PDF preview failed");
+      }
+    })();
     return () => {
       alive = false;
     };
-  }, [tab, id]);
-
-  const persistHidden = (next: Set<string>) => {
-    setHidden(next);
-    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next]));
-  };
-  const toggleField = (key: string) => {
-    const next = new Set(hidden);
-    next.has(key) ? next.delete(key) : next.add(key);
-    persistHidden(next);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, view, quote?.id, quote?.modifiedTime]);
 
   const onEditSave = async (q: Quote) => {
     setEditing(false);
@@ -257,6 +248,7 @@ export function QuoteDetail() {
     : quotes;
 
   const moreItems = [
+    ...(canConvert ? [{ label: "Convert to Master Order", onClick: () => setConverting(true) }] : []),
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
     { label: "Copy Share Link", onClick: () => void onShare() },
@@ -299,14 +291,9 @@ export function QuoteDetail() {
           top: 0,
         }}
       >
-        <div style={{ padding: 10, borderBottom: "1px solid var(--border)" }}>
-          <input
-            type="text"
-            placeholder="Search quotes…"
-            value={listQ}
-            onChange={(e) => setListQ(e.target.value)}
-            style={{ width: "100%" }}
-          />
+        <div className="lp-search">
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search quotes…" value={listQ} onChange={(e) => setListQ(e.target.value)} />
         </div>
         <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
           {listed.map((x) => {
@@ -374,20 +361,12 @@ export function QuoteDetail() {
           <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">
             <Icon name="edit" size={13} /> Edit
           </button>
-          <button
-            className="hbtn"
-            disabled={!canConvert || !!busy}
-            onClick={() => setConverting(true)}
-            title={canConvert ? "Convert to Master Order" : "Already converted"}
-          >
-            <Icon name="arrow-r" size={13} /> Convert to Master Order
-          </button>
           <MoreMenu items={moreItems} />
           <button className="btn x" onClick={() => navigate("/quotes")} title="Close">
             <Icon name="x" size={13} />
           </button>
         </div>
-        <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
           {quote.customer} · Total {quote.currency} {fmt(totals.net)}
           {busy && (
             <>
@@ -414,42 +393,60 @@ export function QuoteDetail() {
           Details
         </button>
         <button
+          className={`tabish ${tab === "orders" ? "active" : ""}`}
+          onClick={() => setTab("orders")}
+          style={tabStyle(tab === "orders")}
+        >
+          Orders{quote.sos && quote.sos.length > 0 ? ` (${quote.sos.length})` : ""}
+        </button>
+        <button
           className={`tabish ${tab === "activity" ? "active" : ""}`}
           onClick={() => setTab("activity")}
           style={tabStyle(tab === "activity")}
         >
-          Activity Log
+          Activity
         </button>
-        <div style={{ marginLeft: "auto", position: "relative" }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           {tab === "details" && (
             <>
-              <button className="hbtn" onClick={() => setFieldsOpen((v) => !v)} title="Show / hide fields">
-                <Icon name="settings" size={13} /> Fields
-              </button>
-              {fieldsOpen && (
-                <div
-                  className="card"
-                  style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", zIndex: 30, padding: 8, width: 220, maxHeight: 320, overflow: "auto" }}
-                >
-                  {FIELDS.map((f) => (
-                    <label key={f.key} className="row" style={{ gap: 8, padding: "4px 6px", cursor: "pointer" }}>
-                      <input type="checkbox" checked={!hidden.has(f.key)} onChange={() => toggleField(f.key)} />
-                      <span>{f.label}</span>
-                    </label>
-                  ))}
-                </div>
+              {/* Details | PDF segmented toggle (Books-style). */}
+              <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+                <button type="button" style={segStyle(view === "details")} onClick={() => setView("details")}>
+                  Details
+                </button>
+                <button type="button" style={segStyle(view === "pdf")} onClick={() => setView("pdf")}>
+                  PDF
+                </button>
+              </div>
+              {view === "details" && (
+                <ColumnPicker columns={fields.ordered} hidden={fields.hidden} onToggle={fields.toggle} onMove={fields.move} />
               )}
             </>
           )}
         </div>
       </div>
 
+      {/* Details tab — PDF view: the real document, inline. */}
+      {tab === "details" && view === "pdf" && (
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          {pdfUrl ? (
+            <iframe
+              src={pdfUrl}
+              title={`${quote.quoteNo} PDF`}
+              style={{ width: "100%", height: "calc(100vh - var(--header-h) - 220px)", minHeight: 480, border: 0, display: "block" }}
+            />
+          ) : (
+            <div className="muted mono" style={{ padding: 24 }}>Rendering PDF…</div>
+          )}
+        </div>
+      )}
+
       {/* Details tab */}
-      {tab === "details" && (
+      {tab === "details" && view === "details" && (
         <>
           <div className="card" style={{ padding: 18, marginBottom: 12 }}>
             <div className="form-grid">
-              {FIELDS.filter((f) => !hidden.has(f.key) && !NOTE_KEYS.has(f.key)).map((f) => (
+              {fields.ordered.filter((f) => !fields.hidden.has(f.key) && !NOTE_KEYS.has(f.key)).map((f) => (
                 <div className="form-field" key={f.key} style={f.wide ? { gridColumn: "1 / -1" } : undefined}>
                   <span className="lbl">{f.label}</span>
                   {f.key === "soNumber" && quote.soNumber && quote.soId ? (
@@ -518,10 +515,10 @@ export function QuoteDetail() {
           </div>
 
           {/* #19: Remarks / Customer Notes / Terms below the item table. */}
-          {FIELDS.some((f) => NOTE_KEYS.has(f.key) && !hidden.has(f.key)) && (
+          {FIELDS.some((f) => NOTE_KEYS.has(f.key) && !fields.hidden.has(f.key)) && (
             <div className="card" style={{ padding: 18, marginTop: 12 }}>
               <div className="form-grid">
-                {FIELDS.filter((f) => NOTE_KEYS.has(f.key) && !hidden.has(f.key)).map((f) => (
+                {fields.ordered.filter((f) => NOTE_KEYS.has(f.key) && !fields.hidden.has(f.key)).map((f) => (
                   <div className="form-field" key={f.key} style={{ gridColumn: "1 / -1" }}>
                     <span className="lbl">{f.label}</span>
                     <span style={{ color: "var(--fg)", whiteSpace: "pre-wrap" }}>{f.value(quote)}</span>
@@ -533,41 +530,41 @@ export function QuoteDetail() {
         </>
       )}
 
-      {/* Activity Log tab */}
-      {tab === "activity" && (
+      {/* Orders tab — Master Orders converted from this quote. */}
+      {tab === "orders" && (
         <div className="card">
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Operation</th>
+                  <th>Order No</th>
+                  <th>Date</th>
                   <th>Status</th>
-                  <th>Actor</th>
-                  <th>Detail / Error</th>
+                  <th className="num" style={{ textAlign: "right" }}>Total</th>
                 </tr>
               </thead>
               <tbody>
-                {acts.map((r) => {
-                  const ok = str(r.status) === "success";
-                  return (
-                    <tr key={String(r.ROWID)}>
-                      <td className="mono muted">{str(r.occurred_at) || str(r.CREATEDTIME)}</td>
-                      <td>{str(r.operation)}</td>
-                      <td>
-                        <span className={`chip qstatus ${ok ? "q-converted" : "q-rejected"}`}>{str(r.status) || "—"}</span>
-                      </td>
-                      <td className="muted">{str(r.actor)}</td>
-                      <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {ok ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!actsLoading && acts.length === 0 && (
+                {(quote.sos ?? []).map((so) => (
+                  <tr
+                    key={so.id}
+                    tabIndex={0}
+                    onClick={() => navigate(`/orders/${so.id}`)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${so.id}`);
+                    }}
+                    style={{ cursor: "pointer" }}
+                    title="Open Master Order"
+                  >
+                    <td className="mono" style={{ color: "var(--accent)" }}>{so.number || "—"}</td>
+                    <td className="mono muted">{so.date || "—"}</td>
+                    <td>{so.status || "—"}</td>
+                    <td className="num mono">{quote.currency} {fmt(so.total)}</td>
+                  </tr>
+                ))}
+                {(quote.sos ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                      No activity recorded for this quote yet.
+                    <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                      Not converted yet — no Master Orders for this quote.
                     </td>
                   </tr>
                 )}
@@ -576,9 +573,25 @@ export function QuoteDetail() {
           </div>
         </div>
       )}
+
+      {/* Activity tab — shared OperationLog view (same as the masters). */}
+      {tab === "activity" && <ActivityLog table="Quote" entityId={id} />}
       </div>
     </div>
   );
+}
+
+function segStyle(active: boolean): CSSProperties {
+  return {
+    background: active ? "var(--accent-soft)" : "transparent",
+    color: active ? "var(--fg)" : "var(--muted)",
+    fontWeight: active ? 600 : 400,
+    border: 0,
+    padding: "4px 12px",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    fontSize: "var(--t-sm)",
+  };
 }
 
 function tabStyle(active: boolean): CSSProperties {

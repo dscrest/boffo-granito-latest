@@ -255,14 +255,9 @@ export function ItemDetail() {
           top: 12,
         }}
       >
-        <div style={{ padding: 10, borderBottom: "1px solid var(--border)" }}>
-          <input
-            type="text"
-            placeholder="Search items…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            style={{ width: "100%" }}
-          />
+        <div className="lp-search">
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search items…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {/* overscrollBehavior contain: reaching the list's end must not
             hand the wheel over to the page. flex:1 fills the card bottom. */}

@@ -174,6 +174,8 @@ export interface Quote {
   soNumber: string | null;
   /** SalesOrder ROWID for the linked SO (for navigation); null until converted. */
   soId?: string | null;
+  /** All SalesOrders converted from this quote (partial conversions can create several). */
+  sos?: Array<{ id: string; number: string; date: string; status: string; total: number }>;
   /** Public share-link token ("" until first shared). */
   shareToken?: string;
   /** Raw Catalyst CREATEDTIME / MODIFIEDTIME (for the Created/Modified grid columns). */

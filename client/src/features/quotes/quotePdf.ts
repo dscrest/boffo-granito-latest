@@ -6,8 +6,8 @@ import { docTotals, lineTotals, type Quote } from "@/data";
 import { downloadPdf, metaLines, money, PDF_STYLES, pdfHeader } from "@/lib/pdf";
 import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
 
-/** Build and download the PDF for one quote. */
-export async function downloadQuotePdf(quote: Quote): Promise<void> {
+/** pdfmake document definition for one quote (shared by download + inline preview). */
+export function buildQuoteDoc(quote: Quote): TDocumentDefinitions {
   const totals = docTotals(quote.lines, {
     docDiscount: quote.docDiscount,
     adjustment: quote.adjustment,
@@ -49,7 +49,7 @@ export async function downloadQuotePdf(quote: Quote): Promise<void> {
     );
   totalsBlock.push(totalRow("Net Total", `${cur} ${money(totals.net)}`, "grand"));
 
-  const doc: TDocumentDefinitions = {
+  return {
     pageSize: "A4",
     pageMargins: [40, 40, 40, 50],
     styles: PDF_STYLES,
@@ -101,6 +101,9 @@ export async function downloadQuotePdf(quote: Quote): Promise<void> {
       { text: "Computer-generated quotation — no signature required.", style: "fine", margin: [0, 24, 0, 0] },
     ],
   };
+}
 
-  await downloadPdf(doc, `${quote.quoteNo.replace(/[\\/]/g, "-")}.pdf`);
+/** Build and download the PDF for one quote. */
+export async function downloadQuotePdf(quote: Quote): Promise<void> {
+  await downloadPdf(buildQuoteDoc(quote), `${quote.quoteNo.replace(/[\\/]/g, "-")}.pdf`);
 }
