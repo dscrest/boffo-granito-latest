@@ -53,6 +53,7 @@ export const CUSTOMER_EXTRA_FIELDS = [
   "contact_email",
   "contact_work_phone",
   "contact_mobile",
+  "contact_persons", // JSON array of ADDITIONAL contacts (primary = flat contact_* columns)
   "billing_attention",
   "billing_country",
   "billing_street1",
@@ -259,4 +260,9 @@ export function updateCustomer(rowid: string, input: CustomerInput) {
 
 export function deleteCustomer(rowid: string) {
   return bust(remove("Customer", rowid));
+}
+
+/** Partial patch for the More-menu Active/Inactive toggle. */
+export function setCustomerActive(rowid: string, active: boolean) {
+  return bust(update("Customer", rowid, { active }));
 }

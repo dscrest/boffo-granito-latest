@@ -3,7 +3,7 @@
    function and refetch. Every write's outcome is recorded in OperationLog
    (see the /ops page). */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -122,6 +122,23 @@ export function QuotesTable() {
   const [query, setQuery] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
+  // Customer name to preset in a fresh QuoteForm (deep-link from the
+  // customer detail's "Create Quotation"); cleared when the form closes.
+  const [presetCustomer, setPresetCustomer] = useState("");
+
+  // Deep-link /quotes?new=<customer name> opens the form pre-filled;
+  // the param is consumed once so back/refresh never reopens it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const preset = searchParams.get("new");
+    if (preset !== null) {
+      setPresetCustomer(preset);
+      setShowForm(true);
+      searchParams.delete("new");
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const COLS = useMemo(() => quoteColumns(navigate), [navigate]);
   const { ordered, visible, hidden, toggle, move } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
@@ -148,6 +165,7 @@ export function QuotesTable() {
 
   const onSave = async (q: Quote) => {
     setShowForm(false);
+    setPresetCustomer("");
     setSaving(true);
     const res = await createQuote(quoteToInput(q));
     setSaving(false);
@@ -196,7 +214,17 @@ export function QuotesTable() {
 
   return (
     <div>
-      {showForm && <QuoteForm nextSeq={nextSeq} onSave={onSave} onClose={() => setShowForm(false)} />}
+      {showForm && (
+        <QuoteForm
+          nextSeq={nextSeq}
+          presetCustomer={presetCustomer || undefined}
+          onSave={onSave}
+          onClose={() => {
+            setShowForm(false);
+            setPresetCustomer("");
+          }}
+        />
+      )}
 
       <div className="page-head">
         <div>

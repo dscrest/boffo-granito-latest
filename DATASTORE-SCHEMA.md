@@ -244,6 +244,7 @@ terms added 2026-07-02: Against Full TT · 10% Advance & 90% Against B/L ·
 | contact_email | varchar(120) | |
 | contact_work_phone | varchar(30) | |
 | contact_mobile | varchar(30) | |
+| contact_persons | text(10000) | JSON array of additional contact persons (2026-07-10) |
 | billing_attention | varchar(100) | |
 | billing_country | varchar(60) | |
 | billing_street1 | varchar(150) | |

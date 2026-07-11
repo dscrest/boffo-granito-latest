@@ -9,7 +9,7 @@
    The customer code is system-assigned (CUS-00001…, lib/seq) and
    read-only here. Reuses shared form/modal CSS (df-*, form-*).
    ============================================================ */
-import { useState } from "react";
+import React, { useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
@@ -62,6 +62,63 @@ function splitPhone(s: string): { dial: string; num: string } {
 }
 function joinPhone(p: { dial: string; num: string }): string {
   return p.num ? `${p.dial} ${p.num}` : "";
+}
+
+/* One row of the Contact Persons tab (additional contacts; the primary
+   contact stays in the flat contact_* columns edited up top). Persisted
+   as a JSON array in Customer.contact_persons (text). */
+interface ContactDraft {
+  salutation: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  work: { dial: string; num: string };
+  mobile: { dial: string; num: string };
+  ch_email: boolean;
+  ch_sms: boolean;
+}
+const emptyContact = (): ContactDraft => ({
+  salutation: "",
+  first_name: "",
+  last_name: "",
+  email: "",
+  work: splitPhone(""),
+  mobile: splitPhone(""),
+  ch_email: true, // Books default: Email channel on
+  ch_sms: false,
+});
+function parseContacts(json: string): ContactDraft[] {
+  try {
+    const arr: unknown = JSON.parse(json || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr.map((c: Record<string, unknown>) => ({
+      salutation: String(c.salutation ?? ""),
+      first_name: String(c.first_name ?? ""),
+      last_name: String(c.last_name ?? ""),
+      email: String(c.email ?? ""),
+      work: splitPhone(String(c.work_phone ?? "")),
+      mobile: splitPhone(String(c.mobile ?? "")),
+      ch_email: c.ch_email !== false,
+      ch_sms: c.ch_sms === true,
+    }));
+  } catch {
+    return []; // corrupt/legacy value — start with an empty grid
+  }
+}
+function serializeContacts(contacts: ContactDraft[]): string {
+  const rows = contacts
+    .map((c) => ({
+      salutation: c.salutation.trim(),
+      first_name: c.first_name.trim(),
+      last_name: c.last_name.trim(),
+      email: c.email.trim(),
+      work_phone: joinPhone(c.work),
+      mobile: joinPhone(c.mobile),
+      ch_email: c.ch_email,
+      ch_sms: c.ch_sms,
+    }))
+    .filter((c) => c.first_name || c.last_name || c.email || c.work_phone || c.mobile);
+  return JSON.stringify(rows);
 }
 
 /* One address column (billing_* or shipping_*). Field order mirrors Books. */
@@ -117,6 +174,12 @@ export function PartyForm({
   });
   const [workPhone, setWorkPhone] = useState(() => splitPhone((initial?.contact_work_phone as string) ?? ""));
   const [mobile, setMobile] = useState(() => splitPhone((initial?.contact_mobile as string) ?? ""));
+  // Books-style tab strip below the always-visible Customer section. All
+  // form state lives up here, so switching tabs never loses anything.
+  const [tab, setTab] = useState<"other" | "address" | "contacts">("other");
+  const [contacts, setContacts] = useState<ContactDraft[]>(() =>
+    parseContacts((initial?.contact_persons as string) ?? ""),
+  );
   // "Same as billing": on for a new customer; on edit, only when shipping
   // already mirrors billing (or is empty).
   const [sameAsBilling, setSameAsBilling] = useState(() =>
@@ -148,8 +211,15 @@ export function PartyForm({
     }
   };
 
+  const setContact = (i: number, patch: Partial<ContactDraft>) =>
+    setContacts((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+
   const missing = !v.name.trim();
   const emailBad = !!x.contact_email.trim() && !EMAIL_RE.test(x.contact_email.trim());
+  // Contact-person emails validate from lifted state, so an error on a
+  // hidden tab still blocks Save (footer note names the tab).
+  const contactEmailBad = contacts.some((c) => c.email.trim() && !EMAIL_RE.test(c.email.trim()));
+  const blocked = missing || emailBad || contactEmailBad;
 
   // Display Name suggestions à la Books: company + contact permutations.
   // The current value must always be an option or the Combobox shows blank.
@@ -160,11 +230,12 @@ export function PartyForm({
   ].map((n) => ({ value: n, label: n }));
 
   const submit = () => {
-    if (missing || emailBad) return;
+    if (blocked) return;
     const extras = {
       ...x,
       contact_work_phone: joinPhone(workPhone),
       contact_mobile: joinPhone(mobile),
+      contact_persons: serializeContacts(contacts),
     };
     // Keep the legacy one-line `address` (quote/order autofill reads it):
     // composed from billing parts, falling back to whatever was typed before.
@@ -254,7 +325,7 @@ export function PartyForm({
               {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
             </div>
           </div>
-          <button className="hbtn primary" style={{ marginLeft: "auto" }} disabled={missing || emailBad} onClick={submit}>
+          <button className="hbtn primary" style={{ marginLeft: "auto" }} disabled={blocked} onClick={submit}>
             <Icon name="check" size={13} />
             Save
           </button>
@@ -361,6 +432,26 @@ export function PartyForm({
             </div>
           </div>
 
+          {/* Books-style tabs; the Customer section above stays visible. */}
+          <div className="dtabs" role="tablist" style={{ marginBottom: 14 }}>
+            {([["other", "Other Details"], ["address", "Address"], ["contacts", "Contact Persons"]] as const).map(
+              ([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === id}
+                  className={`tab ${tab === id ? "active" : ""}`}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                  {id === "contacts" && contacts.length > 0 && <span className="ct">{contacts.length}</span>}
+                </button>
+              ),
+            )}
+          </div>
+
+          {tab === "other" && (
           <div className="form-section">
             <div className="form-section-title">Other Details</div>
             <div className="form-grid">
@@ -398,7 +489,14 @@ export function PartyForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Active</span>
-                <select value={v.active ? "Yes" : "No"} onChange={(e) => set("active", e.target.value === "Yes")}>
+                {/* New customers are always created Active; toggle later via
+                    edit or the detail page's More menu. */}
+                <select
+                  value={v.active ? "Yes" : "No"}
+                  disabled={!isEdit}
+                  title={isEdit ? undefined : "New customers start as Active"}
+                  onChange={(e) => set("active", e.target.value === "Yes")}
+                >
                   <option value="Yes">Yes</option>
                   <option value="No">No</option>
                 </select>
@@ -426,7 +524,9 @@ export function PartyForm({
               </label>
             </div>
           </div>
+          )}
 
+          {tab === "address" && (
           <div className="form-section">
             <div className="form-section-title">
               Address
@@ -452,14 +552,109 @@ export function PartyForm({
               </div>
             </div>
           </div>
+          )}
+
+          {tab === "contacts" && (
+          <div className="form-section">
+            <div className="form-section-title">Contact Persons</div>
+            {contacts.length === 0 ? (
+              <div className="dim" style={{ padding: "6px 0 10px" }}>
+                No additional contact persons. The primary contact is captured in the Customer section above.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <div style={{ minWidth: 940, display: "grid", gridTemplateColumns: "92px 1fr 1fr 1.3fr 170px 170px 140px 30px", gap: 6, alignItems: "center" }}>
+                  {["Salutation", "First Name", "Last Name", "Email Address", "Work Phone", "Mobile", "Channels", ""].map((h, i) => (
+                    <span key={i} className="lbl">{h}</span>
+                  ))}
+                  {contacts.map((c, i) => {
+                    const bad = !!c.email.trim() && !EMAIL_RE.test(c.email.trim());
+                    const phoneCell = (
+                      p: { dial: string; num: string },
+                      setP: (p: { dial: string; num: string }) => void,
+                      label: string,
+                    ) => (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <select
+                          value={p.dial}
+                          aria-label={`${label} dial code`}
+                          onChange={(e) => setP({ ...p, dial: e.target.value })}
+                          style={{ flex: "0 0 64px", width: 64 }}
+                        >
+                          {DIAL_CODES.map((d) => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                        <input
+                          value={p.num}
+                          inputMode="numeric"
+                          maxLength={10}
+                          aria-label={label}
+                          onChange={(e) => setP({ ...p, num: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+                          style={{ flex: 1, minWidth: 0 }}
+                        />
+                      </div>
+                    );
+                    return (
+                      // eslint-disable-next-line react/no-array-index-key
+                      <React.Fragment key={i}>
+                        <select value={c.salutation} onChange={(e) => setContact(i, { salutation: e.target.value })}>
+                          <option value=""></option>
+                          {SALUTATIONS.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                        <input value={c.first_name} placeholder="First Name" onChange={(e) => setContact(i, { first_name: e.target.value })} />
+                        <input value={c.last_name} placeholder="Last Name" onChange={(e) => setContact(i, { last_name: e.target.value })} />
+                        <input
+                          type="email"
+                          className={bad ? "error" : undefined}
+                          value={c.email}
+                          placeholder="name@company.com"
+                          onChange={(e) => setContact(i, { email: e.target.value })}
+                        />
+                        {phoneCell(c.work, (p) => setContact(i, { work: p }), "Work Phone")}
+                        {phoneCell(c.mobile, (p) => setContact(i, { mobile: p }), "Mobile")}
+                        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                            <input type="checkbox" checked={c.ch_email} onChange={(e) => setContact(i, { ch_email: e.target.checked })} />
+                            Email
+                          </label>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                            <input type="checkbox" checked={c.ch_sms} onChange={(e) => setContact(i, { ch_sms: e.target.checked })} />
+                            SMS
+                          </label>
+                        </div>
+                        <button
+                          className="btn x"
+                          title="Remove contact person"
+                          onClick={() => setContacts((cs) => cs.filter((_, j) => j !== i))}
+                        >
+                          ✕
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <button className="hbtn" style={{ marginTop: 10 }} onClick={() => setContacts((cs) => [...cs, emptyContact()])}>
+              <Icon name="plus" size={13} />
+              Add Contact Person
+            </button>
+          </div>
+          )}
         </div>
 
         <div className="df-foot">
           <span className="df-req-note">* Indicates a mandatory field</span>
+          {contactEmailBad && (
+            <span style={{ fontSize: 11, color: "var(--c-red)" }}>Fix the invalid email on the Contact Persons tab</span>
+          )}
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" disabled={missing || emailBad} onClick={submit}>
+          <button className="hbtn primary" disabled={blocked} onClick={submit}>
             <Icon name="check" size={13} />
             Save
           </button>

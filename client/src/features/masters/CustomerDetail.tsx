@@ -26,6 +26,7 @@ import {
   contactName,
   deleteCustomer,
   listCustomers,
+  setCustomerActive,
   updateCustomer,
   type CustomerInput,
   type CustomerRow,
@@ -35,6 +36,22 @@ import {
 /** [label, value, isUnset] — unset fields read "Not set" (dimmed) rather than a bare dash. */
 type Detail = [string, string, boolean];
 const text = (label: string, s: string): Detail => [label, s || "Not set", !s];
+
+/** Names from the contact_persons JSON column ("" on corrupt/empty). */
+const otherContacts = (json: string): string => {
+  try {
+    const arr: unknown = JSON.parse(json || "[]");
+    if (!Array.isArray(arr)) return "";
+    return arr
+      .map((p: Record<string, unknown>) =>
+        [p.salutation, p.first_name, p.last_name].map((s) => String(s ?? "").trim()).filter(Boolean).join(" "),
+      )
+      .filter(Boolean)
+      .join(", ");
+  } catch {
+    return "";
+  }
+};
 
 const rows = (c: CustomerRow): Detail[] => [
   text("Display Name", c.name),
@@ -50,6 +67,7 @@ const rows = (c: CustomerRow): Detail[] => [
   text("Contact Person", contactName(c.extras)),
   text("Email", c.extras.contact_email),
   text("Phone", [c.extras.contact_work_phone, c.extras.contact_mobile].filter(Boolean).join(" / ")),
+  text("Other Contacts", otherContacts(c.extras.contact_persons)),
   text("Billing Address", composeAddress(c.extras, "billing") || c.address),
   text("Shipping Address", composeAddress(c.extras, "shipping")),
   ["Active", c.active ? "Yes" : "No", false],
@@ -149,7 +167,29 @@ export function CustomerDetail() {
     navigate("/parties");
   };
 
-  const moreItems = canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : [];
+  const onToggleActive = async () => {
+    if (!party) return;
+    const next = !party.active;
+    setBusy(true);
+    const res = await setCustomerActive(party.id, next);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Update failed");
+      return;
+    }
+    toast.success(`Marked as ${next ? "Active" : "Inactive"}`);
+    await refresh();
+  };
+
+  const moreItems = [
+    ...(party
+      ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes?new=${encodeURIComponent(party.name)}`) }]
+      : []),
+    ...(canUpdate() && party
+      ? [{ label: party.active ? "Mark as Inactive" : "Mark as Active", onClick: () => void onToggleActive() }]
+      : []),
+    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+  ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>

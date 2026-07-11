@@ -62,18 +62,21 @@ type Head = Required<
 export function QuoteForm({
   nextSeq,
   initial,
+  presetCustomer,
   onSave,
   onClose,
 }: {
   nextSeq: number;
   initial?: Quote;
+  /** Pre-fill the customer on a NEW quote (deep-link from customer detail). */
+  presetCustomer?: string;
   onSave: (q: Quote) => void;
   onClose: () => void;
 }) {
   const editing = !!initial;
   const { customers, parties, designs, salesPersons, paymentTerms } = useMasters();
   const [h, setH] = useState<Head>({
-    customer: initial?.customer ?? "",
+    customer: initial?.customer ?? presetCustomer ?? "",
     address: initial?.address ?? "",
     // New quote: default Quote Date = today, Expiry = +15 days (#13).
     quoteDate: initial?.quoteDate ?? todayISO(),
@@ -116,6 +119,16 @@ export function QuoteForm({
       }
       return next;
     });
+
+  // Preset customer (deep-link): re-pick it once the customer master loads
+  // so the existing setHead branch fills the address too.
+  const presetDone = useRef(false);
+  useEffect(() => {
+    if (editing || !presetCustomer || presetDone.current || !customers.length) return;
+    presetDone.current = true;
+    setHead("customer", presetCustomer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, editing, presetCustomer]);
 
   // New quote: default the salesperson to the rep linked to the logged-in user.
   const defaultedSp = useRef(false);
