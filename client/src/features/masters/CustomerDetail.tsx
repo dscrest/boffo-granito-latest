@@ -309,8 +309,12 @@ export function CustomerDetail() {
                 {[party.code, `${poRows.length} orders`, !party.active && "Inactive"].filter(Boolean).join("  ·  ")}
               </div>
 
+              {/* Low flex bases (340+260+20) so Details + Orders stay
+                  side-by-side down to ~620px panes; wrap only kicks in on
+                  truly small windows. The orders table scrolls horizontally
+                  inside its box when the column gets narrow. */}
               <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginTop: 14 }}>
-                <div style={{ flex: "1 1 460px", maxWidth: 520, minWidth: 0 }}>
+                <div style={{ flex: "1 1 340px", maxWidth: 520, minWidth: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: 8 }}>Primary Details</div>
                   {rows(party).map(([label, value, unset]) => (
                     <DetailRow key={label} label={label} value={value} dim={unset} />
@@ -318,7 +322,7 @@ export function CustomerDetail() {
                 </div>
 
                 {/* The customer's 10 most recent orders — rows open the Master Order. */}
-                <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                <div style={{ flex: "1 1 260px", minWidth: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: 8 }}>
                     Associated Orders {poRows.length > 0 && <span className="dim">({poRows.length} · {fmt(totalQty)} boxes)</span>}
                   </div>
