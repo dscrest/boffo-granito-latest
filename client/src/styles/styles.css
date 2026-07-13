@@ -111,6 +111,23 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 .btn:hover { background: var(--hover); color: var(--fg); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Icon-only variant (close ×, row kebab ⋮) — square with the icon centered;
+   the text-button 0 11px padding made a lone icon read as a lopsided box. */
+.btn.x { width: 28px; padding: 0; justify-content: center; flex-shrink: 0; }
+
+/* GridFooter page-size select — native selects are only skinned inside
+   .form-field/.modal-panel, so this one matches the .btn chrome beside it. */
+select.pg-size {
+  height: 28px; padding: 0 26px 0 10px;
+  border: 1px solid var(--border-2); border-radius: 6px;
+  background: var(--panel-2); color: var(--fg-2);
+  font-family: inherit; font-size: var(--t-md);
+  appearance: none; cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+select.pg-size:hover { background-color: var(--hover); color: var(--fg); }
 .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
 /* Selected state (e.g. GridFooter's current page) — global, was .fbar-scoped only. */
 .btn.active { color: var(--fg); border-color: var(--accent); background: var(--accent-soft); }
@@ -1526,6 +1543,10 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .combo-opt.sel { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .combo-hint { font-size: var(--t-sm); color: var(--dim); font-family: var(--mono, monospace); }
 .combo-empty { padding: 8px 10px; color: var(--dim); font-size: var(--t-sm); }
+/* Dial-code variant: control shows only "+91"; the popup opens wider so the
+   country names read (code left, country right beside it, not spread apart). */
+.combo.dial .combo-pop { right: auto; min-width: 240px; }
+.combo.dial .combo-opt { justify-content: flex-start; }
 
 /* Doc-level charge rows in the totals box (discount / adjustment / tax) */
 .qt-totals .row.charge { align-items: center; gap: 8px; }
@@ -1639,7 +1660,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   margin-bottom: 6px;
 }
 .ord-line-head span { padding-left: 2px; }
-.ord-rm { color: var(--c-red); height: 35px; }
+.ord-rm { color: var(--c-red); height: 35px; justify-content: center; line-height: 1; }
 .ord-rm:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* ============================================================
@@ -1655,12 +1676,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.qt-line {
   grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 26px;
 }
-/* Compact remove ✕ on quote lines (order lines keep the 35px button). */
+/* Compact remove ✕ on quote lines (order lines keep the 35px button).
+   Circular, pinned to the first input line (35px tall) rather than
+   centered in the whole row — the description textarea makes rows tall. */
 .qt-line .ord-rm {
+  width: 26px;
   height: 26px;
   font-size: 11px;
   padding: 0;
-  align-self: center;
+  align-self: start;
+  margin-top: 4px; /* (35 - 26) / 2 → optically centered on the input line */
+  border-radius: 50%;
 }
 /* Subtotal cell: sit on the 35px input line, not centered in the tall row. */
 .qt-line .qt-sub {

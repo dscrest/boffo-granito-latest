@@ -18,8 +18,9 @@ export function DetailRow({ label, value, dim }: { label: string; value: string;
   );
 }
 
-/** "More ▾" actions dropdown (Zoho-style) — reuses the .hdr-menu styles. */
-export function MoreMenu({ items }: { items: { label: string; danger?: boolean; onClick: () => void }[] }) {
+/** "More ▾" actions dropdown (Zoho-style) — reuses the .hdr-menu styles.
+    `kebab` swaps the trigger for a compact icon-only ⋮ button (row menus). */
+export function MoreMenu({ items, kebab }: { items: { label: string; danger?: boolean; onClick: () => void }[]; kebab?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
 
@@ -40,11 +41,11 @@ export function MoreMenu({ items }: { items: { label: string; danger?: boolean; 
   if (items.length === 0) return null;
   return (
     <div className="hdr-pop" ref={ref}>
-      <button className="hbtn" onClick={() => setOpen((v) => !v)} title="More actions">
-        More <Icon name="more" size={13} />
+      <button className={kebab ? "btn x" : "hbtn"} onClick={() => setOpen((v) => !v)} title="More actions">
+        {kebab ? <Icon name="more-v" size={14} /> : <>More <Icon name="more" size={13} /></>}
       </button>
       {open && (
-        <div className="hdr-menu" style={{ right: 0, width: 210, padding: 6 }}>
+        <div className="hdr-menu" style={{ right: 0, width: kebab ? 140 : 210, padding: 6 }}>
           {items.map((it) => (
             <button
               key={it.label}

@@ -81,11 +81,13 @@ const rows = (c: CustomerRow): Detail[] => [
 ];
 
 /* Add one extra address — same fields/labels as the PartyForm address
-   columns, saved into the Customer.additional_addresses JSON array. */
-function AddressModal({ onSave, onClose }: { onSave: (addrs: ExtraAddress[]) => void; onClose: () => void }) {
-  const [billing, setBilling] = useState<ExtraAddress>(() => ({ ...emptyAddress(), type: "billing" }));
+   columns, saved into the Customer.additional_addresses JSON array.
+   With `initial` it edits that single address (one column, type kept). */
+function AddressModal({ initial, onSave, onClose }: { initial?: ExtraAddress; onSave: (addrs: ExtraAddress[]) => void; onClose: () => void }) {
+  const isEdit = !!initial;
+  const [billing, setBilling] = useState<ExtraAddress>(() => initial ?? { ...emptyAddress(), type: "billing" });
   const [shipping, setShipping] = useState<ExtraAddress>(() => emptyAddress());
-  const [sameAsBilling, setSameAsBilling] = useState(true);
+  const [sameAsBilling, setSameAsBilling] = useState(!isEdit);
   const [err, setErr] = useState<string | null>(null);
   const panelRef = useModalA11y(onClose);
 
@@ -104,10 +106,12 @@ function AddressModal({ onSave, onClose }: { onSave: (addrs: ExtraAddress[]) => 
   const filled = (a: ExtraAddress) => !!(a.street1.trim() || a.city.trim());
 
   const submit = () => {
-    // Save whichever columns hold an address (both when "same as billing").
-    const out = [filled(billing) ? billing : null, filled(shipping) ? shipping : null].filter(
-      Boolean,
-    ) as ExtraAddress[];
+    // Save whichever columns hold an address (both when "same as billing");
+    // edit mode saves just the one being edited.
+    const out = (isEdit
+      ? [filled(billing) ? billing : null]
+      : [filled(billing) ? billing : null, filled(shipping) ? shipping : null]
+    ).filter(Boolean) as ExtraAddress[];
     if (!out.length) {
       setErr("Enter at least Street 1 or City");
       return;
@@ -143,13 +147,13 @@ function AddressModal({ onSave, onClose }: { onSave: (addrs: ExtraAddress[]) => 
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 1000 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: isEdit ? 540 : 1000 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
-            <Icon name="plus" size={18} />
+            <Icon name={isEdit ? "edit" : "plus"} size={18} />
           </div>
           <div>
-            <div className="ttl">Add Address</div>
+            <div className="ttl">{isEdit ? "Edit Address" : "Add Address"}</div>
             <div className="sub2">Extra addresses — selectable as billing/shipping on quotations</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
@@ -160,22 +164,28 @@ function AddressModal({ onSave, onClose }: { onSave: (addrs: ExtraAddress[]) => 
           <div className="form-section">
             <div className="form-section-title">
               Address
-              <label
-                style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, cursor: "pointer" }}
-              >
-                <input type="checkbox" checked={sameAsBilling} onChange={(e) => toggleSame(e.target.checked)} />
-                Shipping same as billing
-              </label>
+              {!isEdit && (
+                <label
+                  style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, cursor: "pointer" }}
+                >
+                  <input type="checkbox" checked={sameAsBilling} onChange={(e) => toggleSame(e.target.checked)} />
+                  Shipping same as billing
+                </label>
+              )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isEdit ? "1fr" : "1fr 1fr", gap: 18 }}>
               <div>
-                <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>Billing Address</div>
+                <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>
+                  {isEdit ? (billing.type === "billing" ? "Billing Address" : "Shipping Address") : "Billing Address"}
+                </div>
                 {column(billing, setB, false)}
               </div>
-              <div style={{ opacity: sameAsBilling ? 0.55 : 1 }}>
-                <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>Shipping Address</div>
-                {column(shipping, setS, sameAsBilling)}
-              </div>
+              {!isEdit && (
+                <div style={{ opacity: sameAsBilling ? 0.55 : 1 }}>
+                  <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>Shipping Address</div>
+                  {column(shipping, setS, sameAsBilling)}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -208,6 +218,7 @@ export function CustomerDetail() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [addingAddr, setAddingAddr] = useState(false);
+  const [editingAddr, setEditingAddr] = useState<number | null>(null);
 
   const refresh = () =>
     listCustomers().then((res) => {
@@ -317,6 +328,18 @@ export function CustomerDetail() {
     await refresh();
   };
 
+  const onEditAddress = async (idx: number, a: ExtraAddress) => {
+    if (!party) return;
+    const res = await setAdditionalAddresses(party.id, extraAddrs.map((x, i) => (i === idx ? a : x)));
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setEditingAddr(null);
+    toast.success("Address updated");
+    await refresh();
+  };
+
   const onRemoveAddress = async (idx: number) => {
     if (!party) return;
     if (!(await confirmDialog({ message: "Remove this address?", danger: true }))) return;
@@ -364,6 +387,14 @@ export function CustomerDetail() {
 
       {addingAddr && party && (
         <AddressModal onSave={(a) => void onAddAddress(a)} onClose={() => setAddingAddr(false)} />
+      )}
+
+      {editingAddr !== null && party && extraAddrs[editingAddr] && (
+        <AddressModal
+          initial={extraAddrs[editingAddr]}
+          onSave={(a) => void onEditAddress(editingAddr, a[0])}
+          onClose={() => setEditingAddr(null)}
+        />
       )}
 
       {/* Customer list — fixed viewport height with its OWN scroll, sticky while
@@ -468,33 +499,46 @@ export function CustomerDetail() {
                   ))}
 
                   <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Additional Addresses</div>
-                  {/* Grouped billing first, then shipping, separated by a rule.
+                  {/* Billing | Shipping — always two columns, never wraps.
                       Removal uses the index in the original stored array. */}
-                  {(["billing", "shipping"] as const).map((type, gi) => {
-                    const group = extraAddrs
-                      .map((a, i) => ({ a, i }))
-                      .filter(({ a }) => a.type === type);
-                    if (!group.length) return null;
-                    return (
-                      <div key={type} style={gi > 0 ? { borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 } : undefined}>
-                        <div className="lbl" style={{ marginBottom: 4, fontWeight: 600 }}>
-                          {type === "billing" ? "Billing Addresses" : "Shipping Addresses"}
-                        </div>
-                        {group.map(({ a, i }, j) => (
-                          <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <DetailRow label={`${type === "billing" ? "Billing" : "Shipping"} ${j + 1}`} value={composeExtraAddress(a) || "Not set"} dim={!composeExtraAddress(a)} />
-                            </div>
-                            {canUpdate() && (
-                              <button className="btn x" onClick={() => void onRemoveAddress(i)} title="Remove address" disabled={busy}>
-                                <Icon name="x" size={12} />
-                              </button>
-                            )}
+                  <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                    {(["billing", "shipping"] as const).map((type) => {
+                      const group = extraAddrs
+                        .map((a, i) => ({ a, i }))
+                        .filter(({ a }) => a.type === type);
+                      if (!group.length) return null;
+                      return (
+                        <div key={type} style={{ flex: "1 1 0", minWidth: 0 }}>
+                          <div className="lbl" style={{ marginBottom: 4, fontWeight: 600 }}>
+                            {type === "billing" ? "Billing Addresses" : "Shipping Addresses"}
                           </div>
-                        ))}
-                      </div>
-                    );
-                  })}
+                          {group.map(({ a, i }, j) => (
+                            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                              {/* Label stacked above value — DetailRow's fixed
+                                  160px label doesn't fit a half-width column. */}
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <span className="muted" style={{ display: "block", fontSize: "var(--t-sm)", marginBottom: 2 }}>
+                                  {type === "billing" ? "Billing" : "Shipping"} {j + 1}
+                                </span>
+                                <span className={composeExtraAddress(a) ? "" : "dim"} style={{ overflowWrap: "anywhere" }}>
+                                  {composeExtraAddress(a) || "Not set"}
+                                </span>
+                              </div>
+                              {canUpdate() && (
+                                <MoreMenu
+                                  kebab
+                                  items={[
+                                    { label: "Edit", onClick: () => setEditingAddr(i) },
+                                    { label: "Delete", danger: true, onClick: () => void onRemoveAddress(i) },
+                                  ]}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
                   {extraAddrs.length === 0 && (
                     <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "4px 0" }}>
                       No additional addresses.

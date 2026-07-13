@@ -61,6 +61,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "tile": return <svg {...common}><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>;
     case "flag": return <svg {...common}><path d="M4 21V4h13l-2 4 2 4H4"/></svg>;
     case "more": return <svg {...common}><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>;
+    case "more-v": return <svg {...common}><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>;
     case "sparkline": return <svg {...common} viewBox="0 0 60 20" width={60} height={20}><polyline points="0,15 10,12 20,14 30,8 40,10 50,5 60,7"/></svg>;
     case "quote": return <svg {...common}><path d="M5 3h11l3 3v15H5z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>;
     case "shield-check": return <svg {...common}><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>;

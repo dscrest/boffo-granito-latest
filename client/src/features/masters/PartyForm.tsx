@@ -65,25 +65,45 @@ const SALUTATIONS = ["Mr.", "Mrs.", "Ms.", "Dr."];
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 /* Phone numbers are stored as one string ("+91 9876543210"); the UI
-   splits them into a dial-code select + a digits-only input. The select
-   shows the country name next to the code; only the +NN is stored. */
-const DIAL_CODES: [string, string][] = [
-  ["+91", "India"],
-  ["+1", "USA / Canada"],
-  ["+7", "Russia"],
-  ["+30", "Greece"],
-  ["+31", "Netherlands"],
-  ["+33", "France"],
-  ["+34", "Spain"],
-  ["+39", "Italy"],
-  ["+40", "Romania"],
-  ["+44", "UK"],
-  ["+46", "Sweden"],
-  ["+48", "Poland"],
-  ["+49", "Germany"],
-  ["+966", "Saudi Arabia"],
-  ["+971", "UAE"],
-];
+   splits them into a dial-code picker + a digits-only input. Only the
+   +NN is stored. Dial codes cover every COUNTRY_CODES entry (E.164;
+   NANP islands carry their area code, e.g. +1876 Jamaica); country
+   names/flags derive from isoInfo so the list matches the address
+   country pick list. */
+const ISO_DIAL: Record<string, string> = {
+  AD: "+376", AE: "+971", AF: "+93", AG: "+1268", AI: "+1264", AL: "+355", AM: "+374", AO: "+244",
+  AR: "+54", AT: "+43", AU: "+61", AW: "+297", AZ: "+994", BA: "+387", BB: "+1246", BD: "+880",
+  BE: "+32", BF: "+226", BG: "+359", BH: "+973", BI: "+257", BJ: "+229", BM: "+1441", BN: "+673",
+  BO: "+591", BR: "+55", BS: "+1242", BT: "+975", BW: "+267", BY: "+375", BZ: "+501", CA: "+1",
+  CD: "+243", CF: "+236", CG: "+242", CH: "+41", CI: "+225", CL: "+56", CM: "+237", CN: "+86",
+  CO: "+57", CR: "+506", CU: "+53", CV: "+238", CY: "+357", CZ: "+420", DE: "+49", DJ: "+253",
+  DK: "+45", DM: "+1767", DO: "+1809", DZ: "+213", EC: "+593", EE: "+372", EG: "+20", ER: "+291",
+  ES: "+34", ET: "+251", FI: "+358", FJ: "+679", FM: "+691", FR: "+33", GA: "+241", GB: "+44",
+  GD: "+1473", GE: "+995", GH: "+233", GM: "+220", GN: "+224", GQ: "+240", GR: "+30", GT: "+502",
+  GW: "+245", GY: "+592", HK: "+852", HN: "+504", HR: "+385", HT: "+509", HU: "+36", ID: "+62",
+  IE: "+353", IL: "+972", IN: "+91", IQ: "+964", IR: "+98", IS: "+354", IT: "+39", JM: "+1876",
+  JO: "+962", JP: "+81", KE: "+254", KG: "+996", KH: "+855", KI: "+686", KM: "+269", KN: "+1869",
+  KP: "+850", KR: "+82", KW: "+965", KZ: "+7", LA: "+856", LB: "+961", LC: "+1758", LI: "+423",
+  LK: "+94", LR: "+231", LS: "+266", LT: "+370", LU: "+352", LV: "+371", LY: "+218", MA: "+212",
+  MC: "+377", MD: "+373", ME: "+382", MG: "+261", MH: "+692", MK: "+389", ML: "+223", MM: "+95",
+  MN: "+976", MR: "+222", MT: "+356", MU: "+230", MV: "+960", MW: "+265", MX: "+52", MY: "+60",
+  MZ: "+258", NA: "+264", NE: "+227", NG: "+234", NI: "+505", NL: "+31", NO: "+47", NP: "+977",
+  NR: "+674", NZ: "+64", OM: "+968", PA: "+507", PE: "+51", PG: "+675", PH: "+63", PK: "+92",
+  PL: "+48", PT: "+351", PW: "+680", PY: "+595", QA: "+974", RO: "+40", RS: "+381", RU: "+7",
+  RW: "+250", SA: "+966", SB: "+677", SC: "+248", SD: "+249", SE: "+46", SG: "+65", SI: "+386",
+  SK: "+421", SL: "+232", SM: "+378", SN: "+221", SO: "+252", SR: "+597", SS: "+211", ST: "+239",
+  SV: "+503", SY: "+963", SZ: "+268", TD: "+235", TG: "+228", TH: "+66", TJ: "+992", TL: "+670",
+  TM: "+993", TN: "+216", TO: "+676", TR: "+90", TT: "+1868", TV: "+688", TW: "+886", TZ: "+255",
+  UA: "+380", UG: "+256", US: "+1", UY: "+598", UZ: "+998", VC: "+1784", VE: "+58", VN: "+84",
+  VU: "+678", WS: "+685", YE: "+967", ZA: "+27", ZM: "+260", ZW: "+263",
+};
+/* Dial-code picker options: the closed control shows only the code (+91);
+   the open popup shows code + flag + country and filters on either.
+   Alphabetical by country name, like the Books reference. */
+const DIAL_OPTIONS = COUNTRY_CODES.map((iso) => {
+  const { country, flag } = isoInfo(iso);
+  return { value: ISO_DIAL[iso], label: ISO_DIAL[iso], hint: `${flag} ${country}` };
+}).sort((a, b) => a.hint.localeCompare(b.hint));
 function splitPhone(s: string): { dial: string; num: string } {
   const m = /^(\+\d{1,4})\s*(.*)$/.exec(s.trim());
   return m ? { dial: m[1], num: m[2] } : { dial: "+91", num: s.trim() };
@@ -342,17 +362,16 @@ export function PartyForm({
     <label className="form-field">
       <span className="lbl">{label}</span>
       <div style={{ display: "flex", gap: 6 }}>
-        <select
-          value={p.dial}
-          onChange={(e) => setP({ ...p, dial: e.target.value })}
-          style={{ flex: "0 0 130px", width: 130 }}
-        >
-          {DIAL_CODES.map(([code, country]) => (
-            <option key={code} value={code}>
-              {country} {code}
-            </option>
-          ))}
-        </select>
+        <div style={{ flex: "0 0 84px" }}>
+          <Combobox
+            className="dial"
+            ariaLabel={`${label} dial code`}
+            value={p.dial}
+            options={DIAL_OPTIONS}
+            maxVisible={DIAL_OPTIONS.length}
+            onChange={(dial) => setP({ ...p, dial })}
+          />
+        </div>
         <input
           value={p.num}
           inputMode="numeric"
@@ -475,20 +494,22 @@ export function PartyForm({
                   />
                 </div>
               </label>
-              <label className="form-field">
-                <span className="lbl">Email Address</span>
-                <input
-                  type="email"
-                  className={emailBad ? "error" : undefined}
-                  value={x.contact_email}
-                  onChange={(e) => setExtra("contact_email", e.target.value)}
-                  placeholder="name@company.com"
-                />
-                {emailBad && (
-                  <span style={{ fontSize: 11, color: "var(--c-red)" }}>Enter a valid email address</span>
-                )}
-              </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              {/* Email trimmed so both phone numbers get real typing room;
+                  the dial picker is compact (+91) and expands on open. */}
+              <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14 }}>
+                <label className="form-field">
+                  <span className="lbl">Email Address</span>
+                  <input
+                    type="email"
+                    className={emailBad ? "error" : undefined}
+                    value={x.contact_email}
+                    onChange={(e) => setExtra("contact_email", e.target.value)}
+                    placeholder="name@company.com"
+                  />
+                  {emailBad && (
+                    <span style={{ fontSize: 11, color: "var(--c-red)" }}>Enter a valid email address</span>
+                  )}
+                </label>
                 {phoneField("Work Phone", workPhone, setWorkPhone)}
                 {phoneField("Mobile", mobile, setMobile)}
               </div>
@@ -607,8 +628,10 @@ export function PartyForm({
             <div className="form-section-title">Contact Persons</div>
             {/* Channels (Email/SMS) column hidden for now per request — the
                 ch_email/ch_sms fields stay in state and persist unchanged. */}
-            <div style={{ overflowX: "auto" }}>
-              <div className="contact-grid" style={{ minWidth: 880, display: "grid", gridTemplateColumns: "80px 1fr 1fr 1.3fr 210px 210px 30px", gap: 6, alignItems: "center" }}>
+            {/* No overflow wrapper: the dial popup opens past the row edge and
+                an overflow:auto ancestor would clip it. The grid fits the modal. */}
+            <div>
+              <div className="contact-grid" style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr 1.3fr 180px 180px 30px", gap: 6, alignItems: "center" }}>
                 {["Salutation", "First Name", "Last Name", "Email Address", "Work Phone", "Mobile", ""].map((h, i) => (
                   <span key={i} className="lbl">{h}</span>
                 ))}
@@ -620,16 +643,16 @@ export function PartyForm({
                     label: string,
                   ) => (
                     <div style={{ display: "flex", gap: 4 }}>
-                      <select
-                        value={p.dial}
-                        aria-label={`${label} dial code`}
-                        onChange={(e) => setP({ ...p, dial: e.target.value })}
-                        style={{ flex: "0 0 110px", width: 110 }}
-                      >
-                        {DIAL_CODES.map(([code, country]) => (
-                          <option key={code} value={code}>{country} {code}</option>
-                        ))}
-                      </select>
+                      <div style={{ flex: "0 0 72px" }}>
+                        <Combobox
+                          className="dial"
+                          ariaLabel={`${label} dial code`}
+                          value={p.dial}
+                          options={DIAL_OPTIONS}
+                          maxVisible={DIAL_OPTIONS.length}
+                          onChange={(dial) => setP({ ...p, dial })}
+                        />
+                      </div>
                       <input
                         value={p.num}
                         inputMode="numeric"

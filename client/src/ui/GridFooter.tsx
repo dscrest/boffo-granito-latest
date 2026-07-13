@@ -147,6 +147,7 @@ export function GridFooter(p: Pager) {
           Next ›
         </button>
         <select
+          className="pg-size"
           value={p.pageSize}
           onChange={(e) => p.setPageSize(Number(e.target.value))}
           title="Rows per page"
