@@ -168,7 +168,6 @@ export function PartyForm({
   salesPersons,
   initial,
   isEdit,
-  asPage,
   onSave,
   onClose,
 }: {
@@ -176,9 +175,6 @@ export function PartyForm({
   salesPersons: PaymentTermOption[];
   initial?: Partial<CustomerInput>;
   isEdit?: boolean;
-  /** Render as a full page (route /parties/new) instead of a modal:
-      no backdrop/✕, tabs unfolded into stacked sections (Books-style). */
-  asPage?: boolean;
   onSave: (c: CustomerInput) => void;
   onClose: () => void;
 }) {
@@ -369,10 +365,16 @@ export function PartyForm({
     </label>
   );
 
-  /* Same head/body/foot content in both shells; only the wrapper differs
-     (page = plain centered card, modal = backdrop + focus-trapped panel). */
-  const content = (
-    <>
+  return (
+    <div className="modal-backdrop">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        className="modal-panel card df-modal"
+        style={{ maxWidth: 1000 }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="df-head">
           <div className="ico">
             <Icon name="flag" size={18} />
@@ -383,11 +385,9 @@ export function PartyForm({
               {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
             </div>
           </div>
-          {!asPage && (
-            <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
-              ✕
-            </button>
-          )}
+          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
+            ✕
+          </button>
         </div>
 
         <div className="df-body">
@@ -495,8 +495,7 @@ export function PartyForm({
             </div>
           </div>
 
-          {/* Books-style tabs (modal); the page unfolds all sections stacked. */}
-          {!asPage && (
+          {/* Books-style tabs; the Customer section above stays visible. */}
           <div className="dtabs" role="tablist" style={{ marginBottom: 14 }}>
             {([["other", "Other Details"], ["address", "Address"], ["contacts", "Contact Persons"]] as const).map(
               ([id, label]) => (
@@ -516,9 +515,8 @@ export function PartyForm({
               ),
             )}
           </div>
-          )}
 
-          {(asPage || tab === "other") && (
+          {tab === "other" && (
           <div className="form-section">
             <div className="form-section-title">Other Details</div>
             <div className="form-grid">
@@ -579,7 +577,7 @@ export function PartyForm({
           </div>
           )}
 
-          {(asPage || tab === "address") && (
+          {tab === "address" && (
           <div className="form-section">
             <div className="form-section-title">
               Address
@@ -607,7 +605,7 @@ export function PartyForm({
           </div>
           )}
 
-          {(asPage || tab === "contacts") && (
+          {tab === "contacts" && (
           <div className="form-section">
             <div className="form-section-title">Contact Persons</div>
             {/* Channels (Email/SMS) column hidden for now per request — the
@@ -706,27 +704,6 @@ export function PartyForm({
             Save
           </button>
         </div>
-    </>
-  );
-
-  if (asPage) {
-    return (
-      <div className="card df-modal" style={{ maxWidth: 1000, margin: "0 auto" }}>
-        {content}
-      </div>
-    );
-  }
-  return (
-    <div className="modal-backdrop">
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        className="modal-panel card df-modal"
-        style={{ maxWidth: 1000 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {content}
       </div>
     </div>
   );
