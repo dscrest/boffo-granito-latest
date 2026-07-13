@@ -152,6 +152,57 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     }
   });
 
+  /* ---- SalesPerson auto-sync ----
+     Every AppUser gets a SalesPerson row (linked via app_user) so reps never
+     need separate maintenance. Full sync on each successful login: inserts
+     missing rows, updates drifted name/email/active. Never touches the
+     SalesPerson-only fields (phone/region). Must never fail the login. */
+  async function syncSalesPersons(catalyst) {
+    try {
+      const users = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          "SELECT ROWID, email, name, active FROM AppUser WHERE deleted_at is null",
+        ),
+      );
+      const reps = rowList(
+        await catalyst.zcql().executeZCQLQuery("SELECT ROWID, name, email, active, app_user FROM SalesPerson"),
+      );
+      const byUser = new Map(reps.filter((r) => r.app_user).map((r) => [String(r.app_user), r]));
+      const names = new Set(reps.map((r) => String(r.name || "").toLowerCase()));
+      const ds = catalyst.datastore();
+      for (const u of users) {
+        const rep = byUser.get(String(u.ROWID));
+        const active = String(u.active) === "true";
+        const wantName = String(u.name || u.email || "").trim();
+        if (!wantName) continue;
+        if (!rep) {
+          // Name collision with an unlinked rep → fall back to email as name.
+          const name = names.has(wantName.toLowerCase()) ? String(u.email) : wantName;
+          if (names.has(name.toLowerCase())) continue; // still colliding — leave for manual fix
+          await ds.table("SalesPerson").insertRow({ name, email: u.email || "", active, app_user: String(u.ROWID) });
+          names.add(name.toLowerCase());
+        } else {
+          const canRename =
+            String(rep.name) !== wantName &&
+            (wantName.toLowerCase() === String(rep.name || "").toLowerCase() || !names.has(wantName.toLowerCase()));
+          const drifted =
+            canRename || String(rep.email || "") !== String(u.email || "") || (String(rep.active) === "true") !== active;
+          if (drifted) {
+            await ds.table("SalesPerson").updateRow({
+              ROWID: rep.ROWID,
+              ...(canRename ? { name: wantName } : {}),
+              email: u.email || "",
+              active,
+            });
+            if (canRename) names.add(wantName.toLowerCase());
+          }
+        }
+      }
+    } catch (e) {
+      console.error("SalesPerson sync failed:", e && e.message);
+    }
+  }
+
   /* ---- POST /auth/login ---- */
   app.post("/auth/login", async (req, res) => {
     try {
@@ -182,6 +233,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
         expires_at: istNow(SESSION_HOURS * 3600 * 1000),
       });
       res.json({ ok: true, token, user: publicUser(user, role) });
+      syncSalesPersons(catalyst); // fire-and-forget — reps mirror app users
     } catch (err) {
       sendErr(res, err);
     }

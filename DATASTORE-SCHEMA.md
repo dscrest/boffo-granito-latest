@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (31 tables)
+## Table Index (32 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -56,12 +56,16 @@
 | AuthSession | 76673000000095001 | App auth: bearer tokens |
 | SalesPerson | 76673000000115495 | Sales reps on quotes/SO (links AppUser) |
 | PartyBrand | 69851000000060042 (live) | Lookup — party brands (feeds unique_name) |
+| Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
 Master list of sales reps shown on Quotations / Sales Orders. In the generic-CRUD
-ALLOWED set; natural key = `name`. Managed via the Sales Persons admin page
-(`/salespersons`, admin-only) which reads `/auth/users` for the linked-user picker.
+ALLOWED set; natural key = `name`. **Auto-managed since 2026-07-13:** every AppUser
+gets a SalesPerson row, synced (name/email/active) on each successful login
+(`syncSalesPersons` in functions/data-ops/lib/appauth.js). The admin page
+(`/salespersons`) only edits the rep-specific phone/region fields; create/delete
+were removed.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -222,6 +226,25 @@ terms added 2026-07-02: Against Full TT · 10% Advance & 90% Against B/L ·
 | current_number | int | |
 | fy_token | varchar(20) | |
 
+### Currency (live id 69851000000065195) — added 2026-07-13
+Currency master + exchange rates (base INR; `exchange_rate` = INR per 1 unit, INR row = 1).
+In the generic-CRUD ALLOWED set; natural key = `code`. Rates auto-refresh daily via the
+`fx_refresh_daily` Catalyst cron (Webhook job pool) hitting
+`GET data-ops/cron/fx-refresh?key=$FX_CRON_KEY` (frankfurter.dev); rows with
+`manual_override` keep their hand-entered rate. Admin page `/currencies` (admin-only)
+has a "Refresh rates now" button (authed `POST data-ops/fx-refresh`). All currency pick
+lists (customer / quote / order forms) are DB-sourced from this table.
+
+| Column | Type | Notes |
+|---|---|---|
+| code | varchar(10) | unique, mandatory (natural key: INR/USD/EUR/…) |
+| name | varchar(100) | "Indian Rupee" |
+| symbol | varchar(10) | "₹" |
+| exchange_rate | double(4dp) | INR per 1 unit; INR = 1 |
+| manual_override | boolean | true → daily FX cron skips this row |
+| rate_updated_at | datetime | last rate write |
+| deleted_at | datetime | soft delete |
+
 ---
 
 ## Masters
@@ -333,6 +356,7 @@ terms added 2026-07-02: Against Full TT · 10% Advance & 90% Against B/L ·
 | port_of_discharge | varchar(255) | |
 | status | varchar(50) | |
 | currency | varchar(10) | |
+| exchange_rate | double(4dp) | INR per 1 unit of `currency` (added 2026-07-13); SO/Invoice get one when conversion needs it |
 | remarks | text(10000) | |
 | public_link_token | varchar(100) | legacy/unused? see share_token |
 | conversion_flag | varchar(20) | Full / Partial |

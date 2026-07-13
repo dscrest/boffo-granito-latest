@@ -12,6 +12,7 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { CATEGORIES, docTotals, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
+import { currencyCodes } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 
@@ -55,7 +56,6 @@ function orderLineSub(l: OrderLine): number {
 }
 
 const STATUSES = ["Confirmed", "InProgress", "Cancelled"];
-const CURRENCIES = ["INR", "USD", "EUR"];
 
 type FieldKind = "text" | "date" | "select";
 interface FieldSpec {
@@ -72,9 +72,9 @@ const HEADER: FieldSpec[] = [
   { key: "po_number", label: "PO Number", required: true },
   { key: "order_date", label: "Order Date", kind: "date" },
   { key: "shipment_date", label: "Shipment Date", kind: "date" },
-  // options injected at render from the live PaymentTerm master (useMasters)
+  // options injected at render from the live PaymentTerm / Currency masters (useMasters)
   { key: "payment_term", label: "Payment Term", kind: "select", options: [] },
-  { key: "currency", label: "Currency", kind: "select", options: CURRENCIES },
+  { key: "currency", label: "Currency", kind: "select", options: [] },
   { key: "status", label: "Status", kind: "select", options: STATUSES },
   { key: "salesperson", label: "Salesperson" },
   { key: "port_of_discharge", label: "Port of Discharge" },
@@ -104,7 +104,7 @@ export function OrderForm({
     payment_term: "",
     port_of_discharge: "",
     status: "Confirmed",
-    currency: "EUR",
+    currency: "INR",
     remarks: "",
     salesperson: "",
     box_branding: "",
@@ -116,7 +116,7 @@ export function OrderForm({
     taxPct: "",
   });
   const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
-  const { parties, designs, salesPersons, paymentTerms } = useMasters();
+  const { parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
   const [cat, setCat] = useState("");
   const itemOptions = useMemo(
     () => (cat ? designs.filter((d) => d.category === cat) : designs),
@@ -251,7 +251,12 @@ export function OrderForm({
                         onChange={(e) => setHead(f.key, e.target.value)}
                       >
                         <option value=""></option>
-                        {(f.key === "payment_term" ? paymentTerms.map((t) => t.label) : f.options!).map((o) => (
+                        {(f.key === "payment_term"
+                          ? paymentTerms.map((t) => t.label)
+                          : f.key === "currency"
+                            ? currencyCodes(currencies)
+                            : f.options!
+                        ).map((o) => (
                           <option key={o} value={o}>
                             {o}
                           </option>

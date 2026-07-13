@@ -1,16 +1,14 @@
 /* ============================================================
-   Sales Persons (Settings) — admin master of the reps shown on
-   Quotations / Sales Orders. Each Sales Person wraps an existing
-   AppUser (required link → access perms flow through the user's
-   role). Follows the master-page UI convention: row-click edits.
-   Backed by the generic /data-ops/SalesPerson CRUD; the user picker
-   reads /data-ops/auth/users.
+   Sales Persons (Settings) — the reps shown on Quotations / Sales
+   Orders. AUTO-MANAGED: every AppUser gets a SalesPerson row,
+   synced on each login (name/email/active mirror the user). Only
+   the rep-specific fields (mobile, region) are editable here.
+   Backed by the generic /data-ops/SalesPerson CRUD; user names
+   resolve via /data-ops/auth/users.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
-import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -18,9 +16,7 @@ import { apiGet } from "@/lib/api";
 import { fmtDateTime } from "@/lib/format";
 import {
   listSalesPersons,
-  createSalesPerson,
   updateSalesPerson,
-  deleteSalesPerson,
   type SalesPersonRow,
 } from "@/features/masters/salespersonApi";
 
@@ -31,16 +27,14 @@ interface AppUserOption {
 }
 
 interface Draft {
-  rowid: string | null; // null = new
+  rowid: string;
   name: string;
   email: string;
   phone: string;
   region: string;
   active: boolean;
-  app_user: string; // AppUser ROWID (required)
+  app_user: string; // AppUser ROWID (auto-linked)
 }
-
-const EMPTY: Draft = { rowid: null, name: "", email: "", phone: "", region: "", active: true, app_user: "" };
 
 const dash = <span className="dim">—</span>;
 
@@ -81,11 +75,6 @@ export function SalesPersonsAdmin() {
     users.forEach((u) => m.set(u.rowid, u.name || u.email));
     return m;
   }, [users]);
-
-  const userOptions = useMemo(
-    () => users.map((u) => ({ value: u.rowid, label: u.name || u.email, hint: u.email })),
-    [users],
-  );
 
   // Toggleable + reorderable columns (# pinned outside the map). Defined in
   // the component because "Linked user" resolves names via the users map.
@@ -128,65 +117,25 @@ export function SalesPersonsAdmin() {
   }, [rows, query, statusF]);
   const pager = usePagination(filtered.length, "salesPersonsPageSize", `${query}|${statusF}`);
 
-  const onPickUser = (rowid: string) => {
-    if (!draft) return;
-    const u = users.find((x) => x.rowid === rowid);
-    setDraft({
-      ...draft,
-      app_user: rowid,
-      // Default name/email from the user the first time, if blank.
-      name: draft.name || (u?.name ?? ""),
-      email: draft.email || (u?.email ?? ""),
-    });
-  };
-
+  // Auto-managed: only the rep-specific fields (mobile, region) are saved here;
+  // name/email/active/link mirror the AppUser via the login sync.
   const onSave = async () => {
     if (!draft) return;
-    if (!draft.app_user) {
-      toast.error("Pick a linked user");
-      return;
-    }
-    if (!draft.name.trim()) {
-      toast.error("Name is required");
-      return;
-    }
     setBusy(true);
     try {
-      const input = {
+      await updateSalesPerson(draft.rowid, {
         name: draft.name,
         email: draft.email,
         phone: draft.phone,
         region: draft.region,
         active: draft.active,
         app_user: draft.app_user,
-      };
-      if (draft.rowid) {
-        await updateSalesPerson(draft.rowid, input);
-        toast.success("Sales person updated");
-      } else {
-        await createSalesPerson(input);
-        toast.success("Sales person created");
-      }
+      });
+      toast.success("Sales person updated");
       setDraft(null);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onDelete = async () => {
-    if (!draft?.rowid) return;
-    if (!(await confirmDialog({ message: `Are you sure you want to delete sales person "${draft.name}"? This cannot be undone.`, danger: true }))) return;
-    setBusy(true);
-    try {
-      await deleteSalesPerson(draft.rowid);
-      toast.success("Sales person removed");
-      setDraft(null);
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(false);
     }
@@ -197,16 +146,12 @@ export function SalesPersonsAdmin() {
       <div className="page-head">
         <div>
           <div className="title">Sales Persons</div>
-          <div className="sub">{loading ? "Loading…" : "Shown on quotations & sales orders"}</div>
+          <div className="sub">{loading ? "Loading…" : "Auto-managed from Users — one rep per app user"}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
             <Icon name="clock" size={13} />
             Refresh
-          </button>
-          <button className="hbtn primary" onClick={() => setDraft({ ...EMPTY })}>
-            <Icon name="plus" size={13} />
-            New sales person
           </button>
         </div>
       </div>
@@ -216,30 +161,21 @@ export function SalesPersonsAdmin() {
       {draft && (
         <div className="card form-section" style={{ marginBottom: 12, padding: 16, borderLeft: "3px solid var(--accent)" }}>
           <div className="form-section-title" style={{ marginBottom: 14 }}>
-            <Icon name={draft.rowid ? "settings" : "plus"} size={13} className="ic" />
-            {draft.rowid ? `Edit ${draft.name}` : "New sales person"}
+            <Icon name="settings" size={13} className="ic" />
+            {`Edit ${draft.name}`}
           </div>
           <div className="form-grid">
             <label className="form-field">
-              <span className="lbl">
-                Linked user<span className="req"> *</span>
-              </span>
-              <Combobox
-                value={draft.app_user}
-                options={userOptions}
-                onChange={onPickUser}
-                placeholder="Search a sign-in user…"
-              />
+              <span className="lbl">Linked user (auto)</span>
+              <input value={userName.get(draft.app_user) || draft.email || "—"} disabled />
             </label>
             <label className="form-field">
-              <span className="lbl">
-                Name<span className="req"> *</span>
-              </span>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Display name on documents" />
+              <span className="lbl">Name (from user)</span>
+              <input value={draft.name} disabled />
             </label>
             <label className="form-field">
-              <span className="lbl">Email</span>
-              <input type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+              <span className="lbl">Email (from user)</span>
+              <input type="email" value={draft.email} disabled />
             </label>
             <label className="form-field">
               <span className="lbl">Mobile</span>
@@ -250,20 +186,12 @@ export function SalesPersonsAdmin() {
               <input value={draft.region} onChange={(e) => setDraft({ ...draft, region: e.target.value })} placeholder="Territory / market" />
             </label>
             <label className="form-field">
-              <span className="lbl">Status</span>
-              <select value={draft.active ? "1" : "0"} onChange={(e) => setDraft({ ...draft, active: e.target.value === "1" })}>
-                <option value="1">Active</option>
-                <option value="0">Inactive (hidden from pickers)</option>
-              </select>
+              <span className="lbl">Status (from user)</span>
+              <input value={draft.active ? "Active" : "Inactive"} disabled />
             </label>
           </div>
           <div className="right" style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <span className="df-req-note">* Indicates a mandatory field</span>
-            {draft.rowid && (
-              <button className="btn" style={{ color: "var(--c-red)" }} disabled={busy} onClick={() => void onDelete()}>
-                Delete
-              </button>
-            )}
+            <span className="df-req-note">Name, email &amp; status follow the linked app user</span>
             <button className="btn" onClick={() => setDraft(null)}>
               Cancel
             </button>
@@ -338,7 +266,7 @@ export function SalesPersonsAdmin() {
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td colSpan={visible.length + 1}>
-                      <EmptyState icon="users" title="No sales persons" hint="Click New sales person to add one." />
+                      <EmptyState icon="users" title="No sales persons" hint="Reps appear automatically when app users sign in." />
                     </td>
                   </tr>
                 )}

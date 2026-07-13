@@ -58,7 +58,7 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; e
       paymentTerm: termName.get(str(r.payment_term)) || "",
       portOfDischarge: str(r.port_of_discharge),
       status: "Sent",
-      currency: str(r.currency) || "EUR",
+      currency: str(r.currency) || "INR",
       remarks: str(r.remarks),
       salesperson: salesPerson ? str(salesPerson.name) : "",
       referenceNo: str(r.reference_no),

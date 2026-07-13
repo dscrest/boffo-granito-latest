@@ -122,7 +122,8 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       paymentTerm: termName.get(str(r.payment_term)) || str(r.payment_term),
       portOfDischarge: str(r.port_of_discharge),
       status: toStatus(str(r.status), str(r.conversion_flag)),
-      currency: str(r.currency) || "EUR",
+      currency: str(r.currency) || "INR",
+      exchangeRate: num(r.exchange_rate) || 1,
       remarks: str(r.remarks),
       salesperson: salesPersonName.get(str(r.sales_person)) || "",
       referenceNo: str(r.reference_no),
@@ -155,6 +156,8 @@ export interface NewQuoteInput {
   port_of_discharge: string;
   status: string;
   currency: string;
+  /** INR per 1 unit of `currency`; INR = 1. */
+  exchange_rate: number;
   remarks: string;
   address: string;
   shipping_address: string;

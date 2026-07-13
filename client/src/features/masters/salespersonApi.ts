@@ -7,7 +7,7 @@
    the user's role. Quote.sales_person / SalesOrder.sales_person point
    here. Every write is recorded server-side in OperationLog.
    ============================================================ */
-import { list, listAll, insert, update, remove } from "@/lib/dataOps";
+import { listAll, update } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { storedAuth } from "@/lib/auth";
 
@@ -92,16 +92,10 @@ function bust<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-export function createSalesPerson(input: SalesPersonInput) {
-  return bust(insert("SalesPerson", toPayload(input)));
-}
-
+/* Create/delete removed 2026-07-13: reps are auto-synced from AppUser on
+   login (see functions/data-ops/lib/appauth.js syncSalesPersons). */
 export function updateSalesPerson(rowid: string, input: SalesPersonInput) {
   return bust(update("SalesPerson", rowid, toPayload(input)));
-}
-
-export function deleteSalesPerson(rowid: string) {
-  return bust(remove("SalesPerson", rowid));
 }
 
 /** Name of the active SalesPerson linked to the logged-in AppUser, or "" if none. */

@@ -6,20 +6,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
 import { fmtDateTime, pct } from "@/lib/format";
-import { nextCustomerCode } from "@/lib/seq";
 import { useOrders } from "@/features/orders/useOrders";
-import { PartyForm } from "./PartyForm";
 import {
-  createCustomer,
   listCustomers,
-  type CustomerInput,
   type CustomerRow,
   type PaymentTermOption,
 } from "./customersApi";
@@ -80,7 +75,6 @@ export function PartiesView() {
   const [salesPersons, setSalesPersons] = useState<PaymentTermOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
   const [filterField, setFilterField] = useState<"" | keyof Row>("");
   const [filterValue, setFilterValue] = useState("");
@@ -103,17 +97,7 @@ export function PartiesView() {
   };
   useEffect(load, []);
 
-  const onSave = async (input: CustomerInput) => {
-    const res = await createCustomer(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowForm(false);
-    toast.success("Customer saved");
-    load();
-  };
+  // Create moved to the /parties/new page (PartyNew.tsx) 2026-07-13.
 
   const base = useMemo<Row[]>(
     () =>
@@ -181,16 +165,6 @@ export function PartiesView() {
     /* Column fills the scrollport exactly (same as Sizes) so the grid card
        grows and its footer sits on the window edge — no dead band below. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
-      {showForm && (
-        <PartyForm
-          paymentTerms={paymentTerms}
-          salesPersons={salesPersons}
-          initial={{ code: nextCustomerCode(customers.map((c) => c.code)) }}
-          onSave={onSave}
-          onClose={() => setShowForm(false)}
-        />
-      )}
-
       {error && <ErrorCard message={error} onRetry={load} />}
 
       <div className="fbar">
@@ -233,7 +207,7 @@ export function PartiesView() {
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
-        <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
+        <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>
           <Icon name="plus" size={13} />
           New customer
         </button>

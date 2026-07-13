@@ -14,6 +14,8 @@ import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { storedAuth } from "@/lib/auth";
+import { useMasters } from "./useMasters";
+import { currencyCodes } from "./currenciesApi";
 import {
   composeAddress,
   emptyExtras,
@@ -54,7 +56,7 @@ export const COUNTRY_NAME_OPTIONS = COUNTRY_CODES.map((iso) => {
    billing-address country name; no separate Country field in the form. */
 const NAME_TO_ISO = new Map(COUNTRY_CODES.map((iso) => [isoInfo(iso).country, iso]));
 
-const CURRENCIES = ["EUR", "USD", "INR"];
+/* Currency options come from the Currency master (useMasters().currencies). */
 /* Country → currency auto-set: IN → INR, Eurozone → EUR, everything else → USD. */
 const EUROZONE = new Set(["AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK"]);
 const currencyFor = (iso: string) => (iso === "IN" ? "INR" : EUROZONE.has(iso) ? "EUR" : "USD");
@@ -63,8 +65,25 @@ const SALUTATIONS = ["Mr.", "Mrs.", "Ms.", "Dr."];
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 /* Phone numbers are stored as one string ("+91 9876543210"); the UI
-   splits them into a dial-code select + a digits-only input. */
-const DIAL_CODES = ["+91", "+1", "+7", "+30", "+31", "+33", "+34", "+39", "+40", "+44", "+46", "+48", "+49", "+966", "+971"];
+   splits them into a dial-code select + a digits-only input. The select
+   shows the country name next to the code; only the +NN is stored. */
+const DIAL_CODES: [string, string][] = [
+  ["+91", "India"],
+  ["+1", "USA / Canada"],
+  ["+7", "Russia"],
+  ["+30", "Greece"],
+  ["+31", "Netherlands"],
+  ["+33", "France"],
+  ["+34", "Spain"],
+  ["+39", "Italy"],
+  ["+40", "Romania"],
+  ["+44", "UK"],
+  ["+46", "Sweden"],
+  ["+48", "Poland"],
+  ["+49", "Germany"],
+  ["+966", "Saudi Arabia"],
+  ["+971", "UAE"],
+];
 function splitPhone(s: string): { dial: string; num: string } {
   const m = /^(\+\d{1,4})\s*(.*)$/.exec(s.trim());
   return m ? { dial: m[1], num: m[2] } : { dial: "+91", num: s.trim() };
@@ -149,6 +168,7 @@ export function PartyForm({
   salesPersons,
   initial,
   isEdit,
+  asPage,
   onSave,
   onClose,
 }: {
@@ -156,13 +176,18 @@ export function PartyForm({
   salesPersons: PaymentTermOption[];
   initial?: Partial<CustomerInput>;
   isEdit?: boolean;
+  /** Render as a full page (route /parties/new) instead of a modal:
+      no backdrop/✕, tabs unfolded into stacked sections (Books-style). */
+  asPage?: boolean;
   onSave: (c: CustomerInput) => void;
   onClose: () => void;
 }) {
+  // Cache-first master read — costs nothing when the caller already loaded it.
+  const { currencies } = useMasters();
   const [v, setV] = useState({
     name: initial?.name ?? "",
     code: initial?.code ?? "",
-    currency: initial?.currency ?? "",
+    currency: initial?.currency ?? "INR",
     payment_term: initial?.payment_term ?? "",
     port_of_discharge: initial?.port_of_discharge ?? "",
     address: initial?.address ?? "",
@@ -324,11 +349,11 @@ export function PartyForm({
         <select
           value={p.dial}
           onChange={(e) => setP({ ...p, dial: e.target.value })}
-          style={{ flex: "0 0 86px", width: 86 }}
+          style={{ flex: "0 0 130px", width: 130 }}
         >
-          {DIAL_CODES.map((d) => (
-            <option key={d} value={d}>
-              {d}
+          {DIAL_CODES.map(([code, country]) => (
+            <option key={code} value={code}>
+              {country} {code}
             </option>
           ))}
         </select>
@@ -344,16 +369,10 @@ export function PartyForm({
     </label>
   );
 
-  return (
-    <div className="modal-backdrop">
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        className="modal-panel card df-modal"
-        style={{ maxWidth: 1000 }}
-        onClick={(e) => e.stopPropagation()}
-      >
+  /* Same head/body/foot content in both shells; only the wrapper differs
+     (page = plain centered card, modal = backdrop + focus-trapped panel). */
+  const content = (
+    <>
         <div className="df-head">
           <div className="ico">
             <Icon name="flag" size={18} />
@@ -364,9 +383,11 @@ export function PartyForm({
               {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
             </div>
           </div>
-          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
-            ✕
-          </button>
+          {!asPage && (
+            <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
+              ✕
+            </button>
+          )}
         </div>
 
         <div className="df-body">
@@ -474,7 +495,8 @@ export function PartyForm({
             </div>
           </div>
 
-          {/* Books-style tabs; the Customer section above stays visible. */}
+          {/* Books-style tabs (modal); the page unfolds all sections stacked. */}
+          {!asPage && (
           <div className="dtabs" role="tablist" style={{ marginBottom: 14 }}>
             {([["other", "Other Details"], ["address", "Address"], ["contacts", "Contact Persons"]] as const).map(
               ([id, label]) => (
@@ -494,8 +516,9 @@ export function PartyForm({
               ),
             )}
           </div>
+          )}
 
-          {tab === "other" && (
+          {(asPage || tab === "other") && (
           <div className="form-section">
             <div className="form-section-title">Other Details</div>
             <div className="form-grid">
@@ -503,7 +526,8 @@ export function PartyForm({
                 <span className="lbl">Currency</span>
                 <select value={v.currency} onChange={(e) => set("currency", e.target.value)}>
                   <option value=""></option>
-                  {CURRENCIES.map((c) => (
+                  {/* The saved value stays selectable even if its master row is gone. */}
+                  {[...new Set([...currencyCodes(currencies), ...(v.currency ? [v.currency] : [])])].map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>
@@ -550,19 +574,12 @@ export function PartyForm({
                 <span className="lbl">Port of Discharge</span>
                 <input value={v.port_of_discharge} onChange={(e) => set("port_of_discharge", e.target.value)} placeholder="Gdańsk" />
               </label>
-              <label className="form-field">
-                <span className="lbl">Main Customer Name</span>
-                <input
-                  value={x.main_party_name}
-                  onChange={(e) => setExtra("main_party_name", e.target.value)}
-                  placeholder="Parent / group customer"
-                />
-              </label>
+              {/* Main Customer Name removed 2026-07-13 (UI only; main_party_name column kept). */}
             </div>
           </div>
           )}
 
-          {tab === "address" && (
+          {(asPage || tab === "address") && (
           <div className="form-section">
             <div className="form-section-title">
               Address
@@ -590,13 +607,13 @@ export function PartyForm({
           </div>
           )}
 
-          {tab === "contacts" && (
+          {(asPage || tab === "contacts") && (
           <div className="form-section">
             <div className="form-section-title">Contact Persons</div>
             {/* Channels (Email/SMS) column hidden for now per request — the
                 ch_email/ch_sms fields stay in state and persist unchanged. */}
             <div style={{ overflowX: "auto" }}>
-              <div className="contact-grid" style={{ minWidth: 800, display: "grid", gridTemplateColumns: "80px 1fr 1fr 1.3fr 170px 170px 30px", gap: 6, alignItems: "center" }}>
+              <div className="contact-grid" style={{ minWidth: 880, display: "grid", gridTemplateColumns: "80px 1fr 1fr 1.3fr 210px 210px 30px", gap: 6, alignItems: "center" }}>
                 {["Salutation", "First Name", "Last Name", "Email Address", "Work Phone", "Mobile", ""].map((h, i) => (
                   <span key={i} className="lbl">{h}</span>
                 ))}
@@ -612,10 +629,10 @@ export function PartyForm({
                         value={p.dial}
                         aria-label={`${label} dial code`}
                         onChange={(e) => setP({ ...p, dial: e.target.value })}
-                        style={{ flex: "0 0 64px", width: 64 }}
+                        style={{ flex: "0 0 110px", width: 110 }}
                       >
-                        {DIAL_CODES.map((d) => (
-                          <option key={d} value={d}>{d}</option>
+                        {DIAL_CODES.map(([code, country]) => (
+                          <option key={code} value={code}>{country} {code}</option>
                         ))}
                       </select>
                       <input
@@ -689,6 +706,27 @@ export function PartyForm({
             Save
           </button>
         </div>
+    </>
+  );
+
+  if (asPage) {
+    return (
+      <div className="card df-modal" style={{ maxWidth: 1000, margin: "0 auto" }}>
+        {content}
+      </div>
+    );
+  }
+  return (
+    <div className="modal-backdrop">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        className="modal-panel card df-modal"
+        style={{ maxWidth: 1000 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {content}
       </div>
     </div>
   );

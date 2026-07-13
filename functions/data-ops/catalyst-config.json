@@ -3,7 +3,9 @@
     "name": "data-ops",
     "stack": "node18",
     "type": "advancedio",
-    "env_variables": {}
+    "env_variables": {
+      "FX_CRON_KEY": "ea2738ee1c2432374a9dc40e86a0e2b15ecc336dec0912c7"
+    }
   },
   "execution": {
     "main": "index.js"

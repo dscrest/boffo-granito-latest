@@ -1653,7 +1653,14 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 /* Quote line items grid — item, qty, rate, disc, subtotal, remove. */
 .ord-line.qt-line {
-  grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 34px;
+  grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 26px;
+}
+/* Compact remove ✕ on quote lines (order lines keep the 35px button). */
+.qt-line .ord-rm {
+  height: 26px;
+  font-size: 11px;
+  padding: 0;
+  align-self: center;
 }
 /* Subtotal cell: sit on the 35px input line, not centered in the tall row. */
 .qt-line .qt-sub {

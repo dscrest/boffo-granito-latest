@@ -42,6 +42,7 @@ const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) 
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
+const PartyNew = lazy(() => import("@/features/masters/PartyNew").then((m) => ({ default: m.PartyNew })));
 const CustomerDetail = lazy(() => import("@/features/masters/CustomerDetail").then((m) => ({ default: m.CustomerDetail })));
 const ItemDetail = lazy(() => import("@/features/masters/ItemDetail").then((m) => ({ default: m.ItemDetail })));
 const DesignEdit = lazy(() => import("@/features/masters/DesignEdit").then((m) => ({ default: m.DesignEdit })));
@@ -56,6 +57,7 @@ const Containers = lazy(() => import("@/features/masters/Containers").then((m) =
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
 const SalesPersonsAdmin = lazy(() => import("@/features/admin/SalesPersons").then((m) => ({ default: m.SalesPersonsAdmin })));
+const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
 
 const TWEAK_DEFAULTS = {
   // BOFFO brand orange (#EF7F1A) — must match --accent in styles.css.
@@ -390,6 +392,11 @@ export default function App() {
           </button>
         )}
         {isAdmin && (
+          <button className="hbtn" title="Currencies" aria-label="Currencies" onClick={() => navigate("/currencies")}>
+            <Icon name="chart" size={13} />
+          </button>
+        )}
+        {isAdmin && (
           <button className="hbtn" title="Users" aria-label="Users" onClick={() => navigate("/users")}>
             <Icon name="users" size={13} />
           </button>
@@ -413,6 +420,7 @@ export default function App() {
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
             <Route path="/design/:id/edit" element={<DesignEdit />} />
             <Route path="/design/:id" element={<ItemDetail />} />
+            <Route path="/parties/new" element={<PartyNew />} />
             <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
@@ -434,6 +442,7 @@ export default function App() {
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/salespersons" element={isAdmin ? <SalesPersonsAdmin /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/currencies" element={isAdmin ? <CurrenciesAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

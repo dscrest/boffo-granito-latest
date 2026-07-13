@@ -11,8 +11,6 @@ import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import {
-  CURRENCIES,
-  PORTS,
   docTotals,
   lineTotals,
   type Quote,
@@ -22,6 +20,7 @@ import {
 import { useMasters } from "@/features/masters/useMasters";
 import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
+import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
 
@@ -36,16 +35,19 @@ interface Charges {
 
 const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0, description: "" });
 
-/* Every address on the customer master: primary billing + shipping plus
-   any extra addresses added from the customer detail screen. */
-function customerAddresses(cust: CustomerRow | undefined): string[] {
+/* The customer's addresses of one kind: the primary billing or shipping
+   column set plus any same-typed extra addresses added from the customer
+   detail screen. */
+function customerAddresses(cust: CustomerRow | undefined, kind: "billing" | "shipping"): string[] {
   if (!cust) return [];
-  const all = [
-    composeAddress(cust.extras, "billing") || cust.address,
-    composeAddress(cust.extras, "shipping"),
-    ...parseAddresses(cust.extras.additional_addresses).map(composeExtraAddress),
-  ].filter(Boolean);
-  return [...new Set(all)];
+  const primary =
+    kind === "billing"
+      ? composeAddress(cust.extras, "billing") || cust.address
+      : composeAddress(cust.extras, "shipping");
+  const extras = parseAddresses(cust.extras.additional_addresses)
+    .filter((a) => a.type === kind)
+    .map(composeExtraAddress);
+  return [...new Set([primary, ...extras].filter(Boolean))];
 }
 
 let _seq = 0;
@@ -87,7 +89,7 @@ export function QuoteForm({
   onClose: () => void;
 }) {
   const editing = !!initial;
-  const { customers, parties, designs, salesPersons, paymentTerms } = useMasters();
+  const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? presetCustomer ?? "",
     address: initial?.address ?? "",
@@ -98,7 +100,7 @@ export function QuoteForm({
     paymentTerm: initial?.paymentTerm ?? "",
     portOfDischarge: initial?.portOfDischarge ?? "",
     status: initial?.status ?? "Draft",
-    currency: initial?.currency ?? "EUR",
+    currency: initial?.currency ?? "INR",
     remarks: initial?.remarks ?? "",
     salesperson: initial?.salesperson ?? "",
     referenceNo: initial?.referenceNo ?? "",
@@ -118,29 +120,38 @@ export function QuoteForm({
   const setCharge = <K extends keyof Charges>(k: K, val: Charges[K]) =>
     setCharges((p) => ({ ...p, [k]: val }));
 
-  const setHead = (k: keyof Head, val: string) =>
+  // Exchange rate to INR for the picked currency — auto-filled from the
+  // Currency master whenever the currency changes, typable to override
+  // for this quote (saved on the Quote row).
+  const [fx, setFx] = useState(() => (initial?.exchangeRate ? String(initial.exchangeRate) : "1"));
+
+  const setHead = (k: keyof Head, val: string) => {
+    // Auto-fill from the Customer master when a known customer is picked:
+    // ALL customer fields carry over — addresses, payment term, currency
+    // and the customer's own sales person (falls back to logged-in user).
+    const cust = k === "customer" ? customers.find((x) => x.name === val) : undefined;
+    if (k === "currency") setFx(String(rateFor(currencies, val)));
+    if (cust?.currency) setFx(String(rateFor(currencies, cust.currency)));
     setH((p) => {
       const next = { ...p, [k]: val };
-      // Auto-fill from the Customer master when a known customer is picked:
-      // billing/shipping addresses + the customer's payment term.
-      if (k === "customer") {
-        const cust = customers.find((x) => x.name === val);
-        if (cust) {
-          const billing = composeAddress(cust.extras, "billing") || cust.address;
-          const shipping = composeAddress(cust.extras, "shipping") || billing;
-          if (billing) next.address = billing;
-          if (shipping) next.shippingAddress = shipping;
-          if (cust.paymentTermLabel) next.paymentTerm = cust.paymentTermLabel;
-        }
+      if (cust) {
+        const billing = composeAddress(cust.extras, "billing") || cust.address;
+        const shipping = composeAddress(cust.extras, "shipping") || billing;
+        if (billing) next.address = billing;
+        if (shipping) next.shippingAddress = shipping;
+        if (cust.paymentTermLabel) next.paymentTerm = cust.paymentTermLabel;
+        if (cust.currency) next.currency = cust.currency;
+        if (cust.handlingPersonLabel) next.salesperson = cust.handlingPersonLabel;
       }
       return next;
     });
+  };
 
-  // Pick-list of the selected customer's addresses. The current value stays
-  // selectable even when it's not on the master (legacy quotes / free text) —
-  // a Combobox renders blank when its value is missing from the options.
-  const addressOptions = (current: string) => {
-    const all = customerAddresses(customers.find((x) => x.name === h.customer));
+  // Pick-list of the selected customer's addresses of one kind. The current
+  // value stays selectable even when it's not on the master (legacy quotes /
+  // free text) — a Combobox renders blank when its value is missing.
+  const addressOptions = (current: string, kind: "billing" | "shipping") => {
+    const all = customerAddresses(customers.find((x) => x.name === h.customer), kind);
     if (current && !all.includes(current)) all.unshift(current);
     return all.map((a) => ({ value: a, label: a }));
   };
@@ -200,6 +211,7 @@ export function QuoteForm({
     const party = parties.find((x) => x.name === h.customer);
     onSave({
       ...h,
+      exchangeRate: Number(fx) || 1,
       id: initial?.id ?? newId().slice(0, 6).toUpperCase(),
       quoteNo: initial?.quoteNo ?? `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
       partyCode: party?.code ?? initial?.partyCode ?? "",
@@ -225,7 +237,7 @@ export function QuoteForm({
           <div>
             <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : "New Quote"}</div>
             <div className="sub2">
-              {editing ? "Editing saved quote — changes overwrite the database record" : "Sales quote · local draft — not yet saved to database"}
+              {editing ? "Editing saved quote — changes overwrite the database record" : "Sales quote"}
             </div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
@@ -278,27 +290,32 @@ export function QuoteForm({
                   ))}
                 </select>
               </label>
-              <label className="form-field">
-                <span className="lbl">Port of Discharge</span>
-                <select value={h.portOfDischarge} onChange={(e) => setHead("portOfDischarge", e.target.value)}>
-                  <option value=""></option>
-                  {PORTS.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/* Port of Discharge removed from quotes 2026-07-13 — the stored
+                  value passes through unchanged when editing legacy quotes. */}
               <label className="form-field">
                 <span className="lbl">Currency</span>
                 <select value={h.currency} onChange={(e) => setHead("currency", e.target.value)}>
-                  {CURRENCIES.map((o) => (
+                  {/* Saved value stays selectable even if its master row is gone. */}
+                  {[...new Set([...currencyCodes(currencies), ...(h.currency ? [h.currency] : [])])].map((o) => (
                     <option key={o} value={o}>
                       {o}
                     </option>
                   ))}
                 </select>
               </label>
+              {h.currency !== "INR" && (
+                <label className="form-field">
+                  <span className="lbl">Exchange Rate (₹ per 1 {h.currency})</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.0001"
+                    value={fx}
+                    onChange={(e) => setFx(e.target.value)}
+                    title="Auto-filled from the Currency master — type to override for this quote"
+                  />
+                </label>
+              )}
               {/* #16: Status removed from the form — set via the status bar on
                   QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
               {/* Billing/shipping picked from the customer's addresses (primary
@@ -308,7 +325,7 @@ export function QuoteForm({
                 <span className="lbl">Billing Address</span>
                 <Combobox
                   value={h.address}
-                  options={addressOptions(h.address)}
+                  options={addressOptions(h.address, "billing")}
                   onChange={(v) => setHead("address", v)}
                   onCreate={(v) => setHead("address", v)}
                   placeholder="Select or type the billing address…"
@@ -318,7 +335,7 @@ export function QuoteForm({
                 <span className="lbl">Shipping Address</span>
                 <Combobox
                   value={h.shippingAddress}
-                  options={addressOptions(h.shippingAddress)}
+                  options={addressOptions(h.shippingAddress, "shipping")}
                   onChange={(v) => setHead("shippingAddress", v)}
                   onCreate={(v) => setHead("shippingAddress", v)}
                   placeholder="Select or type the shipping address…"
@@ -437,7 +454,7 @@ export function QuoteForm({
                 {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
               </span>
             ) : (
-              "* Indicates a mandatory field · ≥1 line item"
+              "* Indicates a mandatory field"
             )}
           </span>
           <button className="btn" onClick={onClose}>

@@ -98,8 +98,13 @@ export function composeAddress(x: Partial<CustomerExtras>, prefix: "billing" | "
 
 /* Extra addresses beyond the fixed billing/shipping column sets.
    Persisted as a JSON array in Customer.additional_addresses (text),
-   mirroring the contact_persons pattern. */
+   mirroring the contact_persons pattern. Each one is typed billing or
+   shipping so the detail page can group them and quote pickers can
+   offer the right ones. */
+export type ExtraAddressType = "billing" | "shipping";
+
 export interface ExtraAddress {
+  type: ExtraAddressType;
   attention: string;
   country: string;
   street1: string;
@@ -113,7 +118,7 @@ export interface ExtraAddress {
 export const ADDRESS_FIELD_KEYS = ["attention", "country", "street1", "street2", "city", "state", "pincode", "phone"] as const;
 
 export function emptyAddress(): ExtraAddress {
-  return { attention: "", country: "", street1: "", street2: "", city: "", state: "", pincode: "", phone: "" };
+  return { type: "shipping", attention: "", country: "", street1: "", street2: "", city: "", state: "", pincode: "", phone: "" };
 }
 
 export function parseAddresses(json: string): ExtraAddress[] {
@@ -123,6 +128,8 @@ export function parseAddresses(json: string): ExtraAddress[] {
     return arr.map((a: Record<string, unknown>) => ({
       ...emptyAddress(),
       ...Object.fromEntries(ADDRESS_FIELD_KEYS.map((k) => [k, str(a[k])])),
+      // Legacy untyped rows were extra ship-to's — default to shipping.
+      type: a.type === "billing" ? ("billing" as const) : ("shipping" as const),
     }));
   } catch {
     return []; // corrupt/legacy value — treat as no extra addresses

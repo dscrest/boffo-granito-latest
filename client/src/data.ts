@@ -155,6 +155,8 @@ export interface Quote {
   portOfDischarge: string;
   status: QuoteStatus;
   currency: string;
+  /** Exchange rate to INR (INR per 1 unit of `currency`; INR = 1). */
+  exchangeRate?: number;
   remarks: string;
   /** Salesperson owning the quote. */
   salesperson?: string;
@@ -190,7 +192,8 @@ export interface Quote {
 
 // Payment terms now come from the live PaymentTerm master (useMasters().paymentTerms).
 export const PORTS = ["Mundra", "Nhava Sheva", "Pipavav", "Hazira", "Kandla"];
-export const CURRENCIES = ["INR", "USD", "EUR"];
+// CURRENCIES static list removed 2026-07-13 — currency pick lists are
+// DB-sourced from the Currency master (currenciesApi.currencyCodes).
 
 export interface QuoteLineTotals {
   gross: number; // qty * rate

@@ -82,6 +82,7 @@ const ALLOWED = new Set([
   "Invoice",
   "TransactionSeries",
   "SalesPerson",
+  "Currency",
 ]);
 
 function assertTable(table) {
@@ -371,6 +372,7 @@ const NATURAL_KEY = {
   Pallet: "name",
   Invoice: "invoice_number",
   SalesPerson: "name",
+  Currency: "code",
 };
 
 /**
@@ -425,11 +427,70 @@ app.get("/public/design-image/:fileId", async (req, res) => {
 });
 
 /* ----------------------------------------------------------------
+   FX rates: refresh Currency.exchange_rate from frankfurter.dev
+   (base INR; stored rate = INR per 1 unit). Rows with manual_override
+   are left alone. Shared by the daily cron (key-gated, pre-auth) and
+   the admin "Refresh rates now" button (authed route below).
+   ---------------------------------------------------------------- */
+async function refreshFxRates(catalyst) {
+  const resp = await fetch("https://api.frankfurter.dev/v1/latest?base=INR");
+  if (!resp.ok) throw new Error(`frankfurter.dev ${resp.status}`);
+  const fx = await resp.json();
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      "SELECT ROWID, code, manual_override FROM Currency WHERE deleted_at is null",
+    ),
+  );
+  // Project convention: datetime columns hold IST "yyyy-MM-dd HH:mm:ss".
+  const now = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
+  const updated = [];
+  const skipped = [];
+  for (const r of rows) {
+    const code = String(r.code || "").toUpperCase();
+    const perInr = fx.rates && fx.rates[code];
+    if (code === "INR" || String(r.manual_override) === "true" || !perInr) {
+      skipped.push(code);
+      continue;
+    }
+    // frankfurter returns CODE per 1 INR; we store INR per 1 CODE.
+    const rate = Math.round((1 / Number(perInr)) * 10000) / 10000;
+    await catalyst.datastore().table("Currency").updateRow({
+      ROWID: r.ROWID,
+      exchange_rate: rate,
+      rate_updated_at: now,
+    });
+    updated.push(code);
+  }
+  return { ok: true, updated, skipped };
+}
+
+/* Cron entry point (URL-type Catalyst cron) — gated by FX_CRON_KEY,
+   registered before the auth guard because the cron can't send app tokens. */
+app.get("/cron/fx-refresh", async (req, res) => {
+  try {
+    const key = process.env.FX_CRON_KEY;
+    if (!key || req.query.key !== key) return res.status(403).json({ ok: false, error: "Forbidden" });
+    res.json(await refreshFxRates(init(req)));
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
    App auth: login/sessions/users + role guard for every route below.
    Auth tables (AppUser/Role/AuthSession) are NOT in ALLOWED, so they
    are reachable only through the /auth/* endpoints.
    ---------------------------------------------------------------- */
 require("./lib/appauth").register(app, { init, rowList, sendErr });
+
+/* Authenticated variant of the FX refresh for the admin Currencies page. */
+app.post("/fx-refresh", async (req, res) => {
+  try {
+    res.json(await refreshFxRates(init(req)));
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
 
 /* ----------------------------------------------------------------
    Authenticated: upload a Design image (#12). Body { name, data }
@@ -509,7 +570,8 @@ app.post("/quote-with-items", async (req, res) => {
           payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
           status: body.status || "Draft",
-          currency: body.currency || "EUR",
+          currency: body.currency || "INR",
+          exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
           address: body.address || "",
           shipping_address: body.shipping_address || "",
@@ -589,7 +651,8 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
           status: body.status || "Draft",
-          currency: body.currency || "EUR",
+          currency: body.currency || "INR",
+          exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
           address: body.address || "",
           shipping_address: body.shipping_address || "",
@@ -710,7 +773,7 @@ async function createSalesOrder(ds, body, maps) {
     payment_term: paymentTerm,
     port_of_discharge: body.port_of_discharge || "",
     status: body.status || "Confirmed",
-    currency: body.currency || "EUR",
+    currency: body.currency || "INR",
     remarks: body.remarks || "",
     address: body.address || "",
     manual_so_number: body.manual_so_number || "",
@@ -796,6 +859,8 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             payment_term: body.payment_term,
             port_of_discharge: q.port_of_discharge,
             status: "Confirmed",
+            // ponytail: SalesOrder has no exchange_rate column yet; copy
+            // q.exchange_rate here when SO/Invoice grow one.
             currency: q.currency,
             remarks: `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
             address: q.address,
@@ -1701,7 +1766,7 @@ app.post("/seed/masters", async (req, res) => {
             code: c.code,
             name: c.name,
             country_code: c.country_code || "",
-            currency: c.currency || "EUR",
+            currency: c.currency || "INR",
             active: true,
           })),
         );

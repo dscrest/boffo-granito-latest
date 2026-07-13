@@ -104,6 +104,7 @@ export function quoteToInput(q: Quote): NewQuoteInput {
     port_of_discharge: q.portOfDischarge,
     status: q.status,
     currency: q.currency,
+    exchange_rate: q.exchangeRate || 1,
     remarks: q.remarks,
     address: q.address,
     shipping_address: q.shippingAddress || "",

@@ -20,6 +20,7 @@ import {
 } from "./customersApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "./designsApi";
 import { cachedSalesPersons, listSalesPersons, type SalesPersonRow } from "./salespersonApi";
+import { cachedCurrencies, listCurrencies, type CurrencyRow } from "./currenciesApi";
 
 export interface UseMasters {
   customers: CustomerRow[];
@@ -28,6 +29,7 @@ export interface UseMasters {
   designRows: DesignRow[];
   designs: Design[]; // mock-shaped designs (label strings)
   salesPersons: SalesPersonRow[];
+  currencies: CurrencyRow[];
   loading: boolean;
   error: string | null;
   reload: () => void;
@@ -48,6 +50,7 @@ export function useMasters(): UseMasters {
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>(() => cachedPaymentTerms());
   const [designRows, setDesignRows] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [salesPersons, setSalesPersons] = useState<SalesPersonRow[]>(() => cachedSalesPersons() ?? []);
+  const [currencies, setCurrencies] = useState<CurrencyRow[]>(() => cachedCurrencies() ?? []);
   const [loading, setLoading] = useState(
     () => cachedCustomers() == null || cachedDesigns() == null,
   );
@@ -72,7 +75,11 @@ export function useMasters(): UseMasters {
       if (s.ok) setSalesPersons(s.salesPersons);
       return s;
     });
-    void Promise.all([pc, pd, ps]).then(([c, d]) => {
+    const pcur = listCurrencies().then((cur) => {
+      if (cur.ok) setCurrencies(cur.currencies);
+      return cur;
+    });
+    void Promise.all([pc, pd, ps, pcur]).then(([c, d]) => {
       setLoading(false);
       setError(c.ok && d.ok ? null : c.error || d.error || "Failed to load masters");
     });
@@ -83,5 +90,5 @@ export function useMasters(): UseMasters {
   const parties = useMemo(() => customers.filter((c) => c.active).map(toParty), [customers]);
   const designs = useMemo(() => designRows.map(toDesign), [designRows]);
 
-  return { customers, parties, paymentTerms, designRows, designs, salesPersons, loading, error, reload: load };
+  return { customers, parties, paymentTerms, designRows, designs, salesPersons, currencies, loading, error, reload: load };
 }

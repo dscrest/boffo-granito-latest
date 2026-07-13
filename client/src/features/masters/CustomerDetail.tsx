@@ -66,8 +66,6 @@ const rows = (c: CustomerRow): Detail[] => [
   text("Company Name", c.extras.company_name),
   text("Customer Type", c.extras.customer_type && c.extras.customer_type[0].toUpperCase() + c.extras.customer_type.slice(1)),
   text("Customer Number", c.code),
-  text("Main Customer", c.extras.main_party_name),
-  text("Country", c.country),
   text("Sales Person", c.handlingPersonLabel),
   text("Currency", c.currency),
   text("Payment Term", c.paymentTermLabel),
@@ -115,6 +113,21 @@ function AddressModal({ onSave, onClose }: { onSave: (a: ExtraAddress) => void; 
           </button>
         </div>
         <div className="df-body">
+          <div className="form-field" style={{ marginBottom: 10 }}>
+            <span className="lbl">Address Type</span>
+            <div style={{ display: "flex", gap: 18, alignItems: "center", minHeight: 34 }}>
+              {(["billing", "shipping"] as const).map((t) => (
+                <span
+                  key={t}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                  onClick={() => setA((p) => ({ ...p, type: t }))}
+                >
+                  <input type="radio" name="extra_addr_type" checked={a.type === t} onChange={() => setA((p) => ({ ...p, type: t }))} />
+                  {t === "billing" ? "Billing" : "Shipping"}
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="form-grid">
             {ADDRESS_FIELD_KEYS.map((k) =>
               k === "country" ? (
@@ -426,18 +439,33 @@ export function CustomerDetail() {
                   ))}
 
                   <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Additional Addresses</div>
-                  {extraAddrs.map((a, i) => (
-                    <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <DetailRow label={`Address ${i + 1}`} value={composeExtraAddress(a) || "Not set"} dim={!composeExtraAddress(a)} />
+                  {/* Grouped billing first, then shipping, separated by a rule.
+                      Removal uses the index in the original stored array. */}
+                  {(["billing", "shipping"] as const).map((type, gi) => {
+                    const group = extraAddrs
+                      .map((a, i) => ({ a, i }))
+                      .filter(({ a }) => a.type === type);
+                    if (!group.length) return null;
+                    return (
+                      <div key={type} style={gi > 0 ? { borderTop: "1px solid var(--border)", marginTop: 8, paddingTop: 8 } : undefined}>
+                        <div className="lbl" style={{ marginBottom: 4, fontWeight: 600 }}>
+                          {type === "billing" ? "Billing Addresses" : "Shipping Addresses"}
+                        </div>
+                        {group.map(({ a, i }, j) => (
+                          <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <DetailRow label={`${type === "billing" ? "Billing" : "Shipping"} ${j + 1}`} value={composeExtraAddress(a) || "Not set"} dim={!composeExtraAddress(a)} />
+                            </div>
+                            {canUpdate() && (
+                              <button className="btn x" onClick={() => void onRemoveAddress(i)} title="Remove address" disabled={busy}>
+                                <Icon name="x" size={12} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      {canUpdate() && (
-                        <button className="btn x" onClick={() => void onRemoveAddress(i)} title="Remove address" disabled={busy}>
-                          <Icon name="x" size={12} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                   {extraAddrs.length === 0 && (
                     <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "4px 0" }}>
                       No additional addresses.
