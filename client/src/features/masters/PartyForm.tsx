@@ -568,11 +568,8 @@ export function PartyForm({
                   <option value="No">No</option>
                 </select>
               </label>
-              <label className="form-field">
-                <span className="lbl">Port of Discharge</span>
-                <input value={v.port_of_discharge} onChange={(e) => set("port_of_discharge", e.target.value)} placeholder="Gdańsk" />
-              </label>
-              {/* Main Customer Name removed 2026-07-13 (UI only; main_party_name column kept). */}
+              {/* Main Customer Name + Port of Discharge removed 2026-07-13 (UI only;
+                  columns kept — port differs per shipment, it lives on transactions). */}
             </div>
           </div>
           )}

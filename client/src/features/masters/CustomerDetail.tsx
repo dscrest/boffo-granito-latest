@@ -69,7 +69,6 @@ const rows = (c: CustomerRow): Detail[] => [
   text("Sales Person", c.handlingPersonLabel),
   text("Currency", c.currency),
   text("Payment Term", c.paymentTermLabel),
-  text("Port of Discharge", c.portOfDischarge),
   text("Contact Person", contactName(c.extras)),
   text("Email", c.extras.contact_email),
   text("Phone", [c.extras.contact_work_phone, c.extras.contact_mobile].filter(Boolean).join(" / ")),

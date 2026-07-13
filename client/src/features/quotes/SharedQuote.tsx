@@ -147,7 +147,7 @@ export function SharedQuote() {
                 {quote.quoteDate && <div><b>Date:</b> {quote.quoteDate}</div>}
                 {quote.expiryDate && <div><b>Valid until:</b> {quote.expiryDate}</div>}
                 {quote.paymentTerm && <div><b>Payment:</b> {quote.paymentTerm}</div>}
-                {quote.portOfDischarge && <div><b>Port:</b> {quote.portOfDischarge}</div>}
+                {/* Port of Discharge hidden from the customer-facing view 2026-07-13 — differs per shipment. */}
               </div>
             </div>
 
