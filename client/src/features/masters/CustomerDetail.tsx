@@ -82,71 +82,101 @@ const rows = (c: CustomerRow): Detail[] => [
 
 /* Add one extra address — same fields/labels as the PartyForm address
    columns, saved into the Customer.additional_addresses JSON array. */
-function AddressModal({ onSave, onClose }: { onSave: (a: ExtraAddress) => void; onClose: () => void }) {
-  const [a, setA] = useState<ExtraAddress>(() => emptyAddress());
+function AddressModal({ onSave, onClose }: { onSave: (addrs: ExtraAddress[]) => void; onClose: () => void }) {
+  const [billing, setBilling] = useState<ExtraAddress>(() => ({ ...emptyAddress(), type: "billing" }));
+  const [shipping, setShipping] = useState<ExtraAddress>(() => emptyAddress());
+  const [sameAsBilling, setSameAsBilling] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const panelRef = useModalA11y(onClose);
-  const set = (k: keyof ExtraAddress, v: string) => setA((p) => ({ ...p, [k]: v }));
+
+  // While "same as billing" is on, billing edits mirror into shipping —
+  // identical behaviour to the customer form's Address tab.
+  const setB = (k: keyof ExtraAddress, v: string) => {
+    setBilling((p) => ({ ...p, [k]: v }));
+    if (sameAsBilling) setShipping((p) => ({ ...p, [k]: v }));
+  };
+  const setS = (k: keyof ExtraAddress, v: string) => setShipping((p) => ({ ...p, [k]: v }));
+  const toggleSame = (checked: boolean) => {
+    setSameAsBilling(checked);
+    if (checked) setShipping({ ...billing, type: "shipping" });
+  };
+
+  const filled = (a: ExtraAddress) => !!(a.street1.trim() || a.city.trim());
 
   const submit = () => {
-    if (!a.street1.trim() && !a.city.trim()) {
+    // Save whichever columns hold an address (both when "same as billing").
+    const out = [filled(billing) ? billing : null, filled(shipping) ? shipping : null].filter(
+      Boolean,
+    ) as ExtraAddress[];
+    if (!out.length) {
       setErr("Enter at least Street 1 or City");
       return;
     }
-    onSave(a);
+    onSave(out);
   };
+
+  const column = (a: ExtraAddress, set: (k: keyof ExtraAddress, v: string) => void, disabled: boolean) => (
+    <div style={{ display: "grid", gap: 8 }}>
+      {ADDRESS_FIELD_KEYS.map((k) =>
+        k === "country" ? (
+          // Combobox has no disabled prop — block interaction via the wrapper
+          // (the shipping column is already dimmed while "same as billing").
+          <div key={k} className="form-field" style={disabled ? { pointerEvents: "none" } : undefined}>
+            <span className="lbl">{ADDRESS_LABELS[k]}</span>
+            <Combobox
+              value={a.country}
+              options={COUNTRY_NAME_OPTIONS}
+              onChange={(v) => set("country", v)}
+              onCreate={(label) => set("country", label)}
+              placeholder="Select or type a country"
+            />
+          </div>
+        ) : (
+          <label key={k} className="form-field">
+            <span className="lbl">{ADDRESS_LABELS[k]}</span>
+            <input value={a[k]} disabled={disabled} onChange={(e) => set(k, e.target.value)} placeholder={ADDRESS_LABELS[k]} />
+          </label>
+        ),
+      )}
+    </div>
+  );
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 1000 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="plus" size={18} />
           </div>
           <div>
             <div className="ttl">Add Address</div>
-            <div className="sub2">Extra address — selectable as billing/shipping on quotations</div>
+            <div className="sub2">Extra addresses — selectable as billing/shipping on quotations</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕
           </button>
         </div>
         <div className="df-body">
-          <div className="form-field" style={{ marginBottom: 10 }}>
-            <span className="lbl">Address Type</span>
-            <div style={{ display: "flex", gap: 18, alignItems: "center", minHeight: 34 }}>
-              {(["billing", "shipping"] as const).map((t) => (
-                <span
-                  key={t}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
-                  onClick={() => setA((p) => ({ ...p, type: t }))}
-                >
-                  <input type="radio" name="extra_addr_type" checked={a.type === t} onChange={() => setA((p) => ({ ...p, type: t }))} />
-                  {t === "billing" ? "Billing" : "Shipping"}
-                </span>
-              ))}
+          <div className="form-section">
+            <div className="form-section-title">
+              Address
+              <label
+                style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 400, textTransform: "none", letterSpacing: 0, cursor: "pointer" }}
+              >
+                <input type="checkbox" checked={sameAsBilling} onChange={(e) => toggleSame(e.target.checked)} />
+                Shipping same as billing
+              </label>
             </div>
-          </div>
-          <div className="form-grid">
-            {ADDRESS_FIELD_KEYS.map((k) =>
-              k === "country" ? (
-                <div key={k} className="form-field">
-                  <span className="lbl">{ADDRESS_LABELS[k]}</span>
-                  <Combobox
-                    value={a.country}
-                    options={COUNTRY_NAME_OPTIONS}
-                    onChange={(v) => set("country", v)}
-                    onCreate={(label) => set("country", label)}
-                    placeholder="Select or type a country"
-                  />
-                </div>
-              ) : (
-                <label key={k} className="form-field">
-                  <span className="lbl">{ADDRESS_LABELS[k]}</span>
-                  <input value={a[k]} onChange={(e) => set(k, e.target.value)} placeholder={ADDRESS_LABELS[k]} />
-                </label>
-              ),
-            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+              <div>
+                <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>Billing Address</div>
+                {column(billing, setB, false)}
+              </div>
+              <div style={{ opacity: sameAsBilling ? 0.55 : 1 }}>
+                <div className="lbl" style={{ marginBottom: 8, fontWeight: 600 }}>Shipping Address</div>
+                {column(shipping, setS, sameAsBilling)}
+              </div>
+            </div>
           </div>
         </div>
         <div className="df-foot">
@@ -275,15 +305,15 @@ export function CustomerDetail() {
   // as ship-to/bill-to when creating a quotation.
   const extraAddrs = party ? parseAddresses(party.extras.additional_addresses) : [];
 
-  const onAddAddress = async (a: ExtraAddress) => {
+  const onAddAddress = async (addrs: ExtraAddress[]) => {
     if (!party) return;
-    const res = await setAdditionalAddresses(party.id, [...extraAddrs, a]);
+    const res = await setAdditionalAddresses(party.id, [...extraAddrs, ...addrs]);
     if (!res.ok) {
       toast.error(res.error || "Save failed");
       return;
     }
     setAddingAddr(false);
-    toast.success("Address added");
+    toast.success(addrs.length > 1 ? "Addresses added" : "Address added");
     await refresh();
   };
 
