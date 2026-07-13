@@ -22,6 +22,7 @@ export interface OrderLine {
   ordered_qty_boxes: string;
   rate: string;
   discount: string;
+  description: string;
 }
 
 export interface OrderDraft {
@@ -82,7 +83,7 @@ const HEADER: FieldSpec[] = [
   { key: "box_branding", label: "Box Branding" },
 ];
 
-const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "", discount: "" });
+const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "", discount: "", description: "" });
 
 let _seq = 0;
 const newId = () =>
@@ -320,6 +321,12 @@ export function OrderForm({
                           {d.size} · {d.finish} · {d.brand}
                         </span>
                       )}
+                      <textarea
+                        rows={1}
+                        value={l.description}
+                        onChange={(e) => setLine(i, "description", e.target.value)}
+                        placeholder="Add a description to your item"
+                      />
                     </div>
                     <input
                       type="number" min={0}
@@ -339,7 +346,7 @@ export function OrderForm({
                       onChange={(e) => setLine(i, "discount", e.target.value)}
                       placeholder="0"
                     />
-                    <span className="mono" style={{ alignSelf: "center", color: "var(--fg)" }}>
+                    <span className="mono qt-sub">
                       {fmt(orderLineSub(l))}
                     </span>
                     <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>

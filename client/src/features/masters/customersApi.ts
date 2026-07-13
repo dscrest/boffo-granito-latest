@@ -70,6 +70,7 @@ export const CUSTOMER_EXTRA_FIELDS = [
   "shipping_state",
   "shipping_pincode",
   "shipping_phone",
+  "additional_addresses", // JSON array of ExtraAddress (extra ship-to/bill-to addresses)
 ] as const;
 export type CustomerExtraField = (typeof CUSTOMER_EXTRA_FIELDS)[number];
 export type CustomerExtras = Record<CustomerExtraField, string>;
@@ -91,6 +92,48 @@ export function composeAddress(x: Partial<CustomerExtras>, prefix: "billing" | "
   const f = (k: string) => ((x as Record<string, string | undefined>)[`${prefix}_${k}`] || "").trim();
   const cityLine = [f("city"), f("state"), f("pincode")].filter(Boolean).join(" ");
   return [f("attention"), f("street1"), f("street2"), cityLine, f("country")]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/* Extra addresses beyond the fixed billing/shipping column sets.
+   Persisted as a JSON array in Customer.additional_addresses (text),
+   mirroring the contact_persons pattern. */
+export interface ExtraAddress {
+  attention: string;
+  country: string;
+  street1: string;
+  street2: string;
+  city: string;
+  state: string;
+  pincode: string;
+  phone: string;
+}
+
+export const ADDRESS_FIELD_KEYS = ["attention", "country", "street1", "street2", "city", "state", "pincode", "phone"] as const;
+
+export function emptyAddress(): ExtraAddress {
+  return { attention: "", country: "", street1: "", street2: "", city: "", state: "", pincode: "", phone: "" };
+}
+
+export function parseAddresses(json: string): ExtraAddress[] {
+  try {
+    const arr: unknown = JSON.parse(json || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr.map((a: Record<string, unknown>) => ({
+      ...emptyAddress(),
+      ...Object.fromEntries(ADDRESS_FIELD_KEYS.map((k) => [k, str(a[k])])),
+    }));
+  } catch {
+    return []; // corrupt/legacy value — treat as no extra addresses
+  }
+}
+
+/** One-line address from an ExtraAddress (same field order as composeAddress). */
+export function composeExtraAddress(a: ExtraAddress): string {
+  const cityLine = [a.city, a.state, a.pincode].map((s) => s.trim()).filter(Boolean).join(" ");
+  return [a.attention, a.street1, a.street2, cityLine, a.country]
+    .map((s) => s.trim())
     .filter(Boolean)
     .join(", ");
 }
@@ -127,6 +170,10 @@ const cache = createListCache(fetchCustomers);
 /** Last fetched customers, or null if never fetched this session. */
 export function cachedCustomers(): CustomerRow[] | null {
   return cache.cached()?.customers ?? null;
+}
+/** Last fetched payment-term options ([] if never fetched this session). */
+export function cachedPaymentTerms(): PaymentTermOption[] {
+  return cache.cached()?.paymentTerms ?? [];
 }
 /** Subscribe to customer-cache changes. Returns an unsubscribe fn. */
 export function subscribeCustomers(cb: () => void): () => void {
@@ -265,4 +312,9 @@ export function deleteCustomer(rowid: string) {
 /** Partial patch for the More-menu Active/Inactive toggle. */
 export function setCustomerActive(rowid: string, active: boolean) {
   return bust(update("Customer", rowid, { active }));
+}
+
+/** Replace the customer's extra addresses (detail-screen Add/Remove). */
+export function setAdditionalAddresses(rowid: string, addrs: ExtraAddress[]) {
+  return bust(update("Customer", rowid, { additional_addresses: JSON.stringify(addrs) }));
 }

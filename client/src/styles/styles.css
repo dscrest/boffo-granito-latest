@@ -1356,8 +1356,10 @@ a { color: inherit; text-decoration: none; }
 
 .form-field input,
 .form-field select,
+.form-field textarea,
 .modal-panel input,
-.modal-panel select {
+.modal-panel select,
+.modal-panel textarea {
   width: 100%;
   box-sizing: border-box;
   height: 35px;
@@ -1372,6 +1374,13 @@ a { color: inherit; text-decoration: none; }
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   appearance: none;
 }
+.form-field textarea,
+.modal-panel textarea {
+  height: auto;
+  min-height: 35px;
+  padding: 7px 11px;
+  resize: vertical;
+}
 .form-field select,
 .modal-panel select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
@@ -1381,9 +1390,11 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
 }
 .form-field input:hover,
-.form-field select:hover { border-color: var(--accent); }
+.form-field select:hover,
+.form-field textarea:hover { border-color: var(--accent); }
 .form-field input:focus,
-.form-field select:focus {
+.form-field select:focus,
+.form-field textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1643,6 +1654,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Quote line items grid — item, qty, rate, disc, subtotal, remove. */
 .ord-line.qt-line {
   grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 34px;
+}
+/* Subtotal cell: sit on the 35px input line, not centered in the tall row. */
+.qt-line .qt-sub {
+  line-height: 35px;
+  padding-left: 2px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Quote totals summary under the line items. */

@@ -88,6 +88,7 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,
       rate: parseFloat(l.rate) || 0,
       discount: parseFloat(l.discount) || 0,
+      description: l.description || "",
       stage: "po",
     })),
   };

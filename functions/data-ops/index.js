@@ -512,6 +512,7 @@ app.post("/quote-with-items", async (req, res) => {
           currency: body.currency || "EUR",
           remarks: body.remarks || "",
           address: body.address || "",
+          shipping_address: body.shipping_address || "",
           sales_person: salesPerson || undefined,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
@@ -535,6 +536,7 @@ app.post("/quote-with-items", async (req, res) => {
             rate: Number(it.line.rate) || 0,
             rate_basis: it.line.rate_basis || "box",
             discount_pct: Number(it.line.discount) || 0,
+            description: it.line.description || "",
             sub_total: it.sub,
             final_total: it.sub,
           });
@@ -590,6 +592,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           currency: body.currency || "EUR",
           remarks: body.remarks || "",
           address: body.address || "",
+          shipping_address: body.shipping_address || "",
           sales_person: salesPerson || undefined,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
@@ -617,6 +620,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
             rate: Number(it.line.rate) || 0,
             rate_basis: it.line.rate_basis || "box",
             discount_pct: Number(it.line.discount) || 0,
+            description: it.line.description || "",
             sub_total: it.sub,
             final_total: it.sub,
           });
@@ -741,6 +745,7 @@ async function createSalesOrder(ds, body, maps) {
       due_date: l.due_date || undefined,
       rate: Number(l.rate) || 0,
       discount_pct: Number(l.discount) || 0,
+      description: l.description || "",
       sub_total: it.sub,
       final_total: it.sub,
     });

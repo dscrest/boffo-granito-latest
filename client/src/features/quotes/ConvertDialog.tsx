@@ -55,7 +55,7 @@ export function ConvertDialog({
     }
     setBusy(true);
     setError(null);
-    const lines = included.map((c) => ({ item: c.line.item, qty: c.qty, rate: c.line.rate }));
+    const lines = included.map((c) => ({ item: c.line.item, qty: c.qty, rate: c.line.rate, description: c.line.description || "" }));
     const res = await convertQuote(quote.id, mode, lines, {
       payment_term: quote.paymentTerm,
       box_branding: boxBranding.trim(),

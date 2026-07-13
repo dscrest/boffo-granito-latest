@@ -9,7 +9,7 @@ import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { fmt } from "@/lib/format";
+import { describeChange, fmt } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -36,7 +36,11 @@ const OPS_COLUMNS: ColumnDef<DSRow>[] = [
     className: "muted",
     style: { maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
     render: (r) =>
-      str(r.status) === "success" ? str(r.payload_summary) : <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>,
+      str(r.status) === "success" ? (
+        describeChange(str(r.operation), str(r.payload_summary))
+      ) : (
+        <span style={{ color: "var(--c-red)" }}>{str(r.error_text)}</span>
+      ),
   },
 ];
 

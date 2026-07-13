@@ -2,7 +2,7 @@
    Items are selectable; the action bar sends the whole order ("Palletize all")
    or just the ticked rows ("Palletize selected") into the close-pallet form. */
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
 import { StageBadge } from "@/ui/primitives";
@@ -17,6 +17,7 @@ const avail = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 export function OrderDetail() {
   const { id = "" } = useParams();
   const orderId = decodeURIComponent(id);
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -95,7 +96,19 @@ export function OrderDetail() {
     <RecordDetail
       backTo="/orders"
       title={head.poNumber}
-      subtitle={`${head.flag} ${head.party} · ${items.length} item${items.length > 1 ? "s" : ""}`}
+      subtitle={
+        <>
+          {head.flag}{" "}
+          <span
+            style={{ color: "var(--accent)", cursor: "pointer" }}
+            title="Open customer"
+            onClick={() => navigate(`/parties/${encodeURIComponent(head.partyCode)}`)}
+          >
+            {head.party}
+          </span>
+          {" "}· {items.length} item{items.length > 1 ? "s" : ""}
+        </>
+      }
       fields={fields}
       hiddenStorageKey="orderDetailFields"
       activityTable="SalesOrder"

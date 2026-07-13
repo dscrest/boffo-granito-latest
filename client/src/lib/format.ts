@@ -77,26 +77,42 @@ function changeValue(k: string, v: unknown): string {
   return s;
 }
 
+/** Keys that identify a record in an insert summary, in preference order. */
+const NAME_KEYS = ["name", "design_name", "quote_no", "order_no", "code", "sku"];
+
 /** Raw OperationLog (operation, payload_summary) → human-readable summary,
-    e.g. "Status → Inactive, Size → 600x600". Falls back to the raw text
-    when the payload isn't parseable JSON (e.g. it was truncated). */
+    e.g. "Status → Inactive, Size → 600x600". Inserts collapse to
+    `Created "X"`; truncated JSON (the server caps payload_summary at
+    480 chars) is salvaged pair-by-pair instead of shown raw. */
 export function describeChange(operation?: string, payloadSummary?: string): string {
   const op = (operation || "").toLowerCase();
-  let payload: unknown = null;
+  const raw = payloadSummary || "";
+  let payload: Record<string, unknown> | null = null;
   try {
-    payload = payloadSummary ? JSON.parse(payloadSummary) : null;
+    const p = raw ? JSON.parse(raw) : null;
+    if (p && typeof p === "object") payload = p as Record<string, unknown>;
   } catch {
-    return payloadSummary || "—";
+    // Truncated mid-value — recover every complete "key":value pair.
+    const pairs: Record<string, unknown> = {};
+    for (const m of raw.matchAll(/"([^"]+)"\s*:\s*("(?:[^"\\]|\\.)*"|-?[\d.]+|true|false|null)\s*[,}]/g)) {
+      try {
+        pairs[m[1]] = JSON.parse(m[2]);
+      } catch {
+        /* skip malformed pair */
+      }
+    }
+    if (Object.keys(pairs).length > 0) payload = pairs;
   }
-  if (!payload || typeof payload !== "object") {
-    if (op === "delete") return "Deleted";
-    return payloadSummary || "—";
+  if (op === "delete") return "Deleted";
+  if (!payload) return op === "insert" ? "Created" : op === "update" ? "Updated" : raw || "—";
+  if (op === "insert") {
+    const name = NAME_KEYS.map((k) => payload![k]).find((v) => v != null && v !== "");
+    return name != null ? `Created "${String(name)}"` : "Created";
   }
-  const parts = Object.entries(payload as Record<string, unknown>)
+  const parts = Object.entries(payload)
     .filter(([k]) => !CHANGE_HIDDEN.has(k))
     .map(([k, v]) => `${changeLabel(k)} → ${changeValue(k, v)}`);
-  if (parts.length === 0) return op === "delete" ? "Deleted" : op === "insert" ? "Created" : "—";
-  return parts.join(", ");
+  return parts.length > 0 ? parts.join(", ") : "—";
 }
 
 export function finishClass(f: string): string {

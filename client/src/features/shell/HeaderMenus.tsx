@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { list } from "@/lib/dataOps";
+import { actorName, describeChange } from "@/lib/format";
 import { signOut, type SessionUser } from "@/lib/auth";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -72,12 +73,14 @@ export function NotificationBell() {
           .map((r) => {
             const op = str(r.operation).toUpperCase();
             const verb = OP_VERB[op] || op.toLowerCase() || "changed";
-            const summary = str(r.payload_summary) || (r.entity_rowid ? `#${str(r.entity_rowid)}` : "");
+            // The verb is already in the sentence — keep only what describeChange adds beyond it.
+            const detail = describeChange(str(r.operation), str(r.payload_summary)).replace(/^(Created|Updated|Deleted)\s*/, "");
+            const summary = detail && detail !== "—" ? detail : r.entity_rowid ? `#${str(r.entity_rowid)}` : "";
             return {
               id: str(r.ROWID),
               occurredAt: str(r.occurred_at),
               when: rel(str(r.occurred_at)),
-              text: `${str(r.actor) || "system"} ${verb} ${str(r.table_name)}${summary ? ` · ${summary}` : ""}`,
+              text: `${actorName(str(r.actor))} ${verb} ${str(r.table_name)}${summary ? ` · ${summary}` : ""}`,
             };
           });
         setItems(rows);

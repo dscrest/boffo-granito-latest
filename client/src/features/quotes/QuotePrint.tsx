@@ -94,6 +94,7 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
                     <td>
                       <div className="qp-item-name">{l.item}</div>
                       {d?.brand && <div className="qp-item-sub">{d.brand}</div>}
+                      {l.description && <div className="qp-item-sub">{l.description}</div>}
                     </td>
                     <td>{d?.size || "—"}</td>
                     <td>{d?.finish || "—"}</td>

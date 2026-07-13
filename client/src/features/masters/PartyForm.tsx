@@ -43,19 +43,21 @@ const COUNTRY_CODES = [
   "TW", "TZ", "UA", "UG", "US", "UY", "UZ", "VC", "VE", "VN", "VU", "WS", "YE",
   "ZA", "ZM", "ZW",
 ];
-const COUNTRY_OPTIONS = COUNTRY_CODES.map((iso) => {
-  const { country, flag } = isoInfo(iso);
-  return { value: iso, label: `${flag} ${country}` };
-}).sort((a, b) => a.label.localeCompare(b.label));
-
 /* Address "Country/Region": typable pick list storing the display name
-   (billing_country / shipping_country are free-text varchar columns). */
-const COUNTRY_NAME_OPTIONS = COUNTRY_CODES.map((iso) => {
+   (billing_country / shipping_country are free-text varchar columns).
+   Exported for CustomerDetail's Add-address modal. */
+export const COUNTRY_NAME_OPTIONS = COUNTRY_CODES.map((iso) => {
   const { country, flag } = isoInfo(iso);
   return { value: country, label: `${flag} ${country}` };
 }).sort((a, b) => a.value.localeCompare(b.value));
+/* country_code (ISO — feeds the grid flag & currency) is derived from the
+   billing-address country name; no separate Country field in the form. */
+const NAME_TO_ISO = new Map(COUNTRY_CODES.map((iso) => [isoInfo(iso).country, iso]));
 
 const CURRENCIES = ["EUR", "USD", "INR"];
+/* Country → currency auto-set: IN → INR, Eurozone → EUR, everything else → USD. */
+const EUROZONE = new Set(["AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PT", "SI", "SK"]);
+const currencyFor = (iso: string) => (iso === "IN" ? "INR" : EUROZONE.has(iso) ? "EUR" : "USD");
 const SALUTATIONS = ["Mr.", "Mrs.", "Ms.", "Dr."];
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
@@ -128,9 +130,10 @@ function serializeContacts(contacts: ContactDraft[]): string {
   return JSON.stringify(rows);
 }
 
-/* One address column (billing_* or shipping_*). Field order mirrors Books. */
+/* One address column (billing_* or shipping_*). Field order mirrors Books.
+   Labels exported for CustomerDetail's Add-address modal. */
 const ADDRESS_KEYS = ["attention", "country", "street1", "street2", "city", "state", "pincode", "phone"] as const;
-const ADDRESS_LABELS: Record<(typeof ADDRESS_KEYS)[number], string> = {
+export const ADDRESS_LABELS: Record<(typeof ADDRESS_KEYS)[number], string> = {
   attention: "Attention",
   country: "Country/Region",
   street1: "Street 1",
@@ -156,11 +159,10 @@ export function PartyForm({
   onSave: (c: CustomerInput) => void;
   onClose: () => void;
 }) {
-  const [country, setCountry] = useState(initial?.country_code ?? "");
   const [v, setV] = useState({
     name: initial?.name ?? "",
     code: initial?.code ?? "",
-    currency: initial?.currency ?? "EUR",
+    currency: initial?.currency ?? "",
     payment_term: initial?.payment_term ?? "",
     port_of_discharge: initial?.port_of_discharge ?? "",
     address: initial?.address ?? "",
@@ -222,7 +224,7 @@ export function PartyForm({
   const setContact = (i: number, patch: Partial<ContactDraft>) =>
     setContacts((cs) => cs.map((c, j) => (j === i ? { ...c, ...patch } : c)));
 
-  const missing = !v.name.trim();
+  const missing = !x.company_name.trim();
   const emailBad = !!x.contact_email.trim() && !EMAIL_RE.test(x.contact_email.trim());
   // Contact-person rows: fully blank rows are ignored (dropped on save), but
   // a row someone started needs a first name, a valid email and a phone.
@@ -255,9 +257,11 @@ export function PartyForm({
     // composed from billing parts, falling back to whatever was typed before.
     const composed = composeAddress(extras, "billing");
     onSave({
-      name: v.name,
+      name: v.name.trim() || x.company_name.trim(),
       code: v.code,
-      country_code: country,
+      // Derived from billing country; legacy code kept when the name is
+      // blank or unrecognized (hand-typed via onCreate).
+      country_code: NAME_TO_ISO.get(x.billing_country.trim()) ?? initial?.country_code ?? "",
       currency: v.currency,
       payment_term: v.payment_term,
       port_of_discharge: v.port_of_discharge,
@@ -282,7 +286,12 @@ export function PartyForm({
               <Combobox
                 value={x[key]}
                 options={COUNTRY_NAME_OPTIONS}
-                onChange={(val) => setExtra(key, val)}
+                onChange={(val) => {
+                  setExtra(key, val);
+                  // Billing country drives the currency; stays user-editable after.
+                  const iso = NAME_TO_ISO.get(val);
+                  if (prefix === "billing" && iso) set("currency", currencyFor(iso));
+                }}
                 onCreate={(label) => setExtra(key, label)}
                 placeholder="Select or type a country"
               />
@@ -355,11 +364,7 @@ export function PartyForm({
               {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
             </div>
           </div>
-          <button className="hbtn primary" style={{ marginLeft: "auto" }} disabled={blocked} onClick={submit}>
-            <Icon name="check" size={13} />
-            Save
-          </button>
-          <button className="btn x" style={{ marginLeft: 0 }} onClick={onClose} title="Close">
+          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
             ✕
           </button>
         </div>
@@ -399,24 +404,31 @@ export function PartyForm({
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">Company Name</span>
+                <span className="lbl">
+                  Company Name<span className="req"> *</span>
+                </span>
                 <input
+                  className={missing ? "error" : undefined}
                   value={x.company_name}
-                  onChange={(e) => setExtra("company_name", e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    // Display Name follows Company Name until the user types their own.
+                    setV((p) =>
+                      !p.name.trim() || p.name === x.company_name ? { ...p, name: val } : p,
+                    );
+                    setExtra("company_name", val);
+                  }}
                   placeholder="Company Name"
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">
-                  Display Name<span className="req"> *</span>
-                </span>
+                <span className="lbl">Display Name</span>
                 <Combobox
                   value={v.name}
                   options={displayNameOptions}
                   onChange={(val) => set("name", val)}
                   onCreate={(label) => set("name", label)}
-                  placeholder="Select or type to add"
-                  invalid={missing}
+                  placeholder="Same as Company Name if left blank"
                 />
               </label>
               <label className="form-field" style={{ gridColumn: "1 / -1" }}>
@@ -490,6 +502,7 @@ export function PartyForm({
               <label className="form-field">
                 <span className="lbl">Currency</span>
                 <select value={v.currency} onChange={(e) => set("currency", e.target.value)}>
+                  <option value=""></option>
                   {CURRENCIES.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -533,15 +546,6 @@ export function PartyForm({
                   <option value="No">No</option>
                 </select>
               </label>
-              <div className="form-field">
-                <span className="lbl">Country</span>
-                <Combobox
-                  value={country}
-                  options={COUNTRY_OPTIONS}
-                  onChange={setCountry}
-                  placeholder="Select country"
-                />
-              </div>
               <label className="form-field">
                 <span className="lbl">Port of Discharge</span>
                 <input value={v.port_of_discharge} onChange={(e) => set("port_of_discharge", e.target.value)} placeholder="Gdańsk" />

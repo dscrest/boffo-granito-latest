@@ -63,6 +63,7 @@ const FIELDS: FieldDef[] = [
   { key: "created", label: "Created", value: (q) => fmtDateTime(q.createdTime) },
   { key: "modified", label: "Modified", value: (q) => fmtDateTime(q.modifiedTime) },
   { key: "address", label: "Billing Address", value: (q) => q.address || "—", wide: true },
+  { key: "shippingAddress", label: "Shipping Address", value: (q) => q.shippingAddress || "—", wide: true },
   { key: "remarks", label: "Remarks", value: (q) => q.remarks || "—", wide: true },
   { key: "customerNotes", label: "Customer Notes", value: (q) => q.customerNotes || "—", wide: true },
   { key: "terms", label: "Terms & Conditions", value: (q) => q.terms || "—", wide: true },
@@ -380,7 +381,14 @@ export function QuoteDetail() {
           </button>
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-          {quote.customer} · Total {quote.currency} {fmt(totals.net)}
+          <span
+            style={{ color: "var(--accent)", cursor: "pointer" }}
+            title="Open customer"
+            onClick={() => navigate(`/parties/${encodeURIComponent(quote.partyCode)}`)}
+          >
+            {quote.customer}
+          </span>
+          {" "}· Total {quote.currency} {fmt(totals.net)}
           {busy && (
             <>
               {" · "}
@@ -502,7 +510,10 @@ export function QuoteDetail() {
                     return (
                       <tr key={i}>
                         <td className="mono muted">{i + 1}</td>
-                        <td>{l.item}</td>
+                        <td>
+                          {l.item}
+                          {l.description && <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{l.description}</div>}
+                        </td>
                         <td className="dim">{d ? `${d.size} · ${d.finish}` : "—"}</td>
                         <td className="num mono">{fmt(l.qty)}</td>
                         <td className="num mono">{l.rate.toFixed(2)}</td>

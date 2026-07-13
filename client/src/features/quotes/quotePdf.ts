@@ -84,6 +84,7 @@ export async function buildQuoteDoc(quote: Quote): Promise<TDocumentDefinitions>
         stack: [
           { text: l.item, fontSize: 8.5, bold: true, color: QP.ink },
           ...(d?.brandLabel ? [{ text: d.brandLabel, fontSize: 7, color: QP.dim }] : []),
+          ...(l.description ? [{ text: l.description, fontSize: 7, color: QP.dim }] : []),
         ],
         margin: [0, 4, 0, 4],
       } as Content,

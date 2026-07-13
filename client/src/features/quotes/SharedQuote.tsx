@@ -166,7 +166,10 @@ export function SharedQuote() {
                 {quote.lines.map((l, i) => (
                   <tr key={i}>
                     <td className="mono muted">{i + 1}</td>
-                    <td>{l.item}</td>
+                    <td>
+                      {l.item}
+                      {l.description && <div className="dim" style={{ fontSize: 12 }}>{l.description}</div>}
+                    </td>
                     <td className="num mono">{l.qty}</td>
                     <td className="num mono">{fmt(l.rate)}</td>
                     <td className="num mono">{l.discount ? `${l.discount}%` : "—"}</td>

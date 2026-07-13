@@ -11,25 +11,33 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { Combobox } from "@/ui/Combobox";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { STAGES } from "@/data";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
-import { PartyForm } from "./PartyForm";
+import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS, PartyForm } from "./PartyForm";
 import {
+  ADDRESS_FIELD_KEYS,
   cachedCustomers,
   composeAddress,
+  composeExtraAddress,
   contactName,
   deleteCustomer,
+  emptyAddress,
   listCustomers,
+  parseAddresses,
+  setAdditionalAddresses,
   setCustomerActive,
   updateCustomer,
   type CustomerInput,
   type CustomerRow,
+  type ExtraAddress,
   type PaymentTermOption,
 } from "./customersApi";
 
@@ -75,6 +83,75 @@ const rows = (c: CustomerRow): Detail[] => [
   ["Modified", fmtLocalDateTime(c.modifiedTime), false],
 ];
 
+/* Add one extra address — same fields/labels as the PartyForm address
+   columns, saved into the Customer.additional_addresses JSON array. */
+function AddressModal({ onSave, onClose }: { onSave: (a: ExtraAddress) => void; onClose: () => void }) {
+  const [a, setA] = useState<ExtraAddress>(() => emptyAddress());
+  const [err, setErr] = useState<string | null>(null);
+  const panelRef = useModalA11y(onClose);
+  const set = (k: keyof ExtraAddress, v: string) => setA((p) => ({ ...p, [k]: v }));
+
+  const submit = () => {
+    if (!a.street1.trim() && !a.city.trim()) {
+      setErr("Enter at least Street 1 or City");
+      return;
+    }
+    onSave(a);
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico">
+            <Icon name="plus" size={18} />
+          </div>
+          <div>
+            <div className="ttl">Add Address</div>
+            <div className="sub2">Extra address — selectable as billing/shipping on quotations</div>
+          </div>
+          <button className="btn x" onClick={onClose} title="Close">
+            ✕
+          </button>
+        </div>
+        <div className="df-body">
+          <div className="form-grid">
+            {ADDRESS_FIELD_KEYS.map((k) =>
+              k === "country" ? (
+                <div key={k} className="form-field">
+                  <span className="lbl">{ADDRESS_LABELS[k]}</span>
+                  <Combobox
+                    value={a.country}
+                    options={COUNTRY_NAME_OPTIONS}
+                    onChange={(v) => set("country", v)}
+                    onCreate={(label) => set("country", label)}
+                    placeholder="Select or type a country"
+                  />
+                </div>
+              ) : (
+                <label key={k} className="form-field">
+                  <span className="lbl">{ADDRESS_LABELS[k]}</span>
+                  <input value={a[k]} onChange={(e) => set(k, e.target.value)} placeholder={ADDRESS_LABELS[k]} />
+                </label>
+              ),
+            )}
+          </div>
+        </div>
+        <div className="df-foot">
+          <span className="df-req-note">{err && <span className="field-err">{err}</span>}</span>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="hbtn primary" onClick={submit}>
+            <Icon name="check" size={13} />
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CustomerDetail() {
   const { id = "" } = useParams();
   const code = decodeURIComponent(id);
@@ -88,6 +165,7 @@ export function CustomerDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [addingAddr, setAddingAddr] = useState(false);
 
   const refresh = () =>
     listCustomers().then((res) => {
@@ -181,6 +259,34 @@ export function CustomerDetail() {
     await refresh();
   };
 
+  // Extra addresses beyond the fixed billing/shipping pair — selectable
+  // as ship-to/bill-to when creating a quotation.
+  const extraAddrs = party ? parseAddresses(party.extras.additional_addresses) : [];
+
+  const onAddAddress = async (a: ExtraAddress) => {
+    if (!party) return;
+    const res = await setAdditionalAddresses(party.id, [...extraAddrs, a]);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setAddingAddr(false);
+    toast.success("Address added");
+    await refresh();
+  };
+
+  const onRemoveAddress = async (idx: number) => {
+    if (!party) return;
+    if (!(await confirmDialog({ message: "Remove this address?", danger: true }))) return;
+    const res = await setAdditionalAddresses(party.id, extraAddrs.filter((_, i) => i !== idx));
+    if (!res.ok) {
+      toast.error(res.error || "Remove failed");
+      return;
+    }
+    toast.success("Address removed");
+    await refresh();
+  };
+
   const moreItems = [
     ...(party
       ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes?new=${encodeURIComponent(party.name)}`) }]
@@ -212,6 +318,10 @@ export function CustomerDetail() {
           onSave={(input) => void onSave(input)}
           onClose={() => setEditing(false)}
         />
+      )}
+
+      {addingAddr && party && (
+        <AddressModal onSave={(a) => void onAddAddress(a)} onClose={() => setAddingAddr(false)} />
       )}
 
       {/* Customer list — fixed viewport height with its OWN scroll, sticky while
@@ -314,6 +424,30 @@ export function CustomerDetail() {
                   {rows(party).map(([label, value, unset]) => (
                     <DetailRow key={label} label={label} value={value} dim={unset} />
                   ))}
+
+                  <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Additional Addresses</div>
+                  {extraAddrs.map((a, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <DetailRow label={`Address ${i + 1}`} value={composeExtraAddress(a) || "Not set"} dim={!composeExtraAddress(a)} />
+                      </div>
+                      {canUpdate() && (
+                        <button className="btn x" onClick={() => void onRemoveAddress(i)} title="Remove address" disabled={busy}>
+                          <Icon name="x" size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {extraAddrs.length === 0 && (
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "4px 0" }}>
+                      No additional addresses.
+                    </div>
+                  )}
+                  {canUpdate() && (
+                    <button className="btn" style={{ marginTop: 8 }} onClick={() => setAddingAddr(true)} disabled={busy}>
+                      <Icon name="plus" size={12} /> Add address
+                    </button>
+                  )}
                 </div>
 
                 {/* The customer's 10 most recent orders — rows open the Master Order. */}

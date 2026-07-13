@@ -65,16 +65,32 @@ export function Combobox({
   const canCreate = !!onCreate && !!needle && !options.some((o) => o.label.trim().toLowerCase() === needle);
   const navLen = filtered.length + (canCreate ? 1 : 0);
 
+  /** After a pick, move focus to the next form control (Books-style) so
+      typing can continue — e.g. customer → quote date, line item → qty.
+      Skips textareas (the optional description box) on purpose. */
+  const focusNext = () => {
+    const input = ref.current?.querySelector("input");
+    if (!input) return;
+    const scope = ref.current?.closest<HTMLElement>("[role=dialog]") ?? document.body;
+    const els = [...scope.querySelectorAll<HTMLElement>("input, select, button")].filter(
+      (el) => !(el as HTMLInputElement).disabled && el.tabIndex !== -1 && el.offsetParent !== null,
+    );
+    const i = els.indexOf(input);
+    if (i >= 0) els[i + 1]?.focus();
+  };
+
   const pick = (v: string) => {
     onChange(v);
     setOpen(false);
     setActive(-1);
+    focusNext();
   };
 
   const doCreate = () => {
     onCreate!(q.trim());
     setOpen(false);
     setActive(-1);
+    focusNext();
   };
 
   /** Select the arrow-highlighted row (option or the "Create …" row). */
@@ -143,8 +159,12 @@ export function Combobox({
               role="option"
               aria-selected={o.value === value}
               className={`combo-opt ${o.value === value ? "sel" : ""} ${i === active ? "active" : ""}`}
-              // onMouseDown fires before the input blur, so the pick registers.
-              onMouseDown={() => pick(o.value)}
+              // onMouseDown fires before the input blur; preventDefault keeps
+              // focus in the form so tab order survives a mouse pick.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                pick(o.value);
+              }}
             >
               <span>{o.label}</span>
               {o.hint && <span className="combo-hint">{o.hint}</span>}
@@ -156,7 +176,10 @@ export function Combobox({
               role="option"
               aria-selected={false}
               className={`combo-opt ${active === filtered.length ? "active" : ""}`}
-              onMouseDown={doCreate}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                doCreate();
+              }}
             >
               <span>Create “{q.trim()}”</span>
             </div>

@@ -88,6 +88,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       qty: num(it.quantity_boxes),
       rate: num(it.rate),
       discount: num(it.discount_pct),
+      description: str(it.description),
     };
     (linesByQuote.get(qid) || linesByQuote.set(qid, []).get(qid)!).push(line);
   });
@@ -115,6 +116,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       customer: custName.get(str(r.customer)) || str(r.customer),
       partyCode: custCode.get(str(r.customer)) || "",
       address: str(r.address),
+      shippingAddress: str(r.shipping_address),
       quoteDate: str(r.quote_date),
       expiryDate: str(r.expiry_date),
       paymentTerm: termName.get(str(r.payment_term)) || str(r.payment_term),
@@ -155,6 +157,7 @@ export interface NewQuoteInput {
   currency: string;
   remarks: string;
   address: string;
+  shipping_address: string;
   salesperson: string;
   reference_no: string;
   customer_notes: string;
@@ -163,7 +166,7 @@ export interface NewQuoteInput {
   adjustment: number;
   tax_type: string;
   tax_pct: number;
-  lines: { item: string; qty: number; rate: number; discount: number }[];
+  lines: { item: string; qty: number; rate: number; discount: number; description?: string }[];
 }
 
 /* Mutations invalidate the cache so the next listQuotes() refetches.
@@ -205,7 +208,7 @@ export async function ensureShareToken(quote: Quote): Promise<{ ok: boolean; tok
 export function convertQuote(
   rowid: string,
   mode: "Full" | "Partial",
-  lines: { item: string; qty: number; rate: number }[],
+  lines: { item: string; qty: number; rate: number; description?: string }[],
   // order_number omitted → data-ops assigns the next SO number server-side.
   extra: { order_number?: string; po_number?: string; payment_term?: string; box_branding?: string },
 ) {

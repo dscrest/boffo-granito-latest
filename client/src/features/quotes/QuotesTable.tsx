@@ -106,6 +106,7 @@ export function quoteToInput(q: Quote): NewQuoteInput {
     currency: q.currency,
     remarks: q.remarks,
     address: q.address,
+    shipping_address: q.shippingAddress || "",
     salesperson: q.salesperson || "",
     reference_no: q.referenceNo || "",
     customer_notes: q.customerNotes || "",
@@ -114,7 +115,7 @@ export function quoteToInput(q: Quote): NewQuoteInput {
     adjustment: q.adjustment || 0,
     tax_type: q.taxType || "None",
     tax_pct: q.taxPct || 0,
-    lines: q.lines.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount })),
+    lines: q.lines.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount, description: l.description || "" })),
   };
 }
 

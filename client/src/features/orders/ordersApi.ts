@@ -156,7 +156,7 @@ export interface NewSalesOrderInput {
   adjustment: number;
   tax_type: string;
   tax_pct: number;
-  lines: { item: string; qty: number; rate: number; discount?: number; stage?: string; priority?: string; due_date?: string }[];
+  lines: { item: string; qty: number; rate: number; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
 }
 
 /* Mutations invalidate the cache so the next listOrders() refetches. */

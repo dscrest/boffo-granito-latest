@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Design, Party } from "@/data";
 import {
   cachedCustomers,
+  cachedPaymentTerms,
   listCustomers,
   toParty,
   type CustomerRow,
@@ -44,7 +45,7 @@ function toDesign(d: DesignRow): Design {
 
 export function useMasters(): UseMasters {
   const [customers, setCustomers] = useState<CustomerRow[]>(() => cachedCustomers() ?? []);
-  const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>([]);
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>(() => cachedPaymentTerms());
   const [designRows, setDesignRows] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [salesPersons, setSalesPersons] = useState<SalesPersonRow[]>(() => cachedSalesPersons() ?? []);
   const [loading, setLoading] = useState(
@@ -54,17 +55,26 @@ export function useMasters(): UseMasters {
 
   const load = () => {
     setLoading(true);
-    void Promise.all([listCustomers(), listDesigns(), listSalesPersons()]).then(([c, d, s]) => {
-      setLoading(false);
-      if (!c.ok || !d.ok) {
-        setError(c.error || d.error || "Failed to load masters");
-        return;
+    // Each master paints as soon as ITS fetch lands — don't hold the
+    // customer/payment-term pick lists hostage to the slower designs list.
+    const pc = listCustomers().then((c) => {
+      if (c.ok) {
+        setCustomers(c.customers);
+        setPaymentTerms(c.paymentTerms);
       }
-      setError(null);
-      setCustomers(c.customers);
-      setPaymentTerms(c.paymentTerms);
-      setDesignRows(d.designs);
+      return c;
+    });
+    const pd = listDesigns().then((d) => {
+      if (d.ok) setDesignRows(d.designs);
+      return d;
+    });
+    const ps = listSalesPersons().then((s) => {
       if (s.ok) setSalesPersons(s.salesPersons);
+      return s;
+    });
+    void Promise.all([pc, pd, ps]).then(([c, d]) => {
+      setLoading(false);
+      setError(c.ok && d.ok ? null : c.error || d.error || "Failed to load masters");
     });
   };
 

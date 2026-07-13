@@ -135,6 +135,8 @@ export interface QuoteLine {
   qty: number; // boxes
   rate: number; // per box
   discount: number; // percent
+  /** Free-text line description shown under the item name (form + PDF). */
+  description?: string;
 }
 
 export interface Quote {
@@ -142,7 +144,10 @@ export interface Quote {
   quoteNo: string;
   customer: string;
   partyCode: string;
+  /** Billing address (legacy column `address` — read by PDF/print/lists). */
   address: string;
+  /** Shipping address; picked separately from the customer's addresses. */
+  shippingAddress?: string;
   quoteDate: string;
   /** Quote validity / expiry date. */
   expiryDate?: string;

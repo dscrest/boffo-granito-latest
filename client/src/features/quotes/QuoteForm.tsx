@@ -11,7 +11,6 @@ import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import {
-  CATEGORIES,
   CURRENCIES,
   PORTS,
   docTotals,
@@ -21,6 +20,7 @@ import {
   type TaxType,
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
+import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
@@ -34,7 +34,19 @@ interface Charges {
   taxPct: string;
 }
 
-const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0 });
+const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0, description: "" });
+
+/* Every address on the customer master: primary billing + shipping plus
+   any extra addresses added from the customer detail screen. */
+function customerAddresses(cust: CustomerRow | undefined): string[] {
+  if (!cust) return [];
+  const all = [
+    composeAddress(cust.extras, "billing") || cust.address,
+    composeAddress(cust.extras, "shipping"),
+    ...parseAddresses(cust.extras.additional_addresses).map(composeExtraAddress),
+  ].filter(Boolean);
+  return [...new Set(all)];
+}
 
 let _seq = 0;
 const newId = () =>
@@ -45,6 +57,7 @@ type Head = Required<
     Quote,
     | "customer"
     | "address"
+    | "shippingAddress"
     | "quoteDate"
     | "expiryDate"
     | "paymentTerm"
@@ -78,6 +91,7 @@ export function QuoteForm({
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? presetCustomer ?? "",
     address: initial?.address ?? "",
+    shippingAddress: initial?.shippingAddress ?? "",
     // New quote: default Quote Date = today, Expiry = +15 days (#13).
     quoteDate: initial?.quoteDate ?? todayISO(),
     expiryDate: initial?.expiryDate ?? addDays(todayISO(), 15),
@@ -94,11 +108,6 @@ export function QuoteForm({
   const [lines, setLines] = useState<QuoteLine[]>(
     initial && initial.lines.length ? initial.lines.map((l) => ({ ...l })) : [emptyLine()],
   );
-  const [cat, setCat] = useState("");
-  const itemOptions = useMemo(
-    () => (cat ? designs.filter((d) => d.category === cat) : designs),
-    [cat, designs],
-  );
   const num2str = (n: number | undefined) => (n ? String(n) : "");
   const [charges, setCharges] = useState<Charges>({
     docDiscount: num2str(initial?.docDiscount),
@@ -112,13 +121,29 @@ export function QuoteForm({
   const setHead = (k: keyof Head, val: string) =>
     setH((p) => {
       const next = { ...p, [k]: val };
-      // Auto-fill address from the Customer master when a known customer is picked.
+      // Auto-fill from the Customer master when a known customer is picked:
+      // billing/shipping addresses + the customer's payment term.
       if (k === "customer") {
         const cust = customers.find((x) => x.name === val);
-        if (cust?.address) next.address = cust.address;
+        if (cust) {
+          const billing = composeAddress(cust.extras, "billing") || cust.address;
+          const shipping = composeAddress(cust.extras, "shipping") || billing;
+          if (billing) next.address = billing;
+          if (shipping) next.shippingAddress = shipping;
+          if (cust.paymentTermLabel) next.paymentTerm = cust.paymentTermLabel;
+        }
       }
       return next;
     });
+
+  // Pick-list of the selected customer's addresses. The current value stays
+  // selectable even when it's not on the master (legacy quotes / free text) —
+  // a Combobox renders blank when its value is missing from the options.
+  const addressOptions = (current: string) => {
+    const all = customerAddresses(customers.find((x) => x.name === h.customer));
+    if (current && !all.includes(current)) all.unshift(current);
+    return all.map((a) => ({ value: a, label: a }));
+  };
 
   // Preset customer (deep-link): re-pick it once the customer master loads
   // so the existing setHead branch fills the address too.
@@ -143,7 +168,9 @@ export function QuoteForm({
 
   const setLine = (i: number, k: keyof QuoteLine, val: string) =>
     setLines((ls) =>
-      ls.map((l, j) => (j === i ? { ...l, [k]: k === "item" ? val : Number(val) || 0 } : l)),
+      ls.map((l, j) =>
+        j === i ? { ...l, [k]: k === "item" || k === "description" ? val : Number(val) || 0 } : l,
+      ),
     );
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
   const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
@@ -274,31 +301,34 @@ export function QuoteForm({
               </label>
               {/* #16: Status removed from the form — set via the status bar on
                   QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Address</span>
-                <input value={h.address} onChange={(e) => setHead("address", e.target.value)} placeholder="Customer address" />
-              </label>
+              {/* Billing/shipping picked from the customer's addresses (primary
+                  billing + shipping + extras added on the customer detail page);
+                  free text still allowed for one-off addresses. */}
+              <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Billing Address</span>
+                <Combobox
+                  value={h.address}
+                  options={addressOptions(h.address)}
+                  onChange={(v) => setHead("address", v)}
+                  onCreate={(v) => setHead("address", v)}
+                  placeholder="Select or type the billing address…"
+                />
+              </div>
+              <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Shipping Address</span>
+                <Combobox
+                  value={h.shippingAddress}
+                  options={addressOptions(h.shippingAddress)}
+                  onChange={(v) => setHead("shippingAddress", v)}
+                  onCreate={(v) => setHead("shippingAddress", v)}
+                  placeholder="Select or type the shipping address…"
+                />
+              </div>
             </div>
           </div>
 
           <div className="form-section">
-            <div className="form-section-title">
-              Line Items
-              <select
-                value={cat}
-                onChange={(e) => setCat(e.target.value)}
-                title="Filter items by category"
-                style={{ marginLeft: 10, height: 28, width: 150, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
-              >
-                <option value="">All categories</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                {h.currency} {fmt(totals.final)} final
-              </span>
-            </div>
+            <div className="form-section-title">Line Items</div>
 
             <div className="ord-lines">
               <div className="ord-line ord-line-head qt-line">
@@ -319,7 +349,7 @@ export function QuoteForm({
                         value={l.item}
                         onChange={(v) => setLine(i, "item", v)}
                         placeholder="Search item…"
-                        options={itemOptions.map((x) => ({
+                        options={designs.map((x) => ({
                           value: x.name,
                           label: x.name,
                           hint: [x.size, x.finish].filter(Boolean).join(" · "),
@@ -330,11 +360,17 @@ export function QuoteForm({
                           {d.size} · {d.finish} · {d.brand}
                         </span>
                       )}
+                      <textarea
+                        rows={1}
+                        value={l.description ?? ""}
+                        onChange={(e) => setLine(i, "description", e.target.value)}
+                        placeholder="Add a description to your item"
+                      />
                     </div>
                     <input type="number" min={0} value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
                     <input type="number" min={0} value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
                     <input type="number" min={0} value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
-                    <span className="mono" style={{ alignSelf: "center", color: "var(--fg)" }}>
+                    <span className="mono qt-sub">
                       {fmt(t.subTotal)}
                     </span>
                     <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
