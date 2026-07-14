@@ -10,9 +10,9 @@
    navigating between items or returning to the tab.
    ============================================================ */
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import { update } from "@/lib/dataOps";
 import { Icon } from "@/ui/Icon";
@@ -226,10 +226,11 @@ export function ItemDetail() {
   };
 
   const moreItems = [
-    ...(canUpdate() && design
+    ...(can("items", "create") && design ? [{ label: "Clone", onClick: () => navigate(`/design/${design.id}/clone`) }] : []),
+    ...(can("items", "edit") && design
       ? [{ label: design.status === "Inactive" || design.status === "Discontinued" ? "Mark as Active" : "Mark as Inactive", onClick: () => void onToggleStatus() }]
       : []),
-    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDeleteItem() }] : []),
+    ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDeleteItem() }] : []),
   ];
 
   return (
@@ -265,20 +266,16 @@ export function ItemDetail() {
           {listed.map((d) => {
             const cur = d.id === id;
             return (
-              <button
+              <Link
                 key={d.id}
-                type="button"
-                onClick={() => navigate(`/design/${d.id}`)}
+                to={`/design/${d.id}`}
                 style={{
                   display: "block",
-                  width: "100%",
-                  textAlign: "left",
                   padding: "9px 12px",
-                  border: "none",
                   borderBottom: "1px solid var(--border)",
                   background: cur ? "var(--accent-soft)" : "transparent",
-                  cursor: "pointer",
-                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
                 title={d.uniqueName || d.designName}
               >
@@ -295,7 +292,7 @@ export function ItemDetail() {
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
                   SKU: <span className="mono">{d.sku || "—"}</span>
                 </div>
-              </button>
+              </Link>
             );
           })}
           {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching items</div>}
@@ -320,7 +317,7 @@ export function ItemDetail() {
                 >
                   {design.uniqueName || design.designName}
                 </div>
-                {canUpdate() && (
+                {can("items", "edit") && (
                   <button className="hbtn" onClick={() => navigate(`/design/${design.id}/edit`)} title="Edit item">
                     <Icon name="edit" size={13} />
                     Edit

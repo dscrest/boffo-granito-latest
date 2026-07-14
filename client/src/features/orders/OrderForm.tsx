@@ -1,15 +1,15 @@
 /* ============================================================
-   New Order form — captures the Catalyst `SalesOrder` header +
-   `OrderItem` line items. FRONTEND-ONLY: emits an OrderDraft to
-   OrdersTable local state (no DB writes yet). Header field keys +
-   line keys match the Data Store column names for 1:1 API wiring
-   later. Reuses the shared form/modal CSS (df-*, form-*).
+   Sales Order form — new / convert-from-quote / edit modes over the
+   Catalyst `SalesOrder` header + `OrderItem` line items. Emits an
+   OrderDraft; callers map it via draftToInput and hit data-ops
+   (so-with-items / update-so-with-items / convert-quote). Header +
+   line keys match the Data Store column names.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { CATEGORIES, docTotals, type TaxType } from "@/data";
+import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
@@ -34,8 +34,8 @@ export interface OrderDraft {
   shipment_date: string;
   payment_term: string;
   port_of_discharge: string;
-  status: string;
   currency: string;
+  exchange_rate?: number;
   remarks: string;
   salesperson: string;
   box_branding: string;
@@ -55,8 +55,6 @@ function orderLineSub(l: OrderLine): number {
   return gross - disc;
 }
 
-const STATUSES = ["Confirmed", "InProgress", "Cancelled"];
-
 type FieldKind = "text" | "date" | "select";
 interface FieldSpec {
   key: keyof OrderDraft;
@@ -75,9 +73,9 @@ const HEADER: FieldSpec[] = [
   // options injected at render from the live PaymentTerm / Currency masters (useMasters)
   { key: "payment_term", label: "Payment Term", kind: "select", options: [] },
   { key: "currency", label: "Currency", kind: "select", options: [] },
-  { key: "status", label: "Status", kind: "select", options: STATUSES },
+  // Status removed from the form — managed via the status bar on OrderDetail.
+  // Port of Discharge removed 2026-07-13 (hidden app-wide; carries silently).
   { key: "salesperson", label: "Salesperson" },
-  { key: "port_of_discharge", label: "Port of Discharge" },
   // Renders as a free-text input with our Brand list as suggestions, so the
   // customer's own branding can be typed when they want their name on the boxes.
   { key: "box_branding", label: "Box Branding" },
@@ -89,39 +87,81 @@ let _seq = 0;
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `o${++_seq}`;
 
+/** Remaining convertible boxes per design on the quote (qty − converted),
+    summed across lines sharing a design — same aggregation as the server guard. */
+function remainingByDesign(quote: Quote): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const l of quote.lines) {
+    if (!l.item) continue;
+    const rem = Math.max(0, (l.qty || 0) - (l.converted || 0));
+    m.set(l.item, (m.get(l.item) || 0) + rem);
+  }
+  return m;
+}
+
 export function OrderForm({
   onSave,
   onClose,
+  convert,
+  initial,
+  clone,
 }: {
   onSave: (o: OrderDraft) => void;
   onClose: () => void;
+  /** Convert-quote mode: prefill from the quote, lock customer/currency,
+      cap quote-design quantities at the remaining unconverted boxes. */
+  convert?: { quote: Quote };
+  /** Edit mode: the SO's hydrated line items (header fields repeat on each
+      row). Save replaces header + lines via update-so-with-items. */
+  initial?: Order[];
+  /** Clone mode: `initial` prefills the fields but Save creates a NEW order
+      (parent routes onSave to create), so the title reads as a new order. */
+  clone?: boolean;
 }) {
+  const q = convert?.quote;
+  const ed = initial?.[0];
+  const maxByDesign = useMemo(() => (q ? remainingByDesign(q) : new Map<string, number>()), [q]);
   const [h, setH] = useState<Omit<OrderDraft, "_id" | "lines">>({
-    customer: "",
-    po_number: "",
-    order_date: todayISO(), // #13 default to today on new SO
-    shipment_date: "",
-    payment_term: "",
-    port_of_discharge: "",
-    status: "Confirmed",
-    currency: "INR",
-    remarks: "",
-    salesperson: "",
-    box_branding: "",
-    customer_notes: "",
-    terms: "",
-    docDiscount: "",
-    adjustment: "",
-    taxType: "None",
-    taxPct: "",
+    customer: q?.customer ?? ed?.party ?? "",
+    po_number: ed?.poNumber ?? "",
+    order_date: ed?.orderDate || todayISO(), // #13 default to today on new SO
+    shipment_date: ed?.shipmentDate ?? "",
+    payment_term: q?.paymentTerm ?? ed?.paymentTerm ?? "",
+    port_of_discharge: ed?.portOfDischarge ?? "", // hidden app-wide; carries silently
+    currency: q?.currency ?? ed?.currency ?? "INR",
+    exchange_rate: ed?.exchangeRate,
+    remarks: ed?.remarks ?? "",
+    salesperson: q?.salesperson ?? ed?.salesperson ?? "",
+    box_branding: ed?.boxBranding ?? "",
+    customer_notes: q?.customerNotes ?? ed?.customerNotes ?? "",
+    terms: q?.terms ?? ed?.terms ?? "",
+    docDiscount: ed?.docDiscount ? String(ed.docDiscount) : "",
+    adjustment: q?.adjustment ? String(q.adjustment) : ed?.adjustment ? String(ed.adjustment) : "",
+    taxType: q?.taxType ?? ed?.taxType ?? "None",
+    taxPct: q?.taxPct ? String(q.taxPct) : ed?.taxPct ? String(ed.taxPct) : "",
   });
-  const [lines, setLines] = useState<OrderLine[]>([emptyLine()]);
-  const { parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
-  const [cat, setCat] = useState("");
-  const itemOptions = useMemo(
-    () => (cat ? designs.filter((d) => d.category === cat) : designs),
-    [cat, designs],
-  );
+  const [lines, setLines] = useState<OrderLine[]>(() => {
+    if (initial?.length)
+      return initial.map((o) => ({
+        design: o.design,
+        ordered_qty_boxes: String(o.orderQty || ""),
+        rate: o.rate ? String(o.rate) : "",
+        discount: o.discount ? String(o.discount) : "",
+        description: o.description || "",
+      }));
+    if (!q) return [emptyLine()];
+    const ls = q.lines
+      .filter((l) => l.item && (l.qty || 0) - (l.converted || 0) > 0)
+      .map((l) => ({
+        design: l.item,
+        ordered_qty_boxes: String((l.qty || 0) - (l.converted || 0)),
+        rate: String(l.rate || ""),
+        discount: l.discount ? String(l.discount) : "",
+        description: l.description || "",
+      }));
+    return ls.length ? ls : [emptyLine()];
+  });
+  const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
   const brandOptions = useMemo(
     () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
     [designs],
@@ -138,7 +178,20 @@ export function OrderForm({
     }
   }, [salesPersons]);
 
-  const setHead = (k: string, val: string) => setH((p) => ({ ...p, [k]: val }) as typeof p);
+  const setHead = (k: string, val: string) => {
+    // Transactions inherit customer fields: picking a customer carries their
+    // payment term, currency and handling sales person (mirrors QuoteForm).
+    const cust = k === "customer" ? customers.find((x) => x.name === val) : undefined;
+    setH((p) => {
+      const next = { ...p, [k]: val } as typeof p;
+      if (cust) {
+        if (cust.paymentTermLabel) next.payment_term = cust.paymentTermLabel;
+        if (cust.currency) next.currency = cust.currency;
+        if (cust.handlingPersonLabel) next.salesperson = cust.handlingPersonLabel;
+      }
+      return next;
+    });
+  };
   const setLine = (i: number, k: keyof OrderLine, val: string) =>
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
@@ -171,7 +224,25 @@ export function OrderForm({
     [lines, charge],
   );
   const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
-  const missing = HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) || validLines.length === 0;
+  // Convert mode: requested qty per design must fit within the quote's
+  // remaining (qty − converted) boxes — mirrors the server-side guard.
+  const overCap = useMemo(() => {
+    if (!q) return null;
+    const req = new Map<string, number>();
+    for (const l of lines) {
+      if (!l.design) continue;
+      req.set(l.design, (req.get(l.design) || 0) + (parseInt(l.ordered_qty_boxes, 10) || 0));
+    }
+    for (const [design, want] of req) {
+      const max = maxByDesign.get(design);
+      if (max != null && want > max) return `${design}: only ${max} boxes remain on the quote`;
+    }
+    return null;
+  }, [q, lines, maxByDesign]);
+  const missing =
+    HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
+    validLines.length === 0 ||
+    !!overCap;
 
   // Errors stay hidden until the first submit attempt, then update live.
   const [showErrors, setShowErrors] = useState(false);
@@ -196,8 +267,16 @@ export function OrderForm({
             <Icon name="orders" size={18} />
           </div>
           <div>
-            <div className="ttl">New Order</div>
-            <div className="sub2">Sales order · saves to the database on submit</div>
+            <div className="ttl">{q ? "Convert to Sales Order" : clone ? "Clone Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
+            <div className="sub2">
+              {q
+                ? `From quote ${q.quoteNo} · adjust quantities, dates & terms`
+                : clone
+                  ? `Copy of ${ed?.orderNumber || ed?.poNumber} · saves as a new order`
+                  : ed
+                    ? `${ed.orderNumber || ed.poNumber} · line items are replaced on save`
+                    : "Sales order · saves to the database on submit"}
+            </div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕
@@ -208,15 +287,18 @@ export function OrderForm({
           <div className="form-section">
             <div className="form-section-title">Order Details</div>
             <div className="form-grid">
-              {HEADER.map((f) => {
+              {HEADER.filter((f) => !(q && f.key === "box_branding")).map((f) => {
                 const err = fieldError(f);
+                const locked = !!q && (f.key === "customer" || f.key === "currency");
                 return (
                   <label key={f.key} className="form-field">
                     <span className="lbl">
                       {f.label}
                       {f.required && <span className="req"> *</span>}
                     </span>
-                    {f.key === "customer" ? (
+                    {locked ? (
+                      <input value={h[f.key as keyof typeof h]} disabled title="Fixed by the source quote" />
+                    ) : f.key === "customer" ? (
                       <Combobox
                         value={h.customer}
                         onChange={(v) => setHead("customer", v)}
@@ -279,23 +361,7 @@ export function OrderForm({
           </div>
 
           <div className="form-section">
-            <div className="form-section-title">
-              Line Items
-              <select
-                value={cat}
-                onChange={(e) => setCat(e.target.value)}
-                title="Filter items by category"
-                style={{ marginLeft: 10, height: 28, width: 150, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}
-              >
-                <option value="">All categories</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              <span className="dim" style={{ marginLeft: "auto", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                {totalBoxes} boxes · {h.currency} {fmt(totals.net)}
-              </span>
-            </div>
+            <div className="form-section-title">Line Items</div>
 
             <div className="ord-lines">
               <div className="ord-line ord-line-head qt-line">
@@ -315,7 +381,7 @@ export function OrderForm({
                         value={l.design}
                         onChange={(v) => setLine(i, "design", v)}
                         placeholder="Search design…"
-                        options={itemOptions.map((x) => ({
+                        options={designs.map((x) => ({
                           value: x.name,
                           label: x.name,
                           hint: [x.size, x.finish].filter(Boolean).join(" · "),
@@ -333,12 +399,20 @@ export function OrderForm({
                         placeholder="Add a description to your item"
                       />
                     </div>
-                    <input
-                      type="number" min={0}
-                      value={l.ordered_qty_boxes}
-                      onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
-                      placeholder="0"
-                    />
+                    <div className="form-field" style={{ gap: 2 }}>
+                      <input
+                        type="number" min={0}
+                        max={q ? maxByDesign.get(l.design) : undefined}
+                        value={l.ordered_qty_boxes}
+                        onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
+                        placeholder="0"
+                      />
+                      {q && maxByDesign.has(l.design) && (
+                        <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                          remaining {maxByDesign.get(l.design)}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="number" min={0}
                       value={l.rate}
@@ -366,6 +440,10 @@ export function OrderForm({
             </button>
 
             <div className="qt-totals">
+              <div className="row">
+                <span className="dim">Total Boxes</span>
+                <span className="mono">{totalBoxes} boxes · {h.currency} {fmt(totals.net)}</span>
+              </div>
               <div className="row">
                 <span className="dim">Subtotal</span>
                 <span className="mono">{h.currency} {fmt(totals.final)}</span>
@@ -420,10 +498,12 @@ export function OrderForm({
           <span className="df-req-note">
             {showErrors && missing ? (
               <span className="field-err">
-                {validLines.length === 0 ? "Add at least one line with a design + quantity" : "Fill the required fields above"}
+                {validLines.length === 0
+                  ? "Add at least one line with a design + quantity"
+                  : overCap || "Fill the required fields above"}
               </span>
             ) : (
-              "* Indicates a mandatory field · ≥1 line item"
+              "* Indicates a mandatory field"
             )}
           </span>
           <button className="btn" onClick={onClose}>
@@ -431,7 +511,7 @@ export function OrderForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            Save
+            {q ? "Convert" : "Save"}
           </button>
         </div>
       </div>

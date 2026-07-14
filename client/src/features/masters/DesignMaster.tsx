@@ -10,7 +10,7 @@
    opens the create modal; edits happen on the edit page.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -20,7 +20,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { finishClass, fmtDateTime } from "@/lib/format";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can, canUpdate } from "@/lib/auth";
 import { DesignForm } from "./DesignForm";
 import {
   bulkDeleteDesigns,
@@ -38,7 +38,15 @@ const dash = <span className="dim">—</span>;
 // Reference implementation of the data-driven grid pattern: each ColumnDef
 // carries its own cell renderer; thead/tbody map over useColumns().visible.
 const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
-  { key: "name", label: "Design Name", render: (d) => <span className="design-name">{d.designName}</span> },
+  {
+    key: "name",
+    label: "Design Name",
+    render: (d) => (
+      <Link className="linkish" to={`/design/${d.id}`} onClick={(e) => e.stopPropagation()} title="View item">
+        <span className="design-name">{d.designName}</span>
+      </Link>
+    ),
+  },
   {
     key: "size",
     label: "Size",
@@ -287,7 +295,8 @@ export function DesignMaster() {
     setShowNew(false);
     setNotice(`Design saved (#${res.rowid}).`);
     toast.success("Design saved");
-    await load();
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/design/${encodeURIComponent(res.rowid)}`);
   };
 
   const ids = useMemo(() => [...selected], [selected]);
@@ -348,12 +357,12 @@ export function DesignMaster() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          {canUpdate() && (
+          {can("items", "edit") && (
             <button className="btn" onClick={() => setShowBulk(true)} disabled={busy}>
               <Icon name="settings" size={12} className="ic" /> Bulk edit
             </button>
           )}
-          {canDelete() && (
+          {can("items", "delete") && (
             <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
               Delete
             </button>
@@ -373,7 +382,7 @@ export function DesignMaster() {
           </span>
           <AdvancedFilterButton title="Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {canUpdate() && (
+          {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
               <Icon name="plus" size={13} />

@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { list } from "@/lib/dataOps";
 import { actorName, describeChange } from "@/lib/format";
-import { signOut, type SessionUser } from "@/lib/auth";
+import { signOut, storedAuth, type SessionUser } from "@/lib/auth";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -37,6 +37,8 @@ interface Notif {
   when: string; // relative label
   occurredAt: string;
   text: string;
+  /** In-app route (e.g. "#/quotes/123") — personal notifications only. */
+  link?: string;
 }
 
 const SEEN_KEY = "boffo_notif_seen";
@@ -63,8 +65,29 @@ export function NotificationBell() {
   const [lastSeen, setLastSeen] = useState<string>(() => sessionStorage.getItem(SEEN_KEY) || "");
   useDismiss(ref, open, () => setOpen(false));
 
+  // Personal notifications (approval verdicts etc.) for the signed-in user.
+  const [personal, setPersonal] = useState<Notif[]>([]);
+  const myRowid = storedAuth()?.user?.rowid || "";
+
+  const fetchPersonal = () =>
+    myRowid
+      ? list("Notification", { order: "ROWID desc", limit: 30 }).then((res) =>
+          (res.rows || [])
+            .filter((r) => str(r.recipient) === myRowid)
+            .slice(0, 10)
+            .map((r) => ({
+              id: `n${str(r.ROWID)}`,
+              occurredAt: str(r.occurred_at),
+              when: rel(str(r.occurred_at)),
+              text: str(r.text),
+              link: str(r.link) || undefined,
+            })),
+        )
+      : Promise.resolve([] as Notif[]);
+
   const fetchItems = () => {
     setLoading(true);
+    void fetchPersonal().then(setPersonal);
     void list("OperationLog", { order: "ROWID desc", limit: 30 })
       .then((res) => {
         const rows = (res.rows || [])
@@ -88,22 +111,30 @@ export function NotificationBell() {
       .finally(() => setLoading(false));
   };
 
-  // Track the newest op timestamp so the unseen dot can show without opening.
+  // Track the newest op/notification timestamp so the unseen dot can show
+  // without opening. Personal notifications count toward the dot too.
   const [newest, setNewest] = useState<string>("");
   useEffect(() => {
     let alive = true;
-    const check = () =>
+    const check = () => {
       void list("OperationLog", { order: "ROWID desc", limit: 1 }).then((res) => {
         if (!alive) return;
         const ts = str((res.rows || [])[0]?.occurred_at);
-        if (ts) setNewest(ts);
+        if (ts) setNewest((n) => (ts > n ? ts : n));
       });
+      void fetchPersonal().then((rows) => {
+        if (!alive) return;
+        const ts = rows[0]?.occurredAt || "";
+        if (ts) setNewest((n) => (ts > n ? ts : n));
+      });
+    };
     check();
     const t = setInterval(check, 60_000);
     return () => {
       alive = false;
       clearInterval(t);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hasUnseen = Boolean(newest && newest > lastSeen);
@@ -128,6 +159,30 @@ export function NotificationBell() {
       </button>
       {open && (
         <div className="hdr-menu" style={{ width: 320 }}>
+          {personal.length > 0 && (
+            <>
+              <div className="hdr-menu-head">For you</div>
+              <div className="hdr-menu-list">
+                {personal.map((n) => (
+                  <div
+                    className="hdr-menu-row"
+                    key={n.id}
+                    style={n.link ? { cursor: "pointer" } : undefined}
+                    onClick={() => {
+                      if (n.link) {
+                        location.hash = n.link.replace(/^#/, "#");
+                        setOpen(false);
+                      }
+                    }}
+                    title={n.link ? "Open" : undefined}
+                  >
+                    <div className="hdr-menu-row-text">{n.text}</div>
+                    <div className="hdr-menu-row-time">{n.when}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
           <div className="hdr-menu-head">Recent activity</div>
           {loading && items.length === 0 ? (
             <div className="hdr-menu-empty">Loading…</div>

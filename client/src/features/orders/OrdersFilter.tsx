@@ -29,7 +29,7 @@ export function applyOrderFilter(orders: Order[], st: OrdersFilterState): Order[
   const q = st.search.trim().toLowerCase();
   if (q) {
     arr = arr.filter((o) =>
-      [o.poNumber, o.design, o.party, o.partyCode, o.salesperson, o.size, o.finish, o.brand]
+      [o.orderNumber, o.poNumber, o.design, o.party, o.partyCode, o.salesperson, o.size, o.finish, o.brand]
         .some((f) => String(f || "").toLowerCase().includes(q)),
     );
   }

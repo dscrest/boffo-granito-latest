@@ -7,12 +7,12 @@
    Edit opens the shared SizeForm modal in place.
    ============================================================ */
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedPallets, DetailRow, MoreMenu } from "@/features/common/DetailBits";
@@ -26,7 +26,7 @@ import {
   type PalletRow,
   type SizeOption,
 } from "./palletsApi";
-import { cachedSizes, deleteSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
+import { cachedSizes, createSize, deleteSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -64,6 +64,7 @@ export function SizeDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [creatingPallet, setCreatingPallet] = useState(false);
 
   const refresh = () => listSizes().then((res) => setSizes(res.ok ? res.sizes : (cachedSizes() ?? [])));
@@ -105,6 +106,20 @@ export function SizeDetail() {
     await refresh();
   };
 
+  // Clone: same dimensions into a fresh size; seq_code left blank so
+  // createSize assigns the next short code (never copy the source's).
+  const onClone = async (input: SizeInput) => {
+    const res = await createSize(input);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setCloning(false);
+    toast.success("Size created");
+    if (res.rowid) navigate(`/sizes/${encodeURIComponent(res.rowid)}`);
+    await refresh();
+  };
+
   const onDelete = async () => {
     if (!size) return;
     if (
@@ -141,7 +156,8 @@ export function SizeDetail() {
 
   const moreItems = [
     { label: "Create Pallet", onClick: () => setCreatingPallet(true) },
-    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("items", "create") && size ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -162,6 +178,24 @@ export function SizeDetail() {
           }}
           onSave={onSave}
           onClose={() => setEditing(false)}
+        />
+      )}
+
+      {cloning && size && (
+        <SizeForm
+          tileTypes={tileTypes}
+          initial={{
+            width_mm: size.widthMm,
+            length_mm: size.lengthMm,
+            seq_code: "", // fresh short code assigned on create — never copied
+            tile_type: size.tileType,
+            thickness_mm: size.thicknessMm,
+            pcs_per_packing: size.pcsPerPacking,
+            box_weight_kg: size.boxWeightKg,
+            remark: size.remark,
+          }}
+          onSave={onClone}
+          onClose={() => setCloning(false)}
         />
       )}
 
@@ -213,20 +247,16 @@ export function SizeDetail() {
           {listed.map((s) => {
             const cur = s.id === id;
             return (
-              <button
+              <Link
                 key={s.id}
-                type="button"
-                onClick={() => navigate(`/sizes/${s.id}`)}
+                to={`/sizes/${s.id}`}
                 style={{
                   display: "block",
-                  width: "100%",
-                  textAlign: "left",
                   padding: "9px 12px",
-                  border: "none",
                   borderBottom: "1px solid var(--border)",
                   background: cur ? "var(--accent-soft)" : "transparent",
-                  cursor: "pointer",
-                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
                 title={s.code}
               >
@@ -243,7 +273,7 @@ export function SizeDetail() {
                     .filter(Boolean)
                     .join("  ·  ") || "No details yet"}
                 </div>
-              </button>
+              </Link>
             );
           })}
           {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching sizes</div>}
@@ -268,7 +298,7 @@ export function SizeDetail() {
                 >
                   {size.code || "—"}
                 </div>
-                {canUpdate() && (
+                {can("items", "edit") && (
                   <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit size">
                     <Icon name="edit" size={13} />
                     Edit

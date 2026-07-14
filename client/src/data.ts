@@ -32,6 +32,7 @@ export interface Stage {
 export interface Order {
   id: string;
   salesOrderId?: string; // SalesOrder ROWID (real data); used to scope palletization
+  orderNumber?: string; // SalesOrder.order_number (SO/FY/NNN) — the primary display identifier
   poNumber: string;
   partyCode: string;
   party: string;
@@ -49,6 +50,9 @@ export interface Order {
   totalBoxes: number;
   pallets: number;
   stage: string;
+  /** SalesOrder.status — Draft | PendingApproval | Confirmed | InProgress |
+      Cancelled (state machine in /so-status; status bar on OrderDetail). */
+  status?: string;
   orderDate: string;
   dueDate: string;
   invoice: string | null;
@@ -58,7 +62,13 @@ export interface Order {
   rate?: number;
   discount?: number;
   subTotal?: number;
+  description?: string;
   /** SalesOrder header fields (repeated per line on hydrate). */
+  paymentTerm?: string;
+  currency?: string;
+  exchangeRate?: number;
+  remarks?: string;
+  portOfDischarge?: string;
   salesperson?: string;
   /** Branding printed on the boxes — our brand or the customer's own. */
   boxBranding?: string;
@@ -120,6 +130,8 @@ export function stageOf(id: string): Stage {
 
 export type QuoteStatus =
   | "Draft"
+  | "PendingApproval"
+  | "Approved"
   | "Sent"
   | "Accepted"
   | "Rejected"
@@ -137,6 +149,8 @@ export interface QuoteLine {
   discount: number; // percent
   /** Free-text line description shown under the item name (form + PDF). */
   description?: string;
+  /** Boxes already converted to Sales Orders (caps further conversion). */
+  converted?: number;
 }
 
 export interface Quote {
@@ -214,9 +228,10 @@ export function quoteTotals(q: { lines: QuoteLine[] }) {
       acc.gross += t.gross;
       acc.discount += t.discountAmt;
       acc.final += t.subTotal;
+      acc.qty += l.qty || 0;
       return acc;
     },
-    { gross: 0, discount: 0, final: 0 },
+    { gross: 0, discount: 0, final: 0, qty: 0 },
   );
 }
 

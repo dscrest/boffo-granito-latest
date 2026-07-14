@@ -4,10 +4,24 @@
 // the session on 401. The old Catalyst-hosted-login / dev-stub split is gone.
 import { API_BASE } from "./api";
 
+export type PermModule =
+  | "quotes"
+  | "orders"
+  | "customers"
+  | "items"
+  | "stages"
+  | "invoices"
+  | "reports"
+  | "settings";
+export type PermAction = "view" | "create" | "edit" | "delete" | "export";
+export type ApprovableDoc = "Quote" | "SalesOrder";
+
 export interface Perms {
-  features: string[]; // nav ids the role may see; ["*"] = all
-  can_update: boolean;
-  can_delete: boolean;
+  features: string[]; // nav ids the role may see; ["*"] = all (derived from matrix)
+  can_update: boolean; // legacy rollup: any module has create|edit
+  can_delete: boolean; // legacy rollup: any module has delete
+  matrix?: Record<string, string[]>; // module -> allowed actions
+  approve?: string[]; // doc types this role may approve ("Quote" | "SalesOrder")
 }
 
 export interface SessionUser {
@@ -57,6 +71,9 @@ export async function checkSession(): Promise<SessionUser | null> {
       return null;
     }
     const json = (await res.json()) as { ok: boolean; user: SessionUser };
+    // Refresh the stored perms snapshot: role edits reach signed-in users on
+    // their next reload (the server guard is authoritative in the meantime).
+    sessionStorage.setItem(KEY, JSON.stringify({ token: stored.token, user: json.user }));
     return json.user;
   } catch {
     // Network hiccup: keep the stored session rather than logging the user out.
@@ -113,4 +130,20 @@ export function canDelete(): boolean {
 
 export function isAdmin(): boolean {
   return storedAuth()?.user.role === "Admin";
+}
+
+/** Per-module permission check against the role's matrix. Falls back to the
+ * legacy global flags for sessions minted before the matrix existed. */
+export function can(module: PermModule, action: PermAction): boolean {
+  if (isAdmin()) return true;
+  const p = perms();
+  if (p.matrix) return (p.matrix[module] ?? []).includes(action);
+  // Legacy snapshot: view/export were never gated; delete/update were global.
+  if (action === "view" || action === "export") return true;
+  return action === "delete" ? p.can_delete : p.can_update;
+}
+
+/** May the signed-in role approve/reject the given document type? */
+export function canApprove(doc: ApprovableDoc): boolean {
+  return isAdmin() || (perms().approve ?? []).includes(doc);
 }

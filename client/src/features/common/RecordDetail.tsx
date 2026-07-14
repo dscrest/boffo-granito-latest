@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { list, type DSRow } from "@/lib/dataOps";
-import { fmtDateTime, fmtLocalDateTime, actorName, describeChange } from "@/lib/format";
+import { fmtDateTime, fmtLocalDateTime, fmtDuration, parseDbTime, actorName, describeChange, opLabel } from "@/lib/format";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -65,7 +65,7 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
               return (
                 <tr key={String(r.ROWID)}>
                   <td className="muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
-                  <td>{str(r.operation)}</td>
+                  <td>{opLabel(str(r.operation))}</td>
                   <td className="muted">{actorName(str(r.actor))}</td>
                   <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={detail}>
                     {ok ? detail : <span style={{ color: "var(--c-red)" }}>{detail}</span>}
@@ -87,6 +87,74 @@ export function ActivityLog({ table, entityId }: { table: string; entityId?: str
   );
 }
 
+/** StatusTransition history for one record — every status/stage flip with
+    who, when, and how long the record sat in the previous status (the
+    Jira-style transition view). Mounted above ActivityLog on detail pages. */
+export function StatusTimeline({ entityType, entityId }: { entityType: string; entityId: string }) {
+  const [rows, setRows] = useState<DSRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    void list("StatusTransition", { order: "ROWID desc", limit: 300 }).then((res) => {
+      if (!alive) return;
+      setLoading(false);
+      setRows(
+        (res.rows || []).filter(
+          (r) => str(r.entity_type) === entityType && str(r.entity_rowid) === entityId,
+        ),
+      );
+    });
+    return () => {
+      alive = false;
+    };
+  }, [entityType, entityId]);
+
+  if (!loading && rows.length === 0) return null; // nothing to show — legacy records
+
+  // rows are newest-first; the "time in previous status" for row i is the
+  // gap to the next-older transition (i+1).
+  const timeOf = (r: DSRow) => parseDbTime(str(r.occurred_at) || str(r.CREATEDTIME));
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="form-section-title" style={{ padding: "12px 16px 0" }}>Status Timeline</div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Transition</th>
+              <th>Time in Previous Status</th>
+              <th>User</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const older = rows[i + 1];
+              const gap = older ? timeOf(r) - timeOf(older) : NaN;
+              return (
+                <tr key={String(r.ROWID)}>
+                  <td className="muted">{fmtLocalDateTime(str(r.occurred_at) || str(r.CREATEDTIME))}</td>
+                  <td className="mono">
+                    {str(r.from_status) || "—"} → {str(r.to_status)}
+                  </td>
+                  <td className="muted mono">{older ? fmtDuration(gap) : "—"}</td>
+                  <td className="muted">{actorName(str(r.actor))}</td>
+                  <td className="muted" style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={str(r.note)}>
+                    {str(r.note) || "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function RecordDetail({
   backTo,
   title,
@@ -94,18 +162,24 @@ export function RecordDetail({
   statusChip,
   fields,
   hiddenStorageKey,
+  defaultHidden,
   activityTable,
   entityId,
   created,
   modified,
+  actions,
   children,
 }: {
   backTo: string;
   title: string;
   subtitle?: ReactNode;
   statusChip?: { label: string; cls: string };
+  /** Header action buttons (e.g. status transitions), right-aligned. */
+  actions?: ReactNode;
   fields: RecordField[];
   hiddenStorageKey: string;
+  /** Field keys hidden until the user picks their own set via Fields. */
+  defaultHidden?: string[];
   activityTable?: string; // OperationLog table_name; omit → no Activity tab
   entityId?: string; // when set, Activity also matches entity_rowid
   created?: string; // raw CREATEDTIME — appended as a "Created" field
@@ -118,9 +192,9 @@ export function RecordDetail({
   const [hidden, setHidden] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(hiddenStorageKey);
-      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : defaultHidden || []);
     } catch {
-      return new Set();
+      return new Set(defaultHidden || []);
     }
   });
 
@@ -141,8 +215,10 @@ export function RecordDetail({
 
   return (
     <div>
+      {/* Header actions are RIGHT-aligned — same as QuoteDetail/ItemDetail
+          (user mandate 2026-07-13: identical design on every detail page). */}
       <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+        <div className="row" style={{ gap: 10, alignItems: "center", flex: 1, minWidth: 0 }}>
           <button className="hbtn" onClick={() => navigate(backTo)} title="Back">
             <Icon name="chev-l" size={13} />
           </button>
@@ -154,6 +230,7 @@ export function RecordDetail({
             {subtitle && <div className="sub">{subtitle}</div>}
           </div>
         </div>
+        {actions && <div className="right">{actions}</div>}
       </div>
 
       <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
@@ -198,7 +275,13 @@ export function RecordDetail({
         </>
       )}
 
-      {tab === "activity" && activityTable && <ActivityLog table={activityTable} entityId={entityId} />}
+      {tab === "activity" && activityTable && (
+        <>
+          {/* StatusTransition entity_type === table name; renders null when empty. */}
+          {entityId && <StatusTimeline entityType={activityTable} entityId={entityId} />}
+          <ActivityLog table={activityTable} entityId={entityId} />
+        </>
+      )}
     </div>
   );
 }

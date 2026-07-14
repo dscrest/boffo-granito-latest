@@ -4,7 +4,7 @@
    Grid standard: header-click sorting, generic "filter by field" bar,
    counts live in the GridFooter only. */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -12,6 +12,8 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
+import { can } from "@/lib/auth";
+import { exportCsv } from "@/lib/csv";
 import { fmtDateTime, pct } from "@/lib/format";
 import { nextCustomerCode } from "@/lib/seq";
 import { useOrders } from "@/features/orders/useOrders";
@@ -112,7 +114,9 @@ export function PartiesView() {
     }
     setShowForm(false);
     toast.success("Customer saved");
-    load();
+    // Land on the new record (route is keyed by code) so the next action can't
+    // target the wrong one.
+    navigate(`/parties/${encodeURIComponent(input.code.trim().toUpperCase())}`);
   };
 
   const base = useMemo<Row[]>(
@@ -232,11 +236,35 @@ export function PartiesView() {
         </span>
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-        {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
-        <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
-          <Icon name="plus" size={13} />
-          New customer
-        </button>
+        {can("customers", "export") && (
+          <button
+            className="hbtn"
+            style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+            title="Export the filtered rows as CSV"
+            onClick={() =>
+              exportCsv("customers", sort.sorted, [
+                { header: "Name", value: (r) => r.name },
+                { header: "Code", value: (r) => r.code },
+                { header: "Country", value: (r) => r.country },
+                { header: "Currency", value: (r) => r.currency },
+                { header: "Payment Term", value: (r) => r.paymentTerm },
+                { header: "Handling Person", value: (r) => r.handlingPerson },
+                { header: "Open Orders", value: (r) => r.orders },
+                { header: "Status", value: (r) => (r.active ? "Active" : "Inactive") },
+              ])
+            }
+          >
+            <Icon name="docs" size={13} />
+            Export
+          </button>
+        )}
+        {can("customers", "create") && (
+          /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
+            <Icon name="plus" size={13} />
+            New customer
+          </button>
+        )}
       </div>
 
       {loading && customers.length === 0 ? (
@@ -266,7 +294,9 @@ export function PartiesView() {
                   title="View customer"
                 >
                   <td>
-                    {r.name}
+                    <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
+                      {r.name}
+                    </Link>
                     {!r.active && (
                       <span className="chip" style={{ marginLeft: 6 }}>
                         inactive

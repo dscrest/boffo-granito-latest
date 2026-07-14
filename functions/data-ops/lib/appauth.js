@@ -4,20 +4,30 @@
  * App-level authentication + role permissions for BOFFO.
  *
  * Tables (Data Store):
- *   Role        — name, features (JSON array of nav ids or ["*"]), can_update, can_delete
+ *   Role        — name, matrix (JSON permission matrix, see below), plus legacy
+ *                 features/can_update/can_delete kept in sync for display
  *   AppUser     — email (unique), name, password_hash (scrypt$salt$hash), active, role(FK), deleted_at
  *   AuthSession — token (unique), app_user(FK CASCADE), expires_at (IST "yyyy-MM-dd HH:mm:ss")
+ *
+ * Role.matrix: {"modules":{"quotes":["view","create","edit","delete","export"],...},
+ *               "approve":["Quote","SalesOrder"]}
+ * A null matrix (legacy role) is synthesized from features/can_update/can_delete.
+ * The role named "Admin" is a superuser: bypasses the guard, locked against edits.
  *
  * register(app, { init, rowList, sendErr }) wires:
  *   POST /auth/login            {email,password} -> {token,user}
  *   POST /auth/logout           (Bearer) kill session
  *   GET  /auth/me               (Bearer) current user + perms
- *   GET  /auth/roles            (Bearer) role options
+ *   GET  /auth/roles            (Bearer) role options incl. matrix + user counts
+ *   POST /auth/roles            (Bearer, Admin) create role {name,matrix}
+ *   PATCH /auth/roles/:rowid    (Bearer, Admin) update {name?,matrix?} (not Admin)
+ *   DELETE /auth/roles/:rowid   (Bearer, Admin) delete unreferenced role (not Admin)
  *   GET  /auth/users            (Bearer, Admin) list users
  *   POST /auth/users            (Bearer, Admin) create user {email,name,password,role}
  *   PATCH /auth/users/:rowid    (Bearer, Admin) update {name?,password?,role?,active?}
- * plus a global guard: every other route requires a valid Bearer token;
- * POST/PATCH need role.can_update, DELETE needs role.can_delete.
+ * plus a global guard: every other route requires a valid Bearer token and the
+ * matrix permission for its module+action (tables/business routes are mapped
+ * below; unmapped routes fall back to the legacy can_update/can_delete rules).
  */
 const crypto = require("crypto");
 
@@ -60,16 +70,114 @@ function parseFeatures(text) {
   }
 }
 
+/* ---- Permission model ----
+   module -> sidebar nav ids (features are derived from the matrix so the
+   client's hasFeature()/nav gating keeps working unchanged). */
+const MODULE_NAV = {
+  quotes: ["quotes"],
+  orders: ["byorder", "packing"],
+  customers: ["parties"],
+  items: ["design", "sizes", "pallets", "prod"],
+  stages: ["po", "qc", "containers", "fit", "loadplan", "loading", "final"],
+  invoices: ["invoices"],
+  reports: ["reports", "ops"],
+  settings: [], // settings pages live behind Admin-only routes, no nav ids
+};
+const MODULES = Object.keys(MODULE_NAV);
+const ACTIONS = ["view", "create", "edit", "delete", "export"];
+const APPROVABLES = ["Quote", "SalesOrder"];
+
+/* Datastore table -> module, for the generic CRUD guard. Tables not listed
+   (Currency, SalesPerson, Notification, logs, ...) use the legacy fallback. */
+const TABLE_MODULE = {
+  Quote: "quotes", QuoteItem: "quotes",
+  SalesOrder: "orders", OrderItem: "orders", OrderItemEvent: "orders",
+  PalletisedBatch: "orders", PalletisedBatchLine: "orders",
+  Customer: "customers",
+  Design: "items", DesignPallet: "items", Size: "items", Pallet: "items",
+  Brand: "items", Grade: "items", Finish: "items", Glaze: "items", Category: "items",
+  Container: "stages", ContainerLoading: "stages",
+  Invoice: "invoices",
+};
+
+/* Business route (first path segment) -> [module, action]. Approval verdicts
+   are re-checked inside the status handlers via perms.approve. */
+const ROUTE_PERM = {
+  "quote-with-items": ["quotes", "create"],
+  "update-quote-with-items": ["quotes", "edit"],
+  "quote-status": ["quotes", "edit"],
+  "so-with-items": ["orders", "create"],
+  "convert-quote": ["orders", "create"],
+  "so-status": ["orders", "edit"],
+  "close-pallet": ["stages", "edit"],
+  "production-log": ["stages", "edit"],
+  "load-container": ["stages", "edit"],
+  "dispatch": ["stages", "edit"],
+  "invoice-for-container": ["invoices", "create"],
+};
+
+function isAdminName(roleName) {
+  return String(roleName || "").trim().toLowerCase() === "admin";
+}
+
+/* Parse Role.matrix; a null/invalid matrix is synthesized from the legacy
+   features/can_update/can_delete columns so un-migrated roles keep working. */
+function roleMatrix(role) {
+  if (!role) return { modules: {}, approve: [] };
+  if (role.matrix) {
+    try {
+      const m = JSON.parse(role.matrix);
+      if (m && typeof m === "object" && m.modules)
+        return { modules: m.modules, approve: Array.isArray(m.approve) ? m.approve : [] };
+    } catch {
+      /* fall through to synthesis */
+    }
+  }
+  const features = parseFeatures(role.features);
+  const all = features.includes("*");
+  const up = String(role.can_update) === "true";
+  const del = String(role.can_delete) === "true";
+  const modules = {};
+  for (const mod of MODULES) {
+    if (!all && !MODULE_NAV[mod].some((id) => features.includes(id))) continue;
+    const acts = ["view", "export"];
+    if (up) acts.push("create", "edit");
+    if (del) acts.push("delete");
+    modules[mod] = acts;
+  }
+  return { modules, approve: [] };
+}
+
+function hasPerm(perms, module, action) {
+  const acts = (perms.matrix || {})[module];
+  return Array.isArray(acts) && acts.includes(action);
+}
+
+function derivedFeatures(matrix) {
+  const feats = ["dashboard"];
+  for (const [mod, acts] of Object.entries(matrix.modules)) {
+    if (Array.isArray(acts) && acts.includes("view")) feats.push(...(MODULE_NAV[mod] || []));
+  }
+  if (matrix.approve.length) feats.push("approvals");
+  return feats;
+}
+
 function publicUser(u, role) {
+  const roleName = role ? role.name : null;
+  const admin = isAdminName(roleName);
+  const matrix = roleMatrix(role);
+  const anyAct = (a) => Object.values(matrix.modules).some((acts) => Array.isArray(acts) && acts.includes(a));
   return {
     rowid: String(u.ROWID),
     email: u.email,
     name: u.name || u.email,
-    role: role ? role.name : null,
+    role: roleName,
     perms: {
-      features: role ? parseFeatures(role.features) : [],
-      can_update: role ? String(role.can_update) === "true" : false,
-      can_delete: role ? String(role.can_delete) === "true" : false,
+      features: !role ? [] : admin ? ["*"] : derivedFeatures(matrix),
+      can_update: admin || anyAct("create") || anyAct("edit"),
+      can_delete: admin || anyAct("delete"),
+      matrix: matrix.modules,
+      approve: admin ? APPROVABLES.slice() : matrix.approve,
     },
   };
 }
@@ -98,7 +206,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     if (user.role) {
       role = rowList(
         await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, name, features, can_update, can_delete FROM Role WHERE ROWID = ${user.role}`,
+          `SELECT ROWID, name, features, can_update, can_delete, matrix FROM Role WHERE ROWID = ${user.role}`,
         ),
       )[0];
     }
@@ -140,11 +248,39 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       req.authToken = token;
 
       if (path.startsWith("/auth/")) return next(); // auth routes do their own admin checks
+      if (isAdminName(entry.user.role)) return next(); // Admin bypasses the matrix
 
       const perms = entry.user.perms;
+      const seg = path.split("/")[1] || "";
+
+      // Business routes with an explicit module+action mapping.
+      const biz = ROUTE_PERM[seg];
+      if (biz) {
+        if (!hasPerm(perms, biz[0], biz[1]))
+          return res.status(403).json({ ok: false, error: `Your role cannot ${biz[1]} ${biz[0]}` });
+        return next();
+      }
+
+      if (READONLY_POST.has(path)) return next();
+
+      // Generic CRUD on a mapped table -> matrix check by HTTP method.
+      const module = TABLE_MODULE[seg];
+      if (module) {
+        const action =
+          req.method === "GET" ? "view"
+          : req.method === "DELETE" ? "delete"
+          : req.method === "PATCH" ? "edit"
+          : path.endsWith("/restore") ? "edit"
+          : "create";
+        if (!hasPerm(perms, module, action))
+          return res.status(403).json({ ok: false, error: `Your role cannot ${action} ${module}` });
+        return next();
+      }
+
+      // Legacy fallback: side tables and unmapped routes keep today's rules.
       if (req.method === "DELETE" && !perms.can_delete)
         return res.status(403).json({ ok: false, error: "Your role cannot delete records" });
-      if ((req.method === "POST" || req.method === "PATCH") && !READONLY_POST.has(path) && !perms.can_update)
+      if ((req.method === "POST" || req.method === "PATCH") && !perms.can_update)
         return res.status(403).json({ ok: false, error: "Your role is read-only" });
       return next();
     } catch (err) {
@@ -222,7 +358,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       if (user.role) {
         role = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, name, features, can_update, can_delete FROM Role WHERE ROWID = ${user.role}`,
+            `SELECT ROWID, name, features, can_update, can_delete, matrix FROM Role WHERE ROWID = ${user.role}`,
           ),
         )[0];
       }
@@ -260,32 +396,163 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     res.json({ ok: true, user: req.appUser });
   });
 
+  function assertAdmin(req) {
+    const role = req.appUser && req.appUser.role;
+    if (!role || String(role).trim().toLowerCase() !== "admin")
+      throw httpErr("Admin role required", 403);
+  }
+
+  /* Drop unknown modules/actions/doc-types from a client-supplied matrix. */
+  function sanitizeMatrix(input) {
+    const src = input && typeof input === "object" ? input : {};
+    const srcMods = src.modules && typeof src.modules === "object" ? src.modules : {};
+    const modules = {};
+    for (const mod of MODULES) {
+      const acts = Array.isArray(srcMods[mod]) ? srcMods[mod] : [];
+      const clean = ACTIONS.filter((a) => acts.includes(a));
+      if (clean.length) modules[mod] = clean;
+    }
+    const approve = APPROVABLES.filter((d) => Array.isArray(src.approve) && src.approve.includes(d));
+    return { modules, approve };
+  }
+
+  /* Legacy columns (features/can_update/can_delete) stay in sync with the
+     matrix so nothing that still reads them drifts. */
+  function legacyColumns(matrix) {
+    const anyAct = (a) => Object.values(matrix.modules).some((acts) => acts.includes(a));
+    return {
+      features: JSON.stringify(derivedFeatures(matrix)),
+      can_update: anyAct("create") || anyAct("edit"),
+      can_delete: anyAct("delete"),
+    };
+  }
+
+  async function loadRole(catalyst, rowid) {
+    const safe = String(rowid).replace(/\D/g, "");
+    return rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, name FROM Role WHERE ROWID = ${safe}`),
+    )[0];
+  }
+
   /* ---- GET /auth/roles ---- */
   app.get("/auth/roles", async (req, res) => {
     try {
       const catalyst = init(req);
       const roles = rowList(
-        await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, name, can_update, can_delete FROM Role ORDER BY name`),
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID, name, features, can_update, can_delete, matrix FROM Role ORDER BY name`,
+        ),
       );
+      const users = rowList(
+        await catalyst.zcql().executeZCQLQuery(`SELECT role FROM AppUser WHERE deleted_at is null`),
+      );
+      const counts = new Map();
+      for (const u of users) {
+        if (u.role) counts.set(String(u.role), (counts.get(String(u.role)) || 0) + 1);
+      }
       res.json({
         ok: true,
-        roles: roles.map((r) => ({
-          rowid: String(r.ROWID),
-          name: r.name,
-          can_update: String(r.can_update) === "true",
-          can_delete: String(r.can_delete) === "true",
-        })),
+        roles: roles.map((r) => {
+          const m = roleMatrix(r);
+          return {
+            rowid: String(r.ROWID),
+            name: r.name,
+            can_update: String(r.can_update) === "true",
+            can_delete: String(r.can_delete) === "true",
+            matrix: m.modules,
+            approve: m.approve,
+            users: counts.get(String(r.ROWID)) || 0,
+            locked: isAdminName(r.name),
+          };
+        }),
       });
     } catch (err) {
       sendErr(res, err);
     }
   });
 
-  function assertAdmin(req) {
-    const role = req.appUser && req.appUser.role;
-    if (!role || String(role).trim().toLowerCase() !== "admin")
-      throw httpErr("Admin role required", 403);
-  }
+  /* ---- POST /auth/roles (Admin) ---- */
+  app.post("/auth/roles", async (req, res) => {
+    try {
+      assertAdmin(req);
+      const name = String((req.body || {}).name || "").trim();
+      if (!name) throw httpErr("Role name is required", 400);
+      if (isAdminName(name)) throw httpErr('"Admin" is reserved', 400);
+      const catalyst = init(req);
+      const safe = name.replace(/'/g, "");
+      const dup = rowList(
+        await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Role WHERE name = '${safe}'`),
+      )[0];
+      if (dup) throw httpErr(`Role already exists: ${name}`, 409);
+      const matrix = sanitizeMatrix((req.body || {}).matrix);
+      const row = await catalyst.datastore().table("Role").insertRow({
+        name,
+        matrix: JSON.stringify(matrix),
+        ...legacyColumns(matrix),
+      });
+      res.json({ ok: true, rowid: String(row.ROWID) });
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
+
+  /* ---- PATCH /auth/roles/:rowid (Admin) ---- */
+  app.patch("/auth/roles/:rowid", async (req, res) => {
+    try {
+      assertAdmin(req);
+      const catalyst = init(req);
+      const role = await loadRole(catalyst, req.params.rowid);
+      if (!role) throw httpErr("Role not found", 404);
+      if (isAdminName(role.name)) throw httpErr("The Admin role cannot be modified", 403);
+
+      const patch = { ROWID: role.ROWID };
+      const body = req.body || {};
+      if (body.name !== undefined) {
+        const name = String(body.name || "").trim();
+        if (!name) throw httpErr("Role name is required", 400);
+        if (isAdminName(name)) throw httpErr('"Admin" is reserved', 400);
+        const safe = name.replace(/'/g, "");
+        const dup = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Role WHERE name = '${safe}'`),
+        )[0];
+        if (dup && String(dup.ROWID) !== String(role.ROWID)) throw httpErr(`Role already exists: ${name}`, 409);
+        patch.name = name;
+      }
+      if (body.matrix !== undefined) {
+        const matrix = sanitizeMatrix(body.matrix);
+        patch.matrix = JSON.stringify(matrix);
+        Object.assign(patch, legacyColumns(matrix));
+      }
+      await catalyst.datastore().table("Role").updateRow(patch);
+      sessionCache.clear(); // perms take effect on next request
+      res.json({ ok: true, rowid: String(role.ROWID) });
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
+
+  /* ---- DELETE /auth/roles/:rowid (Admin) ---- */
+  app.delete("/auth/roles/:rowid", async (req, res) => {
+    try {
+      assertAdmin(req);
+      const catalyst = init(req);
+      const role = await loadRole(catalyst, req.params.rowid);
+      if (!role) throw httpErr("Role not found", 404);
+      if (isAdminName(role.name)) throw httpErr("The Admin role cannot be deleted", 403);
+      const assigned = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID FROM AppUser WHERE role = ${role.ROWID} AND deleted_at is null`,
+        ),
+      );
+      if (assigned.length)
+        throw httpErr(`Role is assigned to ${assigned.length} user(s) — reassign them first`, 409);
+      await catalyst.datastore().table("Role").deleteRow(role.ROWID);
+      sessionCache.clear();
+      res.json({ ok: true, rowid: String(role.ROWID) });
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
 
   /* ---- GET /auth/users (Admin) ---- */
   app.get("/auth/users", async (req, res) => {

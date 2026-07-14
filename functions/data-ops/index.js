@@ -83,6 +83,8 @@ const ALLOWED = new Set([
   "TransactionSeries",
   "SalesPerson",
   "Currency",
+  "StatusTransition",
+  "Notification",
 ]);
 
 function assertTable(table) {
@@ -201,6 +203,46 @@ function summarize(payload) {
     return s.length > 480 ? s.slice(0, 480) + "…" : s;
   } catch {
     return "";
+  }
+}
+
+/* ----------------------------------------------------------------
+   StatusTransition — one row per status/stage flip on Quote /
+   SalesOrder / OrderItem, so time-in-state can be reported (OperationLog
+   only stores a truncated payload and can't answer aging queries).
+   ---------------------------------------------------------------- */
+async function logTransition(catalyst, t) {
+  const from = String(t.from_status ?? "");
+  const to = String(t.to_status ?? "");
+  if (from === to) return;
+  try {
+    await catalyst.datastore().table("StatusTransition").insertRow({
+      occurred_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      entity_type: t.entity_type,
+      entity_rowid: String(t.entity_rowid),
+      from_status: from,
+      to_status: to,
+      note: t.note || "",
+      actor: await currentActor(catalyst),
+    });
+  } catch (e) {
+    // Audit must never fail the primary operation.
+    console.error("StatusTransition write failed:", e && e.message);
+  }
+}
+
+/** In-app notification for one AppUser. Best-effort, never throws. */
+async function notifyUser(catalyst, recipientAppUser, text, link) {
+  if (!recipientAppUser) return;
+  try {
+    await catalyst.datastore().table("Notification").insertRow({
+      occurred_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      recipient: String(recipientAppUser),
+      text: String(text).slice(0, 240), // column is varchar(255)
+      link: link || "",
+    });
+  } catch (e) {
+    console.error("Notification write failed:", e && e.message);
   }
 }
 
@@ -569,7 +611,9 @@ app.post("/quote-with-items", async (req, res) => {
           expiry_date: body.expiry_date || undefined,
           payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
-          status: body.status || "Draft",
+          // Every quote is born Draft — approval is mandatory before Sent,
+          // so a crafted create can't mint a pre-approved quote.
+          status: "Draft",
           currency: body.currency || "INR",
           exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
@@ -642,6 +686,13 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
         const doc = docCompute(total, body);
+        // Status is never editable here (use /quote-status). Editing content
+        // invalidates a pending/granted approval → back to Draft.
+        const cur = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT status FROM Quote WHERE ROWID = ${quoteId}`),
+        )[0];
+        const curStatus = String((cur && cur.status) || "Draft");
+        const nextStatus = curStatus === "PendingApproval" || curStatus === "Approved" ? "Draft" : curStatus;
         await ds.table("Quote").updateRow({
           ROWID: quoteId,
           quote_number: body.quote_number || "",
@@ -650,7 +701,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           expiry_date: body.expiry_date || undefined,
           payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
-          status: body.status || "Draft",
+          status: nextStatus,
           currency: body.currency || "INR",
           exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
@@ -667,15 +718,36 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           tax_amount: doc.tax_amount,
           total_amount: doc.total_amount,
         });
+        if (nextStatus !== curStatus)
+          await logTransition(catalyst, {
+            entity_type: "Quote", entity_rowid: quoteId,
+            from_status: curStatus, to_status: nextStatus, note: "edited — approval reset",
+          });
 
         // Replace lines: delete existing QuoteItem rows for this quote, re-insert.
+        // converted_qty_boxes must survive the wholesale replace or a partially
+        // converted quote's over-conversion cap would reset — carry it by design.
         const oldRows = rowList(
-          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM QuoteItem WHERE quote = ${quoteId}`),
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, design, converted_qty_boxes FROM QuoteItem WHERE quote = ${quoteId}`,
+          ),
         );
+        const convertedByDesign = new Map();
+        for (const r of oldRows) {
+          if (r.design)
+            convertedByDesign.set(
+              String(r.design),
+              (convertedByDesign.get(String(r.design)) || 0) + (Number(r.converted_qty_boxes) || 0),
+            );
+        }
         for (const r of oldRows) await ds.table("QuoteItem").deleteRow(r.ROWID);
 
+        const carried = new Set();
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
+          // ponytail: carried converted qty lands on the first line of a design.
+          const carry = carried.has(designIds[i]) ? 0 : convertedByDesign.get(String(designIds[i])) || 0;
+          carried.add(designIds[i]);
           await ds.table("QuoteItem").insertRow({
             quote: quoteId,
             design: designIds[i],
@@ -686,9 +758,152 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
             description: it.line.description || "",
             sub_total: it.sub,
             final_total: it.sub,
+            converted_qty_boxes: carry,
           });
         }
         return { rowid: quoteId, data: { ROWID: quoteId, total_amount: doc.total_amount } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Business: Quote status machine. ALL quote status changes go through
+   here (the generic PATCH rejects Quote.status writes) so transitions
+   are validated, logged, and notified in one place.
+   body: { status, reason? }
+   ---------------------------------------------------------------- */
+const QUOTE_TRANSITIONS = {
+  Draft: ["PendingApproval"],
+  PendingApproval: ["Approved", "Draft"], // approver only (approve / reject with reason)
+  Approved: ["Sent"],
+  Sent: ["Accepted", "Rejected"],
+  Accepted: ["Rejected"], // customer can back out until conversion
+  Rejected: ["Draft"],
+};
+
+/* Approval verdicts need the role's approve list (Role.matrix) — or Admin. */
+function canApprove(req, docType) {
+  const u = req.appUser || {};
+  if (String(u.role || "").trim().toLowerCase() === "admin") return true;
+  return (((u.perms || {}).approve) || []).includes(docType);
+}
+
+app.post("/quote-status/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const quoteId = req.params.rowid;
+    const to = String((req.body || {}).status || "");
+    const reason = String((req.body || {}).reason || "").trim();
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "Quote", operation: "status", payload: { ROWID: quoteId, status: to, reason } },
+      async () => {
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, quote_number, status, conversion_flag, sales_person FROM Quote WHERE ROWID = ${quoteId}`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`Quote not found: ${quoteId}`, 404);
+        const q = rows[0];
+        if (q.conversion_flag && q.conversion_flag !== "None")
+          throw badRequest("Quote is already (partially) converted — status can no longer change", 409);
+
+        const from = String(q.status || "Draft");
+        if (!(QUOTE_TRANSITIONS[from] || []).includes(to))
+          throw badRequest(`Cannot move quote from ${from} to ${to}`, 409);
+        if (from === "PendingApproval" && !canApprove(req, "Quote"))
+          throw badRequest("Your role cannot approve or reject quotations", 403);
+        if (from === "PendingApproval" && to === "Draft" && !reason)
+          throw badRequest("A rejection reason is required");
+
+        await ds.table("Quote").updateRow({ ROWID: quoteId, status: to });
+        await logTransition(catalyst, {
+          entity_type: "Quote", entity_rowid: quoteId, from_status: from, to_status: to, note: reason,
+        });
+
+        // Approval verdicts ping the quote's salesperson in-app.
+        if (from === "PendingApproval" && q.sales_person) {
+          const sp = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT app_user FROM SalesPerson WHERE ROWID = ${q.sales_person}`,
+            ),
+          )[0];
+          const verdict = to === "Approved" ? "approved" : `rejected: ${reason}`;
+          await notifyUser(catalyst, sp && sp.app_user, `Quote ${q.quote_number} ${verdict}`, `#/quotes/${quoteId}`);
+        }
+        return { rowid: quoteId, data: { ROWID: quoteId, status: to } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Business: SalesOrder status machine — mirrors /quote-status. ALL SO
+   status changes go through here (the generic PATCH rejects
+   SalesOrder.status writes) so transitions are validated, logged, and
+   notified in one place. body: { status, reason? }
+   ---------------------------------------------------------------- */
+const SO_TRANSITIONS = {
+  Draft: ["PendingApproval"],
+  PendingApproval: ["Confirmed", "Draft"], // approver only (approve / reject with reason)
+  Confirmed: ["InProgress", "Cancelled"],
+  InProgress: ["Cancelled"],
+  Cancelled: ["Confirmed"],
+};
+
+app.post("/so-status/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const soId = req.params.rowid;
+    const to = String((req.body || {}).status || "");
+    const reason = String((req.body || {}).reason || "").trim();
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SalesOrder", operation: "status", payload: { ROWID: soId, status: to, reason } },
+      async () => {
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, order_number, status, sales_person FROM SalesOrder WHERE ROWID = ${soId}`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`Sales order not found: ${soId}`, 404);
+        const so = rows[0];
+
+        const from = String(so.status || "Draft");
+        if (!(SO_TRANSITIONS[from] || []).includes(to))
+          throw badRequest(`Cannot move sales order from ${from} to ${to}`, 409);
+        if (from === "PendingApproval" && !canApprove(req, "SalesOrder"))
+          throw badRequest("Your role cannot approve or reject sales orders", 403);
+        if (from === "PendingApproval" && to === "Draft" && !reason)
+          throw badRequest("A rejection reason is required");
+
+        await ds.table("SalesOrder").updateRow({ ROWID: soId, status: to });
+        await logTransition(catalyst, {
+          entity_type: "SalesOrder", entity_rowid: soId, from_status: from, to_status: to, note: reason,
+        });
+
+        // Approval verdicts ping the order's salesperson in-app.
+        if (from === "PendingApproval" && so.sales_person) {
+          const sp = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT app_user FROM SalesPerson WHERE ROWID = ${so.sales_person}`,
+            ),
+          )[0];
+          const verdict = to === "Confirmed" ? "approved" : `rejected: ${reason}`;
+          await notifyUser(catalyst, sp && sp.app_user, `Order ${so.order_number} ${verdict}`, `#/orders/${soId}`);
+        }
+        return { rowid: soId, data: { ROWID: soId, status: to } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -718,6 +933,125 @@ app.post("/so-with-items", async (req, res) => {
       catalyst,
       { table_name: "SalesOrder", operation: "insert", payload: body },
       async () => createSalesOrder(ds, body, { dMap, cMap, pMap, sMap, catalyst }),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Business: update an existing SalesOrder header + REPLACE its line
+   items — mirror of /update-quote-with-items. order_number is never
+   editable; status is never editable here (use /so-status).
+   ---------------------------------------------------------------- */
+app.post("/update-so-with-items/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const soId = req.params.rowid;
+    const dMap = await designMap(catalyst);
+    const cMap = await customerMap(catalyst);
+    const pMap = await paymentTermMap(catalyst);
+    const sMap = await salesPersonMap(catalyst);
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SalesOrder", operation: "update", payload: { ROWID: soId, ...body } },
+      async () => {
+        const cur = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, order_number FROM SalesOrder WHERE ROWID = ${soId}`,
+          ),
+        )[0];
+        if (!cur) throw badRequest(`Sales order not found: ${soId}`, 404);
+
+        // Once any work is recorded the lines are FK-referenced downstream
+        // (pallets, containers) — a wholesale line replace would orphan them.
+        const QTY_COLS = [
+          "produced_qty_boxes", "purchased_qty_boxes", "palletized_qty_boxes",
+          "loaded_qty_boxes", "dispatched_qty_boxes",
+        ];
+        const oldItems = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, ${QTY_COLS.join(", ")} FROM OrderItem WHERE sales_order = ${soId}`,
+          ),
+        );
+        if (oldItems.some((it) => QTY_COLS.some((c) => (Number(it[c]) || 0) > 0)))
+          throw badRequest("Work already recorded on this order — items can no longer be edited", 409);
+
+        // Validate everything up front — never write a header then fail on a line.
+        assertDateOrder(body.order_date, body.shipment_date, "order date", "shipment date");
+        const customer = resolveOrThrow(cMap, body.customer, "Customer");
+        const paymentTerm = resolveOptional(pMap, body.payment_term, "Payment term");
+        const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
+        const { items, total } = computeLines(body.lines);
+        const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
+
+        const doc = docCompute(total, body);
+        // Editing content invalidates a pending/granted approval → back to
+        // Draft ("Confirmed" is the approved state in SO_TRANSITIONS).
+        const curStatus = String(cur.status || "Draft");
+        const nextStatus = curStatus === "PendingApproval" || curStatus === "Confirmed" ? "Draft" : curStatus;
+        await ds.table("SalesOrder").updateRow({
+          ROWID: soId,
+          customer,
+          po_number: body.po_number || "",
+          order_date: body.order_date || undefined,
+          shipment_date: body.shipment_date || undefined,
+          payment_term: paymentTerm,
+          port_of_discharge: body.port_of_discharge || "",
+          status: nextStatus,
+          currency: body.currency || "INR",
+          exchange_rate: Number(body.exchange_rate) || 1,
+          remarks: body.remarks || "",
+          address: body.address || "",
+          box_branding: body.box_branding || "",
+          sales_person: salesPerson || undefined,
+          customer_notes: body.customer_notes || "",
+          terms: body.terms || "",
+          discount: doc.discount,
+          adjustment: doc.adjustment,
+          tax_type: doc.tax_type,
+          tax_pct: doc.tax_pct,
+          tax_amount: doc.tax_amount,
+          total_amount: doc.total_amount,
+        });
+        if (nextStatus !== curStatus)
+          await logTransition(catalyst, {
+            entity_type: "SalesOrder", entity_rowid: soId,
+            from_status: curStatus, to_status: nextStatus, note: "edited — approval reset",
+          });
+
+        // Replace lines wholesale — safe because the guard above proved no
+        // work quantities exist, so nothing downstream references these rows.
+        for (const r of oldItems) await ds.table("OrderItem").deleteRow(r.ROWID);
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          const l = it.line;
+          await ds.table("OrderItem").insertRow({
+            sales_order: soId,
+            design: designIds[i],
+            ordered_qty_boxes: Number(l.qty) || 0,
+            produced_qty_boxes: 0,
+            purchased_qty_boxes: 0,
+            qc_passed_qty_boxes: 0,
+            palletized_qty_boxes: 0,
+            loaded_qty_boxes: 0,
+            dispatched_qty_boxes: 0,
+            stage: l.stage || "po",
+            priority_level: l.priority || "normal",
+            due_date: l.due_date || undefined,
+            rate: Number(l.rate) || 0,
+            discount_pct: Number(l.discount) || 0,
+            description: l.description || "",
+            sub_total: it.sub,
+            final_total: it.sub,
+          });
+        }
+        return { rowid: soId, data: { ROWID: soId, order_number: cur.order_number, total_amount: doc.total_amount } };
+      },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
   } catch (err) {
@@ -772,8 +1106,13 @@ async function createSalesOrder(ds, body, maps) {
     shipment_date: body.shipment_date || undefined,
     payment_term: paymentTerm,
     port_of_discharge: body.port_of_discharge || "",
-    status: body.status || "Confirmed",
+    // Manual SOs start in Draft (approval flow); convert-quote passes
+    // "Confirmed" explicitly — the source quote already passed approval.
+    // Every order is born Draft — approval is mandatory (mirror of quotes),
+    // so a crafted create can't mint a pre-approved order.
+    status: "Draft",
     currency: body.currency || "INR",
+    exchange_rate: Number(body.exchange_rate) || 1,
     remarks: body.remarks || "",
     address: body.address || "",
     manual_so_number: body.manual_so_number || "",
@@ -847,6 +1186,43 @@ app.post("/convert-quote/:rowid", async (req, res) => {
           throw e;
         }
         const q = rows[0];
+
+        // Only Sent / Accepted / partially converted quotes can convert —
+        // Draft/PendingApproval/Approved would bypass the approval gate.
+        const effStatus = q.conversion_flag === "Partial" ? "PartiallyConverted" : String(q.status || "Draft");
+        if (q.conversion_flag === "Full" || !["Sent", "Accepted", "PartiallyConverted"].includes(effStatus))
+          throw badRequest(`Quote in status ${effStatus} cannot be converted`, 409);
+
+        // Cumulative over-conversion guard: requested qty per design must fit
+        // within quantity_boxes − converted_qty_boxes across the quote's lines.
+        // ponytail: lines keyed by design; two lines with the same design share one cap.
+        const qItems = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, design, quantity_boxes, converted_qty_boxes FROM QuoteItem WHERE quote = ${quoteId} AND deleted_at is null`,
+          ),
+        );
+        const remainingOf = (it) =>
+          Math.max(0, (Number(it.quantity_boxes) || 0) - (Number(it.converted_qty_boxes) || 0));
+        const reqByDesign = new Map();
+        for (const l of Array.isArray(body.lines) ? body.lines : []) {
+          const dId = resolveOrThrow(dMap, l.item, "Design");
+          reqByDesign.set(String(dId), (reqByDesign.get(String(dId)) || 0) + (Number(l.qty) || 0));
+        }
+        if (!reqByDesign.size) throw badRequest("At least one line is required");
+        for (const [dId, want] of reqByDesign) {
+          const lines = qItems.filter((it) => String(it.design) === dId);
+          // Designs not on the quote are allowed (user-added lines during
+          // conversion) — they land on the SO but never touch converted_qty.
+          if (!lines.length) continue;
+          const remaining = lines.reduce((s, it) => s + remainingOf(it), 0);
+          if (want <= 0) throw badRequest("Convert qty must be > 0");
+          if (want > remaining)
+            throw badRequest(
+              `Converting ${want} boxes exceeds the remaining ${remaining} on the quote line`,
+              409,
+            );
+        }
+
         const so = await createSalesOrder(
           ds,
           {
@@ -858,11 +1234,9 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             shipment_date: body.shipment_date || "",
             payment_term: body.payment_term,
             port_of_discharge: q.port_of_discharge,
-            status: "Confirmed",
-            // ponytail: SalesOrder has no exchange_rate column yet; copy
-            // q.exchange_rate here when SO/Invoice grow one.
             currency: q.currency,
-            remarks: `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
+            exchange_rate: q.exchange_rate,
+            remarks: body.remarks || `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
             address: q.address,
             // Carry the quote's Books-parity header fields onto the SO, allowing
             // the convert request to override per-field. Sales person carries by
@@ -883,11 +1257,27 @@ app.post("/convert-quote/:rowid", async (req, res) => {
           { dMap, cMap, pMap, sMap, catalyst },
         );
 
-        const flag = body.mode === "Partial" ? "Partial" : "Full";
-        await ds.table("Quote").updateRow({
-          ROWID: quoteId,
-          conversion_flag: flag,
-          status: flag === "Full" ? "Converted" : "PartiallyConverted",
+        // Bump converted_qty_boxes (fill lines in order within a design), then
+        // derive Full/Partial from what's actually left — never trust body.mode.
+        for (const [dId, want] of reqByDesign) {
+          let left = want;
+          for (const it of qItems.filter((x) => String(x.design) === dId)) {
+            if (left <= 0) break;
+            const add = Math.min(remainingOf(it), left);
+            if (add <= 0) continue;
+            it.converted_qty_boxes = (Number(it.converted_qty_boxes) || 0) + add;
+            await ds.table("QuoteItem").updateRow({ ROWID: it.ROWID, converted_qty_boxes: it.converted_qty_boxes });
+            left -= add;
+          }
+        }
+        // Lines whose design was deleted (SET-NULL) can never convert — ignore them.
+        const allDone = qItems.filter((it) => it.design).every((it) => remainingOf(it) === 0);
+        const flag = allDone ? "Full" : "Partial";
+        const newStatus = allDone ? "Converted" : "PartiallyConverted";
+        await ds.table("Quote").updateRow({ ROWID: quoteId, conversion_flag: flag, status: newStatus });
+        await logTransition(catalyst, {
+          entity_type: "Quote", entity_rowid: quoteId, from_status: effStatus, to_status: newStatus,
+          note: `→ ${so.data.order_number}`,
         });
         return { rowid: so.rowid, data: { so_rowid: so.rowid, quote_rowid: quoteId, conversion_flag: flag, order_number: so.data.order_number } };
       },
@@ -952,7 +1342,7 @@ async function closePallet(catalyst, ds, body) {
   // Aggregate per order item, then check palletized + new ≤ produced.
   const reqByOi = new Map();
   for (const l of lines) reqByOi.set(l.order_item, (reqByOi.get(l.order_item) || 0) + l.boxes);
-  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID, produced_qty_boxes, palletized_qty_boxes");
+  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage");
   for (const [oiId, reqBoxes] of reqByOi) {
     const oi = oiMap.get(oiId);
     if (!oi) throw badRequest(`OrderItem not found: ${oiId}`, 404);
@@ -987,6 +1377,10 @@ async function closePallet(catalyst, ds, body) {
     for (const [oiId, reqBoxes] of reqByOi) {
       const prev = Number(oiMap.get(oiId).palletized_qty_boxes) || 0;
       await ds.table("OrderItem").updateRow({ ROWID: oiId, palletized_qty_boxes: prev + reqBoxes, stage: "packing" });
+      await logTransition(catalyst, {
+        entity_type: "OrderItem", entity_rowid: oiId,
+        from_status: oiMap.get(oiId).stage || "", to_status: "packing",
+      });
       updatedOi.push({ id: oiId, prev });
       await ds.table("OrderItemEvent").insertRow({
         order_item: oiId,
@@ -1044,6 +1438,11 @@ app.post("/production-log", async (req, res) => {
         const patch = { ROWID: String(body.order_item), produced_qty_boxes: produced + qty };
         if (String(oi.stage || "po") === "po") patch.stage = "prod";
         await ds.table("OrderItem").updateRow(patch);
+        if (patch.stage)
+          await logTransition(catalyst, {
+            entity_type: "OrderItem", entity_rowid: body.order_item,
+            from_status: oi.stage || "po", to_status: patch.stage,
+          });
         return { rowid: ev.ROWID, data: { produced_qty_boxes: produced + qty, stage: patch.stage || oi.stage } };
       },
     );
@@ -1175,7 +1574,7 @@ async function loadContainer(catalyst, ds, body) {
     for (const ln of lineRows) {
       const oiRows = rowList(
         await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, palletized_qty_boxes, loaded_qty_boxes FROM OrderItem WHERE ROWID = ${ln.order_item}`,
+          `SELECT ROWID, palletized_qty_boxes, loaded_qty_boxes, stage FROM OrderItem WHERE ROWID = ${ln.order_item}`,
         ),
       );
       if (!oiRows.length) continue;
@@ -1183,6 +1582,10 @@ async function loadContainer(catalyst, ds, body) {
       const addQty = Number(ln.boxes) || 0;
       const next = Math.min((Number(oi.loaded_qty_boxes) || 0) + addQty, Number(oi.palletized_qty_boxes) || 0);
       await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, loaded_qty_boxes: next, stage: "loading" });
+      await logTransition(catalyst, {
+        entity_type: "OrderItem", entity_rowid: ln.order_item,
+        from_status: oi.stage || "", to_status: "loading",
+      });
       await ds.table("OrderItemEvent").insertRow({
         order_item: ln.order_item,
         event_type: "loaded",
@@ -1234,7 +1637,7 @@ async function dispatchContainer(catalyst, ds, containerId, body) {
     for (const ln of lineRows) {
       const oiRows = rowList(
         await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, loaded_qty_boxes, dispatched_qty_boxes FROM OrderItem WHERE ROWID = ${ln.order_item}`,
+          `SELECT ROWID, loaded_qty_boxes, dispatched_qty_boxes, stage FROM OrderItem WHERE ROWID = ${ln.order_item}`,
         ),
       );
       if (!oiRows.length) continue;
@@ -1242,6 +1645,10 @@ async function dispatchContainer(catalyst, ds, containerId, body) {
       const addQty = Number(ln.boxes) || 0;
       const next = Math.min((Number(oi.dispatched_qty_boxes) || 0) + addQty, Number(oi.loaded_qty_boxes) || 0);
       await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, dispatched_qty_boxes: next, stage: "final" });
+      await logTransition(catalyst, {
+        entity_type: "OrderItem", entity_rowid: ln.order_item,
+        from_status: oi.stage || "", to_status: "final",
+      });
       await ds.table("OrderItemEvent").insertRow({
         order_item: ln.order_item,
         event_type: "dispatched",
@@ -1634,13 +2041,35 @@ app.patch("/:table/:rowid", async (req, res) => {
       catalyst,
       { table_name: table, operation: "update", payload: req.body },
       async () => {
+        // Quote/SO status live behind their status-machine endpoints.
+        if (table === "Quote" && (patch.status !== undefined || patch.conversion_flag !== undefined))
+          throw badRequest("Quote status cannot be set directly — use /quote-status");
+        if (table === "SalesOrder" && patch.status !== undefined)
+          throw badRequest("Sales order status cannot be set directly — use /so-status");
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];
         if (nk && patch[nk] !== undefined) {
           await assertUnique(catalyst, table, nk, patch[nk], req.params.rowid);
         }
+        // OrderItem stage flips get a StatusTransition row; this PATCH is
+        // the one path all client stage writes converge on.
+        const transCol = table === "OrderItem" && patch.stage !== undefined ? "stage" : null;
+        let transFrom = null;
+        if (transCol) {
+          const prev = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ${transCol} FROM ${table} WHERE ROWID = ${req.params.rowid}`,
+            ),
+          )[0];
+          transFrom = prev ? String(prev[transCol] || "") : "";
+        }
         const row = await ds.table(table).updateRow(patch);
+        if (transCol)
+          await logTransition(catalyst, {
+            entity_type: table, entity_rowid: req.params.rowid,
+            from_status: transFrom, to_status: String(patch[transCol] || ""),
+          });
         delete _cache[table]; // FK-name lookup map is now stale
         return { rowid: (row && row.ROWID) || req.params.rowid, data: row };
       },

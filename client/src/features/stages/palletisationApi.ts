@@ -40,7 +40,7 @@ export interface PalletizableOrder {
  * Default (no opts): only items with available > 0 (produced − palletized) —
  * the global "Pallet Packing" work list. With `includeOrderId`, that one order
  * is returned in full (every line item, even available ≤ 0 and regardless of
- * stage) so the form can scope to a confirmed Master Order and surface lines
+ * stage) so the form can scope to a confirmed Sales Order and surface lines
  * that still need production. In preset mode ONLY that order is returned.
  */
 export function listPalletizable(opts?: { includeOrderId?: string }): Promise<{
@@ -96,7 +96,7 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
     if (preset && !isPreset) continue; // preset mode returns only the chosen order
     if (!byOrder.has(soId)) {
       const so = soById.get(soId);
-      const po = so ? str(so.po_number) || str(so.order_number) : soId;
+      const po = so ? str(so.order_number) || str(so.po_number) : soId;
       const party = so ? custName.get(str(so.customer)) || "" : "";
       byOrder.set(soId, {
         salesOrderId: soId,

@@ -3,7 +3,7 @@
    PalletisedBatch (produced → palletized); table reloads on success.
    KPI tiles above remain static prototype figures. */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -168,7 +168,11 @@ export function PalletPacking() {
                     <span style={{ marginRight: 6 }}>{o.flag}</span>
                     {o.party}
                   </td>
-                  <td className="mono">{o.poNumber}</td>
+                  <td className="mono">
+                    <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
+                      {o.poNumber}
+                    </Link>
+                  </td>
                   <td>
                     <span className="design-name">{o.design}</span>
                   </td>

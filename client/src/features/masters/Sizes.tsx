@@ -12,7 +12,7 @@
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -20,7 +20,7 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmtDateTime } from "@/lib/format";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { SizeForm } from "./SizeForm";
 import { bulkDeleteSizes, createSize, listSizes, type SizeInput, type SizeRow } from "./sizesApi";
 
@@ -30,7 +30,15 @@ const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 // Toggleable + reorderable columns (checkbox/# pinned outside the map).
 const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
-  { key: "code", label: "Size", render: (r) => <span className="chip size">{r.code || dash}</span> },
+  {
+    key: "code",
+    label: "Size",
+    render: (r) => (
+      <Link className="linkish" to={`/sizes/${r.id}`} onClick={(e) => e.stopPropagation()} title="View size">
+        <span className="chip size">{r.code || dash}</span>
+      </Link>
+    ),
+  },
   { key: "type", label: "Type", className: "muted", render: (r) => r.tileType || dash },
   {
     key: "thickness",
@@ -131,7 +139,8 @@ export function Sizes() {
     }
     setShowNew(false);
     toast.success("Size saved");
-    await load();
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/sizes/${encodeURIComponent(res.rowid)}`);
   };
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
@@ -192,7 +201,7 @@ export function Sizes() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          {canDelete() && (
+          {can("items", "delete") && (
             <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
               Delete
             </button>
@@ -212,7 +221,7 @@ export function Sizes() {
             <input type="text" placeholder="Search size…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {canUpdate() && (
+          {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
               <Icon name="plus" size={13} />

@@ -16,7 +16,7 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt, fmtDateTime } from "@/lib/format";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { ContainerForm } from "./ContainerForm";
 import { LoadBoard } from "./LoadBoard";
 import {
@@ -211,7 +211,7 @@ export function Containers() {
             <Icon name="clock" size={13} />
             Refresh
           </button>
-          {canUpdate() && (
+          {can("stages", "create") && (
             <button className="hbtn primary" onClick={() => setEditing({ row: null })}>
               <Icon name="plus" size={13} />
               New container
@@ -228,7 +228,7 @@ export function Containers() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          {canDelete() && (
+          {can("stages", "delete") && (
             <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
               Delete
             </button>

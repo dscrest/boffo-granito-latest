@@ -86,7 +86,7 @@ export async function downloadInvoicePdf(inv: InvoiceRow): Promise<void> {
         columns: [
           metaLines([
             ["Customer", inv.customerName],
-            ["Master Order", inv.orderNumber || undefined],
+            ["Sales Order", inv.orderNumber || undefined],
             ["Container", inv.containerNumber || undefined],
           ]),
           metaLines([

@@ -9,6 +9,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
+import { useModalA11y } from "@/ui/useModalA11y";
 import {
   DesignFields,
   blankDesign,
@@ -19,6 +20,7 @@ import {
 } from "./DesignForm";
 import {
   cachedDesigns,
+  createDesign,
   deleteDesign,
   listDesigns,
   updateDesign,
@@ -38,7 +40,7 @@ const EMPTY_LOOKUPS: DesignLookups = {
   partyBrandSeq: {},
 };
 
-export function DesignEdit() {
+export function DesignEdit({ clone }: { clone?: boolean } = {}) {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
@@ -64,8 +66,15 @@ export function DesignEdit() {
       const found = res.designs.find((d) => d.id === id) ?? null;
       setRow(found);
       if (found) {
-        setV(rowToValues(found));
-        setImages(found.images);
+        const seed = rowToValues(found);
+        if (clone) {
+          // Fresh short code (assigned on create) + a distinct name so the
+          // computed unique_name doesn't collide with the source. No images.
+          seed.seq_code = "";
+          seed.design_name = `Copy of ${seed.design_name}`.trim();
+        }
+        setV(seed);
+        setImages(clone ? [] : found.images);
       } else setError("Design not found.");
     })();
     return () => {
@@ -86,8 +95,9 @@ export function DesignEdit() {
     }
     const input = toDesignInput(v, lookups, images);
     // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
+    // A clone is a new row, so it must not match ANY existing item (no self-exclude).
     const dup = (cachedDesigns() || []).find(
-      (d) => d.id !== id && d.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase(),
+      (d) => (clone || d.id !== id) && d.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase(),
     );
     if (dup) {
       toast.error(`An item named "${input.unique_name}" already exists`);
@@ -95,15 +105,15 @@ export function DesignEdit() {
     }
     setBusy(true);
     setError(null);
-    const res = await updateDesign(id, input);
+    const res = clone ? await createDesign(input) : await updateDesign(id, input);
     setBusy(false);
     if (!res.ok) {
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    toast.success("Design updated");
-    navigate(`/design/${id}`);
+    toast.success(clone ? "Item created" : "Design updated");
+    navigate(`/design/${clone ? res.rowid : id}`);
   };
 
   const onDelete = async () => {
@@ -126,6 +136,59 @@ export function DesignEdit() {
     () => [row?.sizeLabel, row?.finishLabel, row?.brandLabel].filter(Boolean).join(" · "),
     [row],
   );
+
+  // Esc / focus-trap only apply to the clone modal; the edit page keeps its
+  // full-page chrome and never attaches this ref (so onClose is a no-op there).
+  const panelRef = useModalA11y(clone ? () => navigate("/design") : () => {});
+
+  // Clone reuses the create-item modal presentation (centered dialog, note on
+  // the left) rather than the full-page edit surface.
+  if (clone) {
+    return (
+      <div className="modal-backdrop">
+        <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 820 }} onClick={(e) => e.stopPropagation()}>
+          <div className="df-head">
+            <div className="ico">
+              <Icon name="tile" size={18} />
+            </div>
+            <div>
+              <div className="ttl">{loading ? "Loading…" : row ? `Clone ${row.designName}` : "Item not found"}</div>
+              <div className="sub2">Item master · saved to Catalyst Data Store</div>
+            </div>
+            <button className="btn x" onClick={() => navigate("/design")} title="Close">
+              ✕
+            </button>
+          </div>
+
+          {error && (
+            <div className="df-body" style={{ color: "var(--c-red)" }}>
+              {error}
+            </div>
+          )}
+
+          {row && (
+            <>
+              <div className="df-body">
+                <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode="create" />
+              </div>
+              <div className="df-foot">
+                <span className="df-req-note">
+                  {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
+                </span>
+                <button className="btn" disabled={busy} onClick={() => navigate("/design")}>
+                  Cancel
+                </button>
+                <button className="hbtn primary" disabled={busy} onClick={() => void onSave()}>
+                  <Icon name="check" size={13} />
+                  {busy ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

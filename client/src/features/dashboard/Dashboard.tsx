@@ -5,6 +5,7 @@ import { Icon } from "@/ui/Icon";
 import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, pct } from "@/lib/format";
+import { can } from "@/lib/auth";
 import { exportCsv } from "@/lib/csv";
 import { STAGES } from "@/data";
 import type { Order } from "@/data";
@@ -131,10 +132,12 @@ export function Dashboard() {
           </div>
         </div>
         <div className="right">
-          <button className="hbtn" onClick={onExport} title="Export current orders to CSV">
-            <Icon name="download" size={13} />
-            Export
-          </button>
+          {can("orders", "export") && (
+            <button className="hbtn" onClick={onExport} title="Export current orders to CSV">
+              <Icon name="download" size={13} />
+              Export
+            </button>
+          )}
           <button
             className={`hbtn${range === "week" ? " primary" : ""}`}
             onClick={() => setRange((r) => (r === "week" ? "all" : "week"))}

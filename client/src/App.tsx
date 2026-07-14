@@ -12,7 +12,7 @@ import { ConfirmHost } from "@/ui/ConfirmDialog";
 import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { STAGES, type Order } from "@/data";
-import { checkSession, hasFeature, type SessionUser } from "@/lib/auth";
+import { canApprove, checkSession, hasFeature, type SessionUser } from "@/lib/auth";
 import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
 import boffoLogo from "@/assets/boffo-logo.png";
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
@@ -25,11 +25,10 @@ import { GlobalSearch } from "@/features/search/GlobalSearch";
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({ default: m.QuotesTable })));
 const QuoteDetail = lazy(() => import("@/features/quotes/QuoteDetail").then((m) => ({ default: m.QuoteDetail })));
+const Approvals = lazy(() => import("@/features/quotes/Approvals").then((m) => ({ default: m.Approvals })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
-// #21: "All Orders" list commented out — "By Order" (/byorder) is the primary orders page.
-// OrdersTable.tsx is kept (ByOrderView imports draftToInput from it); only the route/nav are removed.
-// const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
+const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
 const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })));
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
 const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
@@ -55,8 +54,10 @@ const SizeDetail = lazy(() => import("@/features/masters/SizeDetail").then((m) =
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
+const RolesAdmin = lazy(() => import("@/features/admin/Roles").then((m) => ({ default: m.RolesAdmin })));
 const SalesPersonsAdmin = lazy(() => import("@/features/admin/SalesPersons").then((m) => ({ default: m.SalesPersonsAdmin })));
 const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
+const SettingsHome = lazy(() => import("@/features/settings/SettingsHome").then((m) => ({ default: m.SettingsHome })));
 
 const TWEAK_DEFAULTS = {
   // BOFFO brand orange (#EF7F1A) — must match --accent in styles.css.
@@ -107,16 +108,15 @@ function navTree(): NavNode[] {
       children: [
         { id: "parties", label: "Customers", icon: "users" },
         { id: "quotes", label: "Quotes", icon: "quote" },
-        {
-          label: "Master Orders",
-          icon: "docs",
-          children: [
-            { id: "kanban", label: "Pipeline", icon: "kanban" },
-            { id: "byorder", label: "By Order", icon: "orders" },
-            // #21: "All Orders" page commented out — By Order is the primary list.
-            // { id: "orders", label: "All Orders", icon: "docs" },
-          ],
-        },
+        // Approval inbox — visible to any role that may approve quotes or
+        // sales orders (Role.matrix approve list; Admin always qualifies).
+        ...(canApprove("Quote") || canApprove("SalesOrder")
+          ? [{ id: "approvals", label: "Approvals", icon: "shield-check" }]
+          : []),
+        // Single "Sales Order" leaf — the List | Kanban toggle at the top of
+        // the page (ViewToggle) switches between /byorder and /kanban.
+        // #21: "All Orders" page commented out — By Order is the primary list.
+        { id: "byorder", label: "Sales Orders", icon: "orders" },
         { id: "packing", label: "Palletization", icon: "palette" },
       ],
     },
@@ -326,9 +326,9 @@ export default function App() {
     // Live-only: before the caches hydrate the badges show 0, never mock seeds.
     const ords = liveOrders ?? [];
     const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? 0, kanban: ords.length, orders: ords.length };
-    const distinctPOs = new Set<string>();
-    ords.forEach((o) => distinctPOs.add(`${o.poNumber}__${o.partyCode}`));
-    c.byorder = distinctPOs.size;
+    const distinctSOs = new Set<string>();
+    ords.forEach((o) => distinctSOs.add(o.salesOrderId || `${o.poNumber}__${o.partyCode}`));
+    c.byorder = distinctSOs.size;
     STAGES.forEach((s) => (c[s.id] = ords.filter((o) => o.stage === s.id).length));
     c.design = masterCounts.designs ?? 0;
     c.parties = masterCounts.parties ?? 0;
@@ -382,22 +382,9 @@ export default function App() {
         {/* Breadcrumbs removed 2026-07-06 — the sidebar shows location; search leads the header. */}
         <GlobalSearch />
         <NotificationBell />
-        <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/masters")}>
-          <Icon name="settings" size={13} />
-        </button>
         {isAdmin && (
-          <button className="hbtn" title="Sales Persons" aria-label="Sales Persons" onClick={() => navigate("/salespersons")}>
-            <Icon name="user" size={13} />
-          </button>
-        )}
-        {isAdmin && (
-          <button className="hbtn" title="Currencies" aria-label="Currencies" onClick={() => navigate("/currencies")}>
-            <Icon name="chart" size={13} />
-          </button>
-        )}
-        {isAdmin && (
-          <button className="hbtn" title="Users" aria-label="Users" onClick={() => navigate("/users")}>
-            <Icon name="users" size={13} />
+          <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/settings")}>
+            <Icon name="settings" size={13} />
           </button>
         )}
         <UserMenu user={user} />
@@ -413,11 +400,12 @@ export default function App() {
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
-            {/* #21: All Orders list route removed — see /byorder. */}
-            {/* <Route path="/orders" element={<OrdersTable />} /> */}
+            <Route path="/orders" element={<OrdersTable />} />
+
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
             <Route path="/design/:id/edit" element={<DesignEdit />} />
+            <Route path="/design/:id/clone" element={<DesignEdit clone />} />
             <Route path="/design/:id" element={<ItemDetail />} />
             <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />
@@ -437,10 +425,16 @@ export default function App() {
             <Route path="/pallets/:id" element={<PalletDetail />} />
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
+            <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/roles" element={isAdmin ? <RolesAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/salespersons" element={isAdmin ? <SalesPersonsAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/currencies" element={isAdmin ? <CurrenciesAdmin /> : <Navigate to="/dashboard" replace />} />
+            <Route
+              path="/approvals"
+              element={canApprove("Quote") || canApprove("SalesOrder") ? <Approvals /> : <Navigate to="/dashboard" replace />}
+            />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

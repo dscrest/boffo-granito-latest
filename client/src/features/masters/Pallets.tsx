@@ -9,7 +9,7 @@
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -17,7 +17,7 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt, fmtDateTime } from "@/lib/format";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { PalletForm } from "./PalletForm";
 import { bulkDeletePallets, createPallet, listPallets, type PalletInput, type PalletRow, type SizeOption } from "./palletsApi";
 
@@ -25,7 +25,15 @@ const dash = <span className="dim">—</span>;
 
 // Toggleable + reorderable columns (checkbox/# pinned outside the map).
 const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
-  { key: "name", label: "Name", render: (r) => <span className="chip">{r.name}</span> },
+  {
+    key: "name",
+    label: "Name",
+    render: (r) => (
+      <Link className="linkish" to={`/pallets/${r.id}`} onClick={(e) => e.stopPropagation()} title="View pallet">
+        <span className="chip">{r.name}</span>
+      </Link>
+    ),
+  },
   { key: "packing", label: "Packing", className: "muted mono", render: (r) => r.packingDetails || dash },
   {
     key: "size",
@@ -115,7 +123,8 @@ export function Pallets() {
     }
     setShowNew(false);
     toast.success("Pallet saved");
-    await load();
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/pallets/${encodeURIComponent(res.rowid)}`);
   };
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
@@ -176,7 +185,7 @@ export function Pallets() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          {canDelete() && (
+          {can("items", "delete") && (
             <button className="btn" onClick={() => void onBulkDelete()} disabled={busy}>
               Delete
             </button>
@@ -196,7 +205,7 @@ export function Pallets() {
             <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {canUpdate() && (
+          {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
               <Icon name="plus" size={13} />

@@ -78,6 +78,7 @@ export function QuoteForm({
   nextSeq,
   initial,
   presetCustomer,
+  clone,
   onSave,
   onClose,
 }: {
@@ -85,10 +86,13 @@ export function QuoteForm({
   initial?: Quote;
   /** Pre-fill the customer on a NEW quote (deep-link from customer detail). */
   presetCustomer?: string;
+  /** Clone mode: `initial` prefills every field, but this saves as a NEW quote
+      (fresh id/number, Draft status, no SO link) — not an edit of the source. */
+  clone?: boolean;
   onSave: (q: Quote) => void;
   onClose: () => void;
 }) {
-  const editing = !!initial;
+  const editing = !!initial && !clone;
   const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? presetCustomer ?? "",
@@ -99,7 +103,7 @@ export function QuoteForm({
     expiryDate: initial?.expiryDate ?? addDays(todayISO(), 15),
     paymentTerm: initial?.paymentTerm ?? "",
     portOfDischarge: initial?.portOfDischarge ?? "",
-    status: initial?.status ?? "Draft",
+    status: clone ? "Draft" : initial?.status ?? "Draft",
     currency: initial?.currency ?? "INR",
     remarks: initial?.remarks ?? "",
     salesperson: initial?.salesperson ?? "",
@@ -212,10 +216,10 @@ export function QuoteForm({
     onSave({
       ...h,
       exchangeRate: Number(fx) || 1,
-      id: initial?.id ?? newId().slice(0, 6).toUpperCase(),
-      quoteNo: initial?.quoteNo ?? `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
+      id: editing ? initial!.id : newId().slice(0, 6).toUpperCase(),
+      quoteNo: editing ? initial!.quoteNo : `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
       partyCode: party?.code ?? initial?.partyCode ?? "",
-      soNumber: initial?.soNumber ?? null,
+      soNumber: editing ? initial?.soNumber ?? null : null,
       docDiscount: charge.docDiscount,
       adjustment: charge.adjustment,
       taxType: charge.taxType,
@@ -235,9 +239,13 @@ export function QuoteForm({
             <Icon name="quote" size={18} />
           </div>
           <div>
-            <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : "New Quote"}</div>
+            <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : clone ? "Clone Quote" : "New Quote"}</div>
             <div className="sub2">
-              {editing ? "Editing saved quote — changes overwrite the database record" : "Sales quote"}
+              {editing
+                ? "Editing saved quote — changes overwrite the database record"
+                : clone
+                  ? `Copy of ${initial!.quoteNo} · saves as a new quote`
+                  : "Sales quote"}
             </div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
@@ -403,6 +411,10 @@ export function QuoteForm({
 
             <div className="qt-totals">
               <div className="row">
+                <span className="dim">Total Boxes</span>
+                <span className="mono">{fmt(totals.qty)}</span>
+              </div>
+              <div className="row">
                 <span className="dim">Gross</span>
                 <span className="mono">{h.currency} {fmt(totals.gross)}</span>
               </div>
@@ -425,6 +437,12 @@ export function QuoteForm({
                 <span>Net Total</span>
                 <span className="mono">{h.currency} {fmt(totals.net)}</span>
               </div>
+              {h.currency !== "INR" && (
+                <div className="row">
+                  <span className="dim" title={`At rate 1 ${h.currency} = ₹${Number(fx) || 1}`}>≈ INR</span>
+                  <span className="mono dim">₹ {fmt(totals.net * (Number(fx) || 1))}</span>
+                </div>
+              )}
             </div>
           </div>
 

@@ -7,7 +7,7 @@
    classes (page-head, fbar, card, tbl, btn, hbtn).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -16,13 +16,6 @@ import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
-
-/* Admin areas that have their own dedicated pages (not local-draft lookup
-   tables). Surfaced here as config tiles that route out to those pages. */
-const LINKS: { label: string; icon: string; route: string }[] = [
-  { label: "Sales Persons", icon: "user", route: "/salespersons" },
-  { label: "Users", icon: "users", route: "/users" },
-];
 
 type FieldType = "text" | "number" | "select";
 
@@ -415,9 +408,12 @@ function MasterTable({ def }: { def: MasterDef }) {
 }
 
 export function Masters() {
-  const [active, setActive] = useState(MASTERS[0].key);
+  // Deep-linkable from the Settings home (/masters?m=finish). HashRouter-safe.
+  const [params] = useSearchParams();
+  const [active, setActive] = useState(
+    () => MASTERS.find((m) => m.key === params.get("m"))?.key ?? MASTERS[0].key,
+  );
   const def = MASTERS.find((m) => m.key === active)!;
-  const navigate = useNavigate();
 
   return (
     <div>
@@ -434,13 +430,6 @@ export function Masters() {
         {MASTERS.map((m) => (
           <button key={m.key} className={`btn ${m.key === active ? "active" : ""}`} onClick={() => setActive(m.key)}>
             <Icon name={m.icon} size={12} className="ic" /> {m.label}
-          </button>
-        ))}
-        <div style={{ width: 1, alignSelf: "stretch", background: "var(--line, var(--border))", margin: "0 4px" }} />
-        {LINKS.map((l) => (
-          <button key={l.route} className="btn" onClick={() => navigate(l.route)} title={`Open ${l.label}`}>
-            <Icon name={l.icon} size={12} className="ic" /> {l.label}
-            <Icon name="arrow-r" size={11} style={{ marginLeft: 4, opacity: 0.5 }} />
           </button>
         ))}
       </div>

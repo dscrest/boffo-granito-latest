@@ -29,12 +29,50 @@ export function fmtLocalDateTime(s?: string): string {
   });
 }
 
+/** Catalyst datetime string → epoch ms (NaN when unparseable). Same
+    UTC-assumption as fmtLocalDateTime. */
+export function parseDbTime(s?: string): number {
+  if (!s) return NaN;
+  const iso = s.trim().replace(" ", "T").replace(/:(\d{3})$/, ".$1");
+  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : `${iso}Z`).getTime();
+}
+
+/** Milliseconds → compact human duration ("3d 4h", "2h 15m", "40s"). */
+export function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m % 1440) / 60);
+  if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`;
+  return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
 /* ------------------------------------------------------------------
    Activity-log humanisers — OperationLog stores an actor email and a
    raw JSON payload_summary. These turn both into something readable:
    "prashant@octfis.com" → "Prashant", {"status":"Inactive"} →
    "Status → Inactive".
    ------------------------------------------------------------------ */
+
+/** Raw OperationLog operation → user-friendly label for the Activity feed. */
+const OP_LABELS: Record<string, string> = {
+  insert: "Created",
+  update: "Updated",
+  delete: "Deleted",
+  "soft-delete": "Deleted",
+  restore: "Restored",
+  convert: "Converted",
+  status: "Status Change",
+  "close-pallet": "Pallet Closed",
+  "load-container": "Container Loaded",
+  dispatch: "Dispatched",
+  "production-log": "Production Update",
+};
+export function opLabel(operation?: string): string {
+  const op = (operation || "").trim();
+  return OP_LABELS[op.toLowerCase()] || op.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /** OperationLog actor (email / user_id / "system") → short display name. */
 export function actorName(actor?: string): string {

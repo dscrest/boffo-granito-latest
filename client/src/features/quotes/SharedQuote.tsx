@@ -181,6 +181,10 @@ export function SharedQuote() {
 
             <div style={{ marginTop: 14, marginLeft: "auto", maxWidth: 280, fontSize: 13 }}>
               <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Total Boxes</span>
+                <b className="mono">{fmt(totals.qty)}</b>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="muted">Gross</span>
                 <b className="mono">{quote.currency} {fmt(totals.gross)}</b>
               </div>

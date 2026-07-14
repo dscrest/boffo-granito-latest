@@ -20,7 +20,9 @@ export function QuickView({
   // Live orders (cache-first, so no extra fetch when opened from Kanban).
   const { orders } = useOrders();
   const lineItems = useMemo(() => {
-    const list = orders.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
+    const list = orders.filter((o) =>
+      order.salesOrderId ? o.salesOrderId === order.salesOrderId : o.poNumber === order.poNumber && o.partyCode === order.partyCode,
+    );
     return list.length > 0 ? list : [order];
   }, [orders, order]);
 
@@ -87,9 +89,9 @@ export function QuickView({
     <div ref={popRef} className="qv-pop" style={{ top: pos.top, left: pos.left }} onClick={(e) => e.stopPropagation()}>
       <div className="qv-head">
         <div>
-          <div className="lbl">Line items in PO</div>
+          <div className="lbl">Line items in order</div>
           <div className="po">
-            {order.poNumber} · {order.flag} {order.party}
+            {order.orderNumber || order.poNumber} · {order.flag} {order.party}
           </div>
         </div>
         <div className="right">

@@ -9,14 +9,21 @@
    and the palletisation feed; no extra backend.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { fmt, pct } from "@/lib/format";
+import { can } from "@/lib/auth";
+import { exportCsv } from "@/lib/csv";
+import { fmt, pct, fmtDuration, fmtLocalDateTime, parseDbTime } from "@/lib/format";
 import { ProgressBar } from "@/ui/primitives";
 import { useOrders } from "@/features/orders/useOrders";
 import { listLoadableBatches, type LoadableBatch } from "@/features/stages/palletisationApi";
+import { listAll, type DSRow } from "@/lib/dataOps";
+import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
+import { STATUS_CHIP, STATUS_LABEL } from "@/features/quotes/QuotesTable";
+import type { Quote } from "@/data";
 
-type Tab = "item" | "po" | "ready";
+type Tab = "item" | "po" | "ready" | "aging";
 
 interface QtyRow {
   key: string;
@@ -101,15 +108,40 @@ export function Reports() {
           <div className="title">Quantity Reports</div>
           <div className="sub">Ordered vs produced vs remaining · ready pallets — live data</div>
         </div>
+        {(tab === "item" || tab === "po") && can("reports", "export") && (
+          <div className="right">
+            <button
+              className="hbtn"
+              title="Export the current report as CSV"
+              onClick={() =>
+                exportCsv(tab === "item" ? "report-by-item" : "report-by-po", rows, [
+                  { header: tab === "item" ? "Design" : "PO Number", value: (r) => r.label },
+                  { header: tab === "item" ? "Spec" : "Customer", value: (r) => r.sub },
+                  { header: "Ordered", value: (r) => r.ordered },
+                  { header: "Produced", value: (r) => r.produced },
+                  { header: "Remaining", value: (r) => r.ordered - r.produced },
+                  { header: "Palletized", value: (r) => r.palletized },
+                  { header: "Loaded", value: (r) => r.loaded },
+                ])
+              }
+            >
+              <Icon name="docs" size={13} />
+              Export
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
         <TabBtn active={tab === "item"} onClick={() => setTab("item")} label="By Item" />
         <TabBtn active={tab === "po"} onClick={() => setTab("po")} label="By PO" />
         <TabBtn active={tab === "ready"} onClick={() => setTab("ready")} label="Ready Pallets" />
+        <TabBtn active={tab === "aging"} onClick={() => setTab("aging")} label="Quote Aging" />
       </div>
 
-      {tab !== "ready" && (
+      {tab === "aging" && <QuoteAging />}
+
+      {(tab === "item" || tab === "po") && (
         <>
           {error && <ErrorCard message={error} onRetry={reload} />}
           {showSkeleton ? (
@@ -156,7 +188,7 @@ export function Reports() {
                     {rows.length === 0 && !loading && (
                       <tr>
                         <td colSpan={8} style={{ padding: 0 }}>
-                          <EmptyState icon="orders" title="No order data yet" hint="Create a master order to populate the report." />
+                          <EmptyState icon="orders" title="No order data yet" hint="Create a sales order to populate the report." />
                         </td>
                       </tr>
                     )}
@@ -213,6 +245,91 @@ export function Reports() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/* Quote Aging — "where is my work stuck": every non-converted quote with
+   its current status and how long it has sat there (since the last
+   StatusTransition, else since creation). Longest-stuck first. */
+function QuoteAging() {
+  const navigate = useNavigate();
+  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  const [transitions, setTransitions] = useState<DSRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listQuotes().then((res) => {
+      if (!res.ok) setError(res.error || "Failed to load quotes");
+      else setQuotes(res.quotes);
+    });
+    void listAll("StatusTransition").then((res) => {
+      if (!res.ok) setError(res.error || "Failed to load transitions");
+      else setTransitions(res.rows || []);
+    });
+  }, []);
+
+  const rows = useMemo(() => {
+    if (transitions === null) return null;
+    // Latest transition per quote (rows come in insertion order; keep max ROWID).
+    const latest = new Map<string, DSRow>();
+    for (const t of transitions) {
+      if (String(t.entity_type) !== "Quote") continue;
+      const k = String(t.entity_rowid);
+      const prev = latest.get(k);
+      if (!prev || BigInt(String(t.ROWID)) > BigInt(String(prev.ROWID))) latest.set(k, t);
+    }
+    const now = Date.now();
+    return quotes
+      .filter((q) => q.status !== "Converted")
+      .map((q) => {
+        const t = latest.get(q.id);
+        const since = String(t?.occurred_at || t?.CREATEDTIME || q.createdTime || "");
+        const ms = now - parseDbTime(since);
+        return { q, since, ms: Number.isFinite(ms) ? ms : 0 };
+      })
+      .sort((a, b) => b.ms - a.ms);
+  }, [quotes, transitions]);
+
+  if (error) return <ErrorCard message={error} />;
+  if (rows === null) return <SkeletonRows rows={8} />;
+  return (
+    <div className="card">
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Quote No</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>In Status Since</th>
+              <th className="num" style={{ textAlign: "right" }}>Time in Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ q, since, ms }) => (
+              <tr key={q.id} onClick={() => navigate(`/quotes/${q.id}`)} style={{ cursor: "pointer" }} title="Open quote">
+                <td className="mono">
+                  <Link className="linkish" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()} title="Open quote">
+                    {q.quoteNo}
+                  </Link>
+                </td>
+                <td>{q.customer}</td>
+                <td><span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span></td>
+                <td className="muted">{fmtLocalDateTime(since)}</td>
+                <td className="num mono">{fmtDuration(ms)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: 0 }}>
+                  <EmptyState icon="clock" title="No open quotes" hint="Every quote is converted — nothing is aging." />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

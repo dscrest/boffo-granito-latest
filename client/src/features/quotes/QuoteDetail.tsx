@@ -10,24 +10,26 @@
    ColumnPicker show/hides and reorders Details rows, persisted
    per-browser in localStorage.
 
-   Reuses the existing QuoteForm / QuotePrint / ConvertDialog modals and
+   Reuses the existing QuoteForm / QuotePrint modals (conversion opens the
+   shared OrderForm in convert mode) and
    the quotesApi cache — no new backend.
    ============================================================ */
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
-import { canDelete } from "@/lib/auth";
+import { can, canApprove } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { ActivityLog } from "@/features/common/RecordDetail";
+import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
-import { ConvertDialog } from "./ConvertDialog";
+import { OrderForm, type OrderDraft } from "@/features/orders/OrderForm";
+import { invalidateOrders } from "@/features/orders/ordersApi";
 import {
   STATUS_CHIP,
   STATUS_LABEL,
@@ -36,11 +38,13 @@ import {
 } from "./QuotesTable";
 import {
   cachedQuotes,
+  convertQuote,
+  createQuote,
   deleteQuote,
   ensureShareToken,
   invalidateQuotes,
   listQuotes,
-  updateQuote,
+  setQuoteStatus,
   updateQuoteWithItems,
 } from "./quotesApi";
 
@@ -58,7 +62,7 @@ const FIELDS: FieldDef[] = [
   { key: "paymentTerm", label: "Payment Term", value: (q) => q.paymentTerm || "—" },
   { key: "portOfDischarge", label: "Port of Discharge", value: (q) => q.portOfDischarge || "—" },
   { key: "currency", label: "Currency", value: (q) => q.currency },
-  { key: "soNumber", label: "Master Order", value: (q) => q.soNumber || "—" },
+  { key: "soNumber", label: "Sales Order", value: (q) => q.soNumber || "—" },
   { key: "customer", label: "Customer", value: (q) => q.customer || "—" },
   { key: "created", label: "Created", value: (q) => fmtDateTime(q.createdTime) },
   { key: "modified", label: "Modified", value: (q) => fmtDateTime(q.modifiedTime) },
@@ -88,6 +92,7 @@ export function QuoteDetail() {
   const [listQ, setListQ] = useState("");
 
   const [editing, setEditing] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [converting, setConverting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -128,18 +133,28 @@ export function QuoteDetail() {
   };
 
   // #16: Zoho-Books-style status transitions from the top bar (no form open).
-  const changeStatus = async (next: QuoteStatus, label: string) => {
+  // Server-side state machine (/quote-status) validates every move.
+  const changeStatus = async (next: QuoteStatus, label: string, opts?: { askReason?: boolean; reasonRequired?: boolean }) => {
     if (!quote) return;
-    setBusy(`${label}…`);
-    try {
-      await updateQuote(quote.id, { status: next });
-      await load();
-      toast.success(label);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Status update failed");
-    } finally {
-      setBusy(null);
+    let reason = "";
+    if (opts?.askReason) {
+      const r = window.prompt(opts.reasonRequired ? "Rejection reason (required):" : "Reason (optional):", "");
+      if (r === null) return; // cancelled
+      reason = r.trim();
+      if (opts.reasonRequired && !reason) {
+        toast.error("A rejection reason is required");
+        return;
+      }
     }
+    setBusy(`${label}…`);
+    const res = await setQuoteStatus(quote.id, next, reason || undefined);
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.error || "Status update failed");
+      return;
+    }
+    await load();
+    toast.success(label);
   };
 
   const load = async () => {
@@ -211,6 +226,71 @@ export function QuoteDetail() {
     await load();
   };
 
+  // Clone: same header + lines into a fresh Draft quote (new number, no SO
+  // link). QuoteForm.clone resets the identity fields; we just create + go.
+  const onCloneSave = async (q: Quote) => {
+    setCloning(false);
+    setBusy(`Creating ${q.quoteNo}…`);
+    const res = await createQuote(quoteToInput(q));
+    if (!res.ok) {
+      setBusy(null);
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setBusy(null);
+    toast.success(`Quote ${q.quoteNo} created`);
+    invalidateQuotes();
+    if (res.rowid) navigate(`/quotes/${encodeURIComponent(res.rowid)}`);
+    // Same-route navigation reuses this component — reload so the new id resolves.
+    await load();
+  };
+
+  // Convert via the shared OrderForm (convert mode). The server re-derives
+  // Full/Partial from what's actually left; mode here only tags the remarks.
+  const onConvert = async (d: OrderDraft) => {
+    if (!quote || busy) return;
+    const lines = d.lines.map((l) => ({
+      item: l.design,
+      qty: parseInt(l.ordered_qty_boxes, 10) || 0,
+      rate: parseFloat(l.rate) || 0,
+      discount: parseFloat(l.discount) || 0,
+      description: l.description || "",
+    }));
+    const req = new Map<string, number>();
+    for (const l of lines) req.set(l.item, (req.get(l.item) || 0) + l.qty);
+    const isFull = quote.lines.every((l) => {
+      const rem = Math.max(0, (l.qty || 0) - (l.converted || 0));
+      return rem === 0 || (req.get(l.item) || 0) >= rem;
+    });
+    setBusy("Converting…");
+    const res = await convertQuote(quote.id, isFull ? "Full" : "Partial", lines, {
+      po_number: d.po_number,
+      order_date: d.order_date,
+      shipment_date: d.shipment_date,
+      payment_term: d.payment_term,
+      salesperson: d.salesperson,
+      customer_notes: d.customer_notes,
+      terms: d.terms,
+      remarks: d.remarks,
+      // #17: doc-level discount removed from SOs — never inherit the quote's.
+      discount: 0,
+      adjustment: Number(d.adjustment) || 0,
+      tax_type: d.taxType,
+      tax_pct: Number(d.taxPct) || 0,
+    });
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.error || "Convert failed");
+      return;
+    }
+    setConverting(false);
+    toast.success(`Quote converted to ${res.data?.order_number || "Sales Order"}`);
+    invalidateQuotes();
+    invalidateOrders();
+    // Land on the new Sales Order's detail page (not the list).
+    navigate(`/orders/${res.rowid}`);
+  };
+
   const onDelete = async () => {
     if (!quote) return;
     if (!(await confirmDialog({ message: `Are you sure you want to delete quote ${quote.quoteNo}? This cannot be undone.`, danger: true }))) return;
@@ -262,11 +342,12 @@ export function QuoteDetail() {
     : quotes;
 
   const moreItems = [
-    ...(canConvert ? [{ label: "Convert to Master Order", onClick: () => setConverting(true) }] : []),
+    ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => setConverting(true) }] : []),
+    ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
     { label: "Copy Share Link", onClick: () => void onShare() },
-    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("quotes", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -274,15 +355,21 @@ export function QuoteDetail() {
       {editing && (
         <QuoteForm nextSeq={0} initial={quote} onSave={onEditSave} onClose={() => setEditing(false)} />
       )}
+      {cloning && quote && (
+        <QuoteForm
+          nextSeq={quotes.length + 1}
+          initial={quote}
+          clone
+          onSave={onCloneSave}
+          onClose={() => setCloning(false)}
+        />
+      )}
       {printing && <QuotePrint quote={quote} onClose={() => setPrinting(false)} />}
       {converting && (
-        <ConvertDialog
-          quote={quote}
+        <OrderForm
+          convert={{ quote }}
           onClose={() => setConverting(false)}
-          onConverted={() => {
-            setConverting(false);
-            invalidateQuotes();
-          }}
+          onSave={(d: OrderDraft) => void onConvert(d)}
         />
       )}
 
@@ -313,10 +400,9 @@ export function QuoteDetail() {
           {listed.map((x) => {
             const cur = x.id === id;
             return (
-              <button
+              <Link
                 key={x.id}
-                type="button"
-                onClick={() => navigate(`/quotes/${x.id}`)}
+                to={`/quotes/${x.id}`}
                 style={{
                   display: "block",
                   width: "100%",
@@ -327,6 +413,8 @@ export function QuoteDetail() {
                   background: cur ? "var(--accent-soft)" : "transparent",
                   cursor: "pointer",
                   font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
                 title={x.quoteNo}
               >
@@ -336,7 +424,7 @@ export function QuoteDetail() {
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
                   {[x.customer, STATUS_LABEL[x.status]].filter(Boolean).join("  ·  ")}
                 </div>
-              </button>
+              </Link>
             );
           })}
           {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching quotes</div>}
@@ -356,21 +444,59 @@ export function QuoteDetail() {
             <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{quote.quoteNo}</span>
             <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`}>{STATUS_LABEL[quote.status]}</span>
           </div>
-          {/* #16: status transitions (Zoho Books style). */}
+          {/* #16: status transitions (Zoho Books style) — approval workflow:
+              Draft → PendingApproval → (admin) Approved → Sent → Accepted/Rejected. */}
           {quote.status === "Draft" && (
-            <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Sent", "Marked as sent")} title="Mark as sent">
+            <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("PendingApproval", "Submitted for approval")} title="Send to admin for approval">
+              <Icon name="check" size={13} /> Submit for Approval
+            </button>
+          )}
+          {quote.status === "PendingApproval" && canApprove("Quote") && (
+            <>
+              <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Approved", "Quote approved")} title="Approve this quote">
+                <Icon name="check" size={13} /> Approve
+              </button>
+              <button
+                className="hbtn"
+                disabled={!!busy}
+                onClick={() => void changeStatus("Draft", "Rejected — back to draft", { askReason: true, reasonRequired: true })}
+                title="Reject with a reason (returns to Draft)"
+                style={{ color: "var(--c-red)" }}
+              >
+                <Icon name="x" size={13} /> Reject
+              </button>
+            </>
+          )}
+          {quote.status === "Approved" && (
+            <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Sent", "Marked as sent")} title="Mark as sent to customer">
               <Icon name="check" size={13} /> Mark As Sent
             </button>
           )}
           {quote.status === "Sent" && (
             <>
-              <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Accepted", "Marked accepted")} title="Mark accepted">
+              <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("Accepted", "Marked accepted")} title="Customer accepted">
                 <Icon name="check" size={13} /> Accept
               </button>
-              <button className="hbtn" disabled={!!busy} onClick={() => void changeStatus("Rejected", "Marked rejected")} title="Mark rejected" style={{ color: "var(--c-red)" }}>
+              <button className="hbtn" disabled={!!busy} onClick={() => void changeStatus("Rejected", "Marked rejected", { askReason: true })} title="Customer rejected" style={{ color: "var(--c-red)" }}>
                 <Icon name="x" size={13} /> Reject
               </button>
             </>
+          )}
+          {quote.status === "Accepted" && (
+            <button
+              className="hbtn"
+              disabled={!!busy}
+              onClick={() => void changeStatus("Rejected", "Marked rejected", { askReason: true })}
+              title="Customer backed out before conversion"
+              style={{ color: "var(--c-red)" }}
+            >
+              <Icon name="x" size={13} /> Reject
+            </button>
+          )}
+          {quote.status === "Rejected" && (
+            <button className="hbtn" disabled={!!busy} onClick={() => void changeStatus("Draft", "Moved to draft")} title="Revise this quote">
+              <Icon name="edit" size={13} /> Move to Draft
+            </button>
           )}
           <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">
             <Icon name="edit" size={13} /> Edit
@@ -381,14 +507,15 @@ export function QuoteDetail() {
           </button>
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-          <span
-            style={{ color: "var(--accent)", cursor: "pointer" }}
-            title="Open customer"
-            onClick={() => navigate(`/parties/${encodeURIComponent(quote.partyCode)}`)}
-          >
+          <Link className="linkish" to={`/parties/${encodeURIComponent(quote.partyCode)}`} title="Open customer">
             {quote.customer}
-          </span>
+          </Link>
           {" "}· Total {quote.currency} {fmt(totals.net)}
+          {quote.currency !== "INR" && (
+            <span title={`Base currency (INR) at frozen rate ${quote.exchangeRate || 1}`}>
+              {" "}· ≈ ₹ {fmt(totals.net * (quote.exchangeRate || 1))}
+            </span>
+          )}
           {busy && (
             <>
               {" · "}
@@ -473,14 +600,14 @@ export function QuoteDetail() {
                 <div className="form-field" key={f.key} style={f.wide ? { gridColumn: "1 / -1" } : undefined}>
                   <span className="lbl">{f.label}</span>
                   {f.key === "soNumber" && quote.soNumber && quote.soId ? (
-                    <button
+                    <Link
                       className="linkish"
-                      style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit", textAlign: "left" }}
-                      onClick={() => navigate(`/orders/${quote.soId}`)}
-                      title="Open Master Order"
+                      style={{ textAlign: "left" }}
+                      to={`/orders/${quote.soId}`}
+                      title="Open Sales Order"
                     >
                       {quote.soNumber}
-                    </button>
+                    </Link>
                   ) : (
                     <span style={{ color: "var(--fg)" }}>{f.value(quote)}</span>
                   )}
@@ -532,11 +659,52 @@ export function QuoteDetail() {
                 </tbody>
               </table>
             </div>
-            <div className="row" style={{ justifyContent: "flex-end", gap: 24, padding: "12px 16px", borderTop: "1px solid var(--border)" }}>
-              <span className="dim">Net Total</span>
-              <span className="mono" style={{ fontSize: "var(--t-lg)", color: "var(--fg)" }}>
-                {quote.currency} {fmt(totals.net)}
-              </span>
+            {/* Full totals breakdown (mirrors the customer share view) + qty + BCY. */}
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 16px 12px" }}>
+              <div className="qt-totals">
+                <div className="row">
+                  <span className="dim">Total Boxes</span>
+                  <span className="mono">{fmt(totals.qty)}</span>
+                </div>
+                <div className="row">
+                  <span className="dim">Gross</span>
+                  <span className="mono">{quote.currency} {fmt(totals.gross)}</span>
+                </div>
+                {totals.discount > 0 && (
+                  <div className="row">
+                    <span className="dim">Line Discount</span>
+                    <span className="mono">− {fmt(totals.discount)}</span>
+                  </div>
+                )}
+                {totals.docDiscount > 0 && (
+                  <div className="row">
+                    <span className="dim">Discount</span>
+                    <span className="mono">− {fmt(totals.docDiscount)}</span>
+                  </div>
+                )}
+                {totals.adjustment !== 0 && (
+                  <div className="row">
+                    <span className="dim">Adjustment</span>
+                    <span className="mono">{fmt(totals.adjustment)}</span>
+                  </div>
+                )}
+                {totals.taxType !== "None" && (
+                  <div className="row">
+                    <span className="dim">{totals.taxType} {totals.taxPct}%</span>
+                    <span className="mono">{totals.signedTax < 0 ? "−" : "+"} {fmt(totals.taxAmt)}</span>
+                  </div>
+                )}
+                <div className="row total">
+                  <span>Net Total</span>
+                  <span className="mono">{quote.currency} {fmt(totals.net)}</span>
+                </div>
+                {quote.currency !== "INR" && (
+                  <div className="row">
+                    <span className="dim" title={`Frozen rate: 1 ${quote.currency} = ₹${quote.exchangeRate || 1}`}>≈ INR</span>
+                    <span className="mono dim">₹ {fmt(totals.net * (quote.exchangeRate || 1))}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -547,7 +715,7 @@ export function QuoteDetail() {
                 {fields.ordered.filter((f) => NOTE_KEYS.has(f.key) && !fields.hidden.has(f.key)).map((f) => (
                   <div className="form-field" key={f.key} style={{ gridColumn: "1 / -1" }}>
                     <span className="lbl">{f.label}</span>
-                    <span style={{ color: "var(--fg)", whiteSpace: "pre-wrap" }}>{f.value(quote)}</span>
+                    <ClampText text={f.value(quote)} />
                   </div>
                 ))}
               </div>
@@ -556,7 +724,7 @@ export function QuoteDetail() {
         </>
       )}
 
-      {/* Orders tab — Master Orders converted from this quote. */}
+      {/* Orders tab — Sales Orders converted from this quote. */}
       {tab === "orders" && (
         <div className="card">
           <div style={{ overflow: "auto" }}>
@@ -570,18 +738,19 @@ export function QuoteDetail() {
                 </tr>
               </thead>
               <tbody>
+                {/* Only the SO number is the link (underlined, real anchor →
+                    right-click / cmd-click open-in-new-tab works). */}
                 {(quote.sos ?? []).map((so) => (
-                  <tr
-                    key={so.id}
-                    tabIndex={0}
-                    onClick={() => navigate(`/orders/${so.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${so.id}`);
-                    }}
-                    style={{ cursor: "pointer" }}
-                    title="Open Master Order"
-                  >
-                    <td className="mono" style={{ color: "var(--accent)" }}>{so.number || "—"}</td>
+                  <tr key={so.id}>
+                    <td className="mono">
+                      {so.id ? (
+                        <Link className="linkish" style={{ textDecoration: "underline" }} to={`/orders/${so.id}`} title="Open Sales Order">
+                          {so.number || "—"}
+                        </Link>
+                      ) : (
+                        so.number || "—"
+                      )}
+                    </td>
                     <td className="mono muted">{so.date || "—"}</td>
                     <td>{so.status || "—"}</td>
                     <td className="num mono">{quote.currency} {fmt(so.total)}</td>
@@ -590,7 +759,7 @@ export function QuoteDetail() {
                 {(quote.sos ?? []).length === 0 && (
                   <tr>
                     <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                      Not converted yet — no Master Orders for this quote.
+                      Not converted yet — no Sales Orders for this quote.
                     </td>
                   </tr>
                 )}
@@ -600,10 +769,38 @@ export function QuoteDetail() {
         </div>
       )}
 
-      {/* Activity tab — shared OperationLog view (same as the masters). */}
-      {tab === "activity" && <ActivityLog table="Quote" entityId={id} />}
+      {/* Activity tab — status timeline (with time-in-state) + OperationLog. */}
+      {tab === "activity" && (
+        <>
+          <StatusTimeline entityType="Quote" entityId={id} />
+          <ActivityLog table="Quote" entityId={id} />
+        </>
+      )}
       </div>
     </div>
+  );
+}
+
+/* #8: long Remarks/Terms collapse behind a View more toggle so the page
+   doesn't grow with the text. Short values render as before. */
+const CLAMP_AT = 220;
+function ClampText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > CLAMP_AT || text.split("\n").length > 4;
+  const shown = open || !long ? text : `${text.slice(0, CLAMP_AT).trimEnd()}…`;
+  return (
+    <span style={{ color: "var(--fg)", whiteSpace: "pre-wrap" }}>
+      {shown}
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          style={{ color: "var(--accent)", background: "none", border: 0, padding: "0 0 0 6px", cursor: "pointer", font: "inherit", fontSize: "var(--t-sm)" }}
+        >
+          {open ? "View less" : "View more"}
+        </button>
+      )}
+    </span>
   );
 }
 

@@ -10,12 +10,12 @@
    dash — a labelled blank says more than a hyphen.
    ============================================================ */
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
@@ -25,6 +25,7 @@ import { PalletForm } from "./PalletForm";
 import {
   cachedPalletOrders,
   cachedPallets,
+  createPallet,
   deletePallet,
   listPalletOrders,
   listPallets,
@@ -67,6 +68,7 @@ export function PalletDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [packing, setPacking] = useState(false);
 
   const refresh = () =>
@@ -108,6 +110,19 @@ export function PalletDetail() {
     await refresh();
   };
 
+  // Clone: same spec into a fresh pallet, user edits then saves.
+  const onClone = async (input: PalletInput) => {
+    const res = await createPallet(input);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setCloning(false);
+    toast.success("Pallet created");
+    if (res.rowid) navigate(`/pallets/${encodeURIComponent(res.rowid)}`);
+    await refresh();
+  };
+
   const onDelete = async () => {
     if (!pallet) return;
     if (
@@ -144,7 +159,8 @@ export function PalletDetail() {
 
   const moreItems = [
     { label: "Palletize Order", onClick: () => setPacking(true) },
-    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("items", "create") && pallet ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -174,6 +190,30 @@ export function PalletDetail() {
           }}
           onSave={onSave}
           onClose={() => setEditing(false)}
+        />
+      )}
+
+      {cloning && pallet && (
+        <PalletForm
+          palletTypes={palletTypes}
+          sizeOptions={sizes}
+          initial={{
+            size: pallet.sizeId,
+            pallet_type: pallet.palletType,
+            pallet_size_label: pallet.palletSizeLabel || pallet.sizeLabel,
+            coverage_sqm: pallet.coverageSqm,
+            coverage_sqft: pallet.coverageSqft,
+            box_weight_kg: pallet.boxWeightKg,
+            boxes_per_pallet: pallet.boxesPerPallet,
+            pallets_per_container: pallet.palletsPerContainer,
+            empty_pallet_weight_kg: pallet.emptyWeightKg,
+            b_boxes_per_pallet: pallet.bBoxesPerPallet,
+            b_pallets_per_container: pallet.bPalletsPerContainer,
+            b_pallet_weight: pallet.bPalletWeightKg,
+            remarks: pallet.remarks,
+          }}
+          onSave={onClone}
+          onClose={() => setCloning(false)}
         />
       )}
 
@@ -212,20 +252,16 @@ export function PalletDetail() {
           {listed.map((p) => {
             const cur = p.id === id;
             return (
-              <button
+              <Link
                 key={p.id}
-                type="button"
-                onClick={() => navigate(`/pallets/${p.id}`)}
+                to={`/pallets/${p.id}`}
                 style={{
                   display: "block",
-                  width: "100%",
-                  textAlign: "left",
                   padding: "9px 12px",
-                  border: "none",
                   borderBottom: "1px solid var(--border)",
                   background: cur ? "var(--accent-soft)" : "transparent",
-                  cursor: "pointer",
-                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
                 title={p.name}
               >
@@ -242,7 +278,7 @@ export function PalletDetail() {
                     .filter(Boolean)
                     .join("  ·  ") || "No details yet"}
                 </div>
-              </button>
+              </Link>
             );
           })}
           {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching pallets</div>}
@@ -267,7 +303,7 @@ export function PalletDetail() {
                 >
                   {pallet.name}
                 </div>
-                {canUpdate() && (
+                {can("items", "edit") && (
                   <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit pallet">
                     <Icon name="edit" size={13} />
                     Edit

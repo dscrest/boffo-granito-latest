@@ -50,7 +50,7 @@ export function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
 async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
   // listAll pages past ZCQL's 300-row cap; lookups project only the
   // columns this join actually reads (ROWID is always included).
-  const [sos, items, customers, designs, sizes, finishes, brands, salesPersons] = await Promise.all([
+  const [sos, items, customers, designs, sizes, finishes, brands, salesPersons, paymentTerms] = await Promise.all([
     listAll("SalesOrder", { order: "ROWID desc" }),
     listAll("OrderItem"),
     listAll("Customer", { columns: ["name", "code", "country_code"] }),
@@ -59,6 +59,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Brand", { limit: 300, columns: ["name"] }),
     list("SalesPerson", { limit: 300, columns: ["name"] }),
+    list("PaymentTerm", { limit: 300, columns: ["name"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 
@@ -72,6 +73,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
   const finishName = mapBy(finishes.rows, "name");
   const brandName = mapBy(brands.rows, "name");
   const salesPersonName = mapBy(salesPersons.rows, "name");
+  const paymentTermName = mapBy(paymentTerms.rows, "name");
   // Design row's own lookup FKs (size/finish/brand) → names.
   const designRow = new Map<string, DSRow>();
   (designs.rows || []).forEach((d) => designRow.set(String(d.ROWID), d));
@@ -92,7 +94,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     return {
       id: String(it.ROWID),
       salesOrderId: str(it.sales_order),
-      poNumber: so ? str(so.po_number) || str(so.order_number) : "",
+      orderNumber: so ? str(so.order_number) : "",
+      poNumber: so ? str(so.po_number) : "",
       partyCode: custCode.get(custId) || "",
       party: custName.get(custId) || "",
       country: iso,
@@ -109,6 +112,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       totalBoxes,
       pallets: Math.ceil(totalBoxes / boxesPerPallet),
       stage: str(it.stage) || "po",
+      status: so ? str(so.status) || "Confirmed" : "Confirmed",
       orderDate: so ? str(so.order_date) : "",
       dueDate: str(it.due_date) || "—",
       invoice: null,
@@ -117,6 +121,14 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       rate,
       discount: num(it.discount_pct),
       subTotal,
+      description: str(it.description),
+      // Header fields the edit form must round-trip (update-so-with-items
+      // replaces the header wholesale — anything missing here would wipe).
+      paymentTerm: so ? paymentTermName.get(str(so.payment_term)) || "" : "",
+      currency: so ? str(so.currency) || "INR" : "INR",
+      exchangeRate: so ? num(so.exchange_rate) || 1 : 1,
+      remarks: so ? str(so.remarks) : "",
+      portOfDischarge: so ? str(so.port_of_discharge) : "",
       salesperson: so ? salesPersonName.get(str(so.sales_person)) || "" : "",
       boxBranding: so ? str(so.box_branding) : "",
       shipmentDate: so ? str(so.shipment_date) : "",
@@ -144,8 +156,8 @@ export interface NewSalesOrderInput {
   shipment_date: string;
   payment_term: string;
   port_of_discharge: string;
-  status: string;
   currency: string;
+  exchange_rate?: number;
   remarks: string;
   address: string;
   salesperson: string;
@@ -159,6 +171,21 @@ export interface NewSalesOrderInput {
   lines: { item: string; qty: number; rate: number; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
 }
 
+/* SO status chips reuse the quote-status palette (no new CSS). Shared by
+   the grid, detail and approvals pages. */
+export const SO_STATUS_CHIP: Record<string, string> = {
+  Draft: "q-draft",
+  PendingApproval: "q-pending",
+  Confirmed: "q-accepted",
+  InProgress: "q-sent",
+  Cancelled: "q-rejected",
+};
+export const SO_STATUS_LABEL: Record<string, string> = {
+  PendingApproval: "Pending Approval",
+  InProgress: "In Progress",
+};
+export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
+
 /* Mutations invalidate the cache so the next listOrders() refetches. */
 function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {
@@ -171,8 +198,21 @@ export function createSalesOrder(input: NewSalesOrderInput) {
   return bust(op<{ ROWID: string }>("so-with-items", input));
 }
 
+/** Update header + replace line items (mirror of updateQuoteWithItems).
+    Server 409s once any work is recorded; PendingApproval/Confirmed → Draft. */
+export function updateSalesOrderWithItems(salesOrderId: string, input: NewSalesOrderInput) {
+  return bust(op<{ ROWID: string }>(`update-so-with-items/${salesOrderId}`, input));
+}
+
 export function deleteSalesOrder(rowid: string) {
   return bust(remove("SalesOrder", rowid));
+}
+
+/** Change SO status through the server-side state machine (/so-status —
+    validates the transition, requires approval rights for verdicts, logs a
+    StatusTransition row, and notifies the salesperson). */
+export function setOrderStatus(salesOrderId: string, status: string, reason?: string) {
+  return bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason }));
 }
 
 /** Manual stage advance — only the judgment transitions (po→prod→qc→packing).

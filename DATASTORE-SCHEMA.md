@@ -37,7 +37,7 @@
 | Size | 76673000000050001 | Lookup (keys on `code`) |
 | QuoteItem | 76673000000050364 | Quote line items |
 | Finish | 76673000000051001 | Lookup |
-| SalesOrder | 76673000000051371 | Master Orders (UI label) |
+| SalesOrder | 76673000000051371 | Sales Orders (UI label) |
 | OrderItem | 76673000000051730 | SO line items + stage qty |
 | Category | 76673000000052001 | Lookup |
 | TransactionSeries | 76673000000052360 | Quote#/SO# numbering |
@@ -57,6 +57,8 @@
 | SalesPerson | 76673000000115495 | Sales reps on quotes/SO (links AppUser) |
 | PartyBrand | 69851000000060042 (live) | Lookup — party brands (feeds unique_name) |
 | Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
+| StatusTransition | 69851000000066173 (live) | Status/stage flip audit (Quote/SO/OrderItem) — added 2026-07-13 |
+| Notification | 69851000000062554 (live) | Per-user in-app notifications — added 2026-07-13 |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
@@ -95,18 +97,32 @@ migrated to SalesPerson rows and backfilled.
 
 App-level login (NOT Catalyst user management). Managed exclusively via data-ops `/auth/*`
 endpoints — these 3 tables are deliberately NOT in the generic-CRUD ALLOWED set.
-Every other data-ops route requires `Authorization: Bearer <token>`; POST/PATCH need
-`Role.can_update`, DELETE needs `Role.can_delete` (`POST /fit-suggest` exempt, read-only).
+Every other data-ops route requires a valid session token. Permissions are per-module
+(`Role.matrix`, 2026-07-13): the guard (appauth.js) maps each table/business route to a
+module (quotes / orders / customers / items / stages / invoices / reports / settings) and
+each HTTP method to an action (view / create / edit / delete; export is client-side).
+Unmapped side tables (Currency, SalesPerson, Notification, logs…) keep the legacy rules:
+GET = any authed user, POST/PATCH = `can_update`, DELETE = `can_delete`
+(`POST /fit-suggest` exempt, read-only). The role named **Admin** bypasses everything and
+is locked against edit/delete server-side.
 
-### Role (76673000000092001)
+### Role (76673000000092001) — matrix col added 2026-07-13 (live col `69851000000066545`)
 | Column | Type | Notes |
 |---|---|---|
-| name | varchar(50) | unique, mandatory (Admin / Editor / Viewer seeded) |
-| features | text | JSON array of nav ids visible to this role; `["*"]` = all |
-| can_update | boolean | default false — gates POST/PATCH (create+edit) |
-| can_delete | boolean | default false — gates DELETE |
+| name | varchar(50) | unique, mandatory ("Admin" reserved) |
+| matrix | text(10000) | JSON `{"modules":{"quotes":["view","create","edit","delete","export"],…},"approve":["Quote","SalesOrder"]}`; null = legacy role, synthesized from the 3 columns below |
+| features | text | LEGACY/derived — JSON nav-id array; kept in sync with matrix on role writes |
+| can_update | boolean | LEGACY/derived rollup: any module has create\|edit |
+| can_delete | boolean | LEGACY/derived rollup: any module has delete |
 
-Seeded: Admin `…89012` (update+delete), Editor `…89013` (update only), Viewer `…89014` (read-only).
+`matrix.approve` lists the doc types the role may approve/reject (PendingApproval verdicts
+in `/quote-status` and `/so-status`). Role CRUD: `GET/POST /auth/roles`,
+`PATCH/DELETE /auth/roles/:rowid` (Admin only; delete refused while users are assigned).
+
+Seeded: Admin (superuser, matrix null), Editor / Viewer (legacy, matrix null — reassign
+users then delete via the Roles page), Manager (all modules all actions, approves both),
+Sales Person (quotes/orders view-create-edit-export, customers view-create-edit,
+items view, reports view+export, no delete, no approve). Live seeds: `catalyst-migration/data/Role.json`.
 
 ### AppUser (76673000000094001)
 | Column | Type | Notes |
@@ -380,6 +396,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | Column | Type | Notes |
 |---|---|---|
 | quantity_boxes | int | |
+| converted_qty_boxes | int | boxes already converted to SOs (added 2026-07-13; server-enforced cap, carried across line replaces by design) |
 | rate | double | |
 | rate_basis | varchar(20) | |
 | discount_pct | double | |
@@ -388,15 +405,16 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | quote | FK → Quote | **CASCADE** |
 | design | FK → Design | SET-NULL |
 
-### SalesOrder (76673000000051371) — UI label: "Master Order"
+### SalesOrder (76673000000051371) — UI label: "Sales Order"
 | Column | Type | Notes |
 |---|---|---|
-| order_number | varchar(50) | via TransactionSeries |
+| order_number | varchar(50) | server-assigned `SO/{FY}/NNN` (`nextOrderNumber` MAX-scan); never editable |
 | po_number | varchar(100) | |
 | order_date | date | |
 | port_of_discharge | varchar(255) | |
-| status | varchar(50) | default "Confirmed" on create/convert |
+| status | varchar(50) | born "Draft" on create AND convert (server ignores client status) |
 | currency | varchar(10) | |
+| exchange_rate | double(4dp) | INR per 1 unit; copied from the source quote on convert (added 2026-07-13) |
 | remarks | text(10000) | |
 | quote | FK → Quote | SET-NULL (source quote) |
 | customer | FK → Customer | SET-NULL |
@@ -528,6 +546,63 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | duration_ms | int | |
 | actor | varchar(160) | |
 | payload_summary | text(10000) | |
+
+### StatusTransition (live id 69851000000066173) — added 2026-07-13
+One row per status/stage flip on Quote (`status`), SalesOrder (`status`) and
+OrderItem (`stage`). Written server-side only: `/quote-status`, `/so-status`,
+generic PATCH (OrderItem stage only — Quote/SO status writes are rejected),
+`/convert-quote`, and the saga routes (production-log, close-pallet,
+load-container, dispatch). Powers the Status Timeline on detail pages and the
+Reports ▸ Quote Aging tab. `note` carries the rejection reason for the
+quote/SO approval workflows.
+| Column | Type | Notes |
+|---|---|---|
+| occurred_at | datetime | |
+| entity_type | varchar(30) | Quote / SalesOrder / OrderItem |
+| entity_rowid | varchar(40) | logical FK (bigint id as text) |
+| from_status | varchar(50) | |
+| to_status | varchar(50) | |
+| note | text(10000) | rejection reason etc. |
+| actor | varchar(160) | |
+| deleted_at | datetime | unused; present so generic list's soft-delete filter works |
+
+### Notification (live id 69851000000062554) — added 2026-07-13
+Per-user in-app notifications (approval verdicts). Written server-side by
+`/quote-status`; read by the header bell (filtered to the signed-in AppUser).
+No read-flags — the bell's sessionStorage last-seen stamp covers "unseen".
+| Column | Type | Notes |
+|---|---|---|
+| occurred_at | datetime | |
+| recipient | bigint | logical FK → AppUser ROWID |
+| text | varchar(255) | server truncates to 240 |
+| link | varchar(120) | in-app route, e.g. `#/quotes/<id>` |
+| deleted_at | datetime | unused; soft-delete filter parity |
+
+**Quote approval workflow (2026-07-13):** `Quote.status` gained
+`PendingApproval` and `Approved`. All quote status changes go through
+`POST /quote-status/:rowid` (validated state machine; generic PATCH rejects
+Quote.status writes; create forces Draft; edit resets PendingApproval/Approved
+→ Draft). Transitions: Draft→PendingApproval→(approver)Approved→Sent→Accepted⇄Rejected;
+Rejected→Draft; any change blocked once conversion_flag ≠ None. The
+PendingApproval verdict requires `Role.matrix.approve` to include `"Quote"` (or Admin).
+
+**SalesOrder approval workflow (2026-07-13):** `SalesOrder.status` gained
+`Draft` and `PendingApproval` ahead of the legacy Confirmed / InProgress /
+Cancelled. All SO status changes go through `POST /so-status/:rowid`
+(generic PATCH now rejects SalesOrder.status writes). Transitions:
+Draft→PendingApproval→(approver)Confirmed→InProgress→Cancelled; Cancelled→Confirmed;
+reject returns PendingApproval→Draft with a required reason. The verdict requires
+`Role.matrix.approve` to include `"SalesOrder"` (or Admin). Manual SOs are created
+in Draft; `/convert-quote` also creates Draft — the SO earns its own approval
+(full mirror of quotes; the quote's approval covered the quote, not the SO's
+PO/quantities/dates, which the convert form can change). Verdicts notify the
+SO's salesperson (Notification, link `#/orders/<id>`).
+
+**SalesOrder edit (2026-07-13):** `POST /update-so-with-items/:rowid` — mirror
+of `update-quote-with-items` (header update + wholesale OrderItem replace).
+`order_number` is never editable; 409 once any work quantity (produced /
+purchased / palletized / loaded / dispatched) > 0; editing a PendingApproval
+or Confirmed order resets it to Draft with a logged StatusTransition.
 
 ---
 

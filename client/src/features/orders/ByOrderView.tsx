@@ -2,9 +2,11 @@
    Now the primary orders list (All Orders commented, #21): carries New Order
    create (#8) + a choosable filter (#20). */
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
+import { can } from "@/lib/auth";
+import { exportCsv } from "@/lib/csv";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
@@ -12,6 +14,7 @@ import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
 import { AdvanceButton } from "./AdvanceButton";
 import { OrderForm, type OrderDraft } from "./OrderForm";
+import { ViewToggle } from "./ViewToggle";
 import { draftToInput } from "./OrdersTable";
 import { createSalesOrder } from "./ordersApi";
 import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "./OrdersFilter";
@@ -26,6 +29,8 @@ interface Totals {
 }
 interface Group {
   key: string;
+  salesOrderId: string;
+  orderNumber: string;
   poNumber: string;
   partyCode: string;
   party: string;
@@ -42,13 +47,12 @@ interface Group {
 
 export function ByOrderView() {
   const { orders, loading, error, reload } = useOrders();
+  const navigate = useNavigate();
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // #20: shared choosable filter (Customer / PO / Stage) + free-text search.
   const [filter, setFilter] = useState(EMPTY_FILTER);
-  const [sortBy, setSortBy] = useState("progress");
   const [showForm, setShowForm] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
 
   // #8: deep-link from Dashboard "New Order" (/byorder?new=1) opens the form directly.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -62,18 +66,16 @@ export function ByOrderView() {
   }, []);
 
   const onSaveOrder = async (dr: OrderDraft) => {
-    setNotice("Saving order…");
     const res = await createSalesOrder(draftToInput(dr));
     if (!res.ok) {
       // Keep the form open — closing here would discard everything typed.
-      setNotice(null);
       toast.error(res.error || "Save failed");
       return;
     }
     setShowForm(false);
-    setNotice(`Order saved (#${res.rowid}).`);
     toast.success(`Order saved (#${res.rowid})`);
-    reload();
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
   };
 
   // Filter + search applied before grouping (shared with the Pipeline).
@@ -82,10 +84,13 @@ export function ByOrderView() {
   const groups = useMemo<Group[]>(() => {
     const m: Record<string, Omit<Group, "totals" | "stageDist" | "minStageIdx" | "progress">> = {};
     fOrders.forEach((o) => {
-      const key = `${o.poNumber}__${o.partyCode}`;
+      // One group per SalesOrder (a PO number can repeat across orders).
+      const key = o.salesOrderId || `${o.poNumber}__${o.partyCode}`;
       if (!m[key]) {
         m[key] = {
           key,
+          salesOrderId: o.salesOrderId || "",
+          orderNumber: o.orderNumber || "",
           poNumber: o.poNumber,
           partyCode: o.partyCode,
           party: o.party,
@@ -123,18 +128,15 @@ export function ByOrderView() {
     });
   }, [fOrders]);
 
-  const visible = useMemo(() => {
-    return [...groups].sort((a, b) => {
-      if (sortBy === "progress") return a.progress - b.progress;
-      if (sortBy === "qty") return b.totals.qty - a.totals.qty;
-      if (sortBy === "party") return a.party.localeCompare(b.party);
-      return 0;
-    });
-  }, [groups, sortBy]);
+  // Newest sales order first (ROWIDs are chronological).
+  const visible = useMemo(
+    () => [...groups].sort((a, b) => Number(b.salesOrderId) - Number(a.salesOrderId)),
+    [groups],
+  );
 
   // House pager (grid standard): persisted page size, snaps to page 1 on
-  // filter/sort change via resetKey.
-  const pager = usePagination(visible.length, "pg.byorder", `${JSON.stringify(filter)}|${sortBy}`);
+  // filter change via resetKey.
+  const pager = usePagination(visible.length, "pg.byorder", JSON.stringify(filter));
   const shown = pager.slice(visible);
 
   const toggle = (key: string) => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
@@ -149,35 +151,49 @@ export function ByOrderView() {
     <div>
       {showForm && <OrderForm onSave={onSaveOrder} onClose={() => setShowForm(false)} />}
       <div className="page-head">
-        <div>
-          <div className="title">By Order</div>
-          <div className="sub">
-            {visible.length} POs · {visible.reduce((s, g) => s + g.items.length, 0)} line items · grouped view of the pipeline
-            {notice && <> · <span className="muted">{notice}</span></>}
-          </div>
-        </div>
         <div className="right">
+          <ViewToggle />
           <button className="hbtn" onClick={toggleAll}>
             <Icon name="kanban" size={13} />
             {allCollapsed ? "Expand all" : "Collapse all"}
           </button>
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            New Order
-          </button>
+          {can("orders", "export") && (
+            <button
+              className="hbtn"
+              title="Export the filtered line items as CSV"
+              onClick={() =>
+                exportCsv("orders", fOrders, [
+                  { header: "SO Number", value: (o) => o.orderNumber || "" },
+                  { header: "PO Number", value: (o) => o.poNumber },
+                  { header: "Customer", value: (o) => o.party },
+                  { header: "Item", value: (o) => o.design },
+                  { header: "Size", value: (o) => o.size },
+                  { header: "Order Qty", value: (o) => o.orderQty },
+                  { header: "Produced", value: (o) => o.producedQty },
+                  { header: "Palletized", value: (o) => o.palletizedQty },
+                  { header: "Loaded", value: (o) => o.loadedQty },
+                  { header: "Stage", value: (o) => o.stage },
+                  { header: "Status", value: (o) => o.status },
+                  { header: "Order Date", value: (o) => o.orderDate },
+                  { header: "Due Date", value: (o) => o.dueDate },
+                ])
+              }
+            >
+              <Icon name="docs" size={13} />
+              Export
+            </button>
+          )}
+          {can("orders", "create") && (
+            <button className="hbtn primary" onClick={() => setShowForm(true)}>
+              <Icon name="plus" size={13} />
+              New Order
+            </button>
+          )}
         </div>
       </div>
 
       {/* #20: shared choosable filter (type-to-search value) + search box. */}
       <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
-      <div className="fbar">
-        <div style={{ flex: 1 }} />
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} title="Sort orders">
-          <option value="progress">Sort: Least progress first</option>
-          <option value="qty">Sort: Largest qty</option>
-          <option value="party">Sort: Customer A-Z</option>
-        </select>
-      </div>
 
       {loading && orders.length === 0 ? (
         <SkeletonRows />
@@ -217,20 +233,32 @@ function ByOrderGroup({
   return (
     <div className={`bypo-group ${collapsed ? "collapsed" : ""}`}>
       <div className="bypo-rail">
-        {!collapsed && <div className="po-lbl">Purchase Order</div>}
+        {!collapsed && <div className="po-lbl">Sales Order</div>}
         <div className="row" style={{ alignItems: "center", gap: 8 }}>
           <button className="bypo-toggle" onClick={onToggle} title={collapsed ? "Expand" : "Collapse"}>
             <Icon name={collapsed ? "chev-r" : "arrow-down"} size={11} />
           </button>
-          <div className="po-num">{group.poNumber}</div>
+          <div className="po-num">
+            {group.salesOrderId ? (
+              <Link className="linkish" to={`/orders/${group.salesOrderId}`} title="Open sales order">
+                {group.orderNumber || group.poNumber}
+              </Link>
+            ) : (
+              group.orderNumber || group.poNumber
+            )}
+          </div>
           {!collapsed && (
             <span className="li-badge" style={{ marginLeft: "auto" }}>
               {items.length} items
             </span>
           )}
         </div>
+        {group.poNumber && (
+          <div className="party-name" title="Customer PO number">
+            <span className="mono">PO · {group.poNumber}</span>
+          </div>
+        )}
         <div className="party-name">
-          <span>{group.flag}</span>
           <span>{group.party}</span>
           <span className="country">· {group.country}</span>
         </div>

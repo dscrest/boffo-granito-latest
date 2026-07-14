@@ -112,25 +112,11 @@ function pageWindow(page: number, pageCount: number): number[] {
 }
 
 /** Footer bar: "x–y of z" · Prev / page numbers / Next · page-size select.
-    Render inside the .card, below the table's overflow wrapper. Sticky so
-    the navigation stays visible while the page scrolls. */
+    Fixed to the viewport bottom (user mandate 2026-07-13: "Fixed footer.
+    Always.") — .grid-footer in styles.css; one per page. */
 export function GridFooter(p: Pager) {
   return (
-    <div
-      className="row"
-      style={{
-        padding: "8px 12px",
-        borderTop: "1px solid var(--border)",
-        justifyContent: "space-between",
-        gap: 8,
-        flexWrap: "wrap",
-        position: "sticky",
-        bottom: 0,
-        zIndex: 2,
-        background: "var(--panel)",
-        borderRadius: "0 0 8px 8px",
-      }}
-    >
+    <div className="grid-footer">
       <span className="muted mono" style={{ fontSize: "var(--t-sm)" }}>
         {p.from}–{p.to} of {p.total}
       </span>

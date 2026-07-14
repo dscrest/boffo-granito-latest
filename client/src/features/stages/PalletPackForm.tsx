@@ -25,7 +25,7 @@ export function PalletPackForm({
 }: {
   onSave: (input: ClosePalletInput) => void | Promise<void>;
   onClose: () => void;
-  /** When set, scope the form to one confirmed Master Order (locked select). */
+  /** When set, scope the form to one confirmed Sales Order (locked select). */
   presetOrderId?: string;
   /** When set, scope the form to one Pallet spec (locked select). */
   presetPalletId?: string;
@@ -180,7 +180,7 @@ export function PalletPackForm({
   // Errors stay hidden until the first submit attempt, then update live.
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
-  const orderErr = showErrors && !orderId ? "Master Order is required" : null;
+  const orderErr = showErrors && !orderId ? "Sales Order is required" : null;
   const palletErr = showErrors && !palletId ? "Pallet is required" : null;
 
   const submit = async () => {
@@ -240,7 +240,7 @@ export function PalletPackForm({
                 <div className="form-grid">
                   <label className="form-field">
                     <span className="lbl">
-                      Master Order<span className="req"> *</span>
+                      Sales Order<span className="req"> *</span>
                     </span>
                     {presetOrderId ? (
                       <input value={order?.label || presetOrderId} readOnly disabled />
@@ -249,7 +249,7 @@ export function PalletPackForm({
                         value={orderId}
                         options={orders.map((o) => ({ value: o.salesOrderId, label: o.label }))}
                         onChange={setOrderId}
-                        placeholder="Search master orders…"
+                        placeholder="Search sales orders…"
                         invalid={!!orderErr}
                       />
                     )}
@@ -290,7 +290,7 @@ export function PalletPackForm({
               {order && (
                 <div className="form-section">
                   <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>Items from this Master Order</span>
+                    <span>Items from this Sales Order</span>
                     <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                       <button
                         type="button"

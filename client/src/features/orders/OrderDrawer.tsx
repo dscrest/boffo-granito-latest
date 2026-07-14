@@ -9,6 +9,7 @@ import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { AdvanceButton } from "./AdvanceButton";
 import { EmptyState } from "@/ui/States";
+import { StatusTimeline } from "@/features/common/RecordDetail";
 
 export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose: () => void }) {
   // Live orders (cache-first, so opening the drawer costs no extra fetch).
@@ -17,7 +18,9 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
   // the timeline/badges without reopening; fall back to the clicked snapshot.
   const order = orders.find((o) => o.id === initial.id) ?? initial;
   const lineItems = useMemo(() => {
-    const list = orders.filter((o) => o.poNumber === order.poNumber && o.partyCode === order.partyCode);
+    const list = orders.filter((o) =>
+      order.salesOrderId ? o.salesOrderId === order.salesOrderId : o.poNumber === order.poNumber && o.partyCode === order.partyCode,
+    );
     return list.length > 0 ? list : [order];
   }, [orders, order]);
 
@@ -55,7 +58,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
         <div className="drawer-head">
           <div className="meta">
             <div className="id">
-              PO · {order.poNumber}{" "}
+              {order.orderNumber || order.poNumber}{" "}
               <span style={{ marginLeft: 8 }}>
                 {order.flag} {order.party}
               </span>
@@ -241,7 +244,8 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
         </div>
         {/* Real SalesOrder/OrderItem fields only — no invented doc refs or shipping terms. */}
         <div className="spec-grid">
-          <Spec l="PO Number" v={order.poNumber} mono />
+          <Spec l="SO Number" v={order.orderNumber || "—"} mono />
+          <Spec l="PO Number" v={order.poNumber || "—"} mono />
           <Spec l="Customer" v={`${order.flag} ${order.party}`} />
           <Spec l="Country" v={order.country} />
           <Spec l="Order Date" v={order.orderDate} mono />
@@ -359,18 +363,20 @@ function ActivityTab({ order }: { order: Order }) {
           </div>
           <div className="body">
             <div>
-              <span className="action">PO created</span>
+              <span className="action">Order created</span>
             </div>
             <div className="detail">
-              {order.poNumber} · {order.party}
+              {order.orderNumber || order.poNumber} · {order.party}
             </div>
           </div>
         </div>
       </div>
+      {/* Stage transitions (StatusTransition table) — who/when/how long per stage. */}
+      <StatusTimeline entityType="OrderItem" entityId={order.id} />
       <EmptyState
         icon="clock"
-        title="Detailed activity coming soon"
-        hint="Stage updates are recorded in the audit log; the per-order feed isn't connected here yet."
+        title="Older activity not shown"
+        hint="Stage changes are tracked from Jul 2026 onward; earlier updates live in the audit log (/ops)."
       />
     </div>
   );

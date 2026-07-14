@@ -25,7 +25,7 @@ import {
 const INVOICE_COLUMNS: ColumnDef<InvoiceRow>[] = [
   { key: "date", label: "Date", className: "mono muted", render: (r) => r.invoiceDate || "—" },
   { key: "container", label: "Container", className: "mono", render: (r) => r.containerNumber || "—" },
-  { key: "masterOrder", label: "Master Order", className: "mono muted", render: (r) => r.orderNumber || "multi" },
+  { key: "masterOrder", label: "Sales Order", className: "mono muted", render: (r) => r.orderNumber || "multi" },
   { key: "customer", label: "Customer", render: (r) => r.customerName || "—" },
   {
     key: "amount",
@@ -73,7 +73,7 @@ export function Invoices() {
     return [
       { key: "invoiceNumber", label: "Invoice #", type: "text", get: (r) => r.invoiceNumber },
       { key: "container", label: "Container", type: "text", get: (r) => r.containerNumber },
-      { key: "masterOrder", label: "Master Order", type: "text", get: (r) => r.orderNumber },
+      { key: "masterOrder", label: "Sales Order", type: "text", get: (r) => r.orderNumber },
       { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customerName), get: (r) => r.customerName },
       { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.status), get: (r) => r.status },
       { key: "amount", label: "Amount", type: "numrange", get: (r) => r.totalAmount },

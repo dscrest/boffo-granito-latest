@@ -9,6 +9,7 @@ import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { QuickView } from "./QuickView";
 import { OrderDrawer } from "@/features/orders/OrderDrawer";
 import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "@/features/orders/OrdersFilter";
+import { ViewToggle } from "@/features/orders/ViewToggle";
 
 export function Kanban() {
   const { orders, loading, error, reload } = useOrders();
@@ -29,11 +30,11 @@ export function Kanban() {
     return m;
   }, [filtered]);
 
-  // PO-sibling counts (poNumber + partyCode) for the "N items" badge on cards.
+  // Sales-order sibling counts for the "N items" badge on cards.
   const siblingCounts = useMemo(() => {
     const m: Record<string, number> = {};
     orders.forEach((o) => {
-      const k = `${o.poNumber}__${o.partyCode}`;
+      const k = o.salesOrderId || `${o.poNumber}__${o.partyCode}`;
       m[k] = (m[k] || 0) + 1;
     });
     return m;
@@ -55,6 +56,7 @@ export function Kanban() {
           </div>
         </div>
         <div className="right">
+          <ViewToggle />
           <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
             <Icon name="plus" size={13} />
             New Order
@@ -141,7 +143,7 @@ const KanbanColumn = memo(function KanbanColumn({
           <KanbanCard
             key={o.id}
             order={o}
-            siblingCount={siblingCounts[`${o.poNumber}__${o.partyCode}`] ?? 1}
+            siblingCount={siblingCounts[o.salesOrderId || `${o.poNumber}__${o.partyCode}`] ?? 1}
             onOpen={onOpen}
             onQuickView={onQuickView}
             quickViewActive={quickViewId === o.id}
@@ -202,7 +204,7 @@ const KanbanCard = memo(function KanbanCard({
       className="kcard"
       role="button"
       tabIndex={0}
-      aria-label={`${order.poNumber} · ${order.design} · ${order.party}`}
+      aria-label={`${order.orderNumber || order.poNumber} · ${order.design} · ${order.party}`}
       onClick={() => onOpen && onOpen(order)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -220,11 +222,11 @@ const KanbanCard = memo(function KanbanCard({
       </button>
 
       <div className="top">
-        <span className="po">{order.poNumber}</span>
+        <span className="po">{order.orderNumber || order.poNumber}</span>
         <span>·</span>
         <span>{order.flag}</span>
         {isMulti && (
-          <span className="li-badge" title={`${siblingCount} line items in this PO`}>
+          <span className="li-badge" title={`${siblingCount} line items in this order`}>
             {siblingCount} items
           </span>
         )}

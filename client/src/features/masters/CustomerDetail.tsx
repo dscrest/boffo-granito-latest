@@ -8,14 +8,15 @@
    row's ROWID. Edit opens the shared PartyForm modal in place.
    ============================================================ */
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { nextCustomerCode } from "@/lib/seq";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
 import { STAGES } from "@/data";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
@@ -28,6 +29,7 @@ import {
   composeAddress,
   composeExtraAddress,
   contactName,
+  createCustomer,
   deleteCustomer,
   emptyAddress,
   listCustomers,
@@ -217,6 +219,7 @@ export function CustomerDetail() {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [addingAddr, setAddingAddr] = useState(false);
   const [editingAddr, setEditingAddr] = useState<number | null>(null);
 
@@ -275,6 +278,19 @@ export function CustomerDetail() {
     if (newCode !== party.code) {
       navigate(`/parties/${encodeURIComponent(newCode)}`, { replace: true });
     }
+    await refresh();
+  };
+
+  // Clone: same details into a fresh customer (new code), user edits then saves.
+  const onClone = async (input: CustomerInput) => {
+    const res = await createCustomer(input);
+    if (!res.ok) {
+      toast.error(res.error || "Save failed");
+      return;
+    }
+    setCloning(false);
+    toast.success("Customer created");
+    navigate(`/parties/${encodeURIComponent(input.code.trim().toUpperCase())}`);
     await refresh();
   };
 
@@ -356,10 +372,11 @@ export function CustomerDetail() {
     ...(party
       ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes?new=${encodeURIComponent(party.name)}`) }]
       : []),
-    ...(canUpdate() && party
+    ...(can("customers", "create") && party ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("customers", "edit") && party
       ? [{ label: party.active ? "Mark as Inactive" : "Mark as Active", onClick: () => void onToggleActive() }]
       : []),
-    ...(canDelete() ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("customers", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -382,6 +399,26 @@ export function CustomerDetail() {
           }}
           onSave={(input) => void onSave(input)}
           onClose={() => setEditing(false)}
+        />
+      )}
+
+      {cloning && party && (
+        <PartyForm
+          paymentTerms={paymentTerms}
+          salesPersons={salesPersons}
+          initial={{
+            code: nextCustomerCode((customers ?? []).map((c) => c.code)),
+            name: party.name,
+            country_code: party.countryCode,
+            currency: party.currency,
+            payment_term: party.paymentTermId,
+            port_of_discharge: party.portOfDischarge,
+            address: party.address,
+            active: true,
+            ...party.extras,
+          }}
+          onSave={(input) => void onClone(input)}
+          onClose={() => setCloning(false)}
         />
       )}
 
@@ -424,20 +461,16 @@ export function CustomerDetail() {
           {listed.map((c) => {
             const cur = c.code === code;
             return (
-              <button
+              <Link
                 key={c.id}
-                type="button"
-                onClick={() => navigate(`/parties/${encodeURIComponent(c.code)}`)}
+                to={`/parties/${encodeURIComponent(c.code)}`}
                 style={{
                   display: "block",
-                  width: "100%",
-                  textAlign: "left",
                   padding: "9px 12px",
-                  border: "none",
                   borderBottom: "1px solid var(--border)",
                   background: cur ? "var(--accent-soft)" : "transparent",
-                  cursor: "pointer",
-                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
                 title={c.name}
               >
@@ -447,7 +480,7 @@ export function CustomerDetail() {
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
                   {[c.code, c.country].filter(Boolean).join("  ·  ") || "No details yet"}
                 </div>
-              </button>
+              </Link>
             );
           })}
           {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching customers</div>}
@@ -472,7 +505,7 @@ export function CustomerDetail() {
                 >
                   {party.name}
                 </div>
-                {canUpdate() && (
+                {can("customers", "edit") && (
                   <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit customer">
                     <Icon name="edit" size={13} />
                     Edit
@@ -524,7 +557,7 @@ export function CustomerDetail() {
                                   {composeExtraAddress(a) || "Not set"}
                                 </span>
                               </div>
-                              {canUpdate() && (
+                              {can("customers", "edit") && (
                                 <MoreMenu
                                   kebab
                                   items={[
@@ -544,14 +577,14 @@ export function CustomerDetail() {
                       No additional addresses.
                     </div>
                   )}
-                  {canUpdate() && (
+                  {can("customers", "edit") && (
                     <button className="btn" style={{ marginTop: 8 }} onClick={() => setAddingAddr(true)} disabled={busy}>
                       <Icon name="plus" size={12} /> Add address
                     </button>
                   )}
                 </div>
 
-                {/* The customer's 10 most recent orders — rows open the Master Order. */}
+                {/* The customer's 10 most recent orders — rows open the Sales Order. */}
                 <div style={{ flex: "1 1 260px", minWidth: 0 }}>
                   <div className="form-section-title" style={{ marginBottom: 8 }}>
                     Associated Orders {poRows.length > 0 && <span className="dim">({poRows.length} · {fmt(totalQty)} boxes)</span>}
@@ -575,7 +608,11 @@ export function CustomerDetail() {
                             title="Open order details"
                             onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
                           >
-                            <td className="mono" style={{ color: "var(--accent)" }}>{o.poNumber}</td>
+                            <td className="mono">
+                              <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
+                                {o.poNumber}
+                              </Link>
+                            </td>
                             <td>{o.designs.length > 1 ? `${o.designs.length} designs` : o.designs[0]}</td>
                             <td className="num mono">{fmt(o.orderQty)}</td>
                             <td>{o.stage}</td>

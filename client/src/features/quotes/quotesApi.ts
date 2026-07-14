@@ -25,7 +25,9 @@ function buildMap(rows: DSRow[] | undefined, label: string): Map<string, string>
 function toStatus(s: string, flag: string): QuoteStatus {
   if (flag === "Full") return "Converted";
   if (flag === "Partial") return "PartiallyConverted";
-  const allowed: QuoteStatus[] = ["Draft", "Sent", "Accepted", "Rejected", "Converted", "PartiallyConverted"];
+  const allowed: QuoteStatus[] = [
+    "Draft", "PendingApproval", "Approved", "Sent", "Accepted", "Rejected", "Converted", "PartiallyConverted",
+  ];
   return (allowed as string[]).includes(s) ? (s as QuoteStatus) : "Draft";
 }
 
@@ -89,6 +91,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       rate: num(it.rate),
       discount: num(it.discount_pct),
       description: str(it.description),
+      converted: num(it.converted_qty_boxes),
     };
     (linesByQuote.get(qid) || linesByQuote.set(qid, []).get(qid)!).push(line);
   });
@@ -190,6 +193,12 @@ export function updateQuote(rowid: string, patch: Record<string, unknown>) {
   return bust(update("Quote", rowid, patch));
 }
 
+/** Change quote status through the server-side state machine (validates the
+    transition, logs it, and notifies the salesperson on approval verdicts). */
+export function setQuoteStatus(rowid: string, status: QuoteStatus, reason?: string) {
+  return bust(op<{ ROWID: string; status: string }>(`quote-status/${rowid}`, { status, reason }));
+}
+
 /** Update a Quote header + replace all its line items (full edit). */
 export function updateQuoteWithItems(rowid: string, input: NewQuoteInput) {
   return bust(op<{ ROWID: string; total_amount: number }>(`update-quote-with-items/${rowid}`, input));
@@ -211,9 +220,24 @@ export async function ensureShareToken(quote: Quote): Promise<{ ok: boolean; tok
 export function convertQuote(
   rowid: string,
   mode: "Full" | "Partial",
-  lines: { item: string; qty: number; rate: number; description?: string }[],
+  lines: { item: string; qty: number; rate: number; discount?: number; description?: string }[],
   // order_number omitted → data-ops assigns the next SO number server-side.
-  extra: { order_number?: string; po_number?: string; payment_term?: string; box_branding?: string },
+  extra: {
+    order_number?: string;
+    po_number?: string;
+    payment_term?: string;
+    box_branding?: string;
+    order_date?: string;
+    shipment_date?: string;
+    salesperson?: string;
+    customer_notes?: string;
+    terms?: string;
+    remarks?: string;
+    discount?: number;
+    adjustment?: number;
+    tax_type?: string;
+    tax_pct?: number;
+  },
 ) {
   return bust(
     op<{ so_rowid: string; quote_rowid: string; conversion_flag: string; order_number: string }>(

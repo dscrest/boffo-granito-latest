@@ -3,7 +3,7 @@
    function and refetch. Every write's outcome is recorded in OperationLog
    (see the /ops page). */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -11,14 +11,17 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { can } from "@/lib/auth";
+import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
-import { cachedQuotes, createQuote, deleteQuote, invalidateQuotes, listQuotes, updateQuote, type NewQuoteInput } from "./quotesApi";
+import { cachedQuotes, createQuote, deleteQuote, invalidateQuotes, listQuotes, setQuoteStatus, type NewQuoteInput } from "./quotesApi";
 
 export const STATUS_CHIP: Record<QuoteStatus, string> = {
   Draft: "q-draft",
+  PendingApproval: "q-pending",
+  Approved: "q-approved",
   Sent: "q-sent",
   Accepted: "q-accepted",
   Rejected: "q-rejected",
@@ -27,6 +30,8 @@ export const STATUS_CHIP: Record<QuoteStatus, string> = {
 };
 export const STATUS_LABEL: Record<QuoteStatus, string> = {
   Draft: "Draft",
+  PendingApproval: "Pending Approval",
+  Approved: "Approved",
   Sent: "Sent",
   Accepted: "Accepted",
   Rejected: "Rejected",
@@ -37,6 +42,7 @@ export const STATUS_LABEL: Record<QuoteStatus, string> = {
 const TABS: Array<{ id: string; label: string }> = [
   { id: "all", label: "All" },
   { id: "Draft", label: "Draft" },
+  { id: "PendingApproval", label: "Pending Approval" },
   { id: "Sent", label: "Sent" },
   { id: "Accepted", label: "Accepted" },
   { id: "Converted", label: "Converted" },
@@ -45,9 +51,7 @@ const TABS: Array<{ id: string; label: string }> = [
 // Toggleable + reorderable columns (Quote No pinned outside the map).
 // Data-driven grid pattern (see DesignMaster): each ColumnDef carries its
 // own cell renderer; thead/tbody map over useColumns().visible.
-const linkStyle = { color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" } as const;
-
-function quoteColumns(navigate: (to: string) => void): ColumnDef<Quote>[] {
+function quoteColumns(): ColumnDef<Quote>[] {
   return [
     { key: "customer", label: "Customer", render: (q) => q.customer },
     { key: "date", label: "Date", className: "mono muted", render: (q) => q.quoteDate || "—" },
@@ -71,17 +75,14 @@ function quoteColumns(navigate: (to: string) => void): ColumnDef<Quote>[] {
       className: "mono muted",
       render: (q) =>
         q.soNumber && q.soId ? (
-          <button
+          <Link
             className="linkish"
-            style={linkStyle}
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/orders/${q.soId}`);
-            }}
-            title="Open Master Order"
+            to={`/orders/${q.soId}`}
+            onClick={(e) => e.stopPropagation()}
+            title="Open Sales Order"
           >
             {q.soNumber}
-          </button>
+          </Link>
         ) : (
           q.soNumber || "—"
         ),
@@ -91,8 +92,10 @@ function quoteColumns(navigate: (to: string) => void): ColumnDef<Quote>[] {
   ];
 }
 
+// Draft is no longer convertible — quotes must pass approval + customer
+// acceptance flow before becoming Sales Orders.
 export const convertible = (s: QuoteStatus) =>
-  s === "Draft" || s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
+  s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
 
 export function quoteToInput(q: Quote): NewQuoteInput {
   return {
@@ -143,7 +146,7 @@ export function QuotesTable() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const COLS = useMemo(() => quoteColumns(navigate), [navigate]);
+  const COLS = useMemo(() => quoteColumns(), []);
   const { ordered, visible, hidden, toggle, move } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
@@ -185,7 +188,8 @@ export function QuotesTable() {
     }
     toast.success(`Quote saved (#${res.rowid})`);
     invalidateQuotes();
-    await load();
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/quotes/${encodeURIComponent(res.rowid)}`);
   };
 
   const nextSeq = quotes.length + 1;
@@ -248,13 +252,13 @@ export function QuotesTable() {
     let done = 0;
     let failed = 0;
     for (const q of targets) {
-      const res = await updateQuote(q.id, { status: bulkStatus });
+      const res = await setQuoteStatus(q.id, bulkStatus);
       if (res.ok) done += 1;
       else failed += 1;
     }
     setBulkBusy(false);
-    if (failed) toast.error(`${done} updated, ${failed} failed`);
-    else toast.success(`${done} quote${done === 1 ? "" : "s"} marked ${bulkStatus}${skipped ? ` (${skipped} converted skipped)` : ""}`);
+    if (failed) toast.error(`${done} updated, ${failed} failed (invalid transitions are rejected)`);
+    else toast.success(`${done} quote${done === 1 ? "" : "s"} marked ${STATUS_LABEL[bulkStatus]}${skipped ? ` (${skipped} converted skipped)` : ""}`);
     setSelected(new Set());
     setBulkStatus("");
     invalidateQuotes();
@@ -307,21 +311,22 @@ export function QuotesTable() {
           <span className="mono" style={{ color: "var(--accent)" }}>
             {ids.length} selected
           </span>
-          {canUpdate() && (
+          {can("quotes", "edit") && (
             <>
               <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value as "" | QuoteStatus)} disabled={bulkBusy} title="Bulk status change">
                 <option value="">Change status…</option>
-                <option value="Draft">Draft</option>
+                <option value="PendingApproval">Submit for Approval</option>
                 <option value="Sent">Sent</option>
                 <option value="Accepted">Accepted</option>
                 <option value="Rejected">Rejected</option>
+                <option value="Draft">Draft</option>
               </select>
               <button className="btn" onClick={() => void onBulkStatus()} disabled={!bulkStatus || bulkBusy}>
                 Apply
               </button>
             </>
           )}
-          {canDelete() && (
+          {can("quotes", "delete") && (
             <button className="btn" onClick={() => void onBulkDelete()} disabled={bulkBusy}>
               Delete
             </button>
@@ -353,11 +358,36 @@ export function QuotesTable() {
           </span>
           <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            {saving ? "Saving…" : "New Quote"}
-          </button>
+          {can("quotes", "export") && (
+            <button
+              className="hbtn"
+              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+              title="Export the filtered rows as CSV"
+              onClick={() =>
+                exportCsv("quotes", filtered, [
+                  { header: "Quote No", value: (q) => q.quoteNo },
+                  { header: "Customer", value: (q) => q.customer },
+                  { header: "Date", value: (q) => q.quoteDate },
+                  { header: "Items", value: (q) => q.lines.length },
+                  { header: "Currency", value: (q) => q.currency },
+                  { header: "Final Total", value: (q) => quoteTotals(q).final },
+                  { header: "Terms", value: (q) => q.paymentTerm },
+                  { header: "Status", value: (q) => STATUS_LABEL[q.status] },
+                  { header: "SO", value: (q) => q.soNumber },
+                ])
+              }
+            >
+              <Icon name="docs" size={13} />
+              Export
+            </button>
+          )}
+          {can("quotes", "create") && (
+            /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
+              <Icon name="plus" size={13} />
+              {saving ? "Saving…" : "New Quote"}
+            </button>
+          )}
         </div>
       )}
 
@@ -393,7 +423,11 @@ export function QuotesTable() {
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(q.id)} onChange={() => toggleOne(q.id)} />
                   </td>
-                  <td className="mono">{q.quoteNo}</td>
+                  <td className="mono">
+                    <Link className="linkish" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()} title="View quote">
+                      {q.quoteNo}
+                    </Link>
+                  </td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
                       {c.render!(q)}

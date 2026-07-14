@@ -1,66 +1,39 @@
-/* All Sales Orders table — backed by the Catalyst Data Store via ordersApi.
-   Each row is an OrderItem joined to its SalesOrder header. New Order writes
-   a real SalesOrder + OrderItems; every write is recorded in OperationLog. */
+/* Sales Orders grid — one row per SalesOrder, styled like the quotes
+   master grid (checkbox selection + bulk bar, ColumnPicker, advanced
+   filter, footer pager). Row click / SO-number link opens the detail. */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { SplitBar, StageBadge } from "@/ui/primitives";
-import { fmt, finishClass, fmtDateTime } from "@/lib/format";
-import { STAGES, type Order } from "@/data";
+import { can } from "@/lib/auth";
+import { exportCsv } from "@/lib/csv";
+import { fmt, fmtDateTime } from "@/lib/format";
+import { type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
-import { createSalesOrder, listOrders, type NewSalesOrderInput } from "./ordersApi";
-import { toast } from "@/ui/Toast";
-import { PalletPackForm } from "@/features/stages/PalletPackForm";
-import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
+import { ViewToggle } from "./ViewToggle";
+import {
+  cachedOrders,
+  createSalesOrder,
+  deleteSalesOrder,
+  listOrders,
+  setOrderStatus,
+  soStatusLabel,
+  SO_STATUS_CHIP,
+  type NewSalesOrderInput,
+} from "./ordersApi";
 
-// Toggleable + reorderable columns (# / ID / PO / Actions pinned outside the map).
-const ORDER_COLUMNS: ColumnDef<Order>[] = [
-  {
-    key: "party",
-    label: "Customer",
-    render: (o) => (
-      <>
-        <span style={{ marginRight: 6 }}>{o.flag}</span>
-        {o.party}
-      </>
-    ),
-  },
-  { key: "design", label: "Design", render: (o) => <span className="design-name">{o.design}</span> },
-  {
-    key: "size",
-    label: "Size",
-    render: (o) => (
-      <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
-    ),
-  },
-  { key: "finish", label: "Finish", render: (o) => <span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span> },
-  { key: "brand", label: "Brand", render: (o) => <span className={`chip brand ${o.brand === "BIG" ? "big" : ""}`}>{o.brand}</span> },
-  { key: "qty", label: "Order Qty (boxes)", className: "num", style: { textAlign: "right" }, render: (o) => fmt(o.orderQty) },
-  {
-    key: "progress",
-    label: "Progress",
-    render: (o) => (
-      <div style={{ width: 140 }}>
-        <SplitBar produced={o.producedQty} palletized={o.palletizedQty} loaded={o.loadedQty} total={o.orderQty} />
-      </div>
-    ),
-  },
-  {
-    key: "remaining",
-    label: "Remaining (boxes)",
-    className: "num",
-    style: { textAlign: "right" },
-    render: (o) => fmt(o.orderQty - o.loadedQty),
-  },
-  { key: "stage", label: "Stage", render: (o) => <StageBadge stage={o.stage} /> },
-  { key: "due", label: "Due", className: "mono muted", render: (o) => o.dueDate },
-  { key: "created", label: "Created", className: "muted mono", render: (o) => fmtDateTime(o.createdTime) },
-  { key: "modified", label: "Modified", className: "muted mono", render: (o) => fmtDateTime(o.modifiedTime) },
-];
+/** One grid row = one SalesOrder: the first hydrated line item carries the
+    header fields; `items` is every line of that order. */
+interface SORow {
+  id: string; // salesOrderId
+  head: Order;
+  items: Order[];
+}
 
 export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   return {
@@ -71,8 +44,9 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     shipment_date: dr.shipment_date,
     payment_term: dr.payment_term,
     port_of_discharge: dr.port_of_discharge,
-    status: dr.status,
+    // status omitted — every order is born Draft server-side (/so-status machine).
     currency: dr.currency,
+    exchange_rate: dr.exchange_rate,
     remarks: dr.remarks,
     address: "",
     salesperson: dr.salesperson,
@@ -94,18 +68,66 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   };
 }
 
+// Toggleable + reorderable columns (SO Number pinned outside the map).
+function soColumns(): ColumnDef<SORow>[] {
+  return [
+    {
+      key: "party",
+      label: "Customer",
+      render: (r) => r.head.party,
+    },
+    { key: "po", label: "PO Number", className: "mono", render: (r) => r.head.poNumber || "—" },
+    { key: "date", label: "Order Date", className: "mono muted", render: (r) => r.head.orderDate || "—" },
+    { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (r) => r.items.length },
+    {
+      key: "qty",
+      label: "Total Qty (boxes)",
+      className: "num mono",
+      style: { textAlign: "right" },
+      render: (r) => fmt(r.items.reduce((s, o) => s + o.orderQty, 0)),
+    },
+    {
+      key: "total",
+      label: "Total",
+      className: "num mono",
+      style: { textAlign: "right" },
+      render: (r) => <>{r.head.currency} {fmt(r.head.totalAmount || 0)}</>,
+    },
+    {
+      key: "status",
+      label: "Status",
+      render: (r) => {
+        const s = r.head.status || "Confirmed";
+        return <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`}>{soStatusLabel(s)}</span>;
+      },
+    },
+    { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },
+    { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.head.createdTime) },
+    { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.head.modifiedTime) },
+  ];
+}
+
+const STATUS_TABS = ["all", "Draft", "PendingApproval", "Confirmed", "InProgress", "Cancelled"] as const;
+
 export function OrdersTable() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState<string>("all");
   const [query, setQuery] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const { ordered, visible, hidden, toggle, move } = useColumns("ordersTableColumns", ORDER_COLUMNS, ["created", "modified"]);
   const [criteria, setCriteria] = useState<FilterCriteria>({});
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const COLS = useMemo(() => soColumns(), []);
+  // Fresh storage key (old ordersTableColumns prefs were per-line-item columns).
+  const { ordered, visible, hidden, toggle, move } = useColumns("soGridColumns", COLS, ["created", "modified"]);
+  // Paint the last cached snapshot instantly (stale-while-revalidate).
+  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
+  const [loading, setLoading] = useState(() => cachedOrders() == null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [packOrderId, setPackOrderId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Bulk selection (same master-page convention as QuotesTable/DesignMaster).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -123,124 +145,214 @@ export function OrdersTable() {
     void load();
   }, []);
 
+  // Collapse line items into one row per SalesOrder (newest first).
+  const rows = useMemo<SORow[]>(() => {
+    const bySo = new Map<string, SORow>();
+    for (const o of orders) {
+      const id = o.salesOrderId;
+      if (!id) continue;
+      const r = bySo.get(id);
+      if (r) r.items.push(o);
+      else bySo.set(id, { id, head: o, items: [o] });
+    }
+    return [...bySo.values()].sort((a, b) => Number(b.id) - Number(a.id));
+  }, [orders]);
+
   const onSave = async (dr: OrderDraft) => {
-    setNotice("Saving master order…");
+    setShowForm(false);
+    setSaving(true);
     const res = await createSalesOrder(draftToInput(dr));
+    setSaving(false);
     if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      setNotice(null);
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    setShowForm(false);
-    setNotice(`Master order saved (#${res.rowid}).`);
-    toast.success(`Master order saved (#${res.rowid})`);
-    await load();
-  };
-
-  const onPalletSave = async (input: ClosePalletInput) => {
-    setPackOrderId(null);
-    setNotice("Closing pallet…");
-    const res = await closePallet(input);
-    if (!res.ok) {
-      setNotice(null);
-      setError(res.error || "Close-pallet failed");
-      toast.error(res.error || "Close-pallet failed");
-      return;
-    }
-    setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
-    toast.success(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes`);
-    await load();
+    toast.success(`Sales order saved (#${res.rowid})`);
+    // Land on the new record so the next action can't target the wrong one.
+    if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
   };
 
   // Advanced search fields (magnifier button) — options DB-sourced from rows.
-  const filterFields = useMemo<FilterField<Order>[]>(() => {
-    const opts = (get: (o: Order) => string) => [...new Set(orders.map(get).filter(Boolean))].sort();
+  const filterFields = useMemo<FilterField<SORow>[]>(() => {
+    const opts = (get: (r: SORow) => string) => [...new Set(rows.map(get).filter(Boolean))].sort();
     return [
-      { key: "po", label: "PO Number", type: "text", get: (o) => o.poNumber },
-      { key: "design", label: "Design", type: "text", get: (o) => o.design },
-      { key: "party", label: "Customer", type: "multiselect", options: opts((o) => o.party), get: (o) => o.party },
-      { key: "size", label: "Size", type: "multiselect", options: opts((o) => o.size), get: (o) => o.size },
-      { key: "finish", label: "Finish", type: "multiselect", options: opts((o) => o.finish), get: (o) => o.finish },
-      { key: "brand", label: "Brand", type: "multiselect", options: opts((o) => o.brand), get: (o) => o.brand },
-      { key: "stage", label: "Stage", type: "multiselect", options: opts((o) => o.stage), get: (o) => o.stage },
-      { key: "qty", label: "Order Qty (boxes)", type: "numrange", get: (o) => o.orderQty },
-      { key: "orderDate", label: "Order Date Between", type: "daterange", get: (o) => o.orderDate },
-      { key: "created", label: "Created Between", type: "daterange", get: (o) => o.createdTime || "" },
+      { key: "soNo", label: "SO Number", type: "text", get: (r) => r.head.orderNumber || "" },
+      { key: "po", label: "PO Number", type: "text", get: (r) => r.head.poNumber },
+      { key: "party", label: "Customer", type: "multiselect", options: opts((r) => r.head.party), get: (r) => r.head.party },
+      { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.head.status || ""), get: (r) => r.head.status || "" },
+      { key: "total", label: "Total", type: "numrange", get: (r) => r.head.totalAmount || 0 },
+      { key: "date", label: "Order Date Between", type: "daterange", get: (r) => r.head.orderDate },
+      { key: "created", label: "Created Between", type: "daterange", get: (r) => r.head.createdTime || "" },
     ];
-  }, [orders]);
+  }, [rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = orders.filter((o) => {
-      if (tab !== "all" && o.stage !== tab) return false;
+    const base = rows.filter((r) => {
+      if (tab !== "all" && (r.head.status || "Confirmed") !== tab) return false;
       if (!q) return true;
-      return `${o.poNumber} ${o.party} ${o.design}`.toLowerCase().includes(q);
+      return `${r.head.orderNumber} ${r.head.poNumber} ${r.head.party}`.toLowerCase().includes(q);
     });
     return applyFilters(base, criteria, filterFields);
-  }, [tab, orders, query, criteria, filterFields]);
+  }, [tab, rows, query, criteria, filterFields]);
 
-  const pager = usePagination(filtered.length, "ordersPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
+  const pager = usePagination(filtered.length, "soGridPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
+  const pageRows = pager.slice(filtered);
+
+  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
+  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
+
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const next = new Set(p);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const toggleAll = () =>
+    setSelected((p) => {
+      const next = new Set(p);
+      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
+      else pageRows.forEach((r) => next.add(r.id));
+      return next;
+    });
+
+  const ids = useMemo(() => [...selected], [selected]);
+
+  const onBulkStatus = async () => {
+    if (!bulkStatus) return;
+    setBulkBusy(true);
+    let done = 0;
+    let failed = 0;
+    for (const id of ids) {
+      const res = await setOrderStatus(id, bulkStatus);
+      if (res.ok) done += 1;
+      else failed += 1;
+    }
+    setBulkBusy(false);
+    if (failed) toast.error(`${done} updated, ${failed} failed (invalid transitions are rejected)`);
+    else toast.success(`${done} order${done === 1 ? "" : "s"} marked ${soStatusLabel(bulkStatus)}`);
+    setSelected(new Set());
+    setBulkStatus("");
+    await load();
+  };
+
+  const onBulkDelete = async () => {
+    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected order${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
+      return;
+    setBulkBusy(true);
+    let done = 0;
+    let failed = 0;
+    for (const rowid of ids) {
+      const res = await deleteSalesOrder(rowid);
+      if (res.ok) done += 1;
+      else failed += 1;
+    }
+    setBulkBusy(false);
+    if (failed) toast.error(`${done} deleted, ${failed} failed`);
+    else toast.success(`${done} order${done === 1 ? "" : "s"} deleted`);
+    setSelected(new Set());
+    await load();
+  };
+
+  const tabCount = (id: string) =>
+    id === "all" ? rows.length : rows.filter((r) => (r.head.status || "Confirmed") === id).length;
 
   return (
     <div>
       {showForm && <OrderForm onSave={onSave} onClose={() => setShowForm(false)} />}
-      {packOrderId && (
-        <PalletPackForm presetOrderId={packOrderId} onSave={onPalletSave} onClose={() => setPackOrderId(null)} />
-      )}
+
       <div className="page-head">
-        <div>
-          <div className="title">All Master Orders</div>
-          <div className="sub">
-            {loading ? "Loading…" : "Grouped by stage"}
-            {notice && (
-              <>
-                {" · "}
-                <span className="dim">{notice}</span>
-              </>
-            )}
-          </div>
-        </div>
         <div className="right">
-          <button className="hbtn" onClick={() => void load()} title="Refresh">
-            <Icon name="clock" size={13} />
-            Refresh
-          </button>
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            New Order
-          </button>
+          <ViewToggle />
+          {can("orders", "create") && (
+            <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)}>
+              <Icon name="plus" size={13} />
+              {saving ? "Saving…" : "New Order"}
+            </button>
+          )}
         </div>
       </div>
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
-      <div className="tabs">
-        <div className={`tab ${tab === "all" ? "active" : ""}`} onClick={() => setTab("all")}>
-          All <span className="muted mono" style={{ marginLeft: 4 }}>{orders.length}</span>
+      {/* Bulk action bar replaces the filter bar while a selection is active. */}
+      {ids.length > 0 ? (
+        <div className="fbar" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {ids.length} selected
+          </span>
+          {can("orders", "edit") && (
+            <>
+              <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)} disabled={bulkBusy} title="Bulk status change">
+                <option value="">Change status…</option>
+                <option value="PendingApproval">Submit for Approval</option>
+                <option value="Confirmed">Approve (Confirmed)</option>
+                <option value="InProgress">Start Progress</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+              <button className="btn" onClick={() => void onBulkStatus()} disabled={!bulkStatus || bulkBusy}>
+                Apply
+              </button>
+            </>
+          )}
+          {can("orders", "delete") && (
+            <button className="btn" onClick={() => void onBulkDelete()} disabled={bulkBusy}>
+              Delete
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
         </div>
-        {STAGES.map((s) => (
-          <div key={s.id} className={`tab ${tab === s.id ? "active" : ""}`} onClick={() => setTab(s.id)}>
-            {s.label} <span className="muted mono" style={{ marginLeft: 4 }}>{orders.filter((o) => o.stage === s.id).length}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="fbar">
-        <div style={{ flex: 1 }} />
-        <span className="gsearch">
-          <Icon name="search" size={13} />
-          <input
-            type="text"
-            placeholder="Search PO, customer, design…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </span>
-        <AdvancedFilterButton title="Orders" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-      </div>
+      ) : (
+        <div className="fbar" style={{ marginBottom: 12 }}>
+          <Icon name="filter" size={12} />
+          <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+            {STATUS_TABS.map((t) => (
+              <option key={t} value={t}>
+                {t === "all" ? "All" : soStatusLabel(t)} ({tabCount(t)})
+              </option>
+            ))}
+          </select>
+          <div style={{ flex: 1 }} />
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder="Search SO no, PO, customer…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </span>
+          <AdvancedFilterButton title="Sales Orders" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          {can("orders", "export") && (
+            <button
+              className="hbtn"
+              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+              title="Export the filtered rows as CSV"
+              onClick={() =>
+                exportCsv("sales-orders", filtered, [
+                  { header: "SO Number", value: (r) => r.head.orderNumber || "" },
+                  { header: "PO Number", value: (r) => r.head.poNumber },
+                  { header: "Customer", value: (r) => r.head.party },
+                  { header: "Order Date", value: (r) => r.head.orderDate },
+                  { header: "Items", value: (r) => r.items.length },
+                  { header: "Currency", value: (r) => r.head.currency || "" },
+                  { header: "Total", value: (r) => r.head.totalAmount || 0 },
+                  { header: "Status", value: (r) => soStatusLabel(r.head.status || "") },
+                ])
+              }
+            >
+              <Icon name="docs" size={13} />
+              Export
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <div style={{ overflow: "auto" }}>
@@ -250,66 +362,58 @@ export function OrdersTable() {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width: 36, textAlign: "center" }}>#</th>
-                <th>ID</th>
-                <th>PO Number</th>
+                <th style={{ width: 34, textAlign: "center" }}>
+                  <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
+                </th>
+                <th>SO Number</th>
                 {visible.map((c) => (
                   <th key={c.key} style={c.style}>{c.label}</th>
                 ))}
-                <th style={{ width: 90 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {pager.slice(filtered).map((o, i) => {
-                return (
-                  <tr key={o.id}>
-                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
-                    <td className="mono">
-                      <button
-                        className="linkish"
-                        style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                        onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
-                        title="Open details"
-                      >
-                        {o.id}
-                      </button>
+              {pageRows.map((r) => (
+                <tr
+                  key={r.id}
+                  tabIndex={0}
+                  onClick={() => navigate(`/orders/${r.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${r.id}`);
+                  }}
+                  style={{ cursor: "pointer", background: selected.has(r.id) ? "var(--accent-soft)" : undefined }}
+                  title="View order"
+                >
+                  <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} />
+                  </td>
+                  <td className="mono">
+                    <Link className="linkish" to={`/orders/${r.id}`} onClick={(e) => e.stopPropagation()} title="View order">
+                      {r.head.orderNumber || r.id}
+                    </Link>
+                  </td>
+                  {visible.map((c) => (
+                    <td key={c.key} className={c.className} style={c.style}>
+                      {c.render!(r)}
                     </td>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{o.poNumber}</td>
-                    {visible.map((c) => (
-                      <td key={c.key} className={c.className} style={c.style}>
-                        {c.render!(o)}
-                      </td>
-                    ))}
-                    <td>
-                      {o.salesOrderId && (
-                        <button
-                          className="btn"
-                          title="Send items to palletization"
-                          onClick={() => setPackOrderId(o.salesOrderId!)}
-                          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px" }}
-                        >
-                          <Icon name="palette" size={12} />
-                          Palletize
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                  ))}
+                </tr>
+              ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 4}>
-                    {orders.length > 0 ? (
+                  <td colSpan={visible.length + 2}>
+                    {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (
                       <EmptyState
                         icon="orders"
-                        title="No master orders yet"
+                        title="No sales orders yet"
                         hint="Create one from a Quote (Convert) or via New Order"
                         action={
-                          <button className="hbtn primary" onClick={() => setShowForm(true)}>
-                            New Order
-                          </button>
+                          can("orders", "create") ? (
+                            <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                              New Order
+                            </button>
+                          ) : undefined
                         }
                       />
                     )}

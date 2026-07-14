@@ -1,6 +1,6 @@
 /* Purchase Orders — ported verbatim from prototype/views2.jsx. */
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
@@ -94,7 +94,6 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
 ];
 
 export function PurchaseOrders() {
-  const navigate = useNavigate();
   const { orders, loading, error, reload } = useOrders();
   const { ordered, visible, hidden, toggle, move } = useColumns("poTableColumns", PO_COLUMNS, ["created", "modified"]);
   const [query, setQuery] = useState("");
@@ -178,14 +177,9 @@ export function PurchaseOrders() {
                   {pager.from + i}
                 </td>
                 <td className="mono">
-                  <button
-                    className="linkish"
-                    style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
-                    onClick={() => navigate(`/po/${encodeURIComponent(p.po)}`)}
-                    title="Open details"
-                  >
+                  <Link className="linkish" to={`/po/${encodeURIComponent(p.po)}`} onClick={(e) => e.stopPropagation()} title="Open details">
                     {p.po}
-                  </button>
+                  </Link>
                 </td>
                 {visible.map((c) => (
                   <td key={c.key} className={c.className} style={c.style}>
