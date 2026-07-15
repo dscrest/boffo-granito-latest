@@ -20,7 +20,7 @@ import { useOrders } from "@/features/orders/useOrders";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
 import { listPalletizable, type PalletizableItem } from "./palletisationApi";
-import type { ProductionRequestInput } from "./productionApi";
+import { listProductionLogs, type ProductionRequestInput } from "./productionApi";
 
 export function ProductionForm({
   presetSalesOrderId,
@@ -52,6 +52,19 @@ export function ProductionForm({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  // Warn (don't block) if the selected order already has a production request.
+  const [alreadyInProduction, setAlreadyInProduction] = useState(false);
+  useEffect(() => {
+    if (mode !== "order" || !orderId) { setAlreadyInProduction(false); return; }
+    let live = true;
+    void listProductionLogs().then((res) => {
+      if (!live) return;
+      setAlreadyInProduction(
+        res.ok && res.entries.some((e) => e.salesOrderId === orderId && e.status !== "Rejected"),
+      );
+    });
+    return () => { live = false; };
+  }, [mode, orderId]);
 
   // Available stock in hand per design = opening + produced − loaded (finished goods
   // not yet shipped). Used to default Desired qty to only what stock can't cover.
@@ -113,14 +126,8 @@ export function ProductionForm({
     };
   }, [orderId, mode, availByDesign]);
 
-  const owing = useMemo(() => items.filter((it) => it.toProduce > 0), [items]);
-
   const setQty = (itemId: string, raw: string, max: number) =>
     setQtyByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
-  const fillAll = () =>
-    setQtyByItem(Object.fromEntries(owing.map((it) => [it.orderItemId, it.toProduce])));
-  const clearAll = () => setQtyByItem({});
-
   const designOptions = useMemo<ComboOption[]>(
     () =>
       designRows.map((d) => ({
@@ -250,19 +257,18 @@ export function ProductionForm({
             </div>
           </div>
 
+          {mode === "order" && orderId && alreadyInProduction && (
+            <div className="form-hint" role="status" style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 12px", marginBottom: 10, borderRadius: 6, background: "var(--warn-soft, #fff7ed)", color: "var(--warn-fg, #9a3412)", fontSize: "var(--t-sm)" }}>
+              <Icon name="alert" size={14} />
+              <span>This order already has production requested. Add only additional quantities.</span>
+            </div>
+          )}
+
           {/* Order mode — item-wise desired qty table. */}
           {mode === "order" && orderId && (
             <div className="form-section">
-              <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div className="form-section-title">
                 <span>Items on this Sales Order</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button type="button" className="btn" disabled={owing.length === 0} onClick={fillAll} style={{ padding: "3px 8px" }} title="Request the full remaining qty on every line">
-                    Fill remaining
-                  </button>
-                  <button type="button" className="btn" disabled={totalRequested === 0} onClick={clearAll} style={{ padding: "3px 8px" }}>
-                    Clear
-                  </button>
-                </div>
               </div>
               {loadingItems ? (
                 <div className="muted" style={{ padding: 8 }}>Loading items…</div>
@@ -275,7 +281,7 @@ export function ProductionForm({
                       <th>Design</th>
                       <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
-                      <th className="num" style={{ textAlign: "right" }}>In hand</th>
+                      <th className="num" style={{ textAlign: "right" }}>Stock in hand</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                       <th className="num" style={{ textAlign: "right", width: 120 }}>Desired qty</th>
                     </tr>

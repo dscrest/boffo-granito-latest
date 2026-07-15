@@ -24,27 +24,47 @@ export interface RecordField {
 
 /** OperationLog history for one table (optionally one row) — the app's audit
     trail. Shared by RecordDetail's Activity tab and ItemDetail. */
-export function ActivityLog({ table, entityId }: { table: string; entityId?: string }) {
+export function ActivityLog({
+  table,
+  entityId,
+  entityIds,
+  excludeOps,
+}: {
+  table: string;
+  entityId?: string;
+  /** Scope to a set of rows (e.g. all lines of one production group). */
+  entityIds?: string[];
+  /** Drop rows whose operation is in this set (e.g. per-box production-record). */
+  excludeOps?: string[];
+}) {
   const [acts, setActs] = useState<DSRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const idsKey = entityIds?.join(",");
+  const exKey = excludeOps?.join(",");
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    const idSet = entityIds && entityIds.length ? new Set(entityIds) : null;
+    const exSet = excludeOps && excludeOps.length ? new Set(excludeOps) : null;
     void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
       if (!alive) return;
       setLoading(false);
       setActs(
         (res.rows || []).filter((r) => {
           if (str(r.table_name) !== table) return false;
-          return entityId ? str(r.entity_rowid) === entityId : true;
+          if (entityId && str(r.entity_rowid) !== entityId) return false;
+          if (idSet && !idSet.has(str(r.entity_rowid))) return false;
+          if (exSet && exSet.has(str(r.operation))) return false;
+          return true;
         }),
       );
     });
     return () => {
       alive = false;
     };
-  }, [table, entityId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table, entityId, idsKey, exKey]);
 
   return (
     <div className="card">

@@ -197,7 +197,7 @@ export function OrdersTable() {
       toast.error(res.error || "Save failed");
       return;
     }
-    toast.success(`Sales order saved (#${res.rowid})`);
+    toast.success(`Order ${res.data?.order_number ?? ""} created`);
     // Land on the new record so the next action can't target the wrong one.
     if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
   };
@@ -378,13 +378,7 @@ export function OrdersTable() {
               {pageRows.map((r) => (
                 <tr
                   key={r.id}
-                  tabIndex={0}
-                  onClick={() => navigate(`/orders/${r.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${r.id}`);
-                  }}
-                  style={{ cursor: "pointer", background: selected.has(r.id) ? "var(--accent-soft)" : undefined }}
-                  title="View order"
+                  style={{ background: selected.has(r.id) ? "var(--accent-soft)" : undefined }}
                 >
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} />

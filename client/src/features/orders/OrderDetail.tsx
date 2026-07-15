@@ -210,6 +210,10 @@ export function OrderDetail() {
   const workRecorded = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
   const editable =
     can("orders", "edit") && !workRecorded && ["Draft", "PendingApproval", "Confirmed"].includes(status);
+  // Edit stays visible on every order (consistency); when locked, explain why.
+  const editLockReason = workRecorded
+    ? "Can't edit — production/work already recorded"
+    : `Can't edit — order is ${status}`;
 
   const onEditSave = async (dr: OrderDraft) => {
     if (!head.salesOrderId) return;
@@ -233,7 +237,7 @@ export function OrderDetail() {
       return;
     }
     setCloning(false);
-    toast.success(`Order created (#${res.rowid})`);
+    toast.success(`Order ${res.data?.order_number ?? ""} created`);
     if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
     // Same-route navigation reuses this component — reload so the new id resolves.
     await load();
@@ -249,7 +253,9 @@ export function OrderDetail() {
     const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
     toast.success(`Production request sent for approval — ${total} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
     invalidateProductionLogs();
-    await load();
+    // Land on the new production record instead of reloading this SO page.
+    if (res.data?.request_group) navigate(`/prod/${encodeURIComponent(res.data.request_group)}`);
+    else await load();
   };
 
   const onDelete = async () => {
@@ -358,8 +364,8 @@ export function OrderDetail() {
       }}
       actions={
         <>
-          {editable && (
-            <button className="hbtn" disabled={statusBusy} onClick={() => setEditing(true)} title="Edit header & line items">
+          {can("orders", "edit") && (
+            <button className="hbtn" disabled={statusBusy || !editable} onClick={() => setEditing(true)} title={editable ? "Edit header & line items" : editLockReason}>
               <Icon name="edit" size={13} /> Edit
             </button>
           )}

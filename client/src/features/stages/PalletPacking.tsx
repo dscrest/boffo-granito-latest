@@ -3,7 +3,7 @@
    PalletisedBatch (produced → palletized); table reloads on success.
    KPI tiles above remain static prototype figures. */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -16,7 +16,6 @@ import { PalletPackForm } from "./PalletPackForm";
 import { closePallet, type ClosePalletInput } from "./palletisationApi";
 
 export function PalletPacking() {
-  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -154,16 +153,7 @@ export function PalletPacking() {
               const palletQty = Math.ceil(total / o.boxesPerPallet);
               const status = o.loadedQty >= o.orderQty ? "final" : o.palletizedQty >= o.orderQty * 0.85 ? "loading" : "packing";
               return (
-                <tr
-                  key={o.id + i}
-                  tabIndex={0}
-                  onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${encodeURIComponent(o.id)}`);
-                  }}
-                  style={{ cursor: "pointer" }}
-                  title="Open order details"
-                >
+                <tr key={o.id + i}>
                   <td>{o.party}</td>
                   <td className="mono">
                     <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">

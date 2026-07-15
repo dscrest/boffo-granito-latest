@@ -13,14 +13,15 @@ import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { fmt } from "@/lib/format";
 import type { ProductionEntry, ProductionRecordInput } from "./productionApi";
 
-const SHIFTS = ["A (07:00–15:00)", "B (15:00–23:00)", "C (23:00–07:00)"];
-
 export function RecordOutputForm({
   entry,
+  step,
   onSave,
   onClose,
 }: {
   entry: ProductionEntry;
+  /** When walking a Record-all queue: which line this is (1-based) of how many. */
+  step?: { n: number; of: number };
   onSave: (input: ProductionRecordInput) => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -36,7 +37,6 @@ export function RecordOutputForm({
 
   const [qty, setQty] = useState(String(remaining));
   const [date, setDate] = useState(entry.productionDate || "");
-  const [shift, setShift] = useState(entry.shift || SHIFTS[0]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -53,7 +53,6 @@ export function RecordOutputForm({
       await onSave({
         qty_boxes: qtyNum,
         production_date: date,
-        shift,
         performed_by: loggedBy,
         note: note.trim() || undefined,
       });
@@ -68,7 +67,7 @@ export function RecordOutputForm({
         <div className="df-head">
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
-            <div className="ttl">Record Output</div>
+            <div className="ttl">Record Output{step ? ` — Line ${step.n} of ${step.of}` : ""}</div>
             <div className="sub2">Actual boxes produced · {entry.design}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">✕</button>
@@ -98,12 +97,6 @@ export function RecordOutputForm({
               <label className="form-field">
                 <span className="lbl">Date</span>
                 <DateInput value={date} onChange={(e) => setDate(e.target.value)} />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Shift</span>
-                <select value={shift} onChange={(e) => setShift(e.target.value)}>
-                  {SHIFTS.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
               </label>
               <label className="form-field">
                 <span className="lbl">Logged by</span>

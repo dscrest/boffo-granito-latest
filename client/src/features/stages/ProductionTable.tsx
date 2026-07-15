@@ -6,7 +6,7 @@
    Approvals). Row click / Production-ID link opens the detail; output is
    recorded there, per line. */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -19,6 +19,7 @@ import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
+import { RecordOutputForm } from "./RecordOutputForm";
 import { ProductionKanban } from "./ProductionKanban";
 import {
   cachedProductionLogs,
@@ -26,11 +27,14 @@ import {
   groupProductionByOrder,
   invalidateProductionLogs,
   listProductionLogs,
+  recordProduction,
   requestProduction,
   setProductionStage,
   stageChip,
   PRODUCTION_STAGE_ORDER,
   PRODUCTION_STAGE_META,
+  type ProductionEntry,
+  type ProductionRecordInput,
   type ProductionRequestGroup,
   type ProductionRequestInput,
   type ProductionStage,
@@ -124,7 +128,6 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 }
 
 export function ProductionTable() {
-  const navigate = useNavigate();
   const [tab, setTab] = useState("pending");
   const [view, setView] = useState<"grid" | "board">("grid");
   const [query, setQuery] = useState("");
@@ -133,6 +136,12 @@ export function ProductionTable() {
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Record-qty-on-move: a move to a producing stage first walks the owing lines
+  // through RecordOutputForm, then applies the stage (pendingMove).
+  const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
+  const [recordQueue, setRecordQueue] = useState<ProductionEntry[]>([]);
+  const [recordTotal, setRecordTotal] = useState(0);
+  const [pendingMove, setPendingMove] = useState<{ g: ProductionRequestGroup; stage: ProductionStage } | null>(null);
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
@@ -215,8 +224,8 @@ export function ProductionTable() {
 
   const canEdit = can("stages", "edit");
 
-  // Kanban drag → set the stage on every plan line of the dragged production.
-  const onMove = async (g: ProductionRequestGroup, stage: ProductionStage) => {
+  // Apply the stage to every plan line of a production group.
+  const applyStage = async (g: ProductionRequestGroup, stage: ProductionStage) => {
     const res = await setProductionStage(g.entries.map((e) => e.id), stage);
     if (!res.ok) {
       toast.error(res.error || "Could not move production");
@@ -225,6 +234,60 @@ export function ProductionTable() {
     toast.success(`Moved ${g.code} to ${PRODUCTION_STAGE_META[stage].label}`);
     invalidateProductionLogs();
     await load();
+  };
+
+  // Kanban drag → moving into a producing stage first captures boxes produced
+  // (walk the owing lines through RecordOutputForm), then applies the stage.
+  const onMove = async (g: ProductionRequestGroup, stage: ProductionStage) => {
+    const owing = (stage === "InProduction" || stage === "Completed")
+      ? g.entries.filter((e) => e.qtyRequested - e.producedSoFar > 0)
+      : [];
+    if (owing.length > 0) {
+      setPendingMove({ g, stage });
+      setRecordQueue(owing.slice(1));
+      setRecordTotal(owing.length);
+      setRecordEntry(owing[0]);
+      return;
+    }
+    await applyStage(g, stage);
+  };
+
+  // Save one line's output while walking a move-triggered record queue.
+  const onRecordSave = async (input: ProductionRecordInput) => {
+    const entry = recordEntry;
+    setRecordEntry(null);
+    if (!entry) return;
+    const res = await recordProduction(entry.id, input);
+    if (!res.ok) {
+      toast.error(res.error || "Record output failed");
+      setRecordQueue([]);
+      setRecordTotal(0);
+      setPendingMove(null);
+      await load();
+      return;
+    }
+    toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
+    const [next, ...rest] = recordQueue;
+    if (next) {
+      setRecordQueue(rest);
+      setRecordEntry(next);
+      return;
+    }
+    // Queue done → apply the staged move.
+    setRecordTotal(0);
+    const mv = pendingMove;
+    setPendingMove(null);
+    invalidateProductionLogs();
+    if (mv) await applyStage(mv.g, mv.stage);
+    else await load();
+  };
+
+  // Cancelling the qty prompt aborts the whole move (stage stays put).
+  const onRecordCancel = () => {
+    setRecordEntry(null);
+    setRecordQueue([]);
+    setRecordTotal(0);
+    setPendingMove(null);
   };
 
   // Bulk selection (same master-page convention as OrdersTable). `selected`
@@ -278,6 +341,15 @@ export function ProductionTable() {
   return (
     <div>
       {showForm && <ProductionForm onSave={onRequest} onClose={() => setShowForm(false)} />}
+
+      {recordEntry && (
+        <RecordOutputForm
+          entry={recordEntry}
+          step={recordTotal > 0 ? { n: recordTotal - recordQueue.length, of: recordTotal } : undefined}
+          onSave={onRecordSave}
+          onClose={onRecordCancel}
+        />
+      )}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -388,13 +460,7 @@ export function ProductionTable() {
                 {pageRows.map((g) => (
                   <tr
                     key={g.group}
-                    tabIndex={0}
-                    onClick={() => navigate(`/prod/${encodeURIComponent(g.group)}`)}
-                    onKeyDown={(ev) => {
-                      if (ev.key === "Enter" && ev.target === ev.currentTarget) navigate(`/prod/${encodeURIComponent(g.group)}`);
-                    }}
-                    style={{ cursor: "pointer", background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
-                    title="View production"
+                    style={{ background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
                   >
                     <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />

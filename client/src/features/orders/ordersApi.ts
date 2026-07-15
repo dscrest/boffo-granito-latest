@@ -197,7 +197,7 @@ function bust<T>(p: Promise<T>): Promise<T> {
 }
 
 export function createSalesOrder(input: NewSalesOrderInput) {
-  return bust(op<{ ROWID: string }>("so-with-items", input));
+  return bust(op<{ ROWID: string; order_number: string }>("so-with-items", input));
 }
 
 /** Update header + replace line items (mirror of updateQuoteWithItems).

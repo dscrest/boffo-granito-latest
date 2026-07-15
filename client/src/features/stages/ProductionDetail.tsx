@@ -16,7 +16,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
+import { ActivityLog } from "@/features/common/RecordDetail";
 import { ProgressBar } from "@/ui/primitives";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
@@ -74,6 +74,8 @@ export function ProductionDetail() {
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
   // Remaining lines queued behind recordEntry when "Record all output" is used.
   const [recordQueue, setRecordQueue] = useState<ProductionEntry[]>([]);
+  // Total lines in the current Record-all walk (0 = single-line record, no step shown).
+  const [recordTotal, setRecordTotal] = useState(0);
   const [logItemFilter, setLogItemFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -127,13 +129,14 @@ export function ProductionDetail() {
     if (!res.ok) {
       setBusy(null);
       setRecordQueue([]);
+      setRecordTotal(0);
       toast.error(res.error || "Record output failed");
       await load();
       return;
     }
     toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
     // "Record all" walks the queue — show the entry form for each remaining line
-    // so the date / shift / details can be set per line before recording.
+    // so the date / details can be set per line before recording.
     const [next, ...rest] = recordQueue;
     if (next) {
       setRecordQueue(rest);
@@ -142,6 +145,7 @@ export function ProductionDetail() {
       return;
     }
     setBusy(null);
+    setRecordTotal(0);
     invalidateProductionLogs();
     await load();
   };
@@ -156,6 +160,7 @@ export function ProductionDetail() {
       return;
     }
     setRecordQueue(queue.slice(1));
+    setRecordTotal(queue.length);
     setRecordEntry(queue[0]);
   };
 
@@ -256,10 +261,12 @@ export function ProductionDetail() {
       {recordEntry && (
         <RecordOutputForm
           entry={recordEntry}
+          step={recordTotal > 0 ? { n: recordTotal - recordQueue.length, of: recordTotal } : undefined}
           onSave={onRecordSave}
           onClose={() => {
             setRecordEntry(null);
             setRecordQueue([]);
+            setRecordTotal(0);
           }}
         />
       )}
@@ -329,20 +336,28 @@ export function ProductionDetail() {
             <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{group.code}</span>
               <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
-              {/* Order progress lives next to the title now — just the percentage. */}
-              <span className="chip" style={{ color: "var(--c-blue)" }}>
-                {group.independent
-                  ? `${pct(group.totalProduced, group.totalRequested)}%`
-                  : `${pct(group.produced, group.ordered)}%`}
-              </span>
+              {/* This batch's completeness — produced vs what THIS production
+                  requested (ignores the wider SO target, which may be part-
+                  ordered on purpose). Green once fully produced. */}
+              {(() => {
+                const p = pct(group.totalProduced, group.totalRequested);
+                const done = group.totalProduced >= group.totalRequested;
+                return (
+                  <span className="chip" style={{ color: done ? "var(--c-green)" : "var(--c-blue)" }} title="Produced vs requested in this production">
+                    {done ? "Complete" : `${p}%`}
+                  </span>
+                );
+              })()}
               <span className="chip">{group.independent ? "Independent" : "Order"}</span>
             </div>
+            {/* Stage move control — reuses the app's canonical select skin (.pg-size). */}
             {can("stages", "edit") && (
               <select
+                className="pg-size"
                 value={group.stage}
                 onChange={(e) => void onStageChange(e.target.value as ProductionStage)}
-                title="Move to a Kanban stage"
-                style={{ height: 28 }}
+                title="Move to a stage"
+                aria-label="Production stage"
               >
                 {PRODUCTION_STAGE_ORDER.map((s) => (
                   <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
@@ -497,7 +512,6 @@ export function ProductionDetail() {
                     <th>Design</th>
                     <th>Size / Finish</th>
                     <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                    <th>Shift</th>
                     <th>By</th>
                     <th>Note</th>
                   </tr>
@@ -511,13 +525,12 @@ export function ProductionDetail() {
                         <td><span className="design-name">{r.design}</span></td>
                         <td className="dim">{[r.size, r.finish].filter(Boolean).join(" · ") || "—"}</td>
                         <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.qtyBoxes)}</td>
-                        <td className="dim">{r.shift || "—"}</td>
                         <td className="dim">{r.performedBy || "—"}</td>
                         <td className="dim">{r.note || "—"}</td>
                       </tr>
                     ))}
                   {group.records.length === 0 && (
-                    <tr><td colSpan={7}><span className="dim" style={{ padding: 8, display: "inline-block" }}>No output recorded yet.</span></td></tr>
+                    <tr><td colSpan={6}><span className="dim" style={{ padding: 8, display: "inline-block" }}>No output recorded yet.</span></td></tr>
                   )}
                 </tbody>
               </table>
@@ -526,17 +539,13 @@ export function ProductionDetail() {
         )}
 
         {tab === "activity" && (
-          <>
-            {group.entries.map((e) => (
-              <div key={e.id} style={{ marginBottom: 12 }}>
-                {group.lineCount > 1 && (
-                  <div className="form-section-title" style={{ marginBottom: 6 }}>{e.design}</div>
-                )}
-                <StatusTimeline entityType="ProductionLog" entityId={e.id} />
-                <ActivityLog table="ProductionLog" entityId={e.id} />
-              </div>
-            ))}
-          </>
+          // One flat log for the whole group. Per-box production-record events live
+          // in the Production-log tab; here we show only record-level changes.
+          <ActivityLog
+            table="ProductionLog"
+            entityIds={group.entries.map((e) => e.id)}
+            excludeOps={["production-record"]}
+          />
         )}
       </div>
     </div>

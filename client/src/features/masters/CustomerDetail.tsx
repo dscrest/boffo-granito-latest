@@ -602,12 +602,7 @@ export function CustomerDetail() {
                       </thead>
                       <tbody>
                         {recent.map((o) => (
-                          <tr
-                            key={o.id}
-                            style={{ cursor: "pointer" }}
-                            title="Open order details"
-                            onClick={() => navigate(`/orders/${encodeURIComponent(o.id)}`)}
-                          >
+                          <tr key={o.id}>
                             <td className="mono">
                               <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
                                 {o.poNumber}

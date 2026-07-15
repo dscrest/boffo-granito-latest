@@ -72,7 +72,7 @@ export function ByOrderView() {
       return;
     }
     setShowForm(false);
-    toast.success(`Order saved (#${res.rowid})`);
+    toast.success(`Order ${res.data?.order_number ?? ""} created`);
     // Land on the new record so the next action can't target the wrong one.
     if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
   };
