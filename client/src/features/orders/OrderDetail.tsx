@@ -269,7 +269,7 @@ export function OrderDetail() {
   const fields: RecordField[] = [
     { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
-    { key: "party", label: "Customer", value: `${head.flag} ${head.party}` },
+    { key: "party", label: "Customer", value: head.party },
     { key: "stage", label: "Stage", value: stageOf(head.stage).label },
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
@@ -412,12 +412,9 @@ export function OrderDetail() {
         </>
       }
       subtitle={
-        <>
-          {head.flag}{" "}
-          <Link className="linkish" to={`/parties/${encodeURIComponent(head.partyCode)}`} title="Open customer">
-            {head.party}
-          </Link>
-        </>
+        <Link className="linkish" to={`/parties/${encodeURIComponent(head.partyCode)}`} title="Open customer">
+          {head.party}
+        </Link>
       }
       fields={fields}
       hiddenStorageKey="orderDetailFields"

@@ -1413,15 +1413,21 @@ async function closePallet(catalyst, ds, body) {
   return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
 }
 
-/* 3a2. Production requests + lifecycle. A ProductionLog row is request-first:
-   created PendingApproval with `qty_requested` (no counter touched), Approved to
-   authorize, then Produced — recording actual `qty_boxes` bumps
-   OrderItem.produced (order-linked, capped at ordered) and steps stage po→prod.
-   Every entry (SO-linked or independent) is gated by approval.
+/* 3a2. Production requests + lifecycle (approval retired 2026-07).
+   A "plan" ProductionLog row is request-first: created with `qty_requested`, no
+   counter touched, in the "New" Kanban stage. Recording output inserts a
+   separate "record" child row (entry_type=record, parent_log=plan) carrying the
+   actual `qty_boxes` + date/shift; that bumps OrderItem.produced (order-linked,
+   capped at ordered) and steps stage po→prod. The plan line stays recordable
+   until its records cover qty_requested. Kanban stage is moved MANUALLY (drag),
+   independent of recording.
 
-   POST /production-log        — create a request (one row per line, shared request_group)
-   POST /production-status/:g  — approve/reject a whole request group
-   POST /production-record/:id — record actual output on an approved line */
+   POST /production-log          — create a request (one plan row per line, shared request_group)
+   POST /production-record/:id   — record actual output → inserts a record child
+   POST /production-stage        — move a production to a Kanban stage (manual)
+   POST /production-update/:id    — edit a plan line (qty_requested / note)
+   POST /production-status/:g    — [retired] approve/reject; kept for rollback */
+// ponytail: approval retired — kept for rollback, no longer driven by the UI.
 const PRODUCTION_TRANSITIONS = {
   PendingApproval: ["Approved", "Rejected"], // approver only
   Approved: ["Produced"], // record actual output
@@ -1450,9 +1456,25 @@ app.post("/production-log", async (req, res) => {
         if (!lines.length) throw badRequest("At least one line with qty_requested > 0 is required");
 
         // Derive design / sales_order for order-item lines from the line record.
+        const orderItemIds = lines.map((l) => l.order_item).filter(Boolean);
         const oiMap = await loadOrderItems(
-          catalyst, lines.map((l) => l.order_item).filter(Boolean), "ROWID, design, sales_order",
+          catalyst, orderItemIds, "ROWID, design, sales_order, ordered_qty_boxes, produced_qty_boxes",
         );
+        // Boxes already requested against each order_item (every live plan line —
+        // requested always ⊇ produced), so we don't request more than ordered.
+        const inFlight = new Map();
+        if (orderItemIds.length) {
+          const uniq = [...new Set(orderItemIds.map(String))];
+          const rows = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT order_item, qty_requested FROM ProductionLog WHERE entry_type = 'plan' AND deleted_at is null AND order_item IN (${uniq.join(",")})`,
+            ),
+          );
+          for (const r of rows) {
+            const k = String(r.order_item);
+            inFlight.set(k, (inFlight.get(k) || 0) + (Number(r.qty_requested) || 0));
+          }
+        }
         const group = `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const created = [];
         for (const l of lines) {
@@ -1461,18 +1483,29 @@ app.post("/production-log", async (req, res) => {
           if (l.order_item) {
             const oi = oiMap.get(l.order_item);
             if (!oi) throw badRequest(`OrderItem not found: ${l.order_item}`, 404);
+            const ordered = Number(oi.ordered_qty_boxes) || 0;
+            const pending = inFlight.get(l.order_item) || 0;
+            if (pending + l.qty_requested > ordered)
+              throw badRequest(
+                `Requesting ${l.qty_requested} exceeds remaining for this line (${pending} already requested of ${ordered} ordered)`,
+                409,
+              );
             design = design || String(oi.design || "");
             salesOrder = String(oi.sales_order || "");
           } else if (!design) {
             throw badRequest("design is required for an independent line");
           }
+          // ponytail: approval retired 2026-07 — plan lines are created ready to
+          // record (status "Approved" is vestigial), and land in the "New" Kanban stage.
           const row = await ds.table("ProductionLog").insertRow({
             design: design || null,
             sales_order: salesOrder || null,
             order_item: l.order_item || null,
             qty_requested: l.qty_requested,
             qty_boxes: 0,
-            status: "PendingApproval",
+            status: "Approved",
+            entry_type: "plan",
+            stage: "New",
             request_group: group,
             production_date: String(body.production_date || ""),
             shift: String(body.shift || ""),
@@ -1480,7 +1513,7 @@ app.post("/production-log", async (req, res) => {
             note: String(body.note || ""),
           });
           await logTransition(catalyst, {
-            entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "PendingApproval",
+            entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "New",
           });
           created.push(String(row.ROWID));
         }
@@ -1488,6 +1521,73 @@ app.post("/production-log", async (req, res) => {
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Delete a production line, cascading its effect: soft-deletes the plan line and
+   all its record children, giving back the summed OrderItem.produced bump (and
+   steps stage prod→po if it hits zero). Blocked when those boxes are already
+   palletised downstream. A line with no recorded output never moved a counter. */
+app.post("/production-delete/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rowid = req.params.rowid;
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-delete", payload: { ROWID: rowid } },
+      async () => {
+        const pl = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, order_item, qty_boxes FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+
+        // Record children hold the recorded boxes to reverse (+ any legacy qty_boxes
+        // on the plan line itself, from before the split-row model).
+        const children = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, qty_boxes FROM ProductionLog WHERE parent_log = ${rowid} AND deleted_at is null`,
+          ),
+        );
+        const reverseQty =
+          (Number(pl.qty_boxes) || 0) + children.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
+
+        const orderItemId = String(pl.order_item || "");
+        if (reverseQty > 0 && orderItemId) {
+          const oi = (await loadOrderItems(
+            catalyst, [orderItemId], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage",
+          )).get(orderItemId);
+          if (oi) {
+            const produced = Number(oi.produced_qty_boxes) || 0;
+            const palletized = Number(oi.palletized_qty_boxes) || 0;
+            const newProduced = produced - reverseQty;
+            if (newProduced < palletized)
+              throw badRequest(
+                `Cannot delete: ${palletized} of these boxes are already palletised — unpack them first`,
+                409,
+              );
+            const patch = { ROWID: orderItemId, produced_qty_boxes: Math.max(0, newProduced) };
+            const stage = String(oi.stage || "");
+            if (newProduced <= 0 && stage === "prod") patch.stage = "po";
+            await ds.table("OrderItem").updateRow(patch);
+            if (patch.stage)
+              await logTransition(catalyst, {
+                entity_type: "OrderItem", entity_rowid: orderItemId, from_status: stage, to_status: patch.stage,
+              });
+          }
+        }
+
+        const deletedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
+        for (const c of children) await ds.table("ProductionLog").updateRow({ ROWID: c.ROWID, deleted_at: deletedAt });
+        await ds.table("ProductionLog").updateRow({ ROWID: rowid, deleted_at: deletedAt });
+        return { rowid };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid });
   } catch (err) {
     sendErr(res, err);
   }
@@ -1549,10 +1649,12 @@ app.post("/production-status/:group", async (req, res) => {
   }
 });
 
-/* Record actual output on an Approved line: set qty_boxes, bump OrderItem.produced
-   (order-linked, capped at ordered), step po→prod, mark Produced.
-   body: { qty_boxes, production_date?, shift?, performed_by?, note? }
-   ponytail: one record completes the line; request again for a further batch. */
+/* Record actual output against a plan line. Inserts a SEPARATE dated "record"
+   child row (entry_type=record, parent_log=plan) — the plan line is untouched, so
+   partial records accumulate and the line stays recordable until its records
+   cover qty_requested. Bumps OrderItem.produced (order-linked, capped at ordered)
+   and steps stage po→prod. Kanban stage is NOT changed here (moved manually).
+   body: { qty_boxes, production_date?, shift?, performed_by?, note? } */
 app.post("/production-record/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -1567,12 +1669,22 @@ app.post("/production-record/:rowid", async (req, res) => {
         if (qty <= 0) throw badRequest("qty_boxes must be > 0");
         const pl = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, order_item FROM ProductionLog WHERE ROWID = ${rowid}`,
+            `SELECT ROWID, order_item, design, sales_order, request_group, qty_requested, qty_boxes, stage FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
           ),
         )[0];
         if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
-        if (String(pl.status) !== "Approved")
-          throw badRequest(`Production must be Approved to record output (is ${pl.status})`, 409);
+
+        // Produced so far on THIS plan line = its (legacy) qty_boxes + every record child.
+        const recs = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT qty_boxes FROM ProductionLog WHERE parent_log = ${rowid} AND entry_type = 'record' AND deleted_at is null`,
+          ),
+        );
+        const requested = Number(pl.qty_requested) || 0;
+        const producedSoFar = (Number(pl.qty_boxes) || 0) + recs.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
+        const remaining = Math.max(0, requested - producedSoFar);
+        if (qty > remaining)
+          throw badRequest(`Recording ${qty} exceeds the ${remaining} still to produce on this line`, 409);
 
         let producedAfter; // returned only for the order-linked path
         const orderItemId = String(pl.order_item || "");
@@ -1598,19 +1710,120 @@ app.post("/production-record/:rowid", async (req, res) => {
             });
         }
 
-        const patch = { ROWID: rowid, qty_boxes: qty, status: "Produced" };
-        if (body.production_date != null) patch.production_date = String(body.production_date);
-        if (body.shift != null) patch.shift = String(body.shift);
-        if (body.performed_by != null) patch.performed_by = String(body.performed_by);
-        if (body.note != null) patch.note = String(body.note);
-        await ds.table("ProductionLog").updateRow(patch);
-        await logTransition(catalyst, {
-          entity_type: "ProductionLog", entity_rowid: rowid, from_status: "Approved", to_status: "Produced",
+        const rec = await ds.table("ProductionLog").insertRow({
+          parent_log: rowid,
+          entry_type: "record",
+          design: pl.design || null,
+          sales_order: pl.sales_order || null,
+          order_item: pl.order_item || null,
+          request_group: pl.request_group || null,
+          qty_requested: 0,
+          qty_boxes: qty,
+          status: "Produced",
+          stage: String(pl.stage || "New"),
+          production_date: body.production_date != null ? String(body.production_date) : "",
+          shift: body.shift != null ? String(body.shift) : "",
+          performed_by: body.performed_by != null ? String(body.performed_by) : "",
+          note: body.note != null ? String(body.note) : "",
         });
-        return { rowid, data: { produced_qty_boxes: producedAfter } };
+        await logTransition(catalyst, {
+          entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${qty}`,
+        });
+        return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Move a production to a Kanban stage — manual drag; recording output does NOT
+   change the stage. Sets `stage` on the given plan-line ROWIDs (the whole group).
+   body: { stage, ids: [plan-line ROWIDs] } */
+const PRODUCTION_STAGES = ["New", "InProduction", "QC", "Completed"];
+app.post("/production-stage", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const stage = String(body.stage || "");
+    const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x) => /^\d+$/.test(x));
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-stage", payload: { stage, ids } },
+      async () => {
+        if (!PRODUCTION_STAGES.includes(stage)) throw badRequest(`Unsupported stage: ${stage}`);
+        if (!ids.length) throw badRequest("At least one production line id is required");
+        for (const id of ids) {
+          await ds.table("ProductionLog").updateRow({ ROWID: id, stage });
+          await logTransition(catalyst, {
+            entity_type: "ProductionLog", entity_rowid: id, from_status: "", to_status: `Stage: ${stage}`,
+          });
+        }
+        return { rowid: ids[0], data: { stage, lines: ids.length } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Edit a production plan line — qty_requested / note. qty_requested can only
+   change while nothing has been recorded against the line (no record children,
+   no legacy qty_boxes) and must stay within the order line's remaining.
+   body: { qty_requested?, note? } */
+app.post("/production-update/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rowid = req.params.rowid;
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-update", payload: { ROWID: rowid } },
+      async () => {
+        const pl = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, order_item, qty_boxes, entry_type FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+        if (String(pl.entry_type || "plan") !== "plan") throw badRequest("Only plan lines can be edited");
+        const patch = { ROWID: rowid };
+        if (body.note != null) patch.note = String(body.note);
+        if (body.qty_requested != null) {
+          const next = nonNeg(body.qty_requested, "qty_requested");
+          if (next <= 0) throw badRequest("qty_requested must be > 0");
+          const recs = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID FROM ProductionLog WHERE parent_log = ${rowid} AND entry_type = 'record' AND deleted_at is null`,
+            ),
+          );
+          if (recs.length || (Number(pl.qty_boxes) || 0) > 0)
+            throw badRequest("Cannot change quantity after output has been recorded", 409);
+          const orderItemId = String(pl.order_item || "");
+          if (orderItemId) {
+            const oi = (await loadOrderItems(catalyst, [orderItemId], "ROWID, ordered_qty_boxes")).get(orderItemId);
+            const ordered = oi ? Number(oi.ordered_qty_boxes) || 0 : 0;
+            const others = rowList(
+              await catalyst.zcql().executeZCQLQuery(
+                `SELECT ROWID, qty_requested FROM ProductionLog WHERE entry_type = 'plan' AND deleted_at is null AND order_item = ${orderItemId}`,
+              ),
+            )
+              .filter((r) => String(r.ROWID) !== String(rowid))
+              .reduce((s, r) => s + (Number(r.qty_requested) || 0), 0);
+            if (others + next > ordered)
+              throw badRequest(`${next} exceeds the order's remaining (${others} already requested of ${ordered})`, 409);
+          }
+          patch.qty_requested = next;
+        }
+        await ds.table("ProductionLog").updateRow(patch);
+        return { rowid };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid });
   } catch (err) {
     sendErr(res, err);
   }

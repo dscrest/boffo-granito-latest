@@ -27,18 +27,21 @@ export function RecordOutputForm({
   const { salesPersons } = useMasters();
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
 
-  // Order-linked lines cap at remaining (ordered − produced); independent: free.
-  const remaining = entry.orderItemId ? Math.max(0, entry.ordered - entry.produced) : 0;
-  const cap = entry.orderItemId ? remaining : Infinity;
+  // Cap at what's still owed on THIS plan line (requested − produced-so-far). For
+  // order-linked lines also respect the order's own remaining (ordered − produced).
+  const lineRemaining = Math.max(0, entry.qtyRequested - entry.producedSoFar);
+  const orderRemaining = entry.orderItemId ? Math.max(0, entry.ordered - entry.produced) : Infinity;
+  const remaining = Math.min(lineRemaining, orderRemaining);
+  const cap = remaining;
 
-  const [qty, setQty] = useState(String(entry.orderItemId ? Math.min(entry.qtyRequested, remaining) : entry.qtyRequested));
+  const [qty, setQty] = useState(String(remaining));
   const [date, setDate] = useState(entry.productionDate || "");
   const [shift, setShift] = useState(entry.shift || SHIFTS[0]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
   const qtyNum = parseInt(qty, 10) || 0;
-  const over = entry.orderItemId && qtyNum > cap;
+  const over = qtyNum > cap;
   const missing = qtyNum <= 0 || over;
 
   const panelRef = useModalA11y(onClose);
@@ -80,17 +83,17 @@ export function RecordOutputForm({
                 <input
                   type="number"
                   min={0}
-                  max={entry.orderItemId ? cap : undefined}
+                  max={Number.isFinite(cap) ? cap : undefined}
                   value={qty}
                   onChange={(e) => setQty(e.target.value)}
                   placeholder="0"
                   autoFocus
                 />
                 <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                  Requested {fmt(entry.qtyRequested)}
-                  {entry.orderItemId ? ` · ${fmt(remaining)} still owed on the order` : " · make-to-stock"}
+                  Requested {fmt(entry.qtyRequested)} · {fmt(remaining)} still to produce
+                  {entry.orderItemId ? " on this line" : " · make-to-stock"}
                 </span>
-                {over && <span className="field-err">Exceeds the {fmt(cap)} boxes still owed on this order line</span>}
+                {over && <span className="field-err">Exceeds the {fmt(cap)} boxes still to produce</span>}
               </label>
               <label className="form-field">
                 <span className="lbl">Date</span>

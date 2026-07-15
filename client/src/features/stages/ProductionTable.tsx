@@ -19,6 +19,7 @@ import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
+import { ProductionKanban } from "./ProductionKanban";
 import {
   cachedProductionLogs,
   deleteProductionLog,
@@ -26,17 +27,23 @@ import {
   invalidateProductionLogs,
   listProductionLogs,
   requestProduction,
-  statusChip,
+  setProductionStage,
+  stageChip,
+  PRODUCTION_STAGE_ORDER,
+  PRODUCTION_STAGE_META,
   type ProductionRequestGroup,
   type ProductionRequestInput,
-  type ProductionStatus,
+  type ProductionStage,
 } from "./productionApi";
 
-const TABS: Array<{ id: string; label: string; match?: ProductionStatus }> = [
+// Default view hides completed productions ("Pending" = anything not Completed).
+const TABS: Array<{ id: string; label: string; match?: ProductionStage; pending?: boolean }> = [
+  { id: "pending", label: "Pending", pending: true },
   { id: "all", label: "All" },
-  { id: "pending", label: "Pending", match: "PendingApproval" },
-  { id: "approved", label: "Approved", match: "Approved" },
-  { id: "produced", label: "Produced", match: "Produced" },
+  { id: "new", label: "New Request", match: "New" },
+  { id: "inproduction", label: "In Production", match: "InProduction" },
+  { id: "qc", label: "QC", match: "QC" },
+  { id: "completed", label: "Completed", match: "Completed" },
 ];
 
 /* Data-driven columns (Production ID pinned outside the map as the row
@@ -61,10 +68,10 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
     { key: "customer", label: "Customer", render: (g) => g.customer || (g.independent ? "—" : "") },
     { key: "date", label: "Date", className: "mono muted", render: (g) => g.date || "—" },
     {
-      key: "status",
-      label: "Status",
+      key: "stage",
+      label: "Stage",
       render: (g) => {
-        const s = statusChip(g.status);
+        const s = stageChip(g.stage);
         return <span className="chip" style={{ color: s.color }}>{s.label}</span>;
       },
     },
@@ -104,7 +111,7 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
     case "order": return g.independent ? "Independent" : g.orderNumber || g.poNumber || "";
     case "customer": return g.customer;
     case "date": return g.date || "";
-    case "status": return g.status;
+    case "stage": return PRODUCTION_STAGE_ORDER.indexOf(g.stage);
     case "requested": return g.totalRequested;
     case "produced": return g.totalProduced;
     case "progress": return g.ordered ? g.produced / g.ordered : -1;
@@ -118,7 +125,8 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 
 export function ProductionTable() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState("pending");
+  const [view, setView] = useState<"grid" | "board">("grid");
   const [query, setQuery] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
@@ -175,7 +183,7 @@ export function ProductionTable() {
     const opts = (get: (r: ProductionRequestGroup) => string) => [...new Set(groups.map(get).filter(Boolean))].sort();
     return [
       { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customer), get: (r) => r.customer },
-      { key: "status", label: "Status", type: "multiselect", options: ["PendingApproval", "Approved", "Produced", "Rejected"], get: (r) => r.status },
+      { key: "stage", label: "Stage", type: "multiselect", options: [...PRODUCTION_STAGE_ORDER], get: (r) => r.stage },
       { key: "by", label: "Requested By", type: "multiselect", options: opts((r) => r.performedBy), get: (r) => r.performedBy },
       { key: "requested", label: "Requested (boxes)", type: "numrange", get: (r) => r.totalRequested },
       { key: "date", label: "Date Between", type: "daterange", get: (r) => r.date || r.createdTime || "" },
@@ -184,9 +192,10 @@ export function ProductionTable() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const match = TABS.find((t) => t.id === tab)?.match;
+    const tabDef = TABS.find((t) => t.id === tab);
     const base = groups.filter((r) => {
-      if (match && r.status !== match) return false;
+      if (tabDef?.pending && r.stage === "Completed") return false;
+      if (tabDef?.match && r.stage !== tabDef.match) return false;
       if (!q) return true;
       return `${r.code} ${r.designSummary} ${r.orderNumber} ${r.poNumber} ${r.customer} ${r.performedBy}`.toLowerCase().includes(q);
     });
@@ -198,9 +207,25 @@ export function ProductionTable() {
   const pageRows = pager.slice(sort.sorted);
 
   const tabCount = (t: (typeof TABS)[number]) =>
-    t.match ? groups.filter((g) => g.status === t.match).length : groups.length;
+    t.match
+      ? groups.filter((g) => g.stage === t.match).length
+      : t.pending
+        ? groups.filter((g) => g.stage !== "Completed").length
+        : groups.length;
 
   const canEdit = can("stages", "edit");
+
+  // Kanban drag → set the stage on every plan line of the dragged production.
+  const onMove = async (g: ProductionRequestGroup, stage: ProductionStage) => {
+    const res = await setProductionStage(g.entries.map((e) => e.id), stage);
+    if (!res.ok) {
+      toast.error(res.error || "Could not move production");
+      return;
+    }
+    toast.success(`Moved ${g.code} to ${PRODUCTION_STAGE_META[stage].label}`);
+    invalidateProductionLogs();
+    await load();
+  };
 
   // Bulk selection (same master-page convention as OrdersTable). `selected`
   // holds group keys and accumulates across pages.
@@ -284,7 +309,24 @@ export function ProductionTable() {
           <input type="text" placeholder="Search production, order, customer…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <AdvancedFilterButton title="Production" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
+          {(["grid", "board"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              title={v === "grid" ? "Table view" : "Kanban board"}
+              style={{
+                background: view === v ? "var(--accent-soft)" : "transparent",
+                color: view === v ? "var(--fg)" : "var(--muted)",
+                border: 0, padding: "4px 8px", cursor: "pointer", font: "inherit", display: "inline-flex", alignItems: "center",
+              }}
+            >
+              <Icon name={v === "grid" ? "columns" : "kanban"} size={13} />
+            </button>
+          ))}
+        </div>
+        {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {can("stages", "export") && (
           <button
             className="hbtn"
@@ -294,7 +336,7 @@ export function ProductionTable() {
               exportCsv("production", filtered, [
                 { header: "Production ID", value: (g) => g.code },
                 { header: "Date", value: (g) => g.date },
-                { header: "Status", value: (g) => statusChip(g.status).label },
+                { header: "Stage", value: (g) => stageChip(g.stage).label },
                 { header: "Design", value: (g) => g.designs.join(", ") },
                 { header: "Order", value: (g) => (g.independent ? "Independent" : g.orderNumber || g.poNumber) },
                 { header: "Customer", value: (g) => g.customer },
@@ -318,6 +360,13 @@ export function ProductionTable() {
       </div>
       )}
 
+      {view === "board" ? (
+        loading && entries.length === 0 ? (
+          <SkeletonRows rows={6} />
+        ) : (
+          <ProductionKanban groups={filtered} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} />
+        )
+      ) : (
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && entries.length === 0 ? (
@@ -390,6 +439,7 @@ export function ProductionTable() {
         </div>
         {!(loading && entries.length === 0) && <GridFooter {...pager} />}
       </div>
+      )}
     </div>
   );
 }

@@ -10,7 +10,7 @@
    ProductionEntry by joining Design / Size / Finish / SalesOrder / Customer /
    OrderItem client-side. Mirrors quotesApi.
    ============================================================ */
-import { listAll, list, remove, op, type DSRow } from "@/lib/dataOps";
+import { listAll, list, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 
@@ -25,20 +25,45 @@ function mapBy(rows: DSRow[] | undefined, field: string): Map<string, string> {
 
 export type ProductionStatus = "PendingApproval" | "Approved" | "Produced" | "Rejected";
 
+/** Manual Kanban stage (approval retired 2026-07). Moved by drag, not by recording. */
+export type ProductionStage = "New" | "InProduction" | "QC" | "Completed";
+
+/** One dated recorded-output row (entry_type=record), child of a plan line. */
+export interface ProductionRecordRow {
+  id: string;
+  parentId: string;
+  design: string;
+  size: string;
+  finish: string;
+  qtyBoxes: number;
+  productionDate: string;
+  shift: string;
+  performedBy: string;
+  note: string;
+  orderItemId: string;
+  createdTime: string;
+}
+
 export interface ProductionEntry {
   id: string;
   designId: string;
   design: string; // design name
   size: string;
   finish: string;
-  /** Lifecycle. Legacy rows backfilled to "Produced". */
+  /** Legacy approval status (retired UI). Kept for the commented approval path. */
   status: ProductionStatus;
+  /** Manual Kanban stage (denormalised across the group's lines). */
+  stage: ProductionStage;
   /** Desired boxes from the request. */
   qtyRequested: number;
   /** Shared token for every line of one Send-for-Production submission. */
   requestGroup: string;
-  /** Actual boxes produced (0 until output is recorded). */
+  /** Raw qty_boxes on the plan row (legacy pre-split model; 0 for new lines). */
   qtyBoxes: number;
+  /** Actual produced against this line = legacy qtyBoxes + every record child. */
+  producedSoFar: number;
+  /** Dated output records logged against this plan line. */
+  records: ProductionRecordRow[];
   productionDate: string;
   shift: string;
   performedBy: string;
@@ -54,6 +79,8 @@ export interface ProductionEntry {
   /** Order-line progress (SO-linked only; 0 for independent). */
   ordered: number;
   produced: number;
+  /** Boxes of this line already palletised — a palletised line can't be deleted. */
+  palletized: number;
   createdTime: string;
   modifiedTime: string;
 }
@@ -84,7 +111,7 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
     list("Finish", { limit: 300, columns: ["name"] }),
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
     listAll("Customer", { columns: ["name"] }),
-    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes"] }),
+    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes"] }),
   ]);
   if (!logs.ok) return { ok: false, entries: [], error: logs.error };
 
@@ -99,38 +126,78 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
   const oiById = new Map<string, DSRow>();
   (items.rows || []).forEach((it) => oiById.set(String(it.ROWID), it));
 
-  const entries: ProductionEntry[] = (logs.rows || []).map((r) => {
-    const designId = str(r.design);
+  const rows = logs.rows || [];
+  const hydrateSizeFinish = (designId: string) => {
     const d = designRow.get(designId);
-    const soId = str(r.sales_order);
-    const so = soById.get(soId);
-    const oi = oiById.get(str(r.order_item));
-    return {
+    return { size: d ? sizeName.get(str(d.size)) || "" : "", finish: d ? finishName.get(str(d.finish)) || "" : "" };
+  };
+
+  // Record rows (each recorded output) are children of a plan line via parent_log.
+  const recordsByParent = new Map<string, ProductionRecordRow[]>();
+  for (const r of rows) {
+    if (str(r.entry_type) !== "record") continue;
+    const designId = str(r.design);
+    const { size, finish } = hydrateSizeFinish(designId);
+    const parentId = str(r.parent_log);
+    const rec: ProductionRecordRow = {
       id: String(r.ROWID),
-      designId,
+      parentId,
       design: designName.get(designId) || designId || "—",
-      size: d ? sizeName.get(str(d.size)) || "" : "",
-      finish: d ? finishName.get(str(d.finish)) || "" : "",
-      status: (str(r.status) || "Produced") as ProductionStatus,
-      qtyRequested: num(r.qty_requested),
-      requestGroup: str(r.request_group),
+      size,
+      finish,
       qtyBoxes: num(r.qty_boxes),
       productionDate: str(r.production_date),
       shift: str(r.shift),
       performedBy: str(r.performed_by),
       note: str(r.note),
-      salesOrderId: soId,
       orderItemId: str(r.order_item),
-      orderNumber: so ? str(so.order_number) : "",
-      poNumber: so ? str(so.po_number) : "",
-      customer: so ? custName.get(str(so.customer)) || "" : "",
-      independent: !soId,
-      ordered: oi ? num(oi.ordered_qty_boxes) : 0,
-      produced: oi ? num(oi.produced_qty_boxes) : 0,
       createdTime: str(r.CREATEDTIME),
-      modifiedTime: str(r.MODIFIEDTIME),
     };
-  });
+    (recordsByParent.get(parentId) ?? recordsByParent.set(parentId, []).get(parentId)!).push(rec);
+  }
+
+  // Plan lines carry qty_requested; produced-so-far is derived from their records.
+  const entries: ProductionEntry[] = rows
+    .filter((r) => str(r.entry_type) !== "record")
+    .map((r) => {
+      const designId = str(r.design);
+      const { size, finish } = hydrateSizeFinish(designId);
+      const soId = str(r.sales_order);
+      const so = soById.get(soId);
+      const oi = oiById.get(str(r.order_item));
+      const id = String(r.ROWID);
+      const records = (recordsByParent.get(id) ?? []).sort((a, b) => (a.createdTime < b.createdTime ? -1 : 1));
+      const producedSoFar = num(r.qty_boxes) + records.reduce((s, rec) => s + rec.qtyBoxes, 0);
+      return {
+        id,
+        designId,
+        design: designName.get(designId) || designId || "—",
+        size,
+        finish,
+        status: (str(r.status) || "Produced") as ProductionStatus,
+        stage: (str(r.stage) || "New") as ProductionStage,
+        qtyRequested: num(r.qty_requested),
+        requestGroup: str(r.request_group),
+        qtyBoxes: num(r.qty_boxes),
+        producedSoFar,
+        records,
+        productionDate: str(r.production_date),
+        shift: str(r.shift),
+        performedBy: str(r.performed_by),
+        note: str(r.note),
+        salesOrderId: soId,
+        orderItemId: str(r.order_item),
+        orderNumber: so ? str(so.order_number) : "",
+        poNumber: so ? str(so.po_number) : "",
+        customer: so ? custName.get(str(so.customer)) || "" : "",
+        independent: !soId,
+        ordered: oi ? num(oi.ordered_qty_boxes) : 0,
+        produced: oi ? num(oi.produced_qty_boxes) : 0,
+        palletized: oi ? num(oi.palletized_qty_boxes) : 0,
+        createdTime: str(r.CREATEDTIME),
+        modifiedTime: str(r.MODIFIEDTIME),
+      };
+    });
 
   return { ok: true, entries };
 }
@@ -185,13 +252,26 @@ export function setProductionStatus(group: string, status: "Approved" | "Rejecte
   return bust(op<{ request_group: string; status: string; lines: number }>(`production-status/${encodeURIComponent(group)}`, { status, reason }));
 }
 
-/** Record actual output on an approved line → bumps produced, marks Produced. */
+/** Record actual output on a plan line → inserts a dated record child, bumps produced. */
 export function recordProduction(rowid: string, input: ProductionRecordInput) {
-  return bust(op<{ produced_qty_boxes?: number }>(`production-record/${encodeURIComponent(rowid)}`, input));
+  return bust(op<{ produced_qty_boxes?: number; recorded?: number }>(`production-record/${encodeURIComponent(rowid)}`, input));
 }
 
+/** Move a production to a Kanban stage (manual) — sets `stage` on its plan lines. */
+export function setProductionStage(ids: string[], stage: ProductionStage) {
+  return bustProd(op<{ stage: string; lines: number }>("production-stage", { stage, ids }));
+}
+
+/** Edit a plan line's requested qty / note. */
+export function updateProductionLine(rowid: string, input: { qty_requested?: number; note?: string }) {
+  return bustProd(op(`production-update/${encodeURIComponent(rowid)}`, input));
+}
+
+/** Delete a production line, reversing its effect: a Produced order-linked line
+    gives back the OrderItem.produced bump (and steps stage prod→po if it hits
+    zero). Blocked server-side when those boxes are already palletised. */
 export function deleteProductionLog(rowid: string) {
-  return bust(remove("ProductionLog", rowid));
+  return bust(op(`production-delete/${encodeURIComponent(rowid)}`, {}));
 }
 
 /* ---- status presentation (shared across the production surfaces) ---- */
@@ -207,6 +287,30 @@ export function statusChip(status: ProductionStatus): { label: string; color: st
   return PRODUCTION_STATUS_META[status] ?? { label: status, color: "var(--muted)" };
 }
 
+/* ---- Kanban stages (replace approval statuses in the UI) ---- */
+export const PRODUCTION_STAGE_ORDER: ProductionStage[] = ["New", "InProduction", "QC", "Completed"];
+export const PRODUCTION_STAGE_META: Record<ProductionStage, { label: string; color: string }> = {
+  New: { label: "New Request", color: "var(--c-amber)" },
+  InProduction: { label: "In Production", color: "var(--c-blue)" },
+  QC: { label: "QC", color: "var(--c-violet, var(--c-blue))" },
+  Completed: { label: "Completed", color: "var(--c-green)" },
+};
+
+/** A coloured stage chip (JSX-free — callers render the returned parts). */
+export function stageChip(stage: ProductionStage): { label: string; color: string } {
+  return PRODUCTION_STAGE_META[stage] ?? { label: stage, color: "var(--muted)" };
+}
+
+/** Group stage — denormalised, so all lines share one; legacy mixed groups fall
+    back to the least-advanced line (a group is Completed only when all lines are). */
+function rollupStage(es: ProductionEntry[]): ProductionStage {
+  return es.reduce<ProductionStage>(
+    (min, e) =>
+      PRODUCTION_STAGE_ORDER.indexOf(e.stage) < PRODUCTION_STAGE_ORDER.indexOf(min) ? e.stage : min,
+    "Completed",
+  );
+}
+
 /* ---- request grouping (shared by Approvals + Production page) ---- */
 export interface ProductionRequestGroup {
   group: string; // request_group (route key / source of truth)
@@ -218,7 +322,9 @@ export interface ProductionRequestGroup {
   independent: boolean; // no Sales Order (make-to-stock)
   performedBy: string;
   date: string; // production_date or created
-  status: ProductionStatus; // rolled-up status across the group's lines
+  status: ProductionStatus; // rolled-up legacy status (retired UI)
+  stage: ProductionStage; // manual Kanban stage across the group's lines
+  records: ProductionRecordRow[]; // every dated output record in the group
   designs: string[]; // unique design names in the production
   designSummary: string; // "Design A" or "Design A +2"
   totalRequested: number;
@@ -261,10 +367,12 @@ function buildGroup(group: string, es: ProductionEntry[]): ProductionRequestGrou
     performedBy: latest.performedBy,
     date: latest.productionDate || latest.createdTime,
     status: rollupStatus(es),
+    stage: rollupStage(es),
+    records: es.flatMap((e) => e.records).sort((a, b) => (a.createdTime < b.createdTime ? -1 : 1)),
     designs,
     designSummary: designs.length <= 1 ? designs[0] || "—" : `${designs[0]} +${designs.length - 1}`,
     totalRequested: es.reduce((s, e) => s + e.qtyRequested, 0),
-    totalProduced: es.reduce((s, e) => s + e.qtyBoxes, 0),
+    totalProduced: es.reduce((s, e) => s + e.producedSoFar, 0),
     ordered: [...oi.values()].reduce((s, v) => s + v.ordered, 0),
     produced: [...oi.values()].reduce((s, v) => s + v.produced, 0),
     lineCount: es.length,

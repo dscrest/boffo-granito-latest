@@ -53,6 +53,21 @@ export function ProductionForm({
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
 
+  // Available stock in hand per design = opening + produced − loaded (finished goods
+  // not yet shipped). Used to default Desired qty to only what stock can't cover.
+  const availByDesign = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of designRows) {
+      const forD = orders.filter((o) => o.design === d.designName);
+      const produced = forD.reduce((s, o) => s + o.producedQty, 0);
+      const loaded = forD.reduce((s, o) => s + o.loadedQty, 0);
+      m.set(d.id, (d.accountingStock ?? 0) + produced - loaded);
+    }
+    return m;
+  }, [designRows, orders]);
+  const inHandFor = (it: PalletizableItem) => Math.max(0, availByDesign.get(it.designId) ?? 0);
+  const recommendedQty = (it: PalletizableItem) => Math.max(0, it.toProduce - inHandFor(it));
+
   // Sales Orders still owing production (ordered > produced). Collapsed to one
   // option per SO from the per-line orders list.
   const soOptions = useMemo<ComboOption[]>(() => {
@@ -82,13 +97,21 @@ export function ProductionForm({
       if (!live) return;
       setLoadingItems(false);
       const order = res.ok ? res.orders.find((o) => o.salesOrderId === orderId) : null;
-      setItems(order?.items ?? []);
-      setQtyByItem({});
+      const its = order?.items ?? [];
+      setItems(its);
+      // Default Desired qty = remaining − stock in hand (produce only the shortfall).
+      setQtyByItem(
+        Object.fromEntries(
+          its
+            .filter((it) => it.toProduce > 0)
+            .map((it) => [it.orderItemId, Math.max(0, it.toProduce - Math.max(0, availByDesign.get(it.designId) ?? 0))]),
+        ),
+      );
     });
     return () => {
       live = false;
     };
-  }, [orderId, mode]);
+  }, [orderId, mode, availByDesign]);
 
   const owing = useMemo(() => items.filter((it) => it.toProduce > 0), [items]);
 
@@ -252,6 +275,7 @@ export function ProductionForm({
                       <th>Design</th>
                       <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
+                      <th className="num" style={{ textAlign: "right" }}>In hand</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                       <th className="num" style={{ textAlign: "right", width: 120 }}>Desired qty</th>
                     </tr>
@@ -264,6 +288,7 @@ export function ProductionForm({
                           <td><span className="design-name">{it.designLabel}</span></td>
                           <td className="num mono">{fmt(it.ordered)}</td>
                           <td className="num mono">{fmt(it.produced)}</td>
+                          <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
                           <td className="num mono">{fmt(it.toProduce)}</td>
                           <td className="num">
                             {canProduce ? (

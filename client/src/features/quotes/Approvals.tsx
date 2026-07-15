@@ -67,7 +67,9 @@ export function Approvals() {
 
   const showQuotes = canApprove("Quote");
   const showOrders = canApprove("SalesOrder");
-  const showProduction = canApprove("Production");
+  // ponytail: production approval retired 2026-07 — production is Kanban-driven now,
+  // so it no longer appears in the approvals inbox. Flip back to canApprove to restore.
+  const showProduction = false;
 
   const load = async () => {
     setLoading(true);

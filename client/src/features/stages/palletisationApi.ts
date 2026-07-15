@@ -25,7 +25,7 @@ export interface PalletizableItem {
   available: number; // produced − palletized (boxes free to palletize NOW)
   produced: number;
   palletized: number;
-  toProduce: number; // ordered − produced (boxes still to make → production)
+  toProduce: number; // ordered − produced − in-flight requests (boxes still to request → production)
 }
 export interface PalletizableOrder {
   salesOrderId: string; // SalesOrder ROWID → close-pallet sales_order
@@ -61,13 +61,24 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   orders: PalletizableOrder[];
   error?: string;
 }> {
-  const [items, sos, customers, designs] = await Promise.all([
+  const [items, sos, customers, designs, prod] = await Promise.all([
     listAll("OrderItem"),
     listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer", "port_of_discharge"] }),
     listAll("Customer", { columns: ["name"] }),
     listAll("Design", { columns: ["design_name", "size"] }),
+    // Outstanding production requests (not yet produced) so "remaining to
+    // produce" doesn't offer boxes already awaiting approval/output.
+    listAll("ProductionLog", { columns: ["order_item", "qty_requested", "status"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
+
+  const inFlight = new Map<string, number>();
+  (prod.rows || []).forEach((p) => {
+    const s = str(p.status);
+    if (s !== "PendingApproval" && s !== "Approved") return;
+    const k = str(p.order_item);
+    if (k) inFlight.set(k, (inFlight.get(k) || 0) + num(p.qty_requested));
+  });
 
   const soById = new Map<string, DSRow>();
   (sos.rows || []).forEach((s) => soById.set(String(s.ROWID), s));
@@ -115,7 +126,7 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       available,
       produced,
       palletized,
-      toProduce: Math.max(0, ordered - produced),
+      toProduce: Math.max(0, ordered - produced - (inFlight.get(String(it.ROWID)) || 0)),
     });
   }
 

@@ -100,7 +100,7 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     fields: [
       { key: "rate_per_sqft", label: "Rate / ft²", kind: "number" },
       { key: "rate_per_sqmt", label: "Rate / m²", kind: "number" },
-      { key: "accounting_stock", label: "Accounting Stock", kind: "number" },
+      { key: "accounting_stock", label: "Opening Stock", kind: "number" },
     ],
   },
 ];

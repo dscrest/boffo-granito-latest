@@ -38,6 +38,16 @@ const ZOHO_STUB_FIELDS = ["Unit"];
 
 /** One image slot: preview + delete when filled, a passive placeholder when
     empty (uploads all go through the single "Add Image" button). */
+/** One label/number row in the stock summary. */
+function StockRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
+      <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{label}</span>
+      <span className="mono">{fmt(value)}</span>
+    </div>
+  );
+}
+
 function ImageSlot({
   label,
   imageId,
@@ -112,6 +122,9 @@ export function ItemDetail() {
   const [imgBusy, setImgBusy] = useState(false); // image upload/save only — keeps slots calm during status changes
   const [viewer, setViewer] = useState<number | null>(null); // lightbox: index into design.images
   const [uploads, setUploads] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]); // per-file upload progress
+  const [stockEdit, setStockEdit] = useState(false); // inline Opening-stock edit
+  const [stockVal, setStockVal] = useState("");
+  const [stockBusy, setStockBusy] = useState(false);
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
@@ -129,6 +142,30 @@ export function ItemDetail() {
 
   const orders = design ? allOrders.filter((o) => o.design === design.designName) : [];
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
+
+  // Live stock summary (derived from order lines + the manual Opening stock).
+  const openingStock = design?.accountingStock ?? 0;
+  const producedTot = orders.reduce((s, o) => s + o.producedQty, 0);
+  const loadedTot = orders.reduce((s, o) => s + o.loadedQty, 0);
+  const inProduction = orders.reduce((s, o) => s + Math.max(0, o.orderQty - o.producedQty), 0);
+  const inLoading = orders.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0);
+  const availableStock = openingStock + producedTot - loadedTot;
+
+  const saveOpeningStock = async () => {
+    if (!design) return;
+    const next = Math.max(0, parseInt(stockVal, 10) || 0);
+    setStockBusy(true);
+    const res = await update("Design", design.id, { accounting_stock: next });
+    setStockBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Could not update opening stock");
+      return;
+    }
+    patchDesignCache(design.id, { accountingStock: next });
+    setDesigns((ds) => (ds ? ds.map((d) => (d.id === design.id ? { ...d, accountingStock: next } : d)) : ds));
+    setStockEdit(false);
+    toast.success("Opening stock updated");
+  };
 
   /** Persist a new image list (positional: [front, rear, ...other]). */
   const saveImages = async (next: DesignImage[]) => {
@@ -464,6 +501,55 @@ export function ItemDetail() {
                 </div>
                 <div className="dim" style={{ marginTop: 10, fontSize: "var(--t-sm)" }}>
                   {design.images.length}/{MAX_IMAGES}
+                </div>
+
+                {/* Live stock summary — below the image (2026-07 request). */}
+                <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                  <div className="form-section-title" style={{ marginBottom: 8 }}>Stock</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Opening stock</span>
+                    {stockEdit ? (
+                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                        <input
+                          type="number"
+                          min={0}
+                          value={stockVal}
+                          onChange={(e) => setStockVal(e.target.value)}
+                          style={{ width: 90, textAlign: "right" }}
+                          autoFocus
+                        />
+                        <button className="btn" disabled={stockBusy} onClick={() => void saveOpeningStock()} title="Save">
+                          {stockBusy ? "…" : <Icon name="check" size={12} />}
+                        </button>
+                        <button className="btn x" onClick={() => setStockEdit(false)} title="Cancel">✕</button>
+                      </span>
+                    ) : (
+                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                        <span className="mono">{fmt(openingStock)}</span>
+                        {can("items", "edit") && (
+                          <button
+                            className="btn x"
+                            title="Edit opening stock"
+                            onClick={() => {
+                              setStockVal(String(openingStock));
+                              setStockEdit(true);
+                            }}
+                          >
+                            <Icon name="edit" size={11} />
+                          </button>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  <StockRow label="In production" value={inProduction} />
+                  <StockRow label="In loading" value={inLoading} />
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", marginTop: 4, borderTop: "1px solid var(--border)" }}>
+                    <span style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}>Available stock</span>
+                    <span className="mono" style={{ fontWeight: 700, color: availableStock < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(availableStock)}</span>
+                  </div>
+                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
+                    Opening + produced ({fmt(producedTot)}) − loaded ({fmt(loadedTot)})
+                  </div>
                 </div>
               </div>
               </div>

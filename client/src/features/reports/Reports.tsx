@@ -17,13 +17,14 @@ import { exportCsv } from "@/lib/csv";
 import { fmt, pct, fmtDuration, fmtLocalDateTime, parseDbTime } from "@/lib/format";
 import { ProgressBar } from "@/ui/primitives";
 import { useOrders } from "@/features/orders/useOrders";
+import { useMasters } from "@/features/masters/useMasters";
 import { listLoadableBatches, type LoadableBatch } from "@/features/stages/palletisationApi";
 import { listAll, type DSRow } from "@/lib/dataOps";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
 import { STATUS_CHIP, STATUS_LABEL } from "@/features/quotes/QuotesTable";
 import type { Quote } from "@/data";
 
-type Tab = "item" | "po" | "ready" | "aging";
+type Tab = "item" | "po" | "stock" | "customer" | "salesperson" | "size" | "ready" | "aging";
 
 interface QtyRow {
   key: string;
@@ -35,8 +36,34 @@ interface QtyRow {
   loaded: number;
 }
 
+interface StockReportRow {
+  key: string;
+  label: string;
+  sub: string;
+  opening: number;
+  inProduction: number;
+  inLoading: number;
+  available: number;
+}
+
+interface SalesRow {
+  key: string;
+  label: string;
+  orders: number;
+  boxes: number;
+  amount: number;
+}
+
+interface SizeRow {
+  key: string;
+  label: string;
+  orders: number;
+  boxes: number;
+}
+
 export function Reports() {
   const { orders, loading, error, reload } = useOrders();
+  const { designRows } = useMasters();
   const [tab, setTab] = useState<Tab>("item");
   const [batches, setBatches] = useState<LoadableBatch[] | null>(null);
   const [batchErr, setBatchErr] = useState<string | null>(null);
@@ -97,6 +124,67 @@ export function Reports() {
     return [...m.values()].sort((a, b) => b.ordered - b.produced - (a.ordered - a.produced));
   }, [orders]);
 
+  // Live stock per design: opening (accounting_stock) + produced − loaded.
+  const byStock = useMemo<StockReportRow[]>(() => {
+    return designRows
+      .map((d) => {
+        const forD = orders.filter((o) => o.design === d.designName);
+        const produced = forD.reduce((s, o) => s + o.producedQty, 0);
+        const loaded = forD.reduce((s, o) => s + o.loadedQty, 0);
+        const opening = d.accountingStock ?? 0;
+        return {
+          key: d.id,
+          label: d.designName || "—",
+          sub: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · "),
+          opening,
+          inProduction: forD.reduce((s, o) => s + Math.max(0, o.orderQty - o.producedQty), 0),
+          inLoading: forD.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
+          available: opening + produced - loaded,
+        };
+      })
+      .sort((a, b) => b.available - a.available);
+  }, [designRows, orders]);
+
+  // One row per Sales Order (totalAmount repeats on every line — take it once).
+  const soRows = useMemo(() => {
+    const m = new Map<string, { customer: string; salesperson: string; amount: number; boxes: number }>();
+    orders.forEach((o) => {
+      if (!o.salesOrderId) return;
+      const r = m.get(o.salesOrderId) ?? { customer: o.party || "—", salesperson: o.salesperson || "—", amount: 0, boxes: 0 };
+      r.boxes += o.orderQty;
+      r.amount = o.totalAmount ?? r.amount;
+      m.set(o.salesOrderId, r);
+    });
+    return [...m.values()];
+  }, [orders]);
+
+  const bySalesGroup = (pick: (s: (typeof soRows)[number]) => string): SalesRow[] => {
+    const m = new Map<string, SalesRow>();
+    soRows.forEach((s) => {
+      const k = pick(s) || "—";
+      const r = m.get(k) ?? { key: k, label: k, orders: 0, boxes: 0, amount: 0 };
+      r.orders += 1;
+      r.boxes += s.boxes;
+      r.amount += s.amount;
+      m.set(k, r);
+    });
+    return [...m.values()].sort((a, b) => b.amount - a.amount);
+  };
+  const byCustomer = useMemo(() => bySalesGroup((s) => s.customer), [soRows]);
+  const bySalesperson = useMemo(() => bySalesGroup((s) => s.salesperson), [soRows]);
+
+  const bySize = useMemo<SizeRow[]>(() => {
+    const m = new Map<string, { key: string; label: string; boxes: number; orders: Set<string> }>();
+    orders.forEach((o) => {
+      const k = o.size || "—";
+      const r = m.get(k) ?? { key: k, label: o.size || "—", boxes: 0, orders: new Set<string>() };
+      r.boxes += o.orderQty;
+      if (o.salesOrderId) r.orders.add(o.salesOrderId);
+      m.set(k, r);
+    });
+    return [...m.values()].map((r) => ({ key: r.key, label: r.label, boxes: r.boxes, orders: r.orders.size })).sort((a, b) => b.boxes - a.boxes);
+  }, [orders]);
+
   const rows = tab === "item" ? byItem : byPo;
   const readyBoxes = (batches ?? []).reduce((s, b) => s + b.boxes, 0);
   const showSkeleton = loading && orders.length === 0;
@@ -135,11 +223,19 @@ export function Reports() {
       <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
         <TabBtn active={tab === "item"} onClick={() => setTab("item")} label="By Item" />
         <TabBtn active={tab === "po"} onClick={() => setTab("po")} label="By PO" />
+        <TabBtn active={tab === "stock"} onClick={() => setTab("stock")} label="Stock" />
+        <TabBtn active={tab === "customer"} onClick={() => setTab("customer")} label="Customer Sales" />
+        <TabBtn active={tab === "salesperson"} onClick={() => setTab("salesperson")} label="Salesperson Sales" />
+        <TabBtn active={tab === "size"} onClick={() => setTab("size")} label="Size-wise" />
         <TabBtn active={tab === "ready"} onClick={() => setTab("ready")} label="Ready Pallets" />
         <TabBtn active={tab === "aging"} onClick={() => setTab("aging")} label="Quote Aging" />
       </div>
 
       {tab === "aging" && <QuoteAging />}
+      {tab === "stock" && <StockTable rows={byStock} loading={showSkeleton} error={error} onRetry={reload} />}
+      {tab === "customer" && <SalesTable rows={byCustomer} headLabel="Customer" name="report-customer-sales" loading={showSkeleton} error={error} onRetry={reload} />}
+      {tab === "salesperson" && <SalesTable rows={bySalesperson} headLabel="Salesperson" name="report-salesperson-sales" loading={showSkeleton} error={error} onRetry={reload} />}
+      {tab === "size" && <SizeTable rows={bySize} loading={showSkeleton} error={error} onRetry={reload} />}
 
       {(tab === "item" || tab === "po") && (
         <>
@@ -326,6 +422,176 @@ function QuoteAging() {
                   <EmptyState icon="clock" title="No open quotes" hint="Every quote is converted — nothing is aging." />
                 </td>
               </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ReportExport<T>({ name, rows, columns }: { name: string; rows: T[]; columns: { header: string; value: (r: T) => string | number }[] }) {
+  if (!can("reports", "export")) return null;
+  return (
+    <button className="hbtn" title="Export as CSV" onClick={() => exportCsv(name, rows, columns)} style={{ marginLeft: "auto" }}>
+      <Icon name="docs" size={13} /> Export
+    </button>
+  );
+}
+
+/* Live stock report — opening + produced − loaded per design. */
+function StockTable({ rows, loading, error, onRetry }: { rows: StockReportRow[]; loading: boolean; error: string | null; onRetry: () => void }) {
+  if (error) return <ErrorCard message={error} onRetry={onRetry} />;
+  if (loading) return <SkeletonRows rows={8} />;
+  return (
+    <div className="card">
+      <div className="card-head">
+        <Icon name="package" size={13} />
+        <span className="title">Live stock</span>
+        <ReportExport
+          name="report-stock"
+          rows={rows}
+          columns={[
+            { header: "Design", value: (r) => r.label },
+            { header: "Spec", value: (r) => r.sub },
+            { header: "Opening", value: (r) => r.opening },
+            { header: "In production", value: (r) => r.inProduction },
+            { header: "In loading", value: (r) => r.inLoading },
+            { header: "Available", value: (r) => r.available },
+          ]}
+        />
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Design</th>
+              <th>Spec</th>
+              <th className="num" style={{ textAlign: "right" }}>Opening</th>
+              <th className="num" style={{ textAlign: "right" }}>In production</th>
+              <th className="num" style={{ textAlign: "right" }}>In loading</th>
+              <th className="num" style={{ textAlign: "right" }}>Available</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td style={{ color: "var(--fg)" }}>{r.label}</td>
+                <td className="muted">{r.sub || "—"}</td>
+                <td className="num mono">{fmt(r.opening)}</td>
+                <td className="num mono">{fmt(r.inProduction)}</td>
+                <td className="num mono">{fmt(r.inLoading)}</td>
+                <td className="num mono" style={{ fontWeight: 600, color: r.available < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(r.available)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 0 }}><EmptyState icon="package" title="No items yet" hint="Add items to see live stock." /></td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* Sales grouped by customer or salesperson (one row per Sales Order). */
+function SalesTable({ rows, headLabel, name, loading, error, onRetry }: { rows: SalesRow[]; headLabel: string; name: string; loading: boolean; error: string | null; onRetry: () => void }) {
+  if (error) return <ErrorCard message={error} onRetry={onRetry} />;
+  if (loading) return <SkeletonRows rows={8} />;
+  const totalAmt = rows.reduce((s, r) => s + r.amount, 0);
+  return (
+    <div className="card">
+      <div className="card-head">
+        <Icon name="chart" size={13} />
+        <span className="title">{headLabel} sales</span>
+        <span className="muted">· {fmt(totalAmt)} total</span>
+        <ReportExport
+          name={name}
+          rows={rows}
+          columns={[
+            { header: headLabel, value: (r) => r.label },
+            { header: "Orders", value: (r) => r.orders },
+            { header: "Boxes", value: (r) => r.boxes },
+            { header: "Amount", value: (r) => r.amount },
+          ]}
+        />
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>{headLabel}</th>
+              <th className="num" style={{ textAlign: "right" }}>Orders</th>
+              <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+              <th className="num" style={{ textAlign: "right" }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td style={{ color: "var(--fg)" }}>{r.label}</td>
+                <td className="num mono">{fmt(r.orders)}</td>
+                <td className="num mono">{fmt(r.boxes)}</td>
+                <td className="num mono">{fmt(r.amount)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: 0 }}><EmptyState icon="chart" title="No sales yet" hint="Confirm a sales order to populate this report." /></td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* Ordered boxes grouped by size. */
+function SizeTable({ rows, loading, error, onRetry }: { rows: SizeRow[]; loading: boolean; error: string | null; onRetry: () => void }) {
+  if (error) return <ErrorCard message={error} onRetry={onRetry} />;
+  if (loading) return <SkeletonRows rows={8} />;
+  const totalBoxes = rows.reduce((s, r) => s + r.boxes, 0);
+  return (
+    <div className="card">
+      <div className="card-head">
+        <Icon name="chart" size={13} />
+        <span className="title">Size-wise orders</span>
+        <span className="muted">· {fmt(totalBoxes)} boxes</span>
+        <ReportExport
+          name="report-size"
+          rows={rows}
+          columns={[
+            { header: "Size", value: (r) => r.label },
+            { header: "Orders", value: (r) => r.orders },
+            { header: "Boxes", value: (r) => r.boxes },
+          ]}
+        />
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th className="num" style={{ textAlign: "right" }}>Orders</th>
+              <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+              <th style={{ width: 200 }}>Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td style={{ color: "var(--fg)" }}>{r.label}</td>
+                <td className="num mono">{fmt(r.orders)}</td>
+                <td className="num mono">{fmt(r.boxes)}</td>
+                <td>
+                  <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <ProgressBar value={r.boxes} max={totalBoxes} color="var(--c-blue)" height={4} />
+                    <span className="mono muted" style={{ fontSize: "var(--t-sm)" }}>{pct(r.boxes, totalBoxes)}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={4} style={{ padding: 0 }}><EmptyState icon="chart" title="No orders yet" hint="Create a sales order to see size split." /></td></tr>
             )}
           </tbody>
         </table>

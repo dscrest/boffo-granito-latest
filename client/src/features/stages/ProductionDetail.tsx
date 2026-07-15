@@ -25,6 +25,7 @@ import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { ProductionForm } from "./ProductionForm";
 import { RecordOutputForm } from "./RecordOutputForm";
+import { ProductionEditForm } from "./ProductionEditForm";
 import {
   cachedProductionLogs,
   deleteProductionLog,
@@ -33,8 +34,12 @@ import {
   listProductionLogs,
   recordProduction,
   requestProduction,
-  statusChip,
+  setProductionStage,
+  stageChip,
+  PRODUCTION_STAGE_ORDER,
+  PRODUCTION_STAGE_META,
   type ProductionEntry,
+  type ProductionStage,
   type ProductionRecordInput,
   type ProductionRequestGroup,
   type ProductionRequestInput,
@@ -43,7 +48,7 @@ import {
 type FieldDef = ColumnDef<ProductionRequestGroup> & { value: (g: ProductionRequestGroup) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
   { key: "code", label: "Production ID", value: (g) => g.code },
-  { key: "status", label: "Status", value: (g) => statusChip(g.status).label },
+  { key: "stage", label: "Stage", value: (g) => stageChip(g.stage).label },
   { key: "order", label: "Sales Order", value: (g) => (g.independent ? "Independent (stock)" : g.orderNumber || g.poNumber || "—") },
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
   { key: "requested", label: "Requested (boxes)", value: (g) => fmt(g.totalRequested) },
@@ -62,10 +67,14 @@ export function ProductionDetail() {
 
   const [entries, setEntries] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
-  const [tab, setTab] = useState<"details" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "prodlog" | "activity">("details");
   const [listQ, setListQ] = useState("");
   const [cloning, setCloning] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
+  // Remaining lines queued behind recordEntry when "Record all output" is used.
+  const [recordQueue, setRecordQueue] = useState<ProductionEntry[]>([]);
+  const [logItemFilter, setLogItemFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const { salesPersons } = useMasters();
@@ -115,55 +124,65 @@ export function ProductionDetail() {
     if (!entry) return;
     setBusy("Recording…");
     const res = await recordProduction(entry.id, input);
-    setBusy(null);
     if (!res.ok) {
+      setBusy(null);
+      setRecordQueue([]);
       toast.error(res.error || "Record output failed");
+      await load();
       return;
     }
     toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
+    // "Record all" walks the queue — show the entry form for each remaining line
+    // so the date / shift / details can be set per line before recording.
+    const [next, ...rest] = recordQueue;
+    if (next) {
+      setRecordQueue(rest);
+      setBusy(null);
+      setRecordEntry(next);
+      return;
+    }
+    setBusy(null);
     invalidateProductionLogs();
     await load();
   };
 
-  // Record every Approved line at once, each at its default quantity
-  // (order-linked → still owed on the order, capped; independent → requested).
-  const onRecordAll = async () => {
+  // Record every line still owing output — one entry form per line (so each keeps
+  // its own date). Lines with nothing left to produce are skipped.
+  const onRecordAll = () => {
     if (!group) return;
-    const plan = group.entries
-      .filter((e) => e.status === "Approved")
-      .map((e) => ({
-        e,
-        qty: e.orderItemId ? Math.min(e.qtyRequested, Math.max(0, e.ordered - e.produced)) : e.qtyRequested,
-      }))
-      .filter((p) => p.qty > 0);
-    if (plan.length === 0) {
-      toast.error("No approved lines with quantity left to record");
+    const queue = group.entries.filter((e) => e.qtyRequested - e.producedSoFar > 0);
+    if (queue.length === 0) {
+      toast.error("No lines left to record");
       return;
     }
-    const total = plan.reduce((s, p) => s + p.qty, 0);
-    if (!(await confirmDialog({ message: `Record output for ${plan.length} approved line${plan.length > 1 ? "s" : ""} at requested quantity (${fmt(total)} boxes)?` }))) return;
-    setBusy("Recording…");
-    let ok = 0;
-    let failed = 0;
-    for (const p of plan) {
-      const res = await recordProduction(p.e.id, {
-        qty_boxes: p.qty,
-        production_date: p.e.productionDate || "",
-        shift: p.e.shift || "A (07:00–15:00)",
-        performed_by: loggedBy,
-      });
-      res.ok ? (ok += 1) : (failed += 1);
-    }
+    setRecordQueue(queue.slice(1));
+    setRecordEntry(queue[0]);
+  };
+
+  const onStageChange = async (stage: ProductionStage) => {
+    if (!group || stage === group.stage) return;
+    setBusy("Moving…");
+    const res = await setProductionStage(group.entries.map((e) => e.id), stage);
     setBusy(null);
-    if (failed) toast.error(`${ok} recorded, ${failed} failed`);
-    else toast.success(`Recorded ${fmt(total)} boxes across ${ok} line${ok > 1 ? "s" : ""}`);
+    if (!res.ok) {
+      toast.error(res.error || "Could not change stage");
+      return;
+    }
+    toast.success(`Moved to ${PRODUCTION_STAGE_META[stage].label}`);
+    invalidateProductionLogs();
+    await load();
+  };
+
+  const onEditSave = async () => {
+    setEditing(false);
     invalidateProductionLogs();
     await load();
   };
 
   const onDelete = async () => {
     if (!group) return;
-    if (!(await confirmDialog({ message: `Delete this production (${group.code} · ${fmt(group.totalRequested)} boxes requested · ${group.lineCount} item${group.lineCount > 1 ? "s" : ""})? This cannot be undone.`, danger: true }))) return;
+    const reversal = producedBoxes > 0 ? ` ${fmt(producedBoxes)} produced boxes will be subtracted from the order.` : "";
+    if (!(await confirmDialog({ message: `Delete this production (${group.code} · ${fmt(group.totalRequested)} boxes requested · ${group.lineCount} item${group.lineCount > 1 ? "s" : ""})?${reversal} This cannot be undone.`, danger: true }))) return;
     setBusy("Deleting…");
     for (const e of group.entries) {
       const res = await deleteProductionLog(e.id);
@@ -205,15 +224,23 @@ export function ProductionDetail() {
     ? groups.filter((x) => `${x.code} ${x.designSummary} ${x.orderNumber} ${x.customer} ${x.performedBy}`.toLowerCase().includes(needle))
     : groups;
 
-  // Delete blocked once any order-linked line is Produced — that bump to
-  // OrderItem.produced isn't reversed here, so removing it would overstate.
-  const deletable = group.entries.every((e) => e.independent || e.status !== "Produced");
+  // Deleting cascades server-side: a Produced order-linked line gives back its
+  // OrderItem.produced bump. Blocked once any of the order's stock is palletised —
+  // those boxes are downstream and can't be un-produced.
+  const producedBoxes = group.totalProduced;
+  const palletised = group.entries.some((e) => e.palletized > 0);
   const canRecord = can("stages", "edit");
-  const hasApproved = group.entries.some((e) => e.status === "Approved");
+  // A line is recordable until its records cover what was requested (and the
+  // production isn't parked in Completed).
+  const canRecordLine = (e: ProductionEntry) => e.qtyRequested - e.producedSoFar > 0 && group.stage !== "Completed";
+  const hasRecordable = group.entries.some(canRecordLine);
+  const recorded = group.records.length > 0;
   const moreItems = [
-    ...(canRecord && hasApproved ? [{ label: "Record all output", onClick: () => void onRecordAll() }] : []),
+    ...(canRecord && hasRecordable ? [{ label: "Record all output", onClick: () => void onRecordAll() }] : []),
+    // Editing requested qty is only safe before any output is recorded.
+    ...(can("stages", "edit") && !recorded ? [{ label: "Edit", onClick: () => setEditing(true) }] : []),
     ...(can("stages", "edit") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
-    ...(deletable && can("stages", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("stages", "delete") && !palletised ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -226,7 +253,17 @@ export function ProductionDetail() {
           onClose={() => setCloning(false)}
         />
       )}
-      {recordEntry && <RecordOutputForm entry={recordEntry} onSave={onRecordSave} onClose={() => setRecordEntry(null)} />}
+      {recordEntry && (
+        <RecordOutputForm
+          entry={recordEntry}
+          onSave={onRecordSave}
+          onClose={() => {
+            setRecordEntry(null);
+            setRecordQueue([]);
+          }}
+        />
+      )}
+      {editing && <ProductionEditForm group={group} onSaved={onEditSave} onClose={() => setEditing(false)} />}
 
       {/* Production list — resizable, sticky, own scroll (mirrors OrderDetail). */}
       <div
@@ -276,7 +313,7 @@ export function ProductionDetail() {
                   {x.code} · {x.designSummary}
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[x.independent ? "Independent" : x.orderNumber || x.poNumber, statusChip(x.status).label].filter(Boolean).join("  ·  ")}
+                  {[x.independent ? "Independent" : x.orderNumber || x.poNumber, stageChip(x.stage).label].filter(Boolean).join("  ·  ")}
                 </div>
               </Link>
             );
@@ -291,12 +328,27 @@ export function ProductionDetail() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{group.code}</span>
-              <span className="chip" style={{ color: statusChip(group.status).color }}>{statusChip(group.status).label}</span>
+              <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
+              {/* Order progress lives next to the title now — just the percentage. */}
               <span className="chip" style={{ color: "var(--c-blue)" }}>
-                {group.totalProduced ? `${fmt(group.totalProduced)} produced` : `${fmt(group.totalRequested)} requested`}
+                {group.independent
+                  ? `${pct(group.totalProduced, group.totalRequested)}%`
+                  : `${pct(group.produced, group.ordered)}%`}
               </span>
               <span className="chip">{group.independent ? "Independent" : "Order"}</span>
             </div>
+            {can("stages", "edit") && (
+              <select
+                value={group.stage}
+                onChange={(e) => void onStageChange(e.target.value as ProductionStage)}
+                title="Move to a Kanban stage"
+                style={{ height: 28 }}
+              >
+                {PRODUCTION_STAGE_ORDER.map((s) => (
+                  <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
+                ))}
+              </select>
+            )}
             <MoreMenu items={moreItems} />
             <button className="btn x" onClick={() => navigate("/prod")} title="Close">
               <Icon name="x" size={13} />
@@ -313,8 +365,6 @@ export function ProductionDetail() {
                 {group.customer && <> · {group.customer}</>}
               </>
             )}
-            {" "}· {group.lineCount} item{group.lineCount > 1 ? "s" : ""}
-            {group.date && <> · {group.date}</>}
             {busy && <> · <span className="dim">{busy}</span></>}
           </div>
         </div>
@@ -322,6 +372,7 @@ export function ProductionDetail() {
         {/* Tabs */}
         <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
           <button onClick={() => setTab("details")} style={tabStyle(tab === "details")}>Details</button>
+          <button onClick={() => setTab("prodlog")} style={tabStyle(tab === "prodlog")}>Production log</button>
           <button onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>Activity</button>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             {tab === "details" && (
@@ -369,17 +420,22 @@ export function ProductionDetail() {
                   </thead>
                   <tbody>
                     {group.entries.map((e) => {
-                      const s = statusChip(e.status);
+                      const done = e.producedSoFar >= e.qtyRequested;
+                      const lineState = done
+                        ? { label: "Done", color: "var(--c-green)" }
+                        : e.producedSoFar > 0
+                          ? { label: "Partial", color: "var(--c-blue)" }
+                          : { label: "To produce", color: "var(--c-amber)" };
                       return (
                         <tr key={e.id}>
                           <td><span className="design-name">{e.design}</span></td>
                           <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
-                          <td><span className="chip" style={{ color: s.color }}>{s.label}</span></td>
+                          <td><span className="chip" style={{ color: lineState.color }}>{lineState.label}</span></td>
                           <td className="num mono">{fmt(e.qtyRequested)}</td>
-                          <td className="num mono">{e.qtyBoxes ? <span style={{ color: "var(--c-green)" }}>{fmt(e.qtyBoxes)}</span> : <span className="dim">—</span>}</td>
+                          <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
                           {canRecord && (
                             <td style={{ textAlign: "right" }}>
-                              {e.status === "Approved" && (
+                              {canRecordLine(e) && (
                                 <button
                                   className="hbtn"
                                   style={{ height: 24, padding: "0 8px", borderRadius: 5 }}
@@ -417,6 +473,56 @@ export function ProductionDetail() {
               </div>
             )}
           </>
+        )}
+
+        {tab === "prodlog" && (
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <span style={{ fontWeight: 600 }}>Production log</span>
+              <span className="muted" style={{ fontSize: 12 }}>{group.records.length} record{group.records.length === 1 ? "" : "s"}</span>
+              <div style={{ marginLeft: "auto" }}>
+                <select value={logItemFilter} onChange={(e) => setLogItemFilter(e.target.value)} title="Filter by item">
+                  <option value="">All items</option>
+                  {[...new Set(group.records.map((r) => r.design))].sort().map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div style={{ overflow: "auto" }}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Design</th>
+                    <th>Size / Finish</th>
+                    <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+                    <th>Shift</th>
+                    <th>By</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.records
+                    .filter((r) => !logItemFilter || r.design === logItemFilter)
+                    .map((r) => (
+                      <tr key={r.id}>
+                        <td className="mono">{r.productionDate || fmtDateTime(r.createdTime)}</td>
+                        <td><span className="design-name">{r.design}</span></td>
+                        <td className="dim">{[r.size, r.finish].filter(Boolean).join(" · ") || "—"}</td>
+                        <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.qtyBoxes)}</td>
+                        <td className="dim">{r.shift || "—"}</td>
+                        <td className="dim">{r.performedBy || "—"}</td>
+                        <td className="dim">{r.note || "—"}</td>
+                      </tr>
+                    ))}
+                  {group.records.length === 0 && (
+                    <tr><td colSpan={7}><span className="dim" style={{ padding: 8, display: "inline-block" }}>No output recorded yet.</span></td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {tab === "activity" && (
