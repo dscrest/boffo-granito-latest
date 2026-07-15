@@ -98,7 +98,11 @@ function soColumns(): ColumnDef<SORow>[] {
       label: "Status",
       render: (r) => {
         const s = r.head.status || "Confirmed";
-        return <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`}>{soStatusLabel(s)}</span>;
+        return (
+          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
+            {soStatusLabel(s)}
+          </span>
+        );
       },
     },
     { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },

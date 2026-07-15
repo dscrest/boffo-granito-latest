@@ -153,10 +153,6 @@ export function ByOrderView() {
       <div className="page-head">
         <div className="right">
           <ViewToggle />
-          <button className="hbtn" onClick={toggleAll}>
-            <Icon name="kanban" size={13} />
-            {allCollapsed ? "Expand all" : "Collapse all"}
-          </button>
           {can("orders", "export") && (
             <button
               className="hbtn"
@@ -192,8 +188,19 @@ export function ByOrderView() {
         </div>
       </div>
 
-      {/* #20: shared choosable filter (type-to-search value) + search box. */}
-      <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
+      {/* #20: shared choosable filter (type-to-search value) + search box.
+         Collapse/Expand-all lives here (in the filter bar), not the header. */}
+      <OrdersFilter
+        orders={orders}
+        value={filter}
+        onChange={setFilter}
+        actions={
+          <button className="hbtn" onClick={toggleAll} title={allCollapsed ? "Expand all groups" : "Collapse all groups"}>
+            <Icon name={allCollapsed ? "chev-r" : "menu"} size={13} />
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </button>
+        }
+      />
 
       {loading && orders.length === 0 ? (
         <SkeletonRows />

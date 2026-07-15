@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
@@ -138,13 +138,16 @@ export function QuoteDetail() {
     if (!quote) return;
     let reason = "";
     if (opts?.askReason) {
-      const r = window.prompt(opts.reasonRequired ? "Rejection reason (required):" : "Reason (optional):", "");
+      const r = await promptDialog({
+        title: opts.reasonRequired ? "Reject quote" : "Reason",
+        message: opts.reasonRequired ? `Reason for rejecting ${quote.quoteNo}:` : "Reason (optional):",
+        placeholder: opts.reasonRequired ? "Rejection reason" : "Reason (optional)",
+        confirmLabel: opts.reasonRequired ? "Reject" : "OK",
+        danger: opts.reasonRequired,
+        required: opts.reasonRequired,
+      });
       if (r === null) return; // cancelled
       reason = r.trim();
-      if (opts.reasonRequired && !reason) {
-        toast.error("A rejection reason is required");
-        return;
-      }
     }
     setBusy(`${label}…`);
     const res = await setQuoteStatus(quote.id, next, reason || undefined);
@@ -442,7 +445,7 @@ export function QuoteDetail() {
             title={quote.quoteNo}
           >
             <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{quote.quoteNo}</span>
-            <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`}>{STATUS_LABEL[quote.status]}</span>
+            <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`} title={quote.status === "Rejected" && quote.rejectReason ? `Rejected: ${quote.rejectReason}` : undefined}>{STATUS_LABEL[quote.status]}</span>
           </div>
           {/* #16: status transitions (Zoho Books style) — approval workflow:
               Draft → PendingApproval → (admin) Approved → Sent → Accepted/Rejected. */}
@@ -459,8 +462,8 @@ export function QuoteDetail() {
               <button
                 className="hbtn"
                 disabled={!!busy}
-                onClick={() => void changeStatus("Draft", "Rejected — back to draft", { askReason: true, reasonRequired: true })}
-                title="Reject with a reason (returns to Draft)"
+                onClick={() => void changeStatus("Rejected", "Quote rejected", { askReason: true, reasonRequired: true })}
+                title="Reject with a reason"
                 style={{ color: "var(--c-red)" }}
               >
                 <Icon name="x" size={13} /> Reject

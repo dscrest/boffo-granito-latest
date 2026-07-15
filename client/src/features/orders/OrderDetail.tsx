@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { StageBadge } from "@/ui/primitives";
 import { can, canApprove } from "@/lib/auth";
 import { type Order } from "@/data";
@@ -32,6 +32,7 @@ export function OrderDetail() {
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [listQ, setListQ] = useState("");
 
   const load = async () => {
     const res = await listOrders();
@@ -84,7 +85,6 @@ export function OrderDetail() {
     return <RecordDetail backTo="/orders" title="Order not found" fields={[]} hiddenStorageKey="orderDetailFields" />;
   }
 
-  const totalOrdered = items.reduce((s, o) => s + o.orderQty, 0);
   const totalAvail = items.reduce((s, o) => s + avail(o), 0);
 
   // Status managed here (like quotes) — not in the order form.
@@ -101,14 +101,17 @@ export function OrderDetail() {
     toast.success(label);
     await load();
   };
-  const onReject = () => {
-    const r = window.prompt(`Rejection reason for ${head.orderNumber || head.poNumber} (required):`, "");
-    if (r === null) return;
-    if (!r.trim()) {
-      toast.error("A rejection reason is required");
-      return;
-    }
-    void changeStatus("Draft", "Order rejected — back to draft", r.trim());
+  const onReject = async () => {
+    const reason = await promptDialog({
+      title: "Reject order",
+      message: `Reason for rejecting ${head.orderNumber || head.poNumber}:`,
+      placeholder: "Rejection reason",
+      confirmLabel: "Reject",
+      danger: true,
+      required: true,
+    });
+    if (reason == null) return;
+    void changeStatus("Rejected", "Order rejected", reason);
   };
 
   // Editable until any work is recorded (server enforces the same guard with
@@ -157,27 +160,94 @@ export function OrderDetail() {
     navigate("/orders");
   };
 
+  // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
+  // Items, Total Qty, Box Branding, Invoice) live in the Items table below.
   const fields: RecordField[] = [
     { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
     { key: "status", label: "Status", value: status },
     { key: "party", label: "Customer", value: `${head.flag} ${head.party}` },
-    { key: "country", label: "Country", value: head.country },
-    { key: "skus", label: "Line Items", value: String(items.length) },
-    { key: "totalOrdered", label: "Total Order Qty", value: fmt(totalOrdered) },
     { key: "stage", label: "Stage", value: head.stage },
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
-    { key: "boxBranding", label: "Box Branding", value: head.boxBranding || "—" },
-    { key: "invoice", label: "Invoice", value: head.invoice || "—" },
   ];
 
+  // Left panel: one row per Sales Order (orders is per-line-item), filtered.
+  const soHeads = [...new Map(orders.map((o) => [o.salesOrderId || o.id, o])).values()];
+  const needle = listQ.trim().toLowerCase();
+  const listed = needle
+    ? soHeads.filter((x) => `${x.orderNumber} ${x.poNumber} ${x.party}`.toLowerCase().includes(needle))
+    : soHeads;
+
   return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {/* SO list — resizable, sticky, own scroll (mirrors QuoteDetail). */}
+      <div
+        className="card"
+        style={{
+          width: 300,
+          minWidth: 220,
+          maxWidth: 420,
+          flexShrink: 0,
+          padding: 0,
+          resize: "horizontal",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100vh - var(--header-h) - 46px)",
+          position: "sticky",
+          top: 0,
+        }}
+      >
+        <div className="lp-search">
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search orders…" value={listQ} onChange={(e) => setListQ(e.target.value)} />
+        </div>
+        <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
+          {listed.map((x) => {
+            const cur = x.salesOrderId === head.salesOrderId;
+            return (
+              <Link
+                key={x.salesOrderId || x.id}
+                to={`/orders/${encodeURIComponent(x.salesOrderId || x.id)}`}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "9px 12px",
+                  border: "none",
+                  borderBottom: "1px solid var(--border)",
+                  background: cur ? "var(--accent-soft)" : "transparent",
+                  cursor: "pointer",
+                  font: "inherit",
+                  color: "inherit",
+                  textDecoration: "none",
+                }}
+                title={x.orderNumber || x.poNumber}
+              >
+                <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {x.orderNumber || x.poNumber || "—"}
+                </div>
+                <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+                  {[x.party, soStatusLabel(x.status || "Confirmed")].filter(Boolean).join("  ·  ")}
+                </div>
+              </Link>
+            );
+          })}
+          {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching orders</div>}
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
     <RecordDetail
       backTo="/orders"
       title={head.orderNumber || head.poNumber}
-      statusChip={{ label: soStatusLabel(status), cls: SO_STATUS_CHIP[status] || "q-draft" }}
+      statusChip={{
+        label: soStatusLabel(status),
+        cls: SO_STATUS_CHIP[status] || "q-draft",
+        title: status === "Rejected" && head.rejectReason ? `Rejected: ${head.rejectReason}` : undefined,
+      }}
       actions={
         <>
           {editable && (
@@ -245,7 +315,7 @@ export function OrderDetail() {
       }
       fields={fields}
       hiddenStorageKey="orderDetailFields"
-      defaultHidden={["orderNumber", "status", "party", "skus", "CREATEDTIME", "MODIFIEDTIME"]}
+      defaultHidden={["orderNumber", "status", "party", "CREATEDTIME", "MODIFIEDTIME"]}
       activityTable="SalesOrder"
       entityId={head.salesOrderId}
       created={head.createdTime}
@@ -335,5 +405,7 @@ export function OrderDetail() {
         />
       )}
     </RecordDetail>
+      </div>
+    </div>
   );
 }

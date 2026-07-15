@@ -391,6 +391,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | tax_amount | double | stored positive; sign in total |
 | tax_type | varchar(10) | TDS subtracts / TCS adds |
 | share_token | varchar(64), UNIQUE | public read-only quote link |
+| reject_reason | text(10000) | reason written on reject (status→Rejected); shown on the status hover |
 
 ### QuoteItem (76673000000050364)
 | Column | Type | Notes |
@@ -432,6 +433,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | tax_amount | double | |
 | tax_type | varchar(10) | |
 | box_branding | varchar(120) | customer-selectable box print |
+| reject_reason | text(10000) | reason written on reject (status→Rejected); shown on the status hover |
 
 ### OrderItem (76673000000051730)
 | Column | Type | Notes |
@@ -582,16 +584,21 @@ No read-flags — the bell's sessionStorage last-seen stamp covers "unseen".
 `PendingApproval` and `Approved`. All quote status changes go through
 `POST /quote-status/:rowid` (validated state machine; generic PATCH rejects
 Quote.status writes; create forces Draft; edit resets PendingApproval/Approved
-→ Draft). Transitions: Draft→PendingApproval→(approver)Approved→Sent→Accepted⇄Rejected;
-Rejected→Draft; any change blocked once conversion_flag ≠ None. The
-PendingApproval verdict requires `Role.matrix.approve` to include `"Quote"` (or Admin).
+→ Draft). Transitions: Draft→PendingApproval→(approver: Approved | Rejected);
+Approved→Sent→Accepted⇄Rejected; Rejected→Draft (reopen); any change blocked once
+conversion_flag ≠ None. Reject (PendingApproval→Rejected) requires a reason, which is
+persisted to `Quote.reject_reason` (for the grid/detail status hover) as well as the
+StatusTransition note. The PendingApproval verdict requires `Role.matrix.approve` to
+include `"Quote"` (or Admin). (Updated 2026-07-15: reject now targets Rejected, not Draft.)
 
 **SalesOrder approval workflow (2026-07-13):** `SalesOrder.status` gained
 `Draft` and `PendingApproval` ahead of the legacy Confirmed / InProgress /
 Cancelled. All SO status changes go through `POST /so-status/:rowid`
 (generic PATCH now rejects SalesOrder.status writes). Transitions:
-Draft→PendingApproval→(approver)Confirmed→InProgress→Cancelled; Cancelled→Confirmed;
-reject returns PendingApproval→Draft with a required reason. The verdict requires
+Draft→PendingApproval→(approver: Confirmed | Rejected); Confirmed→InProgress→Cancelled;
+Cancelled→Confirmed; Rejected→Draft (reopen). Reject (PendingApproval→Rejected) requires a
+reason, persisted to `SalesOrder.reject_reason` (status hover) plus the StatusTransition
+note (updated 2026-07-15: reject targets Rejected, not Draft). The verdict requires
 `Role.matrix.approve` to include `"SalesOrder"` (or Admin). Manual SOs are created
 in Draft; `/convert-quote` also creates Draft — the SO earns its own approval
 (full mirror of quotes; the quote's approval covered the quote, not the SO's

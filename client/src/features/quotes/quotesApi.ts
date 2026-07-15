@@ -144,6 +144,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       shareToken: str(r.share_token),
       createdTime: str(r.CREATEDTIME),
       modifiedTime: str(r.MODIFIEDTIME),
+      rejectReason: str(r.reject_reason),
     };
   });
 

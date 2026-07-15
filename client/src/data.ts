@@ -51,8 +51,10 @@ export interface Order {
   pallets: number;
   stage: string;
   /** SalesOrder.status — Draft | PendingApproval | Confirmed | InProgress |
-      Cancelled (state machine in /so-status; status bar on OrderDetail). */
+      Cancelled | Rejected (state machine in /so-status; status bar on OrderDetail). */
   status?: string;
+  /** Reason captured when the order was rejected (shown on the status hover). */
+  rejectReason?: string;
   orderDate: string;
   dueDate: string;
   invoice: string | null;
@@ -202,6 +204,8 @@ export interface Quote {
   /** Raw Catalyst CREATEDTIME / MODIFIEDTIME (for the Created/Modified grid columns). */
   createdTime?: string;
   modifiedTime?: string;
+  /** Reason captured when the quote was rejected (shown on the status hover). */
+  rejectReason?: string;
 }
 
 // Payment terms now come from the live PaymentTerm master (useMasters().paymentTerms).

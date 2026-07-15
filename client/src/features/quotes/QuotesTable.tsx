@@ -67,7 +67,11 @@ function quoteColumns(): ColumnDef<Quote>[] {
     {
       key: "status",
       label: "Status",
-      render: (q) => <span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span>,
+      render: (q) => (
+        <span className={`chip qstatus ${STATUS_CHIP[q.status]}`} title={q.status === "Rejected" && q.rejectReason ? `Rejected: ${q.rejectReason}` : undefined}>
+          {STATUS_LABEL[q.status]}
+        </span>
+      ),
     },
     {
       key: "so",

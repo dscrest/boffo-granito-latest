@@ -9,13 +9,14 @@ function buildUrl(path: string): string {
   return `${API_BASE}/${path.replace(/^\/+/, "")}`;
 }
 
-/* Session token lives in sessionStorage under "boffo_auth" (see lib/auth.ts).
+/* Session token lives in localStorage under "boffo_auth" (see lib/auth.ts) —
+   localStorage so a link opened in a new tab stays signed in.
    Read it directly here to avoid an api<->auth circular import.
    Sent as X-App-Token: the Catalyst gateway hijacks `Authorization: Bearer`
    (validates it as a Zoho OAuth token and 401s before our function runs). */
 function authHeader(): Record<string, string> {
   try {
-    const raw = sessionStorage.getItem("boffo_auth");
+    const raw = localStorage.getItem("boffo_auth");
     const token = raw ? (JSON.parse(raw) as { token?: string }).token : "";
     return token ? { "X-App-Token": token } : {};
   } catch {
@@ -25,7 +26,7 @@ function authHeader(): Record<string, string> {
 
 function onUnauthorized(): void {
   // Stale/expired session: drop it and bounce to the login gate.
-  sessionStorage.removeItem("boffo_auth");
+  localStorage.removeItem("boffo_auth");
   window.location.reload();
 }
 

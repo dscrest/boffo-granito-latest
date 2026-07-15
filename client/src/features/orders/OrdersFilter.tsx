@@ -5,6 +5,7 @@
    plus a free-text search box. applyOrderFilter() runs the same
    logic everywhere.
    ============================================================ */
+import type { ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { STAGES, type Order } from "@/data";
@@ -40,10 +41,12 @@ export function OrdersFilter({
   orders,
   value: st,
   onChange,
+  actions,
 }: {
   orders: Order[];
   value: OrdersFilterState;
   onChange: (next: OrdersFilterState) => void;
+  actions?: ReactNode;
 }) {
   // Value options for the chosen field (type-to-search Combobox).
   const valueOptions = (() => {
@@ -93,6 +96,7 @@ export function OrdersFilter({
         onChange={(e) => onChange({ ...st, search: e.target.value })}
         placeholder="Search PO, design, customer…"
       />
+      {actions}
     </div>
   );
 }

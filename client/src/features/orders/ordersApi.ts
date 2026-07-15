@@ -142,6 +142,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       taxAmount: so ? num(so.tax_amount) : 0,
       createdTime: so ? str(so.CREATEDTIME) : "",
       modifiedTime: so ? str(so.MODIFIEDTIME) : "",
+      rejectReason: so ? str(so.reject_reason) : "",
     };
   });
 
@@ -179,6 +180,7 @@ export const SO_STATUS_CHIP: Record<string, string> = {
   Confirmed: "q-accepted",
   InProgress: "q-sent",
   Cancelled: "q-rejected",
+  Rejected: "q-rejected",
 };
 export const SO_STATUS_LABEL: Record<string, string> = {
   PendingApproval: "Pending Approval",

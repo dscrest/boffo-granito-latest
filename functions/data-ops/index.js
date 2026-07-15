@@ -778,11 +778,11 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
    ---------------------------------------------------------------- */
 const QUOTE_TRANSITIONS = {
   Draft: ["PendingApproval"],
-  PendingApproval: ["Approved", "Draft"], // approver only (approve / reject with reason)
+  PendingApproval: ["Approved", "Rejected"], // approver only (approve / reject with reason)
   Approved: ["Sent"],
   Sent: ["Accepted", "Rejected"],
   Accepted: ["Rejected"], // customer can back out until conversion
-  Rejected: ["Draft"],
+  Rejected: ["Draft"], // reopen a rejected quote for revision
 };
 
 /* Approval verdicts need the role's approve list (Role.matrix) — or Admin. */
@@ -819,10 +819,14 @@ app.post("/quote-status/:rowid", async (req, res) => {
           throw badRequest(`Cannot move quote from ${from} to ${to}`, 409);
         if (from === "PendingApproval" && !canApprove(req, "Quote"))
           throw badRequest("Your role cannot approve or reject quotations", 403);
-        if (from === "PendingApproval" && to === "Draft" && !reason)
+        if (to === "Rejected" && !reason)
           throw badRequest("A rejection reason is required");
 
-        await ds.table("Quote").updateRow({ ROWID: quoteId, status: to });
+        // Persist the reason on the record when rejecting so the status hover
+        // can show it on grids (which don't load StatusTransition).
+        await ds.table("Quote").updateRow(
+          to === "Rejected" ? { ROWID: quoteId, status: to, reject_reason: reason } : { ROWID: quoteId, status: to },
+        );
         await logTransition(catalyst, {
           entity_type: "Quote", entity_rowid: quoteId, from_status: from, to_status: to, note: reason,
         });
@@ -854,10 +858,11 @@ app.post("/quote-status/:rowid", async (req, res) => {
    ---------------------------------------------------------------- */
 const SO_TRANSITIONS = {
   Draft: ["PendingApproval"],
-  PendingApproval: ["Confirmed", "Draft"], // approver only (approve / reject with reason)
+  PendingApproval: ["Confirmed", "Rejected"], // approver only (approve / reject with reason)
   Confirmed: ["InProgress", "Cancelled"],
   InProgress: ["Cancelled"],
   Cancelled: ["Confirmed"],
+  Rejected: ["Draft"], // reopen a rejected order for revision
 };
 
 app.post("/so-status/:rowid", async (req, res) => {
@@ -885,10 +890,13 @@ app.post("/so-status/:rowid", async (req, res) => {
           throw badRequest(`Cannot move sales order from ${from} to ${to}`, 409);
         if (from === "PendingApproval" && !canApprove(req, "SalesOrder"))
           throw badRequest("Your role cannot approve or reject sales orders", 403);
-        if (from === "PendingApproval" && to === "Draft" && !reason)
+        if (to === "Rejected" && !reason)
           throw badRequest("A rejection reason is required");
 
-        await ds.table("SalesOrder").updateRow({ ROWID: soId, status: to });
+        // Persist the reason on the record (see /quote-status) for the grid hover.
+        await ds.table("SalesOrder").updateRow(
+          to === "Rejected" ? { ROWID: soId, status: to, reject_reason: reason } : { ROWID: soId, status: to },
+        );
         await logTransition(catalyst, {
           entity_type: "SalesOrder", entity_rowid: soId, from_status: from, to_status: to, note: reason,
         });

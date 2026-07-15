@@ -1,7 +1,11 @@
 // App-level auth backed by the data-ops /auth/* endpoints (AppUser/Role/
 // AuthSession tables). The session token + user/permissions snapshot live in
-// sessionStorage; lib/api.ts attaches the token to every request and clears
-// the session on 401. The old Catalyst-hosted-login / dev-stub split is gone.
+// localStorage (shared across tabs of the origin, so opening a link in a new
+// tab stays signed in); lib/api.ts attaches the token to every request and
+// clears the session on 401. Trade-off vs the old sessionStorage: the token now
+// survives browser restart until sign-out / server-side expiry — the server
+// token TTL + the 401-clear + explicit sign-out are what end a session.
+// The old Catalyst-hosted-login / dev-stub split is gone.
 import { API_BASE } from "./api";
 
 export type PermModule =
@@ -41,7 +45,7 @@ interface Stored {
 
 export function storedAuth(): Stored | null {
   try {
-    const raw = sessionStorage.getItem(KEY);
+    const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as Stored) : null;
   } catch {
     return null;
@@ -53,7 +57,7 @@ export function authToken(): string {
 }
 
 export function clearAuth(): void {
-  sessionStorage.removeItem(KEY);
+  localStorage.removeItem(KEY);
 }
 
 /** Validate the stored token server-side; null if absent/expired. */
@@ -73,7 +77,7 @@ export async function checkSession(): Promise<SessionUser | null> {
     const json = (await res.json()) as { ok: boolean; user: SessionUser };
     // Refresh the stored perms snapshot: role edits reach signed-in users on
     // their next reload (the server guard is authoritative in the meantime).
-    sessionStorage.setItem(KEY, JSON.stringify({ token: stored.token, user: json.user }));
+    localStorage.setItem(KEY, JSON.stringify({ token: stored.token, user: json.user }));
     return json.user;
   } catch {
     // Network hiccup: keep the stored session rather than logging the user out.
@@ -93,7 +97,7 @@ export async function signIn(email: string, password: string): Promise<SessionUs
   if (!res.ok || !json?.ok || !json.token || !json.user) {
     throw new Error(json?.error || "Sign-in failed");
   }
-  sessionStorage.setItem(KEY, JSON.stringify({ token: json.token, user: json.user }));
+  localStorage.setItem(KEY, JSON.stringify({ token: json.token, user: json.user }));
   return json.user;
 }
 

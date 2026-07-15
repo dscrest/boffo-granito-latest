@@ -173,7 +173,7 @@ export function RecordDetail({
   backTo: string;
   title: string;
   subtitle?: ReactNode;
-  statusChip?: { label: string; cls: string };
+  statusChip?: { label: string; cls: string; title?: string };
   /** Header action buttons (e.g. status transitions), right-aligned. */
   actions?: ReactNode;
   fields: RecordField[];
@@ -225,7 +225,7 @@ export function RecordDetail({
           <div>
             <div className="title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {title}
-              {statusChip && <span className={`chip qstatus ${statusChip.cls}`}>{statusChip.label}</span>}
+              {statusChip && <span className={`chip qstatus ${statusChip.cls}`} title={statusChip.title}>{statusChip.label}</span>}
             </div>
             {subtitle && <div className="sub">{subtitle}</div>}
           </div>
