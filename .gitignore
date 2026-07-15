@@ -25,3 +25,6 @@ catalyst-debug.log
 !.env.example
 catalyst-migration/
 .impeccable/hook.cache.json
+
+# graphify generated knowledge-graph cache
+graphify-out/

@@ -47,24 +47,20 @@ export function Kanban() {
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <div className="title">Pipeline</div>
-          <div className="sub">
-            Click the <Icon name="chev-r" size={11} style={{ verticalAlign: "middle" }} /> arrow on a card for quick line-items view ·
-            click the card for full details. {orders.length} orders in flight.
-          </div>
-        </div>
-        <div className="right">
-          <ViewToggle />
-          <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
-            <Icon name="plus" size={13} />
-            New Order
-          </button>
-        </div>
-      </div>
-
-      <OrdersFilter orders={orders} value={filter} onChange={setFilter} />
+      <OrdersFilter
+        orders={orders}
+        value={filter}
+        onChange={setFilter}
+        actions={
+          <>
+            <ViewToggle />
+            <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }} title="New Order">
+              <Icon name="plus" size={13} />
+              New Order
+            </button>
+          </>
+        }
+      />
 
       {loading && orders.length === 0 ? (
         <SkeletonRows />

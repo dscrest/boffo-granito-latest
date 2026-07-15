@@ -77,6 +77,7 @@ const ALLOWED = new Set([
   "Container",
   "ContainerLoading",
   "OrderItemEvent",
+  "ProductionLog",
   "Activity",
   "OperationLog",
   "Invoice",
@@ -782,7 +783,7 @@ const QUOTE_TRANSITIONS = {
   Approved: ["Sent"],
   Sent: ["Accepted", "Rejected"],
   Accepted: ["Rejected"], // customer can back out until conversion
-  Rejected: ["Draft"], // reopen a rejected quote for revision
+  Rejected: ["PendingApproval"], // resubmit a rejected quote straight for approval
 };
 
 /* Approval verdicts need the role's approve list (Role.matrix) — or Admin. */
@@ -862,7 +863,7 @@ const SO_TRANSITIONS = {
   Confirmed: ["InProgress", "Cancelled"],
   InProgress: ["Cancelled"],
   Cancelled: ["Confirmed"],
-  Rejected: ["Draft"], // reopen a rejected order for revision
+  Rejected: ["PendingApproval"], // resubmit a rejected order straight for approval
 };
 
 app.post("/so-status/:rowid", async (req, res) => {
@@ -1412,8 +1413,24 @@ async function closePallet(catalyst, ds, body) {
   return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
 }
 
-/* 3a2. Production log — OrderItemEvent + OrderItem.produced bump (+ stage po→prod).
-   body: { order_item, qty_boxes, production_date?, shift?, performed_by?, note? } */
+/* 3a2. Production requests + lifecycle. A ProductionLog row is request-first:
+   created PendingApproval with `qty_requested` (no counter touched), Approved to
+   authorize, then Produced — recording actual `qty_boxes` bumps
+   OrderItem.produced (order-linked, capped at ordered) and steps stage po→prod.
+   Every entry (SO-linked or independent) is gated by approval.
+
+   POST /production-log        — create a request (one row per line, shared request_group)
+   POST /production-status/:g  — approve/reject a whole request group
+   POST /production-record/:id — record actual output on an approved line */
+const PRODUCTION_TRANSITIONS = {
+  PendingApproval: ["Approved", "Rejected"], // approver only
+  Approved: ["Produced"], // record actual output
+  Rejected: ["PendingApproval"], // resubmit
+};
+
+/* Create a production request. Each line becomes a PendingApproval ProductionLog
+   row sharing one request_group so approval acts on the whole batch.
+   body: { lines: [{ order_item?, design?, qty_requested }], production_date?, shift?, performed_by?, note? } */
 app.post("/production-log", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -1421,37 +1438,176 @@ app.post("/production-log", async (req, res) => {
     const body = req.body || {};
     const result = await withOpLog(
       catalyst,
-      { table_name: "OrderItemEvent", operation: "production-log", payload: body },
+      { table_name: "ProductionLog", operation: "production-request", payload: body },
       async () => {
-        if (!body.order_item) throw badRequest("order_item is required");
+        const lines = (Array.isArray(body.lines) ? body.lines : [])
+          .map((l) => ({
+            order_item: l.order_item ? String(l.order_item) : "",
+            design: l.design ? String(l.design) : "",
+            qty_requested: nonNeg(l.qty_requested, "qty_requested"),
+          }))
+          .filter((l) => l.qty_requested > 0 && (l.order_item || l.design));
+        if (!lines.length) throw badRequest("At least one line with qty_requested > 0 is required");
+
+        // Derive design / sales_order for order-item lines from the line record.
+        const oiMap = await loadOrderItems(
+          catalyst, lines.map((l) => l.order_item).filter(Boolean), "ROWID, design, sales_order",
+        );
+        const group = `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const created = [];
+        for (const l of lines) {
+          let design = l.design;
+          let salesOrder = "";
+          if (l.order_item) {
+            const oi = oiMap.get(l.order_item);
+            if (!oi) throw badRequest(`OrderItem not found: ${l.order_item}`, 404);
+            design = design || String(oi.design || "");
+            salesOrder = String(oi.sales_order || "");
+          } else if (!design) {
+            throw badRequest("design is required for an independent line");
+          }
+          const row = await ds.table("ProductionLog").insertRow({
+            design: design || null,
+            sales_order: salesOrder || null,
+            order_item: l.order_item || null,
+            qty_requested: l.qty_requested,
+            qty_boxes: 0,
+            status: "PendingApproval",
+            request_group: group,
+            production_date: String(body.production_date || ""),
+            shift: String(body.shift || ""),
+            performed_by: String(body.performed_by || ""),
+            note: String(body.note || ""),
+          });
+          await logTransition(catalyst, {
+            entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "PendingApproval",
+          });
+          created.push(String(row.ROWID));
+        }
+        return { rowid: group, data: { request_group: group, lines: created.length, ids: created } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Approve / reject a whole production request (every PendingApproval line sharing
+   the request_group). body: { status: "Approved"|"Rejected", reason? } */
+app.post("/production-status/:group", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const group = String(req.params.group || "").replace(/'/g, "");
+    const to = String((req.body || {}).status || "");
+    const reason = String((req.body || {}).reason || "").trim();
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-status", payload: { request_group: group, status: to, reason } },
+      async () => {
+        if (!(PRODUCTION_TRANSITIONS.PendingApproval || []).includes(to))
+          throw badRequest(`Unsupported production status: ${to}`);
+        if (to === "Rejected" && !reason) throw badRequest("A rejection reason is required");
+        if (!canApprove(req, "Production"))
+          throw badRequest("Your role cannot approve or reject production requests", 403);
+
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, performed_by FROM ProductionLog WHERE request_group = '${group}' AND status = 'PendingApproval'`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`No pending production request: ${group}`, 404);
+
+        for (const r of rows) {
+          await ds.table("ProductionLog").updateRow(
+            to === "Rejected" ? { ROWID: r.ROWID, status: to, note: reason } : { ROWID: r.ROWID, status: to },
+          );
+          await logTransition(catalyst, {
+            entity_type: "ProductionLog", entity_rowid: r.ROWID,
+            from_status: "PendingApproval", to_status: to, note: reason,
+          });
+        }
+        // Best-effort in-app ping to the requester (matched by SalesPerson name).
+        const requester = String(rows[0].performed_by || "").replace(/'/g, "");
+        if (requester) {
+          const sp = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT app_user FROM SalesPerson WHERE name = '${requester}'`,
+            ),
+          )[0];
+          const verdict = to === "Approved" ? "approved" : `rejected: ${reason}`;
+          await notifyUser(catalyst, sp && sp.app_user, `Production request ${verdict}`, `#/prod`);
+        }
+        return { rowid: group, data: { request_group: group, status: to, lines: rows.length } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Record actual output on an Approved line: set qty_boxes, bump OrderItem.produced
+   (order-linked, capped at ordered), step po→prod, mark Produced.
+   body: { qty_boxes, production_date?, shift?, performed_by?, note? }
+   ponytail: one record completes the line; request again for a further batch. */
+app.post("/production-record/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rowid = req.params.rowid;
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-record", payload: { ROWID: rowid, qty_boxes: body.qty_boxes } },
+      async () => {
         const qty = nonNeg(body.qty_boxes, "qty_boxes");
         if (qty <= 0) throw badRequest("qty_boxes must be > 0");
-        const oiMap = await loadOrderItems(catalyst, [body.order_item], "ROWID, ordered_qty_boxes, produced_qty_boxes, stage");
-        const oi = oiMap.get(String(body.order_item));
-        if (!oi) throw badRequest(`OrderItem not found: ${body.order_item}`, 404);
-        const ordered = Number(oi.ordered_qty_boxes) || 0;
-        const produced = Number(oi.produced_qty_boxes) || 0;
-        if (produced + qty > ordered) {
-          throw badRequest(`Producing ${qty} exceeds ordered (${produced}+${qty} > ${ordered})`, 409);
+        const pl = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, order_item FROM ProductionLog WHERE ROWID = ${rowid}`,
+          ),
+        )[0];
+        if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+        if (String(pl.status) !== "Approved")
+          throw badRequest(`Production must be Approved to record output (is ${pl.status})`, 409);
+
+        let producedAfter; // returned only for the order-linked path
+        const orderItemId = String(pl.order_item || "");
+        if (orderItemId) {
+          const oiMap = await loadOrderItems(
+            catalyst, [orderItemId], "ROWID, ordered_qty_boxes, produced_qty_boxes, stage",
+          );
+          const oi = oiMap.get(orderItemId);
+          if (!oi) throw badRequest(`OrderItem not found: ${orderItemId}`, 404);
+          const ordered = Number(oi.ordered_qty_boxes) || 0;
+          const produced = Number(oi.produced_qty_boxes) || 0;
+          if (produced + qty > ordered)
+            throw badRequest(`Producing ${qty} exceeds ordered (${produced}+${qty} > ${ordered})`, 409);
+          producedAfter = produced + qty;
+          const patch = { ROWID: orderItemId, produced_qty_boxes: producedAfter };
+          const oiStage = String(oi.stage || "po");
+          if (oiStage === "po") patch.stage = "prod";
+          await ds.table("OrderItem").updateRow(patch);
+          if (patch.stage)
+            await logTransition(catalyst, {
+              entity_type: "OrderItem", entity_rowid: orderItemId,
+              from_status: oiStage, to_status: patch.stage,
+            });
         }
-        const noteBits = [body.shift, body.production_date, body.note].map((s) => String(s || "").trim()).filter(Boolean);
-        const ev = await ds.table("OrderItemEvent").insertRow({
-          order_item: String(body.order_item),
-          event_type: "production_update",
-          qty_delta: qty,
-          performed_by: String(body.performed_by || ""),
-          note: noteBits.join(" · "),
+
+        const patch = { ROWID: rowid, qty_boxes: qty, status: "Produced" };
+        if (body.production_date != null) patch.production_date = String(body.production_date);
+        if (body.shift != null) patch.shift = String(body.shift);
+        if (body.performed_by != null) patch.performed_by = String(body.performed_by);
+        if (body.note != null) patch.note = String(body.note);
+        await ds.table("ProductionLog").updateRow(patch);
+        await logTransition(catalyst, {
+          entity_type: "ProductionLog", entity_rowid: rowid, from_status: "Approved", to_status: "Produced",
         });
-        // Never regress a later stage — only po steps forward to prod here.
-        const patch = { ROWID: String(body.order_item), produced_qty_boxes: produced + qty };
-        if (String(oi.stage || "po") === "po") patch.stage = "prod";
-        await ds.table("OrderItem").updateRow(patch);
-        if (patch.stage)
-          await logTransition(catalyst, {
-            entity_type: "OrderItem", entity_rowid: body.order_item,
-            from_status: oi.stage || "po", to_status: patch.stage,
-          });
-        return { rowid: ev.ROWID, data: { produced_qty_boxes: produced + qty, stage: patch.stage || oi.stage } };
+        return { rowid, data: { produced_qty_boxes: producedAfter } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });

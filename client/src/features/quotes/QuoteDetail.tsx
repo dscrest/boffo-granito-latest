@@ -54,7 +54,7 @@ import {
 type FieldDef = ColumnDef<Quote> & { value: (q: Quote) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
   { key: "quoteNo", label: "Quote Number", value: (q) => q.quoteNo },
-  { key: "status", label: "Status", value: (q) => STATUS_LABEL[q.status] },
+  // Status lives in the title chip — not repeated as a field.
   { key: "quoteDate", label: "Quote Date", value: (q) => q.quoteDate || "—" },
   { key: "expiryDate", label: "Expiry Date", value: (q) => q.expiryDate || "—" },
   // #14: Reference No. removed from quotes (SO-only field).
@@ -497,8 +497,8 @@ export function QuoteDetail() {
             </button>
           )}
           {quote.status === "Rejected" && (
-            <button className="hbtn" disabled={!!busy} onClick={() => void changeStatus("Draft", "Moved to draft")} title="Revise this quote">
-              <Icon name="edit" size={13} /> Move to Draft
+            <button className="hbtn primary" disabled={!!busy} onClick={() => void changeStatus("PendingApproval", "Submitted for approval")} title="Send to admin for approval">
+              <Icon name="check" size={13} /> Submit for Approval
             </button>
           )}
           <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">

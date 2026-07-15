@@ -31,6 +31,7 @@ const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) 
 const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
 const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })));
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
+const ProductionDetail = lazy(() => import("@/features/stages/ProductionDetail").then((m) => ({ default: m.ProductionDetail })));
 const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
 const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m) => ({ default: m.OperationsLog })));
 const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => ({ default: m.Invoices })));
@@ -58,6 +59,7 @@ const RolesAdmin = lazy(() => import("@/features/admin/Roles").then((m) => ({ de
 const SalesPersonsAdmin = lazy(() => import("@/features/admin/SalesPersons").then((m) => ({ default: m.SalesPersonsAdmin })));
 const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
 const SettingsHome = lazy(() => import("@/features/settings/SettingsHome").then((m) => ({ default: m.SettingsHome })));
+const DataOperations = lazy(() => import("@/features/settings/DataOperations").then((m) => ({ default: m.DataOperations })));
 
 const TWEAK_DEFAULTS = {
   // BOFFO brand orange (#EF7F1A) — must match --accent in styles.css.
@@ -79,6 +81,10 @@ interface NavNode {
   id?: string;
   label: string;
   icon: string;
+  /** Link target override — defaults to `/${id}`. Lets a leaf land on a
+      different route than its permission/count key (e.g. Sales Orders keys on
+      "byorder" but lands on the Grid at /orders). */
+  path?: string;
   children?: NavNode[];
 }
 
@@ -108,15 +114,15 @@ function navTree(): NavNode[] {
       children: [
         { id: "parties", label: "Customers", icon: "users" },
         { id: "quotes", label: "Quotes", icon: "quote" },
-        // Approval inbox — visible to any role that may approve quotes or
-        // sales orders (Role.matrix approve list; Admin always qualifies).
-        ...(canApprove("Quote") || canApprove("SalesOrder")
+        // Approval inbox — visible to any role that may approve quotes, sales
+        // orders or production (Role.matrix approve list; Admin always qualifies).
+        ...(canApprove("Quote") || canApprove("SalesOrder") || canApprove("Production")
           ? [{ id: "approvals", label: "Approvals", icon: "shield-check" }]
           : []),
         // Single "Sales Order" leaf — the List | Kanban toggle at the top of
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
-        { id: "byorder", label: "Sales Orders", icon: "orders" },
+        { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
         { id: "packing", label: "Palletization", icon: "palette" },
       ],
     },
@@ -157,7 +163,7 @@ function filterTreeByRole(nodes: NavNode[]): NavNode[] {
 /* Labels of every parent on the path to `id` — used to auto-open ancestors. */
 function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] = []): string[] | null {
   for (const n of nodes) {
-    if (n.id === id) return trail;
+    if (n.id === id || n.path === `/${id}`) return trail;
     if (n.children) {
       const found = ancestorsOf(id, n.children, [...trail, n.label]);
       if (found) return found;
@@ -184,7 +190,7 @@ const NavNodeRow = memo(function NavNodeRow({ node, depth, counts, openGroups, o
   if (!node.children) {
     const c = counts[node.id!];
     return (
-      <NavLink to={`/${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
+      <NavLink to={node.path ?? `/${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
         <Icon name={node.icon} size={14} className="ic" />
         <span>{node.label}</span>
         {c != null && c !== "" && <span className="count">{c}</span>}
@@ -410,6 +416,7 @@ export default function App() {
             <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
+            <Route path="/prod/:id" element={<ProductionDetail />} />
             <Route path="/qc" element={<QC />} />
             <Route path="/containers" element={<Containers />} />
             <Route path="/fit" element={<FitSuggest />} />
@@ -426,6 +433,7 @@ export default function App() {
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/data-operations" element={isAdmin ? <DataOperations /> : <Navigate to="/dashboard" replace />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/roles" element={isAdmin ? <RolesAdmin /> : <Navigate to="/dashboard" replace />} />
@@ -433,7 +441,7 @@ export default function App() {
             <Route path="/currencies" element={isAdmin ? <CurrenciesAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route
               path="/approvals"
-              element={canApprove("Quote") || canApprove("SalesOrder") ? <Approvals /> : <Navigate to="/dashboard" replace />}
+              element={canApprove("Quote") || canApprove("SalesOrder") || canApprove("Production") ? <Approvals /> : <Navigate to="/dashboard" replace />}
             />
             <Route path="/parties" element={<PartiesView />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

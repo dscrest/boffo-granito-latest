@@ -9,9 +9,8 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
-import { GridFooter, usePagination } from "@/ui/GridFooter";
+import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { can } from "@/lib/auth";
-import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
@@ -98,9 +97,17 @@ function soColumns(): ColumnDef<SORow>[] {
       label: "Status",
       render: (r) => {
         const s = r.head.status || "Confirmed";
+        // Derived: every line fully produced with boxes waiting to palletise.
+        const ready =
+          r.items.length > 0 &&
+          r.items.every((o) => o.producedQty >= o.orderQty) &&
+          r.items.reduce((sum, o) => sum + Math.max(0, o.producedQty - o.palletizedQty), 0) > 0;
         return (
-          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
-            {soStatusLabel(s)}
+          <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
+              {soStatusLabel(s)}
+            </span>
+            {ready && <span className="chip qstatus q-accepted" title="Produced and waiting to be palletised">Ready for Palletisation</span>}
           </span>
         );
       },
@@ -109,6 +116,24 @@ function soColumns(): ColumnDef<SORow>[] {
     { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.head.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.head.modifiedTime) },
   ];
+}
+
+// Sortable value per column key (header-click sorting — grid standard).
+function soSortVal(r: SORow, k: string): string | number {
+  switch (k) {
+    case "so": return r.head.orderNumber || r.id;
+    case "party": return r.head.party;
+    case "po": return r.head.poNumber || "";
+    case "date": return r.head.orderDate || "";
+    case "items": return r.items.length;
+    case "qty": return r.items.reduce((s, o) => s + o.orderQty, 0);
+    case "total": return r.head.totalAmount || 0;
+    case "status": return r.head.status || "Confirmed";
+    case "salesperson": return r.head.salesperson || "";
+    case "created": return r.head.createdTime || "";
+    case "modified": return r.head.modifiedTime || "";
+    default: return "";
+  }
 }
 
 const STATUS_TABS = ["all", "Draft", "PendingApproval", "Confirmed", "InProgress", "Cancelled"] as const;
@@ -201,8 +226,9 @@ export function OrdersTable() {
     return applyFilters(base, criteria, filterFields);
   }, [tab, rows, query, criteria, filterFields]);
 
+  const sort = useSortRows(filtered, soSortVal);
   const pager = usePagination(filtered.length, "soGridPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
-  const pageRows = pager.slice(filtered);
+  const pageRows = pager.slice(sort.sorted);
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
@@ -267,18 +293,6 @@ export function OrdersTable() {
     <div>
       {showForm && <OrderForm onSave={onSave} onClose={() => setShowForm(false)} />}
 
-      <div className="page-head">
-        <div className="right">
-          <ViewToggle />
-          {can("orders", "create") && (
-            <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)}>
-              <Icon name="plus" size={13} />
-              {saving ? "Saving…" : "New Order"}
-            </button>
-          )}
-        </div>
-      </div>
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
@@ -333,26 +347,11 @@ export function OrdersTable() {
           </span>
           <AdvancedFilterButton title="Sales Orders" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {can("orders", "export") && (
-            <button
-              className="hbtn"
-              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
-              title="Export the filtered rows as CSV"
-              onClick={() =>
-                exportCsv("sales-orders", filtered, [
-                  { header: "SO Number", value: (r) => r.head.orderNumber || "" },
-                  { header: "PO Number", value: (r) => r.head.poNumber },
-                  { header: "Customer", value: (r) => r.head.party },
-                  { header: "Order Date", value: (r) => r.head.orderDate },
-                  { header: "Items", value: (r) => r.items.length },
-                  { header: "Currency", value: (r) => r.head.currency || "" },
-                  { header: "Total", value: (r) => r.head.totalAmount || 0 },
-                  { header: "Status", value: (r) => soStatusLabel(r.head.status || "") },
-                ])
-              }
-            >
-              <Icon name="docs" size={13} />
-              Export
+          <ViewToggle />
+          {can("orders", "create") && (
+            <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)} title="New Order">
+              <Icon name="plus" size={13} />
+              {saving ? "Saving…" : "New Order"}
             </button>
           )}
         </div>
@@ -369,9 +368,9 @@ export function OrdersTable() {
                 <th style={{ width: 34, textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
                 </th>
-                <th>SO Number</th>
+                <SortTh id="so" label="SO Number" sort={sort} />
                 {visible.map((c) => (
-                  <th key={c.key} style={c.style}>{c.label}</th>
+                  <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                 ))}
               </tr>
             </thead>

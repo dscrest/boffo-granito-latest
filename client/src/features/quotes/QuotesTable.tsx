@@ -9,7 +9,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
-import { GridFooter, usePagination } from "@/ui/GridFooter";
+import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
 import { exportCsv } from "@/lib/csv";
@@ -94,6 +94,23 @@ function quoteColumns(): ColumnDef<Quote>[] {
     { key: "created", label: "Created", className: "muted mono", render: (q) => fmtDateTime(q.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (q) => fmtDateTime(q.modifiedTime) },
   ];
+}
+
+// Sortable value per column key (header-click sorting — grid standard).
+function quoteSortVal(q: Quote, k: string): string | number {
+  switch (k) {
+    case "quoteNo": return q.quoteNo;
+    case "customer": return q.customer;
+    case "date": return q.quoteDate || "";
+    case "items": return q.lines.length;
+    case "total": return quoteTotals(q).final;
+    case "terms": return q.paymentTerm || "";
+    case "status": return STATUS_LABEL[q.status];
+    case "so": return q.soNumber || "";
+    case "created": return q.createdTime || "";
+    case "modified": return q.modifiedTime || "";
+    default: return "";
+  }
 }
 
 // Draft is no longer convertible — quotes must pass approval + customer
@@ -222,8 +239,9 @@ export function QuotesTable() {
     return applyFilters(base, criteria, filterFields);
   }, [tab, quotes, query, criteria, filterFields]);
 
+  const sort = useSortRows(filtered, quoteSortVal);
   const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
-  const pageRows = pager.slice(filtered);
+  const pageRows = pager.slice(sort.sorted);
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
@@ -406,9 +424,9 @@ export function QuotesTable() {
                 <th style={{ width: 34, textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
                 </th>
-                <th>Quote No</th>
+                <SortTh id="quoteNo" label="Quote No" sort={sort} />
                 {visible.map((c) => (
-                  <th key={c.key} style={c.style}>{c.label}</th>
+                  <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                 ))}
               </tr>
             </thead>

@@ -121,6 +121,21 @@ export function Dashboard() {
     [orders],
   );
 
+  // Active production grouped by size (moved here from the Production page).
+  const prodBySize = useMemo(() => {
+    const m: Record<string, { size: string; jobs: number; ordered: number; produced: number }> = {};
+    orders
+      .filter((o) => o.stage === "prod" || o.stage === "packing")
+      .forEach((o) => {
+        const k = o.size || "—";
+        if (!m[k]) m[k] = { size: k, jobs: 0, ordered: 0, produced: 0 };
+        m[k].jobs += 1;
+        m[k].ordered += o.orderQty;
+        m[k].produced += o.producedQty;
+      });
+    return Object.values(m).sort((a, b) => b.ordered - a.ordered);
+  }, [orders]);
+
   return (
     <div>
       <div className="page-head">
@@ -304,6 +319,51 @@ export function Dashboard() {
               );
             })}
           </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <div className="card">
+          <div className="card-head">
+            <Icon name="factory" size={13} />
+            <span className="title">Production by Size</span>
+            <span className="muted">· Active jobs (Production / Packing)</span>
+          </div>
+          {showSkeleton ? (
+            <SkeletonRows rows={4} />
+          ) : prodBySize.length === 0 ? (
+            <div className="muted" style={{ textAlign: "center", padding: 18 }}>No active production jobs.</div>
+          ) : (
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Size</th>
+                  <th className="num" style={{ textAlign: "right" }}>Jobs</th>
+                  <th className="num" style={{ textAlign: "right" }}>Ordered (boxes)</th>
+                  <th className="num" style={{ textAlign: "right" }}>Produced (boxes)</th>
+                  <th>Progress</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prodBySize.map((s) => (
+                  <tr key={s.size}>
+                    <td>
+                      <span className={`chip size ${s.size.startsWith("200") || s.size.startsWith("75") ? "b" : ""}`}>{s.size}</span>
+                    </td>
+                    <td className="num mono">{s.jobs}</td>
+                    <td className="num mono">{fmt(s.ordered)}</td>
+                    <td className="num mono" style={{ color: "var(--c-blue)" }}>{fmt(s.produced)}</td>
+                    <td style={{ width: 180 }}>
+                      <div className="row" style={{ gap: 8 }}>
+                        <ProgressBar value={s.produced} max={s.ordered} color="var(--c-blue)" height={5} />
+                        <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{pct(s.produced, s.ordered)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </div>

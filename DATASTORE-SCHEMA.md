@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (32 tables)
+## Table Index (33 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -59,6 +59,7 @@
 | Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
 | StatusTransition | 69851000000066173 (live) | Status/stage flip audit (Quote/SO/OrderItem) — added 2026-07-13 |
 | Notification | 69851000000062554 (live) | Per-user in-app notifications — added 2026-07-13 |
+| ProductionLog | 69851000000068024 (live) | Production entries (order jobs + independent stock) — added 2026-07-15 |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
@@ -463,6 +464,34 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | performed_by | varchar(100) | |
 | note | text(10000) | |
 | order_item | FK → OrderItem | **CASCADE** |
+
+### ProductionLog (live id 69851000000068024) — added 2026-07-15, lifecycle 2026-07-15
+Request-first production entry. Lifecycle (`status`): **PendingApproval → Approved
+→ Produced**, or **Rejected**. Written by three sagas:
+`/production-log` creates a request (one row per line, shared `request_group`,
+`qty_requested` set, **no counter touched**); `/production-status/:group`
+approves/rejects a whole request group (approver-gated via `canApprove("Production")`);
+`/production-record/:rowid` records actual output on an Approved line — sets
+`qty_boxes`, bumps `OrderItem.produced_qty_boxes` (order-linked, capped at ordered),
+steps stage po→prod, marks Produced. SO-linked lines set order_item; independent
+(order_item null) is make-to-stock. Source of truth for the Production grid/detail
++ the Approvals inbox (Production module). FK refs are plain **bigint** (logical FKs
+joined client-side — no DB cascade), because the schema-API can't round-trip
+17-digit parent-column ids as JSON numbers; a log doesn't need referential cascade.
+Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_boxes`.
+| Column | Type | Notes |
+|---|---|---|
+| status | varchar(30) | PendingApproval / Approved / Produced / Rejected — added 2026-07-15 |
+| qty_requested | int | desired boxes from the request — added 2026-07-15 |
+| request_group | varchar(50) | shared token for all lines of one submission (approve/reject together) — added 2026-07-15 |
+| qty_boxes | int | **actual** boxes produced (0 until output recorded) |
+| production_date | varchar(20) | |
+| shift | varchar(30) | |
+| performed_by | varchar(100) | auto-stamped from the signed-in user (requester) |
+| note | text(10000) | on reject, holds the rejection reason |
+| design | bigint | Design ROWID (logical FK) |
+| sales_order | bigint | SalesOrder ROWID — null on independent (logical FK) |
+| order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
 
 ### Invoice (76673000000047747)
 | Column | Type | Notes |

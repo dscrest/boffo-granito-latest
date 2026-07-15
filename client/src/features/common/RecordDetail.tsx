@@ -168,6 +168,8 @@ export function RecordDetail({
   created,
   modified,
   actions,
+  hideFields,
+  extraTabs,
   children,
 }: {
   backTo: string;
@@ -184,10 +186,14 @@ export function RecordDetail({
   entityId?: string; // when set, Activity also matches entity_rowid
   created?: string; // raw CREATEDTIME — appended as a "Created" field
   modified?: string; // raw MODIFIEDTIME — appended as a "Modified" field
+  /** Hide the Details-tab Fields show/hide menu (e.g. Sales Order detail). */
+  hideFields?: boolean;
+  /** Extra tabs shown after Details, before Activity Log. */
+  extraTabs?: { id: string; label: string; content: ReactNode }[];
   children?: ReactNode;
 }) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<"details" | "activity">("details");
+  const [tab, setTab] = useState<string>("details");
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(() => {
     try {
@@ -219,9 +225,6 @@ export function RecordDetail({
           (user mandate 2026-07-13: identical design on every detail page). */}
       <div className="page-head">
         <div className="row" style={{ gap: 10, alignItems: "center", flex: 1, minWidth: 0 }}>
-          <button className="hbtn" onClick={() => navigate(backTo)} title="Back">
-            <Icon name="chev-l" size={13} />
-          </button>
           <div>
             <div className="title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {title}
@@ -230,16 +233,25 @@ export function RecordDetail({
             {subtitle && <div className="sub">{subtitle}</div>}
           </div>
         </div>
-        {actions && <div className="right">{actions}</div>}
+        {/* Close (✕) on the right — consistent with Customer / Production detail. */}
+        <div className="right">
+          {actions}
+          <button className="btn x" onClick={() => navigate(backTo)} title="Close">
+            <Icon name="x" size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="row" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
         <button onClick={() => setTab("details")} style={tabStyle(tab === "details")}>Details</button>
+        {extraTabs?.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={tabStyle(tab === t.id)}>{t.label}</button>
+        ))}
         {activityTable && (
           <button onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>Activity Log</button>
         )}
         <div style={{ marginLeft: "auto", position: "relative" }}>
-          {tab === "details" && (
+          {tab === "details" && !hideFields && (
             <>
               <button className="hbtn" onClick={() => setFieldsOpen((v) => !v)} title="Show / hide fields">
                 <Icon name="settings" size={13} /> Fields
@@ -274,6 +286,8 @@ export function RecordDetail({
           {children}
         </>
       )}
+
+      {extraTabs?.map((t) => tab === t.id && <div key={t.id}>{t.content}</div>)}
 
       {tab === "activity" && activityTable && (
         <>

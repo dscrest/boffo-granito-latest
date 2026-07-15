@@ -21,10 +21,27 @@ import { canApprove } from "@/lib/auth";
 import { quoteTotals, type Order, type Quote } from "@/data";
 import { cachedQuotes, invalidateQuotes, listQuotes, setQuoteStatus } from "./quotesApi";
 import { cachedOrders, invalidateOrders, listOrders, setOrderStatus } from "@/features/orders/ordersApi";
+import {
+  cachedProductionLogs,
+  groupProductionRequests,
+  invalidateProductionLogs,
+  listProductionLogs,
+  setProductionStatus,
+  type ProductionEntry,
+  type ProductionRequestGroup,
+} from "@/features/stages/productionApi";
 
-type Module = "Quote" | "Sales Order";
+type Module = "Quote" | "Sales Order" | "Production";
+/* Consistent noun for approval/reject toasts across every surface — the record
+   number varies per module (and is misleading for Production, which is filed
+   under its SO number), so messages name the document type instead. */
+const MODULE_NOUN: Record<Module, string> = {
+  Quote: "Quote",
+  "Sales Order": "Sales order",
+  Production: "Production request",
+};
 interface Row {
-  id: string; // quote id | salesOrderId — also the busy key
+  id: string; // quote id | salesOrderId | request_group — also the busy key
   module: Module;
   number: string;
   customer: string;
@@ -34,29 +51,36 @@ interface Row {
   link: string;
   quote?: Quote;
   order?: Order;
+  production?: ProductionRequestGroup;
 }
 type SortKey = "module" | "number" | "customer" | "salesperson" | "date";
 
 export function Approvals() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
+  const [prod, setProd] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // quote/SO id being acted on
+  const [busy, setBusy] = useState<string | null>(null); // quote/SO id | request_group being acted on
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
 
   const showQuotes = canApprove("Quote");
   const showOrders = canApprove("SalesOrder");
+  const showProduction = canApprove("Production");
 
   const load = async () => {
     setLoading(true);
-    const [q, o] = await Promise.all([
+    const [q, o, p] = await Promise.all([
       showQuotes ? listQuotes() : Promise.resolve({ ok: true, quotes: [] as Quote[] }),
       showOrders ? listOrders() : Promise.resolve({ ok: true, orders: [] as Order[] }),
+      showProduction ? listProductionLogs() : Promise.resolve({ ok: true, entries: [] as ProductionEntry[] }),
     ]);
     setLoading(false);
-    const err = (!q.ok && (q as { error?: string }).error) || (!o.ok && (o as { error?: string }).error);
+    const err =
+      (!q.ok && (q as { error?: string }).error) ||
+      (!o.ok && (o as { error?: string }).error) ||
+      (!p.ok && (p as { error?: string }).error);
     if (err) {
       setError(err || "Failed to load approvals");
       return;
@@ -64,6 +88,7 @@ export function Approvals() {
     setError(null);
     if ("quotes" in q) setQuotes(q.quotes);
     if ("orders" in o) setOrders(o.orders);
+    if ("entries" in p) setProd(p.entries);
   };
 
   useEffect(() => {
@@ -92,7 +117,7 @@ export function Approvals() {
       ...pendingSOs.map<Row>((o) => ({
         id: o.salesOrderId!,
         module: "Sales Order",
-        number: o.poNumber,
+        number: o.orderNumber || o.poNumber,
         customer: `${o.flag} ${o.party}`,
         salesperson: o.salesperson || "",
         date: o.orderDate || "",
@@ -100,15 +125,27 @@ export function Approvals() {
         link: `/orders/${o.salesOrderId}`,
         order: o,
       })),
+      ...groupProductionRequests(prod.filter((e) => e.status === "PendingApproval")).map<Row>((g) => ({
+        id: g.group,
+        module: "Production",
+        number: g.orderNumber || g.poNumber || "Independent",
+        customer: g.customer || "—",
+        salesperson: g.performedBy || "",
+        date: g.date || "",
+        total: `${fmt(g.totalRequested)} boxes · ${g.lineCount} item${g.lineCount > 1 ? "s" : ""}`,
+        link: g.salesOrderId ? `/orders/${g.salesOrderId}` : "/prod",
+        production: g,
+      })),
     ];
-  }, [quotes, orders]);
+  }, [quotes, orders, prod]);
 
   const salespeople = useMemo(
     () => [...new Set(rows.map((r) => r.salesperson).filter(Boolean))].sort(),
     [rows],
   );
   const filterFields: FilterField<Row>[] = [
-    { key: "module", label: "Module", type: "select", options: ["Quote", "Sales Order"], get: (r) => r.module },
+    { key: "module", label: "Module", type: "select", options: ["Quote", "Sales Order", "Production"], get: (r) => r.module },
+    { key: "customer", label: "Customer", type: "text", get: (r) => r.customer },
     { key: "salesperson", label: "Sales Person", type: "select", options: salespeople, get: (r) => r.salesperson },
     { key: "date", label: "Date", type: "daterange", get: (r) => r.date },
   ];
@@ -143,14 +180,17 @@ export function Approvals() {
     const res =
       row.module === "Quote"
         ? await setQuoteStatus(row.id, approve ? "Approved" : "Rejected", reason || undefined)
-        : await setOrderStatus(row.id, approve ? "Confirmed" : "Rejected", reason || undefined);
+        : row.module === "Production"
+          ? await setProductionStatus(row.id, approve ? "Approved" : "Rejected", reason || undefined)
+          : await setOrderStatus(row.id, approve ? "Confirmed" : "Rejected", reason || undefined);
     setBusy(null);
     if (!res.ok) {
       toast.error(res.error || "Action failed");
       return;
     }
-    toast.success(`${row.number} ${approve ? "approved" : "rejected"}`);
+    toast.success(`${MODULE_NOUN[row.module]} ${approve ? "approved" : "rejected"}`);
     if (row.module === "Quote") invalidateQuotes();
+    else if (row.module === "Production") invalidateProductionLogs();
     else invalidateOrders();
     await load();
   };

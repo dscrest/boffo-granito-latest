@@ -42,11 +42,14 @@ export function OrdersFilter({
   value: st,
   onChange,
   actions,
+  leading,
 }: {
   orders: Order[];
   value: OrdersFilterState;
   onChange: (next: OrdersFilterState) => void;
   actions?: ReactNode;
+  /** Rendered at the far left of the bar, before the Filter label. */
+  leading?: ReactNode;
 }) {
   // Value options for the chosen field (type-to-search Combobox).
   const valueOptions = (() => {
@@ -66,6 +69,7 @@ export function OrdersFilter({
 
   return (
     <div className="fbar">
+      {leading}
       <span className="row" style={{ gap: 6, color: "var(--fg-2)" }}>
         <Icon name="filter" size={13} /> Filter
       </span>

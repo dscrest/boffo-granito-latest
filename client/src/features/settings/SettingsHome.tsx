@@ -40,6 +40,13 @@ const SECTIONS: SettingSection[] = [
     ],
   },
   {
+    title: "Data Operations",
+    icon: "docs",
+    items: [
+      { label: "Export", icon: "docs", route: "/data-operations" },
+    ],
+  },
+  {
     title: "Product Masters",
     icon: "tile",
     items: [

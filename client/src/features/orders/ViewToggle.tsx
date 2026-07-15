@@ -20,9 +20,10 @@ export function ViewToggle() {
   const { pathname } = useLocation();
   return (
     <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} title="Switch view">
-      {/* exact match: /orders/:id (detail) must not light up Grid */}
-      <Link to="/orders" style={segStyle(pathname === "/orders")} title="Grid" aria-label="Grid view"><Icon name="tile" size={15} /></Link>
-      <Link to="/byorder" style={segStyle(pathname.startsWith("/byorder"))} title="List" aria-label="List view"><Icon name="orders" size={15} /></Link>
+      <Link to="/byorder" style={segStyle(pathname.startsWith("/byorder"))} title="List" aria-label="List view"><Icon name="tile" size={15} /></Link>
+      {/* Grid is the default Sales Order view (the sidebar lands here).
+          exact match: /orders/:id (detail) must not light up Grid */}
+      <Link to="/orders" style={segStyle(pathname === "/orders")} title="Grid" aria-label="Grid view"><Icon name="orders" size={15} /></Link>
       <Link to="/kanban" style={segStyle(pathname.startsWith("/kanban"))} title="Kanban" aria-label="Kanban view"><Icon name="kanban" size={15} /></Link>
     </div>
   );

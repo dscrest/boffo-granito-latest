@@ -50,6 +50,7 @@ const ACTIONS: { key: PermAction; label: string }[] = [
 const APPROVABLES: { key: string; label: string }[] = [
   { key: "Quote", label: "Quotations" },
   { key: "SalesOrder", label: "Sales Orders" },
+  { key: "Production", label: "Production Requests" },
 ];
 
 function toDraft(r: RoleRow): Draft {

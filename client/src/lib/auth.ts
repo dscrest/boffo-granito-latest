@@ -18,7 +18,7 @@ export type PermModule =
   | "reports"
   | "settings";
 export type PermAction = "view" | "create" | "edit" | "delete" | "export";
-export type ApprovableDoc = "Quote" | "SalesOrder";
+export type ApprovableDoc = "Quote" | "SalesOrder" | "Production";
 
 export interface Perms {
   features: string[]; // nav ids the role may see; ["*"] = all (derived from matrix)

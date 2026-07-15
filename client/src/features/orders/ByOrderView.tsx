@@ -6,7 +6,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar, StageBadge } from "@/ui/primitives";
 import { can } from "@/lib/auth";
-import { exportCsv } from "@/lib/csv";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { STAGES, type Order } from "@/data";
 import { useOrders } from "./useOrders";
@@ -150,55 +149,28 @@ export function ByOrderView() {
   return (
     <div>
       {showForm && <OrderForm onSave={onSaveOrder} onClose={() => setShowForm(false)} />}
-      <div className="page-head">
-        <div className="right">
-          <ViewToggle />
-          {can("orders", "export") && (
-            <button
-              className="hbtn"
-              title="Export the filtered line items as CSV"
-              onClick={() =>
-                exportCsv("orders", fOrders, [
-                  { header: "SO Number", value: (o) => o.orderNumber || "" },
-                  { header: "PO Number", value: (o) => o.poNumber },
-                  { header: "Customer", value: (o) => o.party },
-                  { header: "Item", value: (o) => o.design },
-                  { header: "Size", value: (o) => o.size },
-                  { header: "Order Qty", value: (o) => o.orderQty },
-                  { header: "Produced", value: (o) => o.producedQty },
-                  { header: "Palletized", value: (o) => o.palletizedQty },
-                  { header: "Loaded", value: (o) => o.loadedQty },
-                  { header: "Stage", value: (o) => o.stage },
-                  { header: "Status", value: (o) => o.status },
-                  { header: "Order Date", value: (o) => o.orderDate },
-                  { header: "Due Date", value: (o) => o.dueDate },
-                ])
-              }
-            >
-              <Icon name="docs" size={13} />
-              Export
-            </button>
-          )}
-          {can("orders", "create") && (
-            <button className="hbtn primary" onClick={() => setShowForm(true)}>
-              <Icon name="plus" size={13} />
-              New Order
-            </button>
-          )}
-        </div>
-      </div>
 
-      {/* #20: shared choosable filter (type-to-search value) + search box.
-         Collapse/Expand-all lives here (in the filter bar), not the header. */}
+      {/* Single-row toolbar: Filter · Search · Collapse · View · New Order.
+         Export moved into the More (⋮) menu. */}
       <OrdersFilter
         orders={orders}
         value={filter}
         onChange={setFilter}
-        actions={
-          <button className="hbtn" onClick={toggleAll} title={allCollapsed ? "Expand all groups" : "Collapse all groups"}>
+        leading={
+          <button className="hbtn icon" onClick={toggleAll} title={allCollapsed ? "Expand all groups" : "Collapse all groups"} aria-label={allCollapsed ? "Expand all groups" : "Collapse all groups"}>
             <Icon name={allCollapsed ? "chev-r" : "menu"} size={13} />
-            {allCollapsed ? "Expand all" : "Collapse all"}
           </button>
+        }
+        actions={
+          <>
+            <ViewToggle />
+            {can("orders", "create") && (
+              <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                <Icon name="plus" size={13} />
+                New Order
+              </button>
+            )}
+          </>
         }
       />
 

@@ -164,10 +164,7 @@ export function PalletPacking() {
                   style={{ cursor: "pointer" }}
                   title="Open order details"
                 >
-                  <td>
-                    <span style={{ marginRight: 6 }}>{o.flag}</span>
-                    {o.party}
-                  </td>
+                  <td>{o.party}</td>
                   <td className="mono">
                     <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
                       {o.poNumber}
