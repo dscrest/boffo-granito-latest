@@ -421,7 +421,7 @@ export function Masters() {
         <div>
           <div className="title">Masters</div>
           <div className="sub">
-            Lookup data entry · {MASTERS.length} tables · saved to Catalyst Data Store
+            Lookup data entry · {MASTERS.length} tables
           </div>
         </div>
       </div>

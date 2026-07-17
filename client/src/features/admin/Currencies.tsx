@@ -22,6 +22,7 @@ import {
   refreshRatesNow,
   type CurrencyRow,
 } from "@/features/masters/currenciesApi";
+import { NumberInput } from "@/ui/NumberInput";
 
 interface Draft {
   rowid: string | null; // null = new
@@ -228,8 +229,7 @@ export function CurrenciesAdmin() {
             </label>
             <label className="form-field">
               <span className="lbl">Exchange rate (INR per 1)</span>
-              <input
-                type="number"
+              <NumberInput
                 min={0}
                 step="0.0001"
                 value={draft.rate}

@@ -273,7 +273,7 @@ export function OrderDetail() {
   // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
   // Items, Total Qty, Box Branding, Invoice) live in the Items table below.
   const fields: RecordField[] = [
-    { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
+    // SO Number omitted here — it's the page title (line ~354).
     { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
     { key: "stage", label: "Stage", value: stageOf(head.stage).label },
@@ -402,7 +402,7 @@ export function OrderDetail() {
                 ? [{ label: "Palletise", onClick: () => setPack({ mode: "all" as const }) }]
                 : []),
               ...(prodJobs.length > 0 && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
-                ? [{ label: "Send for Production", onClick: () => setProd(true) }]
+                ? [{ label: "Record New Production", onClick: () => setProd(true) }]
                 : []),
               ...((status === "Confirmed" || status === "InProgress") && can("orders", "edit")
                 ? [{ label: "Cancel Order", danger: true, onClick: () => void changeStatus("Cancelled", "Order cancelled") }]

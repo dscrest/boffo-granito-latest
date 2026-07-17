@@ -18,9 +18,12 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { useMasters } from "@/features/masters/useMasters";
 import { useOrders } from "@/features/orders/useOrders";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
+import { DateInput } from "@/ui/DateInput";
+import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { listPalletizable, type PalletizableItem } from "./palletisationApi";
 import { listProductionLogs, type ProductionRequestInput } from "./productionApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 export function ProductionForm({
   presetSalesOrderId,
@@ -45,10 +48,19 @@ export function ProductionForm({
   const [loadingItems, setLoadingItems] = useState(false);
   const [qtyByItem, setQtyByItem] = useState<Record<string, number>>({});
 
-  // Independent mode
-  const [designId, setDesignId] = useState(presetDesignId || "");
-  const [indepQty, setIndepQty] = useState("");
+  // Independent mode — Quote/SO-style line items (Item + Request Qty).
+  // ponytail: no dedupe of the same design across rows; add distinct-design guard if it ever matters.
+  type IndepLine = { design: string; qty: string };
+  const emptyLine = (): IndepLine => ({ design: "", qty: "" });
+  const [indepLines, setIndepLines] = useState<IndepLine[]>(
+    presetDesignId ? [{ design: presetDesignId, qty: "" }] : [emptyLine()],
+  );
+  const setLine = (i: number, k: keyof IndepLine, v: string) =>
+    setIndepLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
+  const addLine = () => setIndepLines((ls) => [...ls, emptyLine()]);
+  const removeLine = (i: number) => setIndepLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
 
+  const [prodDate, setProdDate] = useState(todayISO());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
@@ -138,6 +150,8 @@ export function ProductionForm({
     [designRows],
   );
 
+  // Lines still owing production — the only ones worth showing/typing against.
+  const producible = useMemo(() => items.filter((it) => it.toProduce > 0), [items]);
   const orderLines = useMemo(
     () =>
       items
@@ -145,11 +159,20 @@ export function ProductionForm({
         .filter((l) => l.qty_requested > 0),
     [items, qtyByItem],
   );
-  const indepQtyNum = parseInt(indepQty, 10) || 0;
+  const indepValid = useMemo(
+    () =>
+      indepLines
+        .map((l) => ({ design: l.design, qty_requested: parseInt(l.qty, 10) || 0 }))
+        .filter((l) => l.design && l.qty_requested > 0),
+    [indepLines],
+  );
   const totalRequested =
-    mode === "order" ? orderLines.reduce((s, l) => s + l.qty_requested, 0) : indepQtyNum;
+    mode === "order"
+      ? orderLines.reduce((s, l) => s + l.qty_requested, 0)
+      : indepValid.reduce((s, l) => s + l.qty_requested, 0);
   const missing =
-    mode === "order" ? !orderId || orderLines.length === 0 : !designId || indepQtyNum <= 0;
+    mode === "order" ? !orderId || orderLines.length === 0 : indepValid.length === 0;
+  const lineCount = mode === "order" ? orderLines.length : indepValid.length;
 
   const panelRef = useModalA11y(onClose);
 
@@ -161,10 +184,8 @@ export function ProductionForm({
     setSaving(true);
     try {
       await onSave({
-        lines:
-          mode === "order"
-            ? orderLines
-            : [{ design: designId, qty_requested: indepQtyNum }],
+        lines: mode === "order" ? orderLines : indepValid,
+        production_date: prodDate || undefined,
         performed_by: requestedBy,
         note: note.trim() || undefined,
       });
@@ -175,21 +196,40 @@ export function ProductionForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="factory" size={18} />
           </div>
           <div>
-            <div className="ttl">Send for Production</div>
-            <div className="sub2">Production request · submitted for approval before it counts</div>
+            <div className="ttl">Record New Production</div>
+            <div className="sub2">Record a new production request</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
 
         <div className="df-body">
+          <div className="form-section">
+            <div className="form-section-title">Details</div>
+            <div className="form-grid">
+              <label className="form-field">
+                <span className="lbl">Requested by</span>
+                {/* Auto-stamped from the signed-in user — grey = system-filled. */}
+                <input value={requestedBy || "—"} readOnly tabIndex={-1} style={{ background: "var(--bg-2)", color: "var(--muted)" }} title="Auto: the signed-in user" />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Date</span>
+                <DateInput value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+              </label>
+              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                <span className="lbl">Note</span>
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional — priority, target date, remarks…" />
+              </label>
+            </div>
+          </div>
+
           <div className="form-section">
             <div className="form-section-title">What to produce?</div>
             {/* Locked to one SO when launched from an order; otherwise pick. */}
@@ -217,8 +257,8 @@ export function ProductionForm({
               </div>
             )}
 
-            <div className="form-grid">
-              {mode === "order" ? (
+            {mode === "order" ? (
+              <div className="form-grid">
                 <label className="form-field" style={{ gridColumn: "1 / -1" }}>
                   <span className="lbl">
                     Sales Order<span className="req"> *</span>
@@ -236,25 +276,8 @@ export function ProductionForm({
                     />
                   )}
                 </label>
-              ) : (
-                <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                  <span className="lbl">
-                    Design / Item<span className="req"> *</span>
-                  </span>
-                  <Combobox
-                    value={designId}
-                    options={designOptions}
-                    onChange={setDesignId}
-                    placeholder="Search an item…"
-                    ariaLabel="Design / Item"
-                    invalid={showErrors && !designId}
-                  />
-                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                    No order — requested as make-to-stock production.
-                  </span>
-                </label>
-              )}
-            </div>
+              </div>
+            ) : null}
           </div>
 
           {mode === "order" && orderId && alreadyInProduction && (
@@ -264,17 +287,22 @@ export function ProductionForm({
             </div>
           )}
 
-          {/* Order mode — item-wise desired qty table. */}
+          {/* Order mode — item-wise desired qty table. Only lines still owing
+              production (Remaining > 0) are shown; fully-produced/exceeded lines
+              are noise here, so they're hidden with a one-line hint. */}
           {mode === "order" && orderId && (
             <div className="form-section">
               <div className="form-section-title">
-                <span>Items on this Sales Order</span>
+                <span>Items to produce on this Sales Order</span>
               </div>
               {loadingItems ? (
                 <div className="muted" style={{ padding: 8 }}>Loading items…</div>
               ) : items.length === 0 ? (
                 <div className="muted" style={{ padding: 8 }}>No line items on this order.</div>
+              ) : producible.length === 0 ? (
+                <div className="muted" style={{ padding: 8 }}>All {items.length} item{items.length > 1 ? "s" : ""} on this order are fully produced — nothing left to request.</div>
               ) : (
+                <>
                 <table className="tbl">
                   <thead>
                     <tr>
@@ -287,9 +315,7 @@ export function ProductionForm({
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((it) => {
-                      const canProduce = it.toProduce > 0;
-                      return (
+                    {producible.map((it) => (
                         <tr key={it.orderItemId}>
                           <td><span className="design-name">{it.designLabel}</span></td>
                           <td className="num mono">{fmt(it.ordered)}</td>
@@ -297,56 +323,72 @@ export function ProductionForm({
                           <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
                           <td className="num mono">{fmt(it.toProduce)}</td>
                           <td className="num">
-                            {canProduce ? (
-                              <input
-                                type="number"
-                                min={0}
-                                max={it.toProduce}
-                                value={qtyByItem[it.orderItemId] || ""}
-                                onChange={(e) => setQty(it.orderItemId, e.target.value, it.toProduce)}
-                                placeholder="0"
-                                style={{ width: 100, textAlign: "right" }}
-                              />
-                            ) : (
-                              <span className="chip" title="Fully produced">Done</span>
-                            )}
+                            <NumberInput
+                              min={0}
+                              max={it.toProduce}
+                              value={qtyByItem[it.orderItemId] || ""}
+                              onChange={(e) => setQty(it.orderItemId, e.target.value, it.toProduce)}
+                              placeholder="0"
+                              style={{ width: 100, textAlign: "right" }}
+                            />
                           </td>
                         </tr>
-                      );
-                    })}
+                    ))}
                   </tbody>
                 </table>
+                {items.length > producible.length && (
+                  <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 8px" }}>
+                    {items.length - producible.length} item{items.length - producible.length > 1 ? "s" : ""} already fully produced — hidden.
+                  </div>
+                )}
+                </>
               )}
             </div>
           )}
 
-          {/* Independent mode — single desired qty. */}
+          {/* Independent mode — Quote/SO-style line items: Item + Request Qty. */}
           {mode === "independent" && (
             <div className="form-section">
-              <div className="form-section-title">Quantity</div>
-              <div className="form-grid">
-                <label className="form-field">
-                  <span className="lbl">Desired qty<span className="hint"> (boxes)</span><span className="req"> *</span></span>
-                  <input type="number" min={0} value={indepQty} onChange={(e) => setIndepQty(e.target.value)} placeholder="0" />
-                </label>
+              <div className="form-section-title">Items to produce</div>
+              <div className="ord-lines">
+                <div className="ord-line ord-line-head qt-line" style={{ gridTemplateColumns: "2fr 1fr 26px" }}>
+                  <span>Item<span className="req"> *</span></span>
+                  <span>Request Qty</span>
+                  <span />
+                </div>
+                {indepLines.map((l, i) => (
+                  <div className="ord-line qt-line" key={i} style={{ gridTemplateColumns: "2fr 1fr 26px" }}>
+                    <Combobox
+                      value={l.design}
+                      options={designOptions}
+                      onChange={(v) => setLine(i, "design", v)}
+                      placeholder="Search an item…"
+                      ariaLabel="Item"
+                      invalid={showErrors && !l.design && !!l.qty}
+                    />
+                    <NumberInput
+                      min={0}
+                      value={l.qty}
+                      onChange={(e) => setLine(i, "qty", e.target.value)}
+                      placeholder="0"
+                    />
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={indepLines.length === 1} tabIndex={-1}>
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
+                <Icon name="plus" size={12} /> Add line
+              </button>
+              <div className="qt-totals">
+                <div className="row total">
+                  <span>Total production</span>
+                  <span className="mono">{fmt(totalRequested)} boxes</span>
+                </div>
               </div>
             </div>
           )}
-
-          <div className="form-section">
-            <div className="form-section-title">Request</div>
-            <div className="form-grid">
-              <label className="form-field">
-                <span className="lbl">Requested by</span>
-                {/* Auto-stamped from the signed-in user — grey = system-filled. */}
-                <input value={requestedBy || "—"} readOnly tabIndex={-1} style={{ background: "var(--bg-2)", color: "var(--muted)" }} title="Auto: the signed-in user" />
-              </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Note</span>
-                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional — priority, target date, remarks…" />
-              </label>
-            </div>
-          </div>
         </div>
 
         <div className="df-foot">
@@ -357,10 +399,10 @@ export function ProductionForm({
                   ? orderId
                     ? "Enter a desired qty for at least one item"
                     : "Pick a Sales Order"
-                  : "Pick an item and a desired qty"}
+                  : "Add at least one item and a request qty"}
               </span>
             ) : totalRequested > 0 ? (
-              `${fmt(totalRequested)} boxes requested${mode === "order" ? ` · ${orderLines.length} item${orderLines.length > 1 ? "s" : ""}` : ""}`
+              `${fmt(totalRequested)} boxes requested · ${lineCount} item${lineCount > 1 ? "s" : ""}`
             ) : (
               "* Indicates a mandatory field"
             )}
@@ -368,7 +410,7 @@ export function ProductionForm({
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Submitting…" : "Send for approval"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

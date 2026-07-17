@@ -333,8 +333,6 @@ export function PalletDetail() {
                     title="Primary Details"
                     rows={[
                       text("Name", pallet.name),
-                      text("Size", pallet.sizeLabel),
-                      text("Pallet Size", pallet.palletSizeLabel),
                       text("Type", pallet.palletType),
                       text("Packing", pallet.packingDetails),
                       num("Coverage (m² / box)", pallet.coverageSqm),

@@ -6,7 +6,7 @@
    Approvals). Row click / Production-ID link opens the detail; output is
    recorded there, per line. */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -128,6 +128,7 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 }
 
 export function ProductionTable() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("pending");
   const [view, setView] = useState<"grid" | "board">("grid");
   const [query, setQuery] = useState("");
@@ -182,7 +183,7 @@ export function ProductionTable() {
       return;
     }
     const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
-    toast.success(`Sent for approval — ${fmt(total)} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
+    toast.success(`Production recorded — ${fmt(total)} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
     invalidateProductionLogs();
     setTab("pending");
     await load();
@@ -426,7 +427,7 @@ export function ProductionTable() {
         {canEdit && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
-            {saving ? "Saving…" : "Send for Production"}
+            {saving ? "Saving…" : "Record New Production"}
           </button>
         )}
       </div>
@@ -460,7 +461,10 @@ export function ProductionTable() {
                 {pageRows.map((g) => (
                   <tr
                     key={g.group}
-                    style={{ background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
+                    tabIndex={0}
+                    onClick={() => navigate(`/prod/${encodeURIComponent(g.group)}`)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/prod/${encodeURIComponent(g.group)}`); }}
+                    style={{ cursor: "pointer", background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
                   >
                     <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />
@@ -490,7 +494,7 @@ export function ProductionTable() {
                           action={
                             canEdit ? (
                               <button className="hbtn primary" onClick={() => setShowForm(true)}>
-                                Send for Production
+                                Record New Production
                               </button>
                             ) : undefined
                           }

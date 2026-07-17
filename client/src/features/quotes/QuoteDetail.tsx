@@ -53,7 +53,7 @@ import {
    the list grids) drives show/hide + reorder. */
 type FieldDef = ColumnDef<Quote> & { value: (q: Quote) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
-  { key: "quoteNo", label: "Quote Number", value: (q) => q.quoteNo },
+  // Quote Number omitted here — it's the page title.
   // Status lives in the title chip — not repeated as a field.
   { key: "quoteDate", label: "Quote Date", value: (q) => q.quoteDate || "—" },
   { key: "expiryDate", label: "Expiry Date", value: (q) => q.expiryDate || "—" },

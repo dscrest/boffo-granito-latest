@@ -149,7 +149,7 @@ function AddressModal({ initial, onSave, onClose }: { initial?: ExtraAddress; on
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: isEdit ? 540 : 1000 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name={isEdit ? "edit" : "plus"} size={18} />
@@ -158,7 +158,7 @@ function AddressModal({ initial, onSave, onClose }: { initial?: ExtraAddress; on
             <div className="ttl">{isEdit ? "Edit Address" : "Add Address"}</div>
             <div className="sub2">Extra addresses — selectable as billing/shipping on quotations</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>

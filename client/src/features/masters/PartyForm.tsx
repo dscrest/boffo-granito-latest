@@ -391,7 +391,6 @@ export function PartyForm({
         role="dialog"
         aria-modal="true"
         className="modal-panel card df-modal"
-        style={{ maxWidth: 1000 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="df-head">
@@ -404,7 +403,7 @@ export function PartyForm({
               {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
             </div>
           </div>
-          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close">
+          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>

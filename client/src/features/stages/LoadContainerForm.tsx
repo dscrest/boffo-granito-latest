@@ -73,7 +73,7 @@ export function LoadContainerForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="truck" size={18} />
@@ -82,7 +82,7 @@ export function LoadContainerForm({
             <div className="ttl">Load Container</div>
             <div className="sub2">Loads closed pallets · palletized → loaded</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>

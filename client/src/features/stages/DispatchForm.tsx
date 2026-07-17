@@ -57,7 +57,7 @@ export function DispatchForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="invoice" size={18} />
@@ -66,7 +66,7 @@ export function DispatchForm({
             <div className="ttl">Dispatch Container</div>
             <div className="sub2">Closes out a loaded container · loaded → dispatched</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>

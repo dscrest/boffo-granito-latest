@@ -434,7 +434,10 @@ export function QuotesTable() {
               {pageRows.map((q) => (
                 <tr
                   key={q.id}
-                  style={{ background: selected.has(q.id) ? "var(--accent-soft)" : undefined }}
+                  tabIndex={0}
+                  onClick={() => navigate(`/quotes/${q.id}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/quotes/${q.id}`); }}
+                  style={{ cursor: "pointer", background: selected.has(q.id) ? "var(--accent-soft)" : undefined }}
                 >
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(q.id)} onChange={() => toggleOne(q.id)} />

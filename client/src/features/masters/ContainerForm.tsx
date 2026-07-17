@@ -8,6 +8,7 @@ import { Icon } from "@/ui/Icon";
 import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { CONTAINER_STATUSES, CONTAINER_TYPES, type ContainerInput } from "./containersApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 export interface ContainerFormInitial extends Partial<ContainerInput> {}
 
@@ -60,16 +61,16 @@ export function ContainerForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="truck" size={18} />
           </div>
           <div>
             <div className="ttl">{isEdit ? "Edit Container" : "New Container"}</div>
-            <div className="sub2">Container master · stored in Catalyst Data Store</div>
+            <div className="sub2">Container master</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -125,9 +126,8 @@ export function ContainerForm({
                 <span className="lbl">
                   Capacity (boxes)<span className="req"> *</span>
                 </span>
-                <input
+                <NumberInput
                   className={boxesErr ? "error" : ""}
-                  type="number" min={0}
                   value={v.capacity_boxes || ""}
                   onChange={(e) => setNum("capacity_boxes", e.target.value)}
                   placeholder="e.g. 1200"
@@ -136,8 +136,7 @@ export function ContainerForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Capacity (pallets)</span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   value={v.capacity_pallets || ""}
                   onChange={(e) => setNum("capacity_pallets", e.target.value)}
                   placeholder="e.g. 20"
@@ -147,8 +146,7 @@ export function ContainerForm({
                 <span className="lbl">
                   Capacity area<span className="hint"> (m²)</span>
                 </span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   step="0.01"
                   value={v.capacity_area_sqm || ""}
                   onChange={(e) => setNum("capacity_area_sqm", e.target.value)}
@@ -159,8 +157,7 @@ export function ContainerForm({
                 <span className="lbl">
                   Max weight<span className="hint"> (kg)</span>
                 </span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   step="0.01"
                   value={v.max_weight_kg || ""}
                   onChange={(e) => setNum("max_weight_kg", e.target.value)}

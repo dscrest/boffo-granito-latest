@@ -15,7 +15,8 @@ import { toast } from "@/ui/Toast";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { insert } from "@/lib/dataOps";
-import { invalidateDesigns, type DesignImage, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
+import { nextSeqCode } from "@/lib/seq";
+import { cachedDesigns, invalidateDesigns, type DesignImage, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID.
    Coverage is NOT held here — it's derived from width/length/pcs. */
@@ -90,8 +91,6 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     fields: [
       { key: "width_mm", label: "Width", kind: "number", suffix: "mm", fromSize: true },
       { key: "length_mm", label: "Length", kind: "number", suffix: "mm", fromSize: true },
-      { key: "pcs_per_box", label: "Pcs / Box", kind: "number", fromSize: true },
-      { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg", fromSize: true },
       { key: "random_faces", label: "Random Faces", kind: "number" },
     ],
   },
@@ -111,6 +110,10 @@ const REQUIRED = ALL_FIELDS.filter((f) => f.required).map((f) => f.key);
 export function blankDesign(): DesignValues {
   const v = Object.fromEntries(ALL_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
   v.seq_code = ""; // no longer a rendered field — assigned on create by designsApi
+  // Packing fields are no longer rendered (owned by the Size master) but still
+  // live in state — snapshotted from the chosen Size and read by toDesignInput.
+  v.pcs_per_box = "";
+  v.box_weight_kg = "";
   v.status = "Active"; // #10: new designs default to Active
   return v;
 }
@@ -251,7 +254,15 @@ export function DesignFields({
   mode: "create" | "edit";
 }) {
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
-  const sku = useMemo(() => computeSku(value, lookups), [value, lookups]);
+  // On create/clone the short code is assigned on save; preview the provisional
+  // next code so the SKU doesn't read as a duplicate "00-…".
+  const sku = useMemo(() => {
+    const v =
+      mode === "create" && !value.seq_code
+        ? { ...value, seq_code: nextSeqCode((cachedDesigns() || []).map((d) => d.seqCode)) }
+        : value;
+    return computeSku(v, lookups);
+  }, [value, lookups, mode]);
   const cov = useMemo(() => computeCoverage(value), [value]);
 
   // Packing data is owned by the Size master — the item snapshots it. Fill any
@@ -430,9 +441,9 @@ export function DesignForm({
           </div>
           <div>
             <div className="ttl">New Item</div>
-            <div className="sub2">Item master · saved to Catalyst Data Store</div>
+            <div className="sub2">Item master</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>

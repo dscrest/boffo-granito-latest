@@ -378,7 +378,10 @@ export function OrdersTable() {
               {pageRows.map((r) => (
                 <tr
                   key={r.id}
-                  style={{ background: selected.has(r.id) ? "var(--accent-soft)" : undefined }}
+                  tabIndex={0}
+                  onClick={() => navigate(`/orders/${r.id}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/orders/${r.id}`); }}
+                  style={{ cursor: "pointer", background: selected.has(r.id) ? "var(--accent-soft)" : undefined }}
                 >
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} />

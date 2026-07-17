@@ -113,7 +113,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Icon-only variant (close ×, row kebab ⋮) — square with the icon centered;
    the text-button 0 11px padding made a lone icon read as a lopsided box. */
-.btn.x { width: 28px; padding: 0; justify-content: center; flex-shrink: 0; }
+.btn.x { width: 34px; height: 34px; padding: 0; justify-content: center; flex-shrink: 0; }
 
 /* GridFooter page-size select — native selects are only skinned inside
    .form-field/.modal-panel, so this one matches the .btn chrome beside it. */
@@ -690,6 +690,22 @@ a { color: inherit; text-decoration: none; }
 .page-head .right select:hover { background-color: var(--hover); color: var(--fg); }
 .fbar select:focus,
 .page-head .right select:focus { border-color: var(--accent); }
+
+/* Date inputs share the 26px control skin (native chrome is a heavy
+   rectangle that clashes with the bar); the platform calendar button stays. */
+.fbar input[type="date"] {
+  height: 26px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  border-radius: 5px;
+  padding: 0 8px;
+  font-size: var(--t-sm);
+  color: var(--fg);
+  outline: none;
+  cursor: pointer;
+}
+.fbar input[type="date"]:hover { background-color: var(--hover); }
+.fbar input[type="date"]:focus { border-color: var(--accent); }
 
 /* Section title */
 .sec-title { display: flex; align-items: baseline; gap: 12px; margin: 18px 0 10px; }
@@ -1524,6 +1540,12 @@ a { color: inherit; text-decoration: none; }
   background-position: right 26px top 7px, right 10px center;
 }
 
+/* Kill the native up/down spinner on any residual type=number (numeric fields
+   use the NumberInput component, but this covers stragglers app-wide). */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
 /* ---------- native date inputs ----------
    Match the select styling: same height/padding, our own calendar glyph
    (the UA's default icon clashes with the theme), accent-tinted picker
@@ -1568,7 +1590,22 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 /* Combobox — searchable single-select (customer pickers) */
 .combo { position: relative; width: 100%; }
-.combo-input { width: 100%; }
+.combo-input { width: 100%; padding-right: 28px; }
+/* Dropdown-affordance chevron — reuses the native <select> house chevron so
+   comboboxes read as dropdowns. Pseudo-element (not a bg-image on the input) so
+   it never collides with the required-field asterisk bg on .combo-input. */
+.combo::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  background: no-repeat center / 12px 12px
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+}
 .combo-pop {
   position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0;
   max-height: 240px; overflow-y: auto;

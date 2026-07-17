@@ -25,7 +25,7 @@ export function PurchaseOrderDetail() {
   const totalQty = items.reduce((s, o) => s + o.orderQty, 0);
 
   const fields: RecordField[] = [
-    { key: "po", label: "PO Number", value: poNumber },
+    // PO Number omitted here — it's the page title.
     { key: "party", label: "Customer", value: `${head.flag} ${head.party}` },
     { key: "country", label: "Country", value: head.country },
     { key: "date", label: "Order Date", value: head.orderDate },

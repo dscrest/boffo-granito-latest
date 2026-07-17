@@ -19,11 +19,15 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
+import type { Order } from "@/data";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
+import { NumberInput } from "../../ui/NumberInput";
+import { DesignEdit } from "./DesignEdit";
 
 const MAX_IMAGES = 5;
 
@@ -38,12 +42,65 @@ const ZOHO_STUB_FIELDS = ["Unit"];
 
 /** One image slot: preview + delete when filled, a passive placeholder when
     empty (uploads all go through the single "Add Image" button). */
-/** One label/number row in the stock summary. */
-function StockRow({ label, value }: { label: string; value: number }) {
+/** One label/number row in the stock summary. When onClick is given and the
+    number is non-zero it renders as a link that opens the drill-down. */
+function StockRow({ label, value, onClick }: { label: string; value: number; onClick?: () => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
       <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{label}</span>
-      <span className="mono">{fmt(value)}</span>
+      {onClick && value > 0 ? (
+        <button className="linkish mono" onClick={onClick} title={`See what makes up ${label.toLowerCase()}`}
+          style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}>
+          {fmt(value)}
+        </button>
+      ) : (
+        <span className="mono">{fmt(value)}</span>
+      )}
+    </div>
+  );
+}
+
+/** A stock number's drill-down: which order lines add up to it. Pure client —
+    reuses the orders already loaded on the page; each row links to its SO. */
+type StockBreakdown = {
+  title: string;
+  note: string;
+  rows: Order[];
+  columns: { head: string; num?: boolean; val: (o: Order) => string }[];
+};
+
+function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown; onClose: () => void }) {
+  const panelRef = useModalA11y(onClose);
+  const total = bd.rows.length;
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={bd.title} style={{ maxWidth: 720 }}>
+        <div className="row" style={{ marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>{bd.title}</div>
+          <span className="muted" style={{ fontSize: 12 }}>{total} order{total === 1 ? "" : "s"}</span>
+          <button className="btn x" onClick={onClose} title="Close" style={{ marginLeft: "auto" }} tabIndex={-1}><Icon name="x" size={13} /></button>
+        </div>
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 12 }}>{bd.note}</div>
+        <div className="modal-body" style={{ overflow: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>{bd.columns.map((c, i) => <th key={i} className={c.num ? "num" : undefined} style={c.num ? { textAlign: "right" } : undefined}>{c.head}</th>)}</tr>
+            </thead>
+            <tbody>
+              {bd.rows.map((o) => (
+                <tr key={o.id}>
+                  {bd.columns.map((c, i) => (
+                    <td key={i} className={c.num ? "num mono" : undefined} style={c.num ? { textAlign: "right" } : undefined}>
+                      {i === 0 ? <Link className="linkish" to={`/orders/${o.salesOrderId}`} onClick={onClose} title="Open Sales Order">{c.val(o)}</Link> : c.val(o)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {total === 0 && <tr><td colSpan={bd.columns.length}><span className="dim" style={{ padding: 8, display: "inline-block" }}>Nothing contributing right now.</span></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -122,9 +179,12 @@ export function ItemDetail() {
   const [imgBusy, setImgBusy] = useState(false); // image upload/save only — keeps slots calm during status changes
   const [viewer, setViewer] = useState<number | null>(null); // lightbox: index into design.images
   const [uploads, setUploads] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]); // per-file upload progress
+  const [editing, setEditing] = useState(false); // inline edit modal (uniform with other masters)
+  const [cloning, setCloning] = useState(false); // inline clone modal
   const [stockEdit, setStockEdit] = useState(false); // inline Opening-stock edit
   const [stockVal, setStockVal] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
+  const [breakdown, setBreakdown] = useState<StockBreakdown | null>(null); // stock-number drill-down
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
@@ -151,8 +211,43 @@ export function ItemDetail() {
   const inLoading = orders.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0);
   const availableStock = openingStock + producedTot - loadedTot;
 
+  // Drill-downs: which order lines add up to each stock number (this item, all SOs).
+  const orderCol = { head: "Order", val: (o: Order) => o.orderNumber || o.poNumber || "—" };
+  const custCol = { head: "Customer", val: (o: Order) => o.party || "—" };
+  const bdInProduction: StockBreakdown = {
+    title: "In production", note: "Ordered boxes not yet produced — across every open order for this item.",
+    rows: orders.filter((o) => o.orderQty - o.producedQty > 0),
+    columns: [orderCol, custCol,
+      { head: "Ordered", num: true, val: (o) => fmt(o.orderQty) },
+      { head: "Produced", num: true, val: (o) => fmt(o.producedQty) },
+      { head: "In production", num: true, val: (o) => fmt(Math.max(0, o.orderQty - o.producedQty)) }],
+  };
+  const bdInLoading: StockBreakdown = {
+    title: "In loading", note: "Palletised boxes waiting to be loaded — across every open order for this item.",
+    rows: orders.filter((o) => o.palletizedQty - o.loadedQty > 0),
+    columns: [orderCol, custCol,
+      { head: "Palletised", num: true, val: (o) => fmt(o.palletizedQty) },
+      { head: "Loaded", num: true, val: (o) => fmt(o.loadedQty) },
+      { head: "In loading", num: true, val: (o) => fmt(Math.max(0, o.palletizedQty - o.loadedQty)) }],
+  };
+  const bdProduced: StockBreakdown = {
+    title: "Produced", note: "All boxes produced against this item, across every order. Added to available stock.",
+    rows: orders.filter((o) => o.producedQty > 0),
+    columns: [orderCol, custCol, { head: "Produced", num: true, val: (o) => fmt(o.producedQty) }],
+  };
+  const bdLoaded: StockBreakdown = {
+    title: "Loaded", note: "All boxes loaded/dispatched against this item, across every order. Subtracted from available stock.",
+    rows: orders.filter((o) => o.loadedQty > 0),
+    columns: [orderCol, custCol, { head: "Loaded", num: true, val: (o) => fmt(o.loadedQty) }],
+  };
+
   const saveOpeningStock = async () => {
     if (!design) return;
+    // Empty field = "leave unchanged" (the current value shows only as a placeholder).
+    if (stockVal.trim() === "") {
+      setStockEdit(false);
+      return;
+    }
     const next = Math.max(0, parseInt(stockVal, 10) || 0);
     setStockBusy(true);
     const res = await update("Design", design.id, { accounting_stock: next });
@@ -263,7 +358,7 @@ export function ItemDetail() {
   };
 
   const moreItems = [
-    ...(can("items", "create") && design ? [{ label: "Clone", onClick: () => navigate(`/design/${design.id}/clone`) }] : []),
+    ...(can("items", "create") && design ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     ...(can("items", "edit") && design
       ? [{ label: design.status === "Inactive" || design.status === "Discontinued" ? "Mark as Active" : "Mark as Inactive", onClick: () => void onToggleStatus() }]
       : []),
@@ -272,6 +367,28 @@ export function ItemDetail() {
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {breakdown && <StockBreakdownModal bd={breakdown} onClose={() => setBreakdown(null)} />}
+      {editing && design && (
+        <DesignEdit
+          idProp={design.id}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            void refresh();
+          }}
+        />
+      )}
+      {cloning && design && (
+        <DesignEdit
+          clone
+          idProp={design.id}
+          onClose={() => setCloning(false)}
+          onSaved={(newId) => {
+            setCloning(false);
+            navigate(`/design/${newId}`);
+          }}
+        />
+      )}
       {/* Shrunk item list (#13.4) — fixed viewport height with its OWN scroll
           (the page never scrolls with it), sticky while the detail scrolls.
           Drag the bottom-right corner to resize the width. */}
@@ -355,7 +472,7 @@ export function ItemDetail() {
                   {design.uniqueName || design.designName}
                 </div>
                 {can("items", "edit") && (
-                  <button className="hbtn" onClick={() => navigate(`/design/${design.id}/edit`)} title="Edit item">
+                  <button className="hbtn" onClick={() => setEditing(true)} title="Edit item">
                     <Icon name="edit" size={13} />
                     Edit
                   </button>
@@ -394,7 +511,6 @@ export function ItemDetail() {
                   label="Coverage / box"
                   value={design.coverageSqm ? `${design.coverageSqm} m² · ${design.coverageSqft} ft²` : "—"}
                 />
-                <DetailRow label="Pcs / Box" value={design.pcsPerBox ? String(design.pcsPerBox) : "—"} />
                 <DetailRow label="Created" value={fmtLocalDateTime(design.createdTime)} />
                 <DetailRow label="Modified" value={fmtLocalDateTime(design.modifiedTime)} />
                 {/* STUB: Zoho Books mapping — blocked on reference. */}
@@ -510,10 +626,9 @@ export function ItemDetail() {
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Opening stock</span>
                     {stockEdit ? (
                       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                        <input
-                          type="number"
-                          min={0}
+                        <NumberInput
                           value={stockVal}
+                          placeholder={String(openingStock)}
                           onChange={(e) => setStockVal(e.target.value)}
                           style={{ width: 90, textAlign: "right" }}
                           autoFocus
@@ -531,7 +646,7 @@ export function ItemDetail() {
                             className="btn x"
                             title="Edit opening stock"
                             onClick={() => {
-                              setStockVal(String(openingStock));
+                              setStockVal("");
                               setStockEdit(true);
                             }}
                           >
@@ -541,14 +656,22 @@ export function ItemDetail() {
                       </span>
                     )}
                   </div>
-                  <StockRow label="In production" value={inProduction} />
-                  <StockRow label="In loading" value={inLoading} />
+                  <StockRow label="In production" value={inProduction} onClick={() => setBreakdown(bdInProduction)} />
+                  <StockRow label="In loading" value={inLoading} onClick={() => setBreakdown(bdInLoading)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", marginTop: 4, borderTop: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}>Available stock</span>
                     <span className="mono" style={{ fontWeight: 700, color: availableStock < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(availableStock)}</span>
                   </div>
                   <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
-                    Opening + produced ({fmt(producedTot)}) − loaded ({fmt(loadedTot)})
+                    Opening + produced (
+                    {producedTot > 0
+                      ? <button className="linkish" onClick={() => setBreakdown(bdProduced)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}>{fmt(producedTot)}</button>
+                      : fmt(producedTot)}
+                    ) − loaded (
+                    {loadedTot > 0
+                      ? <button className="linkish" onClick={() => setBreakdown(bdLoaded)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}>{fmt(loadedTot)}</button>
+                      : fmt(loadedTot)}
+                    )
                   </div>
                 </div>
               </div>

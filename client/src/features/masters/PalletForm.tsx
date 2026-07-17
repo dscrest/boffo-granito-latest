@@ -8,6 +8,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import type { PalletInput, SizeOption } from "./palletsApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 // Default pallet types (datalist seed). The live list is these merged with the
 // distinct types already saved on Pallet rows — a new type typed here is
@@ -147,9 +148,9 @@ export function PalletForm({
           </div>
           <div>
             <div className="ttl">{isEdit ? "Edit Pallet" : "New Pallet"}</div>
-            <div className="sub2">Pallet master · stored in Catalyst Data Store</div>
+            <div className="sub2">Pallet master</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -272,8 +273,7 @@ export function PalletForm({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Boxes / Pallet</span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   value={v.boxes_per_pallet || ""}
                   onChange={(e) => setNum("boxes_per_pallet", e.target.value)}
                   placeholder="e.g. 32"
@@ -281,8 +281,7 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Pallets / Container</span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   value={v.pallets_per_container || ""}
                   onChange={(e) => setNum("pallets_per_container", e.target.value)}
                   placeholder="e.g. 30"
@@ -290,8 +289,7 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Empty Pallet Weight (kg)</span>
-                <input
-                  type="number" min={0}
+                <NumberInput
                   step="0.01"
                   value={v.empty_pallet_weight_kg || ""}
                   onChange={(e) => setNum("empty_pallet_weight_kg", e.target.value)}

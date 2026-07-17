@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
+import { NumberInput } from "./NumberInput";
 
 export type FilterFieldType = "text" | "select" | "multiselect" | "daterange" | "numrange";
 
@@ -212,9 +213,9 @@ function FieldInput({
       const r = (value as NumRange) || {};
       return (
         <div className="row" style={{ gap: 8 }}>
-          <input type="number" min={0} value={r.min ?? ""} placeholder="Min" onChange={(e) => onChange({ ...r, min: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+          <NumberInput  value={r.min ?? ""} placeholder="Min" onChange={(e) => onChange({ ...r, min: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
           <span className="dim" style={{ flex: "0 0 auto" }}>–</span>
-          <input type="number" min={0} value={r.max ?? ""} placeholder="Max" onChange={(e) => onChange({ ...r, max: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+          <NumberInput  value={r.max ?? ""} placeholder="Max" onChange={(e) => onChange({ ...r, max: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
         </div>
       );
     }

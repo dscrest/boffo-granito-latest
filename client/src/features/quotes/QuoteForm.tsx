@@ -23,6 +23,7 @@ import { currentSalespersonName, salesPersonOptions } from "@/features/masters/s
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
+import { NumberInput } from "../../ui/NumberInput";
 
 // #16 status set on QuoteDetail bar; #18 TDS/TCS removed — STATUSES/TAX_TYPES no longer used here.
 
@@ -248,7 +249,7 @@ export function QuoteForm({
                   : "Sales quote"}
             </div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -314,8 +315,7 @@ export function QuoteForm({
               {h.currency !== "INR" && (
                 <label className="form-field">
                   <span className="lbl">Exchange Rate (₹ per 1 {h.currency})</span>
-                  <input
-                    type="number"
+                  <NumberInput
                     min={0}
                     step="0.0001"
                     value={fx}
@@ -387,18 +387,19 @@ export function QuoteForm({
                       )}
                       <textarea
                         rows={1}
+                        tabIndex={-1}
                         value={l.description ?? ""}
                         onChange={(e) => setLine(i, "description", e.target.value)}
                         placeholder="Add a description to your item"
                       />
                     </div>
-                    <input type="number" min={0} value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
-                    <input type="number" min={0} value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
-                    <input type="number" min={0} value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
+                    <NumberInput  value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
+                    <NumberInput  value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
+                    <NumberInput  value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
                     <span className="mono qt-sub">
                       {fmt(t.subTotal)}
                     </span>
-                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1} tabIndex={-1}>
                       ✕
                     </button>
                   </div>
@@ -430,7 +431,7 @@ export function QuoteForm({
                   discount only. Adjustment kept. */}
               <div className="row charge">
                 <span className="dim">Adjustment</span>
-                <input type="number" value={charges.adjustment} placeholder="0.00" onChange={(e) => setCharge("adjustment", e.target.value)} />
+                <NumberInput  value={charges.adjustment} placeholder="0.00" onChange={(e) => setCharge("adjustment", e.target.value)} />
               </div>
               {/* #18: TDS/TCS tax option removed from quotes. */}
               <div className="row total">

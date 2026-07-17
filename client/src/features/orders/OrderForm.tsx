@@ -15,6 +15,7 @@ import { currentSalespersonName, salesPersonOptions } from "@/features/masters/s
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
+import { NumberInput } from "../../ui/NumberInput";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
 
@@ -278,7 +279,7 @@ export function OrderForm({
                     : "Sales order · saves to the database on submit"}
             </div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -394,14 +395,14 @@ export function OrderForm({
                       )}
                       <textarea
                         rows={1}
+                        tabIndex={-1}
                         value={l.description}
                         onChange={(e) => setLine(i, "description", e.target.value)}
                         placeholder="Add a description to your item"
                       />
                     </div>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <input
-                        type="number" min={0}
+                      <NumberInput
                         max={q ? maxByDesign.get(l.design) : undefined}
                         value={l.ordered_qty_boxes}
                         onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
@@ -413,14 +414,12 @@ export function OrderForm({
                         </span>
                       )}
                     </div>
-                    <input
-                      type="number" min={0}
+                    <NumberInput
                       value={l.rate}
                       onChange={(e) => setLine(i, "rate", e.target.value)}
                       placeholder="0.00"
                     />
-                    <input
-                      type="number" min={0}
+                    <NumberInput
                       value={l.discount}
                       onChange={(e) => setLine(i, "discount", e.target.value)}
                       placeholder="0"
@@ -428,7 +427,7 @@ export function OrderForm({
                     <span className="mono qt-sub">
                       {fmt(orderLineSub(l))}
                     </span>
-                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1}>
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1} tabIndex={-1}>
                       ✕
                     </button>
                   </div>
@@ -451,7 +450,7 @@ export function OrderForm({
               {/* #17: document-level Discount removed from SO — inline per-line discount only. */}
               <div className="row charge">
                 <span className="dim">Adjustment</span>
-                <input type="number" value={h.adjustment} placeholder="0.00" onChange={(e) => setHead("adjustment", e.target.value)} />
+                <NumberInput  value={h.adjustment} placeholder="0.00" onChange={(e) => setHead("adjustment", e.target.value)} />
               </div>
               <div className="row charge">
                 <span className="lbl-wrap">
@@ -461,7 +460,7 @@ export function OrderForm({
                     ))}
                   </select>
                   {h.taxType !== "None" && (
-                    <input type="number" min={0} value={h.taxPct} placeholder="%" onChange={(e) => setHead("taxPct", e.target.value)} />
+                    <NumberInput  value={h.taxPct} placeholder="%" onChange={(e) => setHead("taxPct", e.target.value)} />
                   )}
                 </span>
                 <span className="mono" style={{ color: h.taxType === "TDS" ? "var(--c-red)" : "var(--fg)" }}>

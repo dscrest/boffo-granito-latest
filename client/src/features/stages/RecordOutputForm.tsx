@@ -10,8 +10,10 @@ import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
+import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import type { ProductionEntry, ProductionRecordInput } from "./productionApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 export function RecordOutputForm({
   entry,
@@ -36,7 +38,7 @@ export function RecordOutputForm({
   const cap = remaining;
 
   const [qty, setQty] = useState(String(remaining));
-  const [date, setDate] = useState(entry.productionDate || "");
+  const [date, setDate] = useState(entry.productionDate || todayISO());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -63,14 +65,14 @@ export function RecordOutputForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
             <div className="ttl">Record Output{step ? ` — Line ${step.n} of ${step.of}` : ""}</div>
             <div className="sub2">Actual boxes produced · {entry.design}</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">✕</button>
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
 
         <div className="df-body">
@@ -79,8 +81,7 @@ export function RecordOutputForm({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Boxes produced<span className="req"> *</span></span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   max={Number.isFinite(cap) ? cap : undefined}
                   value={qty}
@@ -115,7 +116,7 @@ export function RecordOutputForm({
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="hbtn primary" disabled={missing || saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Saving…" : "Record output"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

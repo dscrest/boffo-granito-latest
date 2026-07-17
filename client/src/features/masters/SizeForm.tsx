@@ -13,6 +13,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { sizeCodeOf, sqftPerBoxOf, sqmPerBoxOf, type SizeInput } from "./sizesApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 // Tile body types (datalist seed). The live list is these merged with the
 // distinct types already saved on Size rows — a new type typed here is created
@@ -94,9 +95,9 @@ export function SizeForm({
           </div>
           <div>
             <div className="ttl">{isEdit ? "Edit Size" : "New Size"}</div>
-            <div className="sub2">Size master · stored in Catalyst Data Store</div>
+            <div className="sub2">Size master</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -111,8 +112,7 @@ export function SizeForm({
                 <span className="lbl">
                   Width (mm)<span className="req"> *</span>
                 </span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   value={v.width_mm || ""}
                   onChange={(e) => setNum("width_mm", e.target.value)}
@@ -123,8 +123,7 @@ export function SizeForm({
                 <span className="lbl">
                   Length (mm)<span className="req"> *</span>
                 </span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   value={v.length_mm || ""}
                   onChange={(e) => setNum("length_mm", e.target.value)}
@@ -164,8 +163,7 @@ export function SizeForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Thickness (mm)</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   step="0.01"
                   value={v.thickness_mm || ""}
@@ -181,8 +179,7 @@ export function SizeForm({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Pcs. per Packing</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   value={v.pcs_per_packing || ""}
                   onChange={(e) => setNum("pcs_per_packing", e.target.value)}
@@ -191,8 +188,7 @@ export function SizeForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Box Weight (kg)</span>
-                <input
-                  type="number"
+                <NumberInput
                   min={0}
                   step="0.01"
                   value={v.box_weight_kg || ""}

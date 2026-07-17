@@ -260,7 +260,10 @@ export function Sizes() {
                   return (
                     <tr
                       key={r.id}
-                      style={{ background: sel ? "var(--accent-soft)" : undefined }}
+                      tabIndex={0}
+                      onClick={() => navigate(`/sizes/${r.id}`)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/sizes/${r.id}`); }}
+                      style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
                     >
                       {/* checkbox cell stops propagation so toggling never navigates */}
                       <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>

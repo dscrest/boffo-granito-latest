@@ -243,7 +243,10 @@ export function Pallets() {
                 return (
                   <tr
                     key={r.id}
-                    style={{ background: sel ? "var(--accent-soft)" : undefined }}
+                    tabIndex={0}
+                    onClick={() => navigate(`/pallets/${r.id}`)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/pallets/${r.id}`); }}
+                    style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }}
                   >
                     {/* checkbox cell stops propagation so toggling never navigates */}
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>

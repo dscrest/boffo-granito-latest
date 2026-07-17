@@ -47,7 +47,7 @@ import {
 
 type FieldDef = ColumnDef<ProductionRequestGroup> & { value: (g: ProductionRequestGroup) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
-  { key: "code", label: "Production ID", value: (g) => g.code },
+  // Production ID omitted here — it's the page title.
   { key: "stage", label: "Stage", value: (g) => stageChip(g.stage).label },
   { key: "order", label: "Sales Order", value: (g) => (g.independent ? "Independent (stock)" : g.orderNumber || g.poNumber || "—") },
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
@@ -113,7 +113,7 @@ export function ProductionDetail() {
       return;
     }
     const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
-    toast.success(`Sent for approval — ${fmt(total)} boxes`);
+    toast.success(`Production recorded — ${fmt(total)} boxes`);
     invalidateProductionLogs();
     const dest = target ?? res.rowid;
     if (dest) navigate(`/prod/${encodeURIComponent(dest)}`);

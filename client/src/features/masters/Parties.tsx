@@ -283,7 +283,13 @@ export function PartiesView() {
             </thead>
             <tbody>
               {pager.slice(sort.sorted).map((r) => (
-                <tr key={r.key}>
+                <tr
+                  key={r.key}
+                  tabIndex={0}
+                  onClick={() => navigate(`/parties/${encodeURIComponent(r.code)}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/parties/${encodeURIComponent(r.code)}`); }}
+                  style={{ cursor: "pointer" }}
+                >
                   <td>
                     <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
                       {r.name}

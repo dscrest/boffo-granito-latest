@@ -10,10 +10,12 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
+import { todayISO } from "@/lib/dates";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listContainers, listContainerFill, type ContainerRow } from "@/features/masters/containersApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableOrder } from "./palletisationApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 export function PalletPackForm({
   onSave,
@@ -44,7 +46,7 @@ export function PalletPackForm({
 
   const [orderId, setOrderId] = useState("");
   const [palletId, setPalletId] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState(todayISO());
   const [remarks, setRemarks] = useState("");
   const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
 
@@ -206,7 +208,7 @@ export function PalletPackForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
             <Icon name="palette" size={18} />
@@ -215,7 +217,7 @@ export function PalletPackForm({
             <div className="ttl">Close Pallet</div>
             <div className="sub2">Commits a palletised batch · produced → palletized</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
         </div>
@@ -338,8 +340,7 @@ export function PalletPackForm({
                             <td className="num mono">{it.available}</td>
                             <td className="num">
                               {ready ? (
-                                <input
-                                  type="number" min={0}
+                                <NumberInput
                                   max={it.available}
                                   value={boxesByItem[it.orderItemId] || ""}
                                   onChange={(e) => setBoxes(it.orderItemId, e.target.value, it.available)}

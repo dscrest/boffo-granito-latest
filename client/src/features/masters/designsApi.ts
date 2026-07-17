@@ -365,8 +365,21 @@ export async function createDesign(input: DesignInput) {
   // the design short code ("00" while blank) — swap in the generated one.
   if (!input.seq_code.trim()) {
     const res = await listDesigns();
-    const seq = nextSeqCode(res.designs.map((d) => d.seqCode));
-    input = { ...input, seq_code: seq, sku: [seq, ...input.sku.split("-").slice(1)].join("-") };
+    const existing = res.designs ?? [];
+    const tail = input.sku.split("-").slice(1);
+    const takenSku = new Set(existing.map((d) => d.sku));
+    // Assign the next short code, then keep bumping until the assembled SKU is
+    // unique — closes the client-side nextSeqCode race that could otherwise
+    // mint two identical SKUs.
+    let n = Number(nextSeqCode(existing.map((d) => d.seqCode)));
+    let seq = String(n).padStart(2, "0");
+    let sku = [seq, ...tail].join("-");
+    while (takenSku.has(sku)) {
+      n += 1;
+      seq = String(n).padStart(2, "0");
+      sku = [seq, ...tail].join("-");
+    }
+    input = { ...input, seq_code: seq, sku };
   }
   return bust(insert("Design", toPayload(input)));
 }

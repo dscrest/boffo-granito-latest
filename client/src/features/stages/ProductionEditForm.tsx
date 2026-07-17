@@ -9,6 +9,7 @@ import { toast } from "@/ui/Toast";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { updateProductionLine, type ProductionRequestGroup } from "./productionApi";
+import { NumberInput } from "../../ui/NumberInput";
 
 export function ProductionEditForm({
   group,
@@ -51,14 +52,14 @@ export function ProductionEditForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
             <div className="ttl">Edit Production</div>
             <div className="sub2">{group.code} · adjust requested quantities</div>
           </div>
-          <button className="btn x" onClick={onClose} title="Close">✕</button>
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
 
         <div className="df-body">
@@ -77,8 +78,7 @@ export function ProductionEditForm({
                     <td><span className="design-name">{e.design}</span></td>
                     <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
                     <td className="num">
-                      <input
-                        type="number"
+                      <NumberInput
                         min={1}
                         value={qty[e.id] ?? ""}
                         onChange={(ev) => setQty((p) => ({ ...p, [e.id]: ev.target.value }))}
@@ -103,7 +103,7 @@ export function ProductionEditForm({
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

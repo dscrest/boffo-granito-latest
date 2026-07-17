@@ -35,7 +35,8 @@ const ProductionDetail = lazy(() => import("@/features/stages/ProductionDetail")
 const QC = lazy(() => import("@/features/stages/QC").then((m) => ({ default: m.QC })));
 const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m) => ({ default: m.OperationsLog })));
 const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => ({ default: m.Invoices })));
-const Reports = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.Reports })));
+const ReportsHome = lazy(() => import("@/features/reports/ReportsHome").then((m) => ({ default: m.ReportsHome })));
+const ReportView = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.ReportView })));
 const PalletPacking = lazy(() => import("@/features/stages/PalletPacking").then((m) => ({ default: m.PalletPacking })));
 const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
 const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
@@ -144,7 +145,7 @@ function navTree(): NavNode[] {
       label: "Reports",
       icon: "chart",
       children: [
-        { id: "reports", label: "Quantity Reports", icon: "chart" },
+        { id: "reports", label: "Reports", icon: "chart" },
         { id: "ops", label: "Audit Log", icon: "clock" },
       ],
     },
@@ -426,7 +427,8 @@ export default function App() {
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/invoices" element={<Invoices />} />
-            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports" element={<ReportsHome />} />
+            <Route path="/reports/:id" element={<ReportView />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
