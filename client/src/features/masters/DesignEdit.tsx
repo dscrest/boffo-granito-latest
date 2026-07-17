@@ -81,7 +81,10 @@ export function DesignEdit({
         if (clone) {
           // Fresh short code (assigned on create) + a distinct name so the
           // computed unique_name doesn't collide with the source. No images.
+          // Opening stock is per-item and must NOT carry over (the field is
+          // hidden on create, but its seeded value would still be submitted).
           seed.seq_code = "";
+          seed.accounting_stock = "";
           seed.design_name = `Copy of ${seed.design_name}`.trim();
         }
         setV(seed);
