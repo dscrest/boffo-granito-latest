@@ -28,7 +28,7 @@ const dash = <span className="dim">—</span>;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
-// Toggleable + reorderable columns (checkbox/# pinned outside the map).
+// Toggleable + reorderable columns (checkbox pinned outside the map).
 const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
   { key: "name", label: "Name", render: (r) => r.name || dash },
   {

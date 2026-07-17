@@ -44,7 +44,7 @@ const EMPTY: Draft = { rowid: null, email: "", name: "", password: "", role: "",
 
 const dash = <span className="dim">—</span>;
 
-// Toggleable + reorderable columns (# pinned outside the map).
+// Toggleable + reorderable columns.
 const USER_COLUMNS: ColumnDef<UserRow>[] = [
   { key: "email", label: "Email", className: "mono", render: (u) => <span style={{ color: "var(--fg)" }}>{u.email}</span> },
   { key: "name", label: "Name", render: (u) => u.name || dash },
@@ -269,14 +269,13 @@ export function UsersAdmin() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 36, textAlign: "center" }}>#</th>
                   {visible.map((c) => (
                     <th key={c.key} style={c.style}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pager.slice(filtered).map((u, i) => (
+                {pager.slice(filtered).map((u) => (
                   <tr
                     key={u.rowid}
                     tabIndex={0}
@@ -297,7 +296,6 @@ export function UsersAdmin() {
                     style={{ cursor: "pointer" }}
                     title="Edit user"
                   >
-                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(u)}
@@ -307,7 +305,7 @@ export function UsersAdmin() {
                 ))}
                 {!loading && users.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 1}>
+                    <td colSpan={visible.length}>
                       <EmptyState icon="users" title="No users" hint="Click New user to add one." />
                     </td>
                   </tr>

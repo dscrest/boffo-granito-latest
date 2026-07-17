@@ -37,7 +37,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 const dash = <span className="dim">—</span>;
 
-// Toggleable + reorderable columns (checkbox/# pinned outside the map).
+// Toggleable + reorderable columns (checkbox pinned outside the map).
 const CONTAINER_COLUMNS: ColumnDef<ContainerRow>[] = [
   {
     key: "number",
@@ -273,14 +273,13 @@ export function Containers() {
                     title={allShownSelected ? "Deselect all" : "Select all"}
                   />
                 </th>
-                <th style={{ width: 36, textAlign: "center" }}>#</th>
                 {visible.map((c) => (
                   <th key={c.key} style={c.style}>{c.label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((r, i) => {
+              {pageRows.map((r) => {
                 const sel = selected.has(r.id);
                 return (
                   <tr
@@ -297,7 +296,6 @@ export function Containers() {
                     <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
                     </td>
-                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
@@ -308,7 +306,7 @@ export function Containers() {
               })}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 2}>
+                  <td colSpan={visible.length + 1}>
                     {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

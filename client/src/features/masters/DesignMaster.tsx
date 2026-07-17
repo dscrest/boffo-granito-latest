@@ -34,16 +34,16 @@ import {
 
 const dash = <span className="dim">—</span>;
 
-// Toggleable + reorderable columns (checkbox/# pinned outside the map).
+// Toggleable + reorderable columns (checkbox pinned outside the map).
 // Reference implementation of the data-driven grid pattern: each ColumnDef
 // carries its own cell renderer; thead/tbody map over useColumns().visible.
 const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
   {
     key: "name",
-    label: "Design Name",
+    label: "Name",
     render: (d) => (
       <Link className="linkish" to={`/design/${d.id}`} onClick={(e) => e.stopPropagation()} title="View item">
-        <span className="design-name">{d.designName}</span>
+        <span className="design-name">{d.uniqueName || d.designName}</span>
       </Link>
     ),
   },

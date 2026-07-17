@@ -163,7 +163,6 @@ export function PurchaseOrders() {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 36, textAlign: "center" }}>#</th>
               <th>PO Number</th>
               {visible.map((c) => (
                 <th key={c.key} style={c.style}>{c.label}</th>
@@ -173,9 +172,6 @@ export function PurchaseOrders() {
           <tbody>
             {pager.slice(filtered).map((p, i) => (
               <tr key={p.po + i}>
-                <td className="muted mono" style={{ textAlign: "center" }}>
-                  {pager.from + i}
-                </td>
                 <td className="mono">
                   <Link className="linkish" to={`/po/${encodeURIComponent(p.po)}`} onClick={(e) => e.stopPropagation()} title="Open details">
                     {p.po}

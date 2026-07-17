@@ -326,7 +326,6 @@ export function RolesAdmin() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 36, textAlign: "center" }}>#</th>
                   <th>Role</th>
                   <th style={{ width: 70, textAlign: "center" }}>Users</th>
                   <th style={{ width: 160 }}>Approves</th>
@@ -334,7 +333,7 @@ export function RolesAdmin() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r, i) => (
+                {filtered.map((r) => (
                   <tr
                     key={r.rowid}
                     tabIndex={0}
@@ -345,7 +344,6 @@ export function RolesAdmin() {
                     style={{ cursor: "pointer" }}
                     title={r.locked ? "View role" : "Edit role"}
                   >
-                    <td className="muted mono" style={{ textAlign: "center" }}>{i + 1}</td>
                     <td>
                       <span className="chip">{r.name}</span>
                       {r.locked && <Icon name="shield-check" size={12} style={{ marginLeft: 6, verticalAlign: -2 }} />}
@@ -363,7 +361,7 @@ export function RolesAdmin() {
                 ))}
                 {!loading && roles.length === 0 && (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={4}>
                       <EmptyState icon="users" title="No roles" hint="Click New role to add one." />
                     </td>
                   </tr>

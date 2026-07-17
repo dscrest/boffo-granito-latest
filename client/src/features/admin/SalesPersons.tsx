@@ -76,7 +76,7 @@ export function SalesPersonsAdmin() {
     return m;
   }, [users]);
 
-  // Toggleable + reorderable columns (# pinned outside the map). Defined in
+  // Toggleable + reorderable columns. Defined in
   // the component because "Linked user" resolves names via the users map.
   const spColumns = useMemo<ColumnDef<SalesPersonRow>[]>(
     () => [
@@ -230,14 +230,13 @@ export function SalesPersonsAdmin() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 36, textAlign: "center" }}>#</th>
                   {visible.map((c) => (
                     <th key={c.key} style={c.style}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pager.slice(filtered).map((s, i) => (
+                {pager.slice(filtered).map((s) => (
                   <tr
                     key={s.id}
                     tabIndex={0}
@@ -255,7 +254,6 @@ export function SalesPersonsAdmin() {
                     style={{ cursor: "pointer" }}
                     title="Edit sales person"
                   >
-                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(s)}
@@ -265,7 +263,7 @@ export function SalesPersonsAdmin() {
                 ))}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 1}>
+                    <td colSpan={visible.length}>
                       <EmptyState icon="users" title="No sales persons" hint="Reps appear automatically when app users sign in." />
                     </td>
                   </tr>

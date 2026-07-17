@@ -349,7 +349,6 @@ function MasterTable({ def }: { def: MasterDef }) {
                   title={allShownSelected ? "Deselect all" : "Select all"}
                 />
               </th>
-              <th style={{ width: 36, textAlign: "center" }}>#</th>
               {def.fields.map((f) => (
                 <th key={f.key} className={f.type === "number" ? "num" : ""} style={f.type === "number" ? { textAlign: "right" } : undefined}>
                   {f.label}
@@ -360,12 +359,12 @@ function MasterTable({ def }: { def: MasterDef }) {
           <tbody>
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={def.fields.length + 2} className="muted" style={{ textAlign: "center", padding: 24 }}>
+                <td colSpan={def.fields.length + 1} className="muted" style={{ textAlign: "center", padding: 24 }}>
                   {rows.length > 0 ? "No matching results." : `No rows yet — click “New ${def.label.toLowerCase()}”.`}
                 </td>
               </tr>
             )}
-            {filtered.map((r, i) => {
+            {filtered.map((r) => {
               const sel = selected.has(r._id);
               return (
                 <tr
@@ -381,9 +380,6 @@ function MasterTable({ def }: { def: MasterDef }) {
                   {/* checkbox cell stops propagation so toggling never opens the editor */}
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={sel} onChange={() => toggleOne(r._id)} />
-                  </td>
-                  <td className="muted mono" style={{ textAlign: "center" }}>
-                    {i + 1}
                   </td>
                   {def.fields.map((f) => (
                     <td key={f.key} className={f.type === "number" ? "num" : ""}>

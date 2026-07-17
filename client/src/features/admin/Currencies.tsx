@@ -287,16 +287,14 @@ export function CurrenciesAdmin() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th style={{ width: 36, textAlign: "center" }}>#</th>
                   {visible.map((c) => (
                     <th key={c.key} style={c.style}>{c.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pager.slice(filtered).map((c, i) => (
+                {pager.slice(filtered).map((c) => (
                   <tr key={c.id} tabIndex={0} onClick={() => setDraft(editDraft(c))} style={{ cursor: "pointer" }} title="Edit currency">
-                    <td className="muted mono" style={{ textAlign: "center" }}>{pager.from + i}</td>
                     {visible.map((col) => (
                       <td key={col.key} className={col.className} style={col.style}>
                         {col.render!(c)}
@@ -306,7 +304,7 @@ export function CurrenciesAdmin() {
                 ))}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 1}>
+                    <td colSpan={visible.length}>
                       <EmptyState icon="chart" title="No currencies" hint="Click New currency to add one." />
                     </td>
                   </tr>
