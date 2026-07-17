@@ -30,6 +30,7 @@ const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 // Toggleable + reorderable columns (checkbox/# pinned outside the map).
 const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
+  { key: "name", label: "Name", render: (r) => r.name || dash },
   {
     key: "code",
     label: "Size",
@@ -39,7 +40,6 @@ const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
       </Link>
     ),
   },
-  { key: "name", label: "Name", render: (r) => r.name || dash },
   { key: "type", label: "Type", className: "muted", render: (r) => r.tileType || dash },
   {
     key: "thickness",
