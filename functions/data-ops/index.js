@@ -404,7 +404,7 @@ function assertNoNegatives(obj) {
 const NATURAL_KEY = {
   Customer: "code",
   Design: "unique_name",
-  Size: "code",
+  Size: "name", // full spec (code-type-thickness-pcs); dims alone repeat legitimately
   Finish: "name",
   Brand: "name",
   Category: "name",
@@ -1740,7 +1740,9 @@ app.post("/production-record/:rowid", async (req, res) => {
 
 /* Move a production to a Kanban stage — manual drag; recording output does NOT
    change the stage. Sets `stage` on the given plan-line ROWIDs (the whole group).
-   body: { stage, ids: [plan-line ROWIDs] } */
+   Optional per-line `notes` map (e.g. item-wise QC remarks) + an overall `note`
+   ride along on the stage transition so they show in the Activity feed.
+   body: { stage, ids: [plan-line ROWIDs], notes?: {id:remark}, note? } */
 const PRODUCTION_STAGES = ["New", "InProduction", "QC", "Completed"];
 app.post("/production-stage", async (req, res) => {
   try {
@@ -1749,6 +1751,8 @@ app.post("/production-stage", async (req, res) => {
     const body = req.body || {};
     const stage = String(body.stage || "");
     const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x) => /^\d+$/.test(x));
+    const notes = body.notes && typeof body.notes === "object" ? body.notes : {};
+    const overall = String(body.note || "");
     const result = await withOpLog(
       catalyst,
       { table_name: "ProductionLog", operation: "production-stage", payload: { stage, ids } },
@@ -1759,9 +1763,95 @@ app.post("/production-stage", async (req, res) => {
           await ds.table("ProductionLog").updateRow({ ROWID: id, stage });
           await logTransition(catalyst, {
             entity_type: "ProductionLog", entity_rowid: id, from_status: "", to_status: `Stage: ${stage}`,
+            note: String(notes[id] || overall || ""),
           });
         }
         return { rowid: ids[0], data: { stage, lines: ids.length } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Final completion — the ONE place available stock moves. For each plan line
+   records the ACTUAL total boxes produced (over- OR under-production allowed,
+   unlike /production-record which caps at remaining), bumps OrderItem.produced by
+   the delta over what's already recorded, inserts a dated `record` child so derived
+   stock updates, and flips every line to stage=Completed.
+   body: { lines: [{ id, qty_boxes }], production_date?, performed_by?, note? }
+   ponytail: a down-correction below what's already been recorded (delta < 0) only
+   completes the stage — it doesn't claw back stock. Prior records are rare now that
+   In-Production no longer captures output; upgrade to a negative reconciling record
+   if that path becomes real. */
+app.post("/production-complete", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const productionDate = body.production_date != null ? String(body.production_date) : "";
+    const performedBy = body.performed_by != null ? String(body.performed_by) : "";
+    const note = body.note != null ? String(body.note) : "";
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-complete", payload: { lines: lines.length } },
+      async () => {
+        const ids = lines.map((l) => String((l && l.id) || "")).filter((x) => /^\d+$/.test(x));
+        if (!ids.length) throw badRequest("At least one production line is required");
+        let completed = 0;
+        for (const l of lines) {
+          const id = String((l && l.id) || "");
+          if (!/^\d+$/.test(id)) continue;
+          const qty = Math.max(0, Number(l.qty_boxes) || 0);
+          const pl = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID, order_item, design, sales_order, request_group, qty_requested, qty_boxes, stage FROM ProductionLog WHERE ROWID = ${id} AND deleted_at is null`,
+            ),
+          )[0];
+          if (!pl) throw badRequest(`Production entry not found: ${id}`, 404);
+
+          // Final produced minus what's already recorded on this line.
+          const recs = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT qty_boxes FROM ProductionLog WHERE parent_log = ${id} AND entry_type = 'record' AND deleted_at is null`,
+            ),
+          );
+          const producedSoFar = (Number(pl.qty_boxes) || 0) + recs.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
+          const delta = qty - producedSoFar;
+
+          if (delta > 0) {
+            const orderItemId = String(pl.order_item || "");
+            if (orderItemId) {
+              const oiMap = await loadOrderItems(catalyst, [orderItemId], "ROWID, ordered_qty_boxes, produced_qty_boxes, stage");
+              const oi = oiMap.get(orderItemId);
+              if (oi) {
+                const produced = Number(oi.produced_qty_boxes) || 0;
+                const patch = { ROWID: orderItemId, produced_qty_boxes: produced + delta };
+                const oiStage = String(oi.stage || "po");
+                if (oiStage === "po") patch.stage = "prod";
+                await ds.table("OrderItem").updateRow(patch);
+                if (patch.stage)
+                  await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: orderItemId, from_status: oiStage, to_status: patch.stage });
+              }
+            }
+            await ds.table("ProductionLog").insertRow({
+              parent_log: id, entry_type: "record",
+              design: pl.design || null, sales_order: pl.sales_order || null,
+              order_item: pl.order_item || null, request_group: pl.request_group || null,
+              qty_requested: 0, qty_boxes: delta, status: "Produced", stage: "Completed",
+              production_date: productionDate, shift: "", performed_by: performedBy, note,
+            });
+          }
+
+          await ds.table("ProductionLog").updateRow({ ROWID: id, stage: "Completed" });
+          await logTransition(catalyst, {
+            entity_type: "ProductionLog", entity_rowid: id, from_status: "", to_status: "Stage: Completed", note,
+          });
+          completed += 1;
+        }
+        return { rowid: ids[0], data: { lines: completed } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
