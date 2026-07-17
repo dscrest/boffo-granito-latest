@@ -37,6 +37,7 @@ const num = (label: string, n: number): Detail => [label, n > 0 ? String(n) : "N
 const text = (label: string, s: string): Detail => [label, s || "Not set", !s];
 
 const rows = (s: SizeRow): Detail[] => [
+  text("Name", s.name),
   text("Size", s.code),
   text("Type", s.tileType),
   num("Width (mm)", s.widthMm),
@@ -261,17 +262,7 @@ export function SizeDetail() {
                 title={s.code}
               >
                 <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {s.code || "—"}
-                </div>
-                {/* Label the values instead of printing bare dashes for the ones a size doesn't carry. */}
-                <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[
-                    s.tileType && `Type: ${s.tileType}`,
-                    s.seqCode && `Short Code: ${s.seqCode}`,
-                    s.thicknessMm > 0 && `${s.thicknessMm} mm`,
-                  ]
-                    .filter(Boolean)
-                    .join("  ·  ") || "No details yet"}
+                  {s.name || s.code || "—"}
                 </div>
               </Link>
             );

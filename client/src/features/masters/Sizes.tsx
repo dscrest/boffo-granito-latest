@@ -39,6 +39,7 @@ const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
       </Link>
     ),
   },
+  { key: "name", label: "Name", render: (r) => r.name || dash },
   { key: "type", label: "Type", className: "muted", render: (r) => r.tileType || dash },
   {
     key: "thickness",
@@ -120,6 +121,7 @@ export function Sizes() {
     return rows.filter(
       (r) =>
         r.code.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
         r.tileType.toLowerCase().includes(q) ||
         r.seqCode.toLowerCase().includes(q) ||
         r.remark.toLowerCase().includes(q),

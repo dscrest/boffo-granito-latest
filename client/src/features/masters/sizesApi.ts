@@ -21,6 +21,7 @@ export const SQFT_PER_SQM = 10.7639;
 export interface SizeRow {
   id: string; // ROWID
   code: string; // "600x600" — derived from width × length
+  name: string; // "600x600 - GVT - 9mm - 6" — stored composed name (sizeDisplayName)
   widthMm: number;
   lengthMm: number;
   seqCode: string;
@@ -38,6 +39,25 @@ export interface SizeRow {
 /** `code` mirrors the dimensions — "600x600". Blank until both are set. */
 export function sizeCodeOf(widthMm: number, lengthMm: number): string {
   return widthMm && lengthMm ? `${widthMm}x${lengthMm}` : "";
+}
+
+/** Readable size name — "600x600 - GVT - 9mm - 6" (Size · Type · Thickness ·
+    Pcs/box). Skips any missing part. Stored on the row as `name` (computed in
+    toPayload) and used in the sidebar and every size pick-box so a size reads
+    the same everywhere. */
+export function sizeDisplayName(p: {
+  code?: unknown;
+  tileType?: unknown;
+  pcsPerPacking?: unknown;
+  thicknessMm?: unknown;
+}): string {
+  const code = p.code == null ? "" : String(p.code);
+  const type = p.tileType == null ? "" : String(p.tileType);
+  const pcs = Number(p.pcsPerPacking) || 0;
+  const thick = Number(p.thicknessMm) || 0;
+  return [code, type, thick > 0 ? `${thick}mm` : "", pcs > 0 ? String(pcs) : ""]
+    .filter(Boolean)
+    .join(" - ");
 }
 
 /** Coverage of one packed box, in m². Zero unless all three inputs are set. */
@@ -75,6 +95,10 @@ async function fetchSizes(): Promise<{ ok: boolean; sizes: SizeRow[]; error?: st
   const sizes: SizeRow[] = (res.rows || []).map((r: DSRow) => ({
     id: String(r.ROWID),
     code: str(r.code),
+    // Prefer the stored name; fall back to composing it for rows saved before the column existed.
+    name:
+      str(r.name) ||
+      sizeDisplayName({ code: r.code, tileType: r.tile_type, thicknessMm: r.thickness_mm, pcsPerPacking: r.pcs_per_packing }),
     widthMm: num(r.width_mm),
     lengthMm: num(r.length_mm),
     seqCode: str(r.seq_code),
@@ -108,8 +132,15 @@ export interface SizeInput {
     can persist a stale code/coverage by hand. */
 function toPayload(input: SizeInput): Record<string, unknown> {
   const sqm = sqmPerBoxOf(input.width_mm, input.length_mm, input.pcs_per_packing);
+  const code = sizeCodeOf(input.width_mm, input.length_mm);
   return {
-    code: sizeCodeOf(input.width_mm, input.length_mm),
+    code,
+    name: sizeDisplayName({
+      code,
+      tileType: input.tile_type,
+      thicknessMm: input.thickness_mm,
+      pcsPerPacking: input.pcs_per_packing,
+    }),
     width_mm: input.width_mm,
     length_mm: input.length_mm,
     seq_code: input.seq_code.trim(),
