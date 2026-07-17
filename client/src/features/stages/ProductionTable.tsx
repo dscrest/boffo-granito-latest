@@ -20,13 +20,14 @@ import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
 import { RecordOutputForm } from "./RecordOutputForm";
-import { ProductionKanban } from "./ProductionKanban";
+import { ProductionKanban, type ProductionGroupBy } from "./ProductionKanban";
 import {
   cachedProductionLogs,
   deleteProductionLog,
-  groupProductionByOrder,
+  groupProductionByItem,
   invalidateProductionLogs,
   listProductionLogs,
+  productionDetailKey,
   recordProduction,
   requestProduction,
   setProductionStage,
@@ -46,7 +47,6 @@ const TABS: Array<{ id: string; label: string; match?: ProductionStage; pending?
   { id: "all", label: "All" },
   { id: "new", label: "New Request", match: "New" },
   { id: "inproduction", label: "In Production", match: "InProduction" },
-  { id: "qc", label: "QC", match: "QC" },
   { id: "completed", label: "Completed", match: "Completed" },
 ];
 
@@ -130,19 +130,25 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 export function ProductionTable() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("pending");
-  const [view, setView] = useState<"grid" | "board">("grid");
+  // View persists across visits (board stays board until switched back).
+  const [view, setView] = useState<"grid" | "board">(() => (localStorage.getItem("productionView") === "board" ? "board" : "grid"));
+  useEffect(() => {
+    localStorage.setItem("productionView", view);
+  }, [view]);
+  // Board grouping dimension → swimlanes (Item = flat, no lanes).
+  const [groupBy, setGroupBy] = useState<ProductionGroupBy>(() => (localStorage.getItem("productionGroup") as ProductionGroupBy) || "item");
+  useEffect(() => {
+    localStorage.setItem("productionGroup", groupBy);
+  }, [groupBy]);
   const [query, setQuery] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
-  // Record-qty-on-move: a move to a producing stage first walks the owing lines
-  // through RecordOutputForm, then applies the stage (pendingMove).
+  // Logging output (the `+` on a card, or dragging a remaining card → Completed)
+  // opens the record dialog; all output flows through recordProduction.
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
-  const [recordQueue, setRecordQueue] = useState<ProductionEntry[]>([]);
-  const [recordTotal, setRecordTotal] = useState(0);
-  const [pendingMove, setPendingMove] = useState<{ g: ProductionRequestGroup; stage: ProductionStage } | null>(null);
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
@@ -167,9 +173,9 @@ export function ProductionTable() {
     void load();
   }, []);
 
-  // One row per Sales Order's production (whole order), newest first.
+  // One row/card per production LINE ITEM (item-wise), newest first.
   const groups = useMemo(
-    () => groupProductionByOrder(entries).sort((a, b) => (b.createdTime > a.createdTime ? 1 : -1)),
+    () => groupProductionByItem(entries).sort((a, b) => (b.createdTime > a.createdTime ? 1 : -1)),
     [entries],
   );
 
@@ -204,13 +210,15 @@ export function ProductionTable() {
     const q = query.trim().toLowerCase();
     const tabDef = TABS.find((t) => t.id === tab);
     const base = groups.filter((r) => {
-      if (tabDef?.pending && r.stage === "Completed") return false;
+      // Grid defaults to Pending (hides Completed); the board shows all lanes so
+      // the Completed column carries the produced split.
+      if (view === "grid" && tabDef?.pending && r.stage === "Completed") return false;
       if (tabDef?.match && r.stage !== tabDef.match) return false;
       if (!q) return true;
       return `${r.code} ${r.designSummary} ${r.orderNumber} ${r.poNumber} ${r.customer} ${r.performedBy}`.toLowerCase().includes(q);
     });
     return applyFilters(base, criteria, filterFields);
-  }, [tab, groups, query, criteria, filterFields]);
+  }, [tab, view, groups, query, criteria, filterFields]);
 
   const sort = useSortRows(filtered, prodSortVal);
   const pager = usePagination(filtered.length, "productionPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
@@ -237,58 +245,31 @@ export function ProductionTable() {
     await load();
   };
 
-  // Kanban drag → moving into a producing stage first captures boxes produced
-  // (walk the owing lines through RecordOutputForm), then applies the stage.
+  // Kanban drag → New / In Production apply directly (no output captured — that
+  // was the source of the false "complete"). Completed opens a capture dialog first.
   const onMove = async (g: ProductionRequestGroup, stage: ProductionStage) => {
-    const owing = (stage === "InProduction" || stage === "Completed")
-      ? g.entries.filter((e) => e.qtyRequested - e.producedSoFar > 0)
-      : [];
-    if (owing.length > 0) {
-      setPendingMove({ g, stage });
-      setRecordQueue(owing.slice(1));
-      setRecordTotal(owing.length);
-      setRecordEntry(owing[0]);
-      return;
-    }
+    // Dragging a remaining card into Completed = "record the rest": open the
+    // output dialog (prefilled to what's left). Other moves apply the stage.
+    if (stage === "Completed") { setRecordEntry(g.entries[0]); return; }
     await applyStage(g, stage);
   };
 
-  // Save one line's output while walking a move-triggered record queue.
+  // Log output on a line. When it finishes the line, also flip its stage to
+  // Completed so the grid tab / detail stay consistent.
+  const onRecord = (g: ProductionRequestGroup) => setRecordEntry(g.entries[0]);
   const onRecordSave = async (input: ProductionRecordInput) => {
-    const entry = recordEntry;
+    const e = recordEntry;
     setRecordEntry(null);
-    if (!entry) return;
-    const res = await recordProduction(entry.id, input);
+    if (!e) return;
+    const res = await recordProduction(e.id, input);
     if (!res.ok) {
       toast.error(res.error || "Record output failed");
-      setRecordQueue([]);
-      setRecordTotal(0);
-      setPendingMove(null);
-      await load();
       return;
     }
+    if (e.producedSoFar + input.qty_boxes >= e.qtyRequested) await setProductionStage([e.id], "Completed");
     toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
-    const [next, ...rest] = recordQueue;
-    if (next) {
-      setRecordQueue(rest);
-      setRecordEntry(next);
-      return;
-    }
-    // Queue done → apply the staged move.
-    setRecordTotal(0);
-    const mv = pendingMove;
-    setPendingMove(null);
     invalidateProductionLogs();
-    if (mv) await applyStage(mv.g, mv.stage);
-    else await load();
-  };
-
-  // Cancelling the qty prompt aborts the whole move (stage stays put).
-  const onRecordCancel = () => {
-    setRecordEntry(null);
-    setRecordQueue([]);
-    setRecordTotal(0);
-    setPendingMove(null);
+    await load();
   };
 
   // Bulk selection (same master-page convention as OrdersTable). `selected`
@@ -343,14 +324,7 @@ export function ProductionTable() {
     <div>
       {showForm && <ProductionForm onSave={onRequest} onClose={() => setShowForm(false)} />}
 
-      {recordEntry && (
-        <RecordOutputForm
-          entry={recordEntry}
-          step={recordTotal > 0 ? { n: recordTotal - recordQueue.length, of: recordTotal } : undefined}
-          onSave={onRecordSave}
-          onClose={onRecordCancel}
-        />
-      )}
+      {recordEntry && <RecordOutputForm entry={recordEntry} onSave={onRecordSave} onClose={() => setRecordEntry(null)} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -399,6 +373,14 @@ export function ProductionTable() {
             </button>
           ))}
         </div>
+        {view === "board" && (
+          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as ProductionGroupBy)} title="Group the board into swimlanes">
+            <option value="item">Group: Item</option>
+            <option value="customer">Group: Customer</option>
+            <option value="order">Group: Order</option>
+            <option value="size">Group: Size</option>
+          </select>
+        )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {can("stages", "export") && (
           <button
@@ -437,7 +419,7 @@ export function ProductionTable() {
         loading && entries.length === 0 ? (
           <SkeletonRows rows={6} />
         ) : (
-          <ProductionKanban groups={filtered} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} />
+          <ProductionKanban groups={filtered} groupBy={groupBy} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} onRecord={onRecord} />
         )
       ) : (
       <div className="card">
@@ -458,19 +440,21 @@ export function ProductionTable() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((g) => (
+                {pageRows.map((g) => {
+                  const detail = `/prod/${encodeURIComponent(productionDetailKey(g.entries[0]))}`;
+                  return (
                   <tr
                     key={g.group}
                     tabIndex={0}
-                    onClick={() => navigate(`/prod/${encodeURIComponent(g.group)}`)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/prod/${encodeURIComponent(g.group)}`); }}
+                    onClick={() => navigate(detail)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(detail); }}
                     style={{ cursor: "pointer", background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
                   >
                     <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />
                     </td>
                     <td className="mono">
-                      <Link className="linkish" to={`/prod/${encodeURIComponent(g.group)}`} onClick={(ev) => ev.stopPropagation()} title="View production">
+                      <Link className="linkish" to={detail} onClick={(ev) => ev.stopPropagation()} title="View production">
                         {g.code}
                       </Link>
                     </td>
@@ -480,7 +464,8 @@ export function ProductionTable() {
                       </td>
                     ))}
                   </tr>
-                ))}
+                  );
+                })}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
                     <td colSpan={visible.length + 2}>

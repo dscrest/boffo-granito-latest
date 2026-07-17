@@ -11,6 +11,7 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
+import { LineStock, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
@@ -163,6 +164,7 @@ export function OrderForm({
     return ls.length ? ls : [emptyLine()];
   });
   const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
+  const stockFor = useStockLookup();
   const brandOptions = useMemo(
     () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
     [designs],
@@ -384,15 +386,11 @@ export function OrderForm({
                         placeholder="Search design…"
                         options={designs.map((x) => ({
                           value: x.name,
-                          label: x.name,
+                          label: x.uniqueName || x.name,
                           hint: [x.size, x.finish].filter(Boolean).join(" · "),
                         }))}
                       />
-                      {d && (
-                        <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                          {d.size} · {d.finish} · {d.brand}
-                        </span>
-                      )}
+                      {d && <LineStock stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />}
                       <textarea
                         rows={1}
                         tabIndex={-1}

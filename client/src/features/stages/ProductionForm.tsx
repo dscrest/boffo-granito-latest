@@ -16,6 +16,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useMasters } from "@/features/masters/useMasters";
+import { LineStock, useStockLookup } from "@/features/masters/LineStock";
 import { useOrders } from "@/features/orders/useOrders";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { DateInput } from "@/ui/DateInput";
@@ -39,6 +40,7 @@ export function ProductionForm({
   onClose: () => void;
 }) {
   const { designRows, salesPersons } = useMasters();
+  const stockFor = useStockLookup();
   const { orders } = useOrders();
   const requestedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
 
@@ -144,7 +146,7 @@ export function ProductionForm({
     () =>
       designRows.map((d) => ({
         value: d.id,
-        label: d.designName,
+        label: d.uniqueName || d.designName,
         hint: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || undefined,
       })),
     [designRows],
@@ -358,14 +360,20 @@ export function ProductionForm({
                 </div>
                 {indepLines.map((l, i) => (
                   <div className="ord-line qt-line" key={i} style={{ gridTemplateColumns: "2fr 1fr 26px" }}>
-                    <Combobox
-                      value={l.design}
-                      options={designOptions}
-                      onChange={(v) => setLine(i, "design", v)}
-                      placeholder="Search an item…"
-                      ariaLabel="Item"
-                      invalid={showErrors && !l.design && !!l.qty}
-                    />
+                    <div className="form-field" style={{ gap: 2 }}>
+                      <Combobox
+                        value={l.design}
+                        options={designOptions}
+                        onChange={(v) => setLine(i, "design", v)}
+                        placeholder="Search an item…"
+                        ariaLabel="Item"
+                        invalid={showErrors && !l.design && !!l.qty}
+                      />
+                      {l.design && (() => {
+                        const name = designRows.find((d) => d.id === l.design)?.designName;
+                        return name ? <LineStock stock={stockFor(name)} qty={Number(l.qty) || 0} /> : null;
+                      })()}
+                    </div>
                     <NumberInput
                       min={0}
                       value={l.qty}

@@ -23,6 +23,8 @@ import { applyFilters, type FilterField, type FilterCriteria } from "@/ui/Advanc
 import { ReportShell, TotalsRow, inDateRange, type DateRangeState, type KpiSpec } from "./ReportShell";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
+import { designStock } from "@/lib/stock";
+import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { listLoadableBatches, type LoadableBatch } from "@/features/stages/palletisationApi";
 import { listAll, type DSRow } from "@/lib/dataOps";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
@@ -464,24 +466,28 @@ function StockReport() {
   const { orders, loading, error, reload } = useOrders();
   const { designRows } = useMasters();
   const [criteria, setCriteria] = useState<FilterCriteria>({});
+  // Production log folds into In production / Available (same lib/stock.ts basis
+  // as the Item detail) — fetch once.
+  const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  useEffect(() => {
+    void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
+  }, []);
 
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
-      const forD = orders.filter((o) => o.design === d.designName);
-      const produced = forD.reduce((s, o) => s + o.producedQty, 0);
-      const loaded = forD.reduce((s, o) => s + o.loadedQty, 0);
       const opening = d.accountingStock ?? 0;
+      const s = designStock(d.designName, { openingStock: opening, orders, prodLogs });
       return {
         key: d.id,
         label: d.designName || "—",
         sub: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · "),
         opening,
-        inProduction: forD.reduce((s, o) => s + Math.max(0, o.orderQty - o.producedQty), 0),
-        inLoading: forD.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
-        available: opening + produced - loaded,
+        inProduction: s.inProduction,
+        inLoading: s.inLoading,
+        available: s.available,
       };
     });
-  }, [designRows, orders]);
+  }, [designRows, orders, prodLogs]);
 
   const fields = useMemo<FilterField<StockRow>[]>(
     () => [

@@ -8,6 +8,7 @@
    ============================================================ */
 import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { sizeDisplayName } from "./sizesApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -54,7 +55,16 @@ export interface PalletRow {
 }
 
 function sizeLabelOf(r: DSRow): string {
-  return str(r.code) || str(r.name) || str(r.ROWID);
+  return (
+    sizeDisplayName({
+      code: r.code,
+      tileType: r.tile_type,
+      pcsPerPacking: r.pcs_per_packing,
+      thicknessMm: r.thickness_mm,
+    }) ||
+    str(r.name) ||
+    str(r.ROWID)
+  );
 }
 
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
@@ -88,7 +98,7 @@ async function fetchPallets(): Promise<{
   // listAll pages past ZCQL's 300-row cap; Size projects its label + packing columns.
   const [pallets, sizes] = await Promise.all([
     listAll("Pallet", { order: "ROWID desc" }),
-    list("Size", { limit: 300, columns: ["code", "sqm_per_box", "sqft_per_box", "box_weight_kg"] }),
+    list("Size", { limit: 300, columns: ["code", "tile_type", "pcs_per_packing", "thickness_mm", "sqm_per_box", "sqft_per_box", "box_weight_kg"] }),
   ]);
   if (!pallets.ok) return { ok: false, pallets: [], sizes: [], error: pallets.error };
 

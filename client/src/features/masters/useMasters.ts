@@ -38,6 +38,7 @@ export interface UseMasters {
 function toDesign(d: DesignRow): Design {
   return {
     name: d.designName,
+    uniqueName: d.uniqueName || d.designName,
     size: d.sizeLabel,
     finish: d.finishLabel,
     brand: d.brandLabel,

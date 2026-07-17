@@ -1522,23 +1522,8 @@ a { color: inherit; text-decoration: none; }
   padding-right: 32px;
 }
 
-/* Required fields are flagged inside the box (red asterisk, top-right), not
-   on the label — the `.req` span in the label stays in the markup as the
-   marker `:has()` keys off, but is visually hidden. */
-.form-field > .lbl .req { display: none; }
-.form-field:has(> .lbl .req) input:not([readonly]):not([disabled]),
-.form-field:has(> .lbl .req) .combo-input {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23dc3b42' stroke-width='3.2' stroke-linecap='round'><path d='M12 4v16M5.1 8l13.8 8M18.9 8 5.1 16'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px top 7px;
-  padding-right: 26px;
-}
-.form-field:has(> .lbl .req) select {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23dc3b42' stroke-width='3.2' stroke-linecap='round'><path d='M12 4v16M5.1 8l13.8 8M18.9 8 5.1 16'/></svg>"),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 26px top 7px, right 10px center;
-}
+/* Required fields are flagged with a red asterisk on the label (the `.req`
+   span, red via the `.req` rule above). Controls stay clean — no in-box marker. */
 
 /* Kill the native up/down spinner on any residual type=number (numeric fields
    use the NumberInput component, but this covers stragglers app-wide). */

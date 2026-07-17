@@ -19,15 +19,18 @@ import { MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { ProgressBar } from "@/ui/primitives";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
-import { fmt, fmtDateTime, pct } from "@/lib/format";
+import { fmt, fmtDateTime, fmtLocalDate, pct } from "@/lib/format";
+import { list, type DSRow } from "@/lib/dataOps";
 import type { CSSProperties } from "react";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { ProductionForm } from "./ProductionForm";
 import { RecordOutputForm } from "./RecordOutputForm";
 import { ProductionEditForm } from "./ProductionEditForm";
+import { ProductionCompleteForm, type ProductionCompleteResult } from "./ProductionCompleteForm";
 import {
   cachedProductionLogs,
+  completeProduction,
   deleteProductionLog,
   groupProductionByOrder,
   invalidateProductionLogs,
@@ -48,7 +51,7 @@ import {
 type FieldDef = ColumnDef<ProductionRequestGroup> & { value: (g: ProductionRequestGroup) => string; wide?: boolean };
 const FIELDS: FieldDef[] = [
   // Production ID omitted here — it's the page title.
-  { key: "stage", label: "Stage", value: (g) => stageChip(g.stage).label },
+  // Stage omitted — shown as the header chip, not repeated here.
   { key: "order", label: "Sales Order", value: (g) => (g.independent ? "Independent (stock)" : g.orderNumber || g.poNumber || "—") },
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
   { key: "requested", label: "Requested (boxes)", value: (g) => fmt(g.totalRequested) },
@@ -78,6 +81,8 @@ export function ProductionDetail() {
   const [recordTotal, setRecordTotal] = useState(0);
   const [logItemFilter, setLogItemFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  // Completion capture dialog (opened when moving into Completed).
+  const [completeOpen, setCompleteOpen] = useState(false);
 
   const { salesPersons } = useMasters();
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
@@ -166,6 +171,8 @@ export function ProductionDetail() {
 
   const onStageChange = async (stage: ProductionStage) => {
     if (!group || stage === group.stage) return;
+    // Completed captures actual produced first via a dialog.
+    if (stage === "Completed") { setCompleteOpen(true); return; }
     setBusy("Moving…");
     const res = await setProductionStage(group.entries.map((e) => e.id), stage);
     setBusy(null);
@@ -174,6 +181,21 @@ export function ProductionDetail() {
       return;
     }
     toast.success(`Moved to ${PRODUCTION_STAGE_META[stage].label}`);
+    invalidateProductionLogs();
+    await load();
+  };
+
+  const onCompleteSave = async (result: ProductionCompleteResult) => {
+    setCompleteOpen(false);
+    if (!group) return;
+    setBusy("Completing…");
+    const res = await completeProduction(result);
+    setBusy(null);
+    if (!res.ok) {
+      toast.error(res.error || "Could not complete production");
+      return;
+    }
+    toast.success("Production completed");
     invalidateProductionLogs();
     await load();
   };
@@ -271,6 +293,7 @@ export function ProductionDetail() {
         />
       )}
       {editing && <ProductionEditForm group={group} onSaved={onEditSave} onClose={() => setEditing(false)} />}
+      {completeOpen && group && <ProductionCompleteForm group={group} onSave={onCompleteSave} onClose={() => setCompleteOpen(false)} />}
 
       {/* Production list — resizable, sticky, own scroll (mirrors OrderDetail). */}
       <div
@@ -338,17 +361,13 @@ export function ProductionDetail() {
               <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
               {/* This batch's completeness — produced vs what THIS production
                   requested (ignores the wider SO target, which may be part-
-                  ordered on purpose). Green once fully produced. */}
-              {(() => {
-                const p = pct(group.totalProduced, group.totalRequested);
-                const done = group.totalProduced >= group.totalRequested;
-                return (
-                  <span className="chip" style={{ color: done ? "var(--c-green)" : "var(--c-blue)" }} title="Produced vs requested in this production">
-                    {done ? "Complete" : `${p}%`}
-                  </span>
-                );
-              })()}
-              <span className="chip">{group.independent ? "Independent" : "Order"}</span>
+                  ordered on purpose). Only while in progress: once fully
+                  produced the stage chip already says "Completed". */}
+              {group.totalProduced < group.totalRequested && (
+                <span className="chip" style={{ color: "var(--c-blue)" }} title="Produced vs requested in this production">
+                  {pct(group.totalProduced, group.totalRequested)}%
+                </span>
+              )}
             </div>
             {/* Stage move control — reuses the app's canonical select skin (.pg-size). */}
             {can("stages", "edit") && (
@@ -370,9 +389,7 @@ export function ProductionDetail() {
             </button>
           </div>
           <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-            {group.independent ? (
-              "Make-to-stock production"
-            ) : (
+            {group.independent ? null : (
               <>
                 <Link className="linkish" to={`/orders/${group.salesOrderId}`} title="Open Sales Order">
                   {group.orderNumber || group.poNumber || "Order"}
@@ -398,6 +415,7 @@ export function ProductionDetail() {
 
         {tab === "details" && (
           <>
+            <StageDateStrip group={group} />
             <div className="card" style={{ padding: 18, marginBottom: 12 }}>
               <div className="form-grid">
                 {fields.ordered.filter((f) => !fields.hidden.has(f.key)).map((f) => (
@@ -521,7 +539,7 @@ export function ProductionDetail() {
                     .filter((r) => !logItemFilter || r.design === logItemFilter)
                     .map((r) => (
                       <tr key={r.id}>
-                        <td className="mono">{r.productionDate || fmtDateTime(r.createdTime)}</td>
+                        <td className="mono">{fmtLocalDate(r.productionDate || r.createdTime)}</td>
                         <td><span className="design-name">{r.design}</span></td>
                         <td className="dim">{[r.size, r.finish].filter(Boolean).join(" · ") || "—"}</td>
                         <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.qtyBoxes)}</td>
@@ -548,6 +566,46 @@ export function ProductionDetail() {
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/** Compact 4-stage date strip. Dates come from the StatusTransition log (the
+    `Stage: X` flips) — New Request is the record's own creation. No new columns. */
+function StageDateStrip({ group }: { group: ProductionRequestGroup }) {
+  const [txns, setTxns] = useState<DSRow[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const ids = new Set(group.entries.map((e) => e.id));
+    void list("StatusTransition", { order: "ROWID desc", limit: 300 }).then((res) => {
+      if (alive) setTxns((res.rows || []).filter((r) => String(r.entity_type) === "ProductionLog" && ids.has(String(r.entity_rowid))));
+    });
+    return () => { alive = false; };
+  }, [group]);
+
+  // Earliest occurred_at of the matching stage flip across the group's lines.
+  const stageDate = (stage: ProductionStage) => {
+    const marker = `Stage: ${stage}`;
+    const times = txns
+      .filter((r) => String(r.to_status) === marker)
+      .map((r) => String(r.occurred_at || r.CREATEDTIME || ""))
+      .filter(Boolean)
+      .sort();
+    return times[0] || "";
+  };
+  const cells = [
+    { label: "New Request", date: group.createdTime },
+    { label: "In Production", date: stageDate("InProduction") },
+    { label: "Completed", date: stageDate("Completed") },
+  ];
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 12, display: "flex", gap: 28, flexWrap: "wrap" }}>
+      {cells.map((c) => (
+        <div key={c.label}>
+          <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{c.label}</div>
+          <div className="mono" style={{ fontSize: 13, color: c.date ? "var(--fg)" : "var(--muted)" }}>{c.date ? fmtLocalDate(c.date) : "—"}</div>
+        </div>
+      ))}
     </div>
   );
 }

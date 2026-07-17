@@ -21,6 +21,8 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
+import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
+import { designStock } from "@/lib/stock";
 import type { Order } from "@/data";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
@@ -62,14 +64,14 @@ function StockRow({ label, value, onClick }: { label: string; value: number; onC
 
 /** A stock number's drill-down: which order lines add up to it. Pure client —
     reuses the orders already loaded on the page; each row links to its SO. */
-type StockBreakdown = {
+type StockBreakdown<T = Order> = {
   title: string;
   note: string;
-  rows: Order[];
-  columns: { head: string; num?: boolean; val: (o: Order) => string }[];
+  rows: T[];
+  columns: { head: string; num?: boolean; val: (o: T) => string }[];
 };
 
-function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown; onClose: () => void }) {
+function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown<any>; onClose: () => void }) {
   const panelRef = useModalA11y(onClose);
   const total = bd.rows.length;
   return (
@@ -184,11 +186,15 @@ export function ItemDetail() {
   const [stockEdit, setStockEdit] = useState(false); // inline Opening-stock edit
   const [stockVal, setStockVal] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
-  const [breakdown, setBreakdown] = useState<StockBreakdown | null>(null); // stock-number drill-down
+  const [breakdown, setBreakdown] = useState<StockBreakdown<any> | null>(null); // stock-number drill-down
+  // Make-to-stock (independent) production has no SO line, so it never reaches
+  // `allOrders` — pull the production log to fold its output into available stock.
+  const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   useEffect(() => {
     void refresh();
+    void listProductionLogs().then((res) => res.ok && setProdLogs(res.entries));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -203,42 +209,38 @@ export function ItemDetail() {
   const orders = design ? allOrders.filter((o) => o.design === design.designName) : [];
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
 
-  // Live stock summary (derived from order lines + the manual Opening stock).
+  // Live stock summary — single source of truth (lib/stock.ts), shared with the
+  // transaction line-item rows and Reports.
   const openingStock = design?.accountingStock ?? 0;
-  const producedTot = orders.reduce((s, o) => s + o.producedQty, 0);
-  const loadedTot = orders.reduce((s, o) => s + o.loadedQty, 0);
-  const inProduction = orders.reduce((s, o) => s + Math.max(0, o.orderQty - o.producedQty), 0);
-  const inLoading = orders.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0);
-  const availableStock = openingStock + producedTot - loadedTot;
+  const stock = designStock(design?.designName ?? "", { openingStock, orders: allOrders, prodLogs });
+  const inProduction = stock.inProduction;
+  const inLoading = stock.inLoading;
+  const availableStock = stock.available;
 
-  // Drill-downs: which order lines add up to each stock number (this item, all SOs).
+  // Drill-downs: what adds up to each stock number (this item, all SOs).
   const orderCol = { head: "Order", val: (o: Order) => o.orderNumber || o.poNumber || "—" };
   const custCol = { head: "Customer", val: (o: Order) => o.party || "—" };
-  const bdInProduction: StockBreakdown = {
-    title: "In production", note: "Ordered boxes not yet produced — across every open order for this item.",
-    rows: orders.filter((o) => o.orderQty - o.producedQty > 0),
-    columns: [orderCol, custCol,
-      { head: "Ordered", num: true, val: (o) => fmt(o.orderQty) },
-      { head: "Produced", num: true, val: (o) => fmt(o.producedQty) },
-      { head: "In production", num: true, val: (o) => fmt(Math.max(0, o.orderQty - o.producedQty)) }],
+  // In production now itemises the open production lines (not raw SO lines).
+  const prodInProd = design
+    ? prodLogs.filter((e) => e.design === design.designName && e.stage !== "Completed" && e.status !== "Rejected" && e.qtyRequested - e.producedSoFar > 0)
+    : [];
+  const bdInProduction: StockBreakdown<ProductionEntry> = {
+    title: "In production", note: "Boxes on an open production order, not yet produced — this item.",
+    rows: prodInProd,
+    columns: [
+      { head: "Order", val: (e) => (e.independent ? "Stock" : e.orderNumber || e.poNumber || "—") },
+      { head: "Customer", val: (e) => e.customer || "—" },
+      { head: "Requested", num: true, val: (e) => fmt(e.qtyRequested) },
+      { head: "Produced", num: true, val: (e) => fmt(e.producedSoFar) },
+      { head: "In production", num: true, val: (e) => fmt(Math.max(0, e.qtyRequested - e.producedSoFar)) }],
   };
-  const bdInLoading: StockBreakdown = {
+  const bdInLoading: StockBreakdown<Order> = {
     title: "In loading", note: "Palletised boxes waiting to be loaded — across every open order for this item.",
     rows: orders.filter((o) => o.palletizedQty - o.loadedQty > 0),
     columns: [orderCol, custCol,
       { head: "Palletised", num: true, val: (o) => fmt(o.palletizedQty) },
       { head: "Loaded", num: true, val: (o) => fmt(o.loadedQty) },
       { head: "In loading", num: true, val: (o) => fmt(Math.max(0, o.palletizedQty - o.loadedQty)) }],
-  };
-  const bdProduced: StockBreakdown = {
-    title: "Produced", note: "All boxes produced against this item, across every order. Added to available stock.",
-    rows: orders.filter((o) => o.producedQty > 0),
-    columns: [orderCol, custCol, { head: "Produced", num: true, val: (o) => fmt(o.producedQty) }],
-  };
-  const bdLoaded: StockBreakdown = {
-    title: "Loaded", note: "All boxes loaded/dispatched against this item, across every order. Subtracted from available stock.",
-    rows: orders.filter((o) => o.loadedQty > 0),
-    columns: [orderCol, custCol, { head: "Loaded", num: true, val: (o) => fmt(o.loadedQty) }],
   };
 
   const saveOpeningStock = async () => {
@@ -505,7 +507,7 @@ export function ItemDetail() {
                 <DetailRow label="Category" value={design.categoryLabel || "—"} />
                 <DetailRow label="Glaze" value={design.glazeLabel || "—"} />
                 <DetailRow label="Grade" value={design.gradeLabel || "—"} />
-                <DetailRow label="Status" value={design.status || "—"} />
+                {/* Status omitted — shown in the header subtitle, not repeated here. */}
                 <DetailRow label="Rate / m²" value={design.ratePerSqmt ? fmt(design.ratePerSqmt) : "—"} />
                 <DetailRow
                   label="Coverage / box"
@@ -656,22 +658,11 @@ export function ItemDetail() {
                       </span>
                     )}
                   </div>
-                  <StockRow label="In production" value={inProduction} onClick={() => setBreakdown(bdInProduction)} />
+                  <StockRow label="In production" value={inProduction} onClick={prodInProd.length > 0 ? () => setBreakdown(bdInProduction) : undefined} />
                   <StockRow label="In loading" value={inLoading} onClick={() => setBreakdown(bdInLoading)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", marginTop: 4, borderTop: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}>Available stock</span>
                     <span className="mono" style={{ fontWeight: 700, color: availableStock < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(availableStock)}</span>
-                  </div>
-                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
-                    Opening + produced (
-                    {producedTot > 0
-                      ? <button className="linkish" onClick={() => setBreakdown(bdProduced)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}>{fmt(producedTot)}</button>
-                      : fmt(producedTot)}
-                    ) − loaded (
-                    {loadedTot > 0
-                      ? <button className="linkish" onClick={() => setBreakdown(bdLoaded)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}>{fmt(loadedTot)}</button>
-                      : fmt(loadedTot)}
-                    )
                   </div>
                 </div>
               </div>

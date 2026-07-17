@@ -10,6 +10,7 @@
 import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { nextSeqCode } from "@/lib/seq";
+import { sizeDisplayName } from "./sizesApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -19,6 +20,7 @@ export interface LookupOption {
   id: string; // parent ROWID (the value stored in the FK column)
   label: string;
   seqCode?: string; // stored SKU segment short code (Size/Finish/Category/Glaze)
+  code?: string; // Size only: the raw dimension ("600x600") — shown in the item Size picker
   // Size only: the packing data the Size master owns. The item form fills these
   // in read-only from the picked size — the operator never types them twice.
   widthMm?: number;
@@ -112,10 +114,18 @@ function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
       const o: LookupOption = { id: String(r.ROWID), label: str(r[key]) || str(r.name) || String(r.ROWID) };
       o.seqCode = str(r.seq_code);
       if (withDims) {
+        o.code = str(r.code);
         o.widthMm = num(r.width_mm);
         o.lengthMm = num(r.length_mm);
         o.pcsPerPacking = num(r.pcs_per_packing);
         o.boxWeightKg = num(r.box_weight_kg);
+        // Size reads as the composed name everywhere it's picked.
+        o.label = sizeDisplayName({
+          code: r.code,
+          tileType: r.tile_type,
+          pcsPerPacking: r.pcs_per_packing,
+          thicknessMm: r.thickness_mm,
+        }) || o.label;
       }
       return o;
     })
@@ -167,7 +177,7 @@ async function fetchDesigns(): Promise<{
     listAll("Design", { order: "ROWID desc" }),
     list("Size", {
       limit: 300,
-      columns: ["code", "width_mm", "length_mm", "seq_code", "pcs_per_packing", "box_weight_kg"],
+      columns: ["code", "tile_type", "thickness_mm", "width_mm", "length_mm", "seq_code", "pcs_per_packing", "box_weight_kg"],
     }),
     list("Finish", { limit: 300, columns: ["name", "seq_code"] }),
     list("Category", { limit: 300, columns: ["name", "seq_code"] }),

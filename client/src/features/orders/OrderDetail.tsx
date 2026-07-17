@@ -9,7 +9,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { StageBadge } from "@/ui/primitives";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, stageOf, type Order } from "@/data";
+import { STAGES, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
@@ -276,7 +276,7 @@ export function OrderDetail() {
     // SO Number omitted here — it's the page title (line ~354).
     { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
-    { key: "stage", label: "Stage", value: stageOf(head.stage).label },
+    // Stage omitted — the order's status is the header chip, not repeated here.
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },

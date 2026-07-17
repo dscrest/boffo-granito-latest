@@ -12,7 +12,8 @@ export interface Party {
 }
 
 export interface Design {
-  name: string;
+  name: string; // designName — the stored/matched key
+  uniqueName: string; // the human-facing unique item name (shown in pickers)
   size: string;
   finish: string;
   brand: string;

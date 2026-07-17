@@ -331,14 +331,17 @@ export function DesignFields({
                     {f.required && <span className="req"> *</span>}
                   </span>
                   {f.kind === "select" ? (
-                    // #4: status is locked to Active while creating; edit mode unlocks it.
-                    f.key === "status" && mode === "create" ? (
-                      <input value="Active" disabled title="Status is locked during creation — edit the item to change it" />
+                    // Status is read-only everywhere — Active/Inactive is changed
+                    // only via the item's More menu, never typed here.
+                    f.key === "status" ? (
+                      <input value={value.status || "Active"} readOnly tabIndex={-1} style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }} title="Change status from the item's More menu" />
                     ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.
+                      // Size picker shows only the unique dimension (code), not
+                      // the composed name.
                       const comboOpts: ComboOption[] = opts
-                        ? opts.map((o) => ({ value: o.id, label: o.label }))
+                        ? opts.map((o) => ({ value: o.id, label: f.key === "size" ? o.code || o.label : o.label }))
                         : f.options!.map((o) => ({ value: o, label: o }));
                       // House standard: every pick list is a searchable Combobox.
                       return (

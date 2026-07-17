@@ -1,51 +1,120 @@
 /* ============================================================
-   Production Kanban — four manual stages (New Request → In Production → QC →
-   Completed). Cards are whole-order productions (groupProductionByOrder). Moved
-   by hand-rolled HTML5 drag-and-drop (no dependency); dropping a card in a column
-   sets that stage on every plan line of the production via setProductionStage.
-   Recording output does NOT move a card — stages are manual.
+   Production Kanban — item-wise board. One production LINE ITEM per card, split
+   by output: the produced portion shows in Completed (available immediately), the
+   remaining portion stays in its In Production / New lane — so a partly-produced
+   line appears in BOTH lanes. Stages: New Request → In Production → Completed
+   (QC hidden 2026-07). Cards move by hand-rolled HTML5 drag-and-drop; the `+`
+   button on a remaining card logs output. Grouping adds horizontal swimlanes
+   (Customer / Order / Size); Item = no swimlanes.
    ============================================================ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { pct } from "@/lib/format";
-import { PRODUCTION_STAGE_ORDER, PRODUCTION_STAGE_META, type ProductionRequestGroup, type ProductionStage } from "./productionApi";
+import { Icon } from "@/ui/Icon";
+import { ProgressBar } from "@/ui/primitives";
+import { fmt } from "@/lib/format";
+import {
+  PRODUCTION_STAGE_ORDER,
+  PRODUCTION_STAGE_META,
+  productionDetailKey,
+  type ProductionEntry,
+  type ProductionRequestGroup,
+  type ProductionStage,
+} from "./productionApi";
+
+export type ProductionGroupBy = "item" | "customer" | "order" | "size";
+
+interface Card {
+  key: string;
+  g: ProductionRequestGroup;
+  e: ProductionEntry;
+  kind: "remaining" | "done";
+  qty: number;
+  stage: ProductionStage; // which lane the card sits in
+}
+
+/** Split each item group into up to two cards: produced → Completed, remaining
+    → its working stage. A line with both appears in both lanes. */
+function buildCards(groups: ProductionRequestGroup[]): Card[] {
+  const cards: Card[] = [];
+  for (const g of groups) {
+    const e = g.entries[0];
+    if (!e) continue;
+    const remaining = Math.max(0, e.qtyRequested - e.producedSoFar);
+    const done = e.producedSoFar;
+    if (done > 0) cards.push({ key: `${g.group}:done`, g, e, kind: "done", qty: done, stage: "Completed" });
+    if (remaining > 0 || done === 0) {
+      const stage = e.stage === "Completed" && remaining > 0 ? "InProduction" : e.stage;
+      cards.push({ key: `${g.group}:rem`, g, e, kind: "remaining", qty: remaining, stage });
+    }
+  }
+  return cards;
+}
+
+function laneKey(e: ProductionEntry, groupBy: ProductionGroupBy): string {
+  switch (groupBy) {
+    case "customer": return e.customer || "—";
+    case "order": return e.independent ? "Independent" : e.orderNumber || e.poNumber || "—";
+    case "size": return e.size || "—";
+    default: return "";
+  }
+}
 
 export function ProductionKanban({
   groups,
+  groupBy,
   canEdit,
   onMove,
+  onRecord,
 }: {
   groups: ProductionRequestGroup[];
+  groupBy: ProductionGroupBy;
   canEdit: boolean;
   onMove: (group: ProductionRequestGroup, stage: ProductionStage) => void;
+  onRecord: (group: ProductionRequestGroup) => void;
 }) {
   const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
-  const [overStage, setOverStage] = useState<ProductionStage | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
 
-  const byStage = (stage: ProductionStage) => groups.filter((g) => g.stage === stage);
+  const allCards = buildCards(groups);
 
-  return (
+  // Build swimlanes: Item = one implicit lane; else group cards by the dimension.
+  const lanes: { key: string; title: string | null; cards: Card[] }[] =
+    groupBy === "item"
+      ? [{ key: "", title: null, cards: allCards }]
+      : (() => {
+          const by = new Map<string, Card[]>();
+          for (const c of allCards) {
+            const k = laneKey(c.e, groupBy);
+            (by.get(k) ?? by.set(k, []).get(k)!).push(c);
+          }
+          return [...by.entries()]
+            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+            .map(([k, cards]) => ({ key: k, title: k, cards }));
+        })();
+
+  const stageGrid = (laneCards: Card[], laneKey: string) => (
     <div style={{ display: "grid", gridTemplateColumns: `repeat(${PRODUCTION_STAGE_ORDER.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
       {PRODUCTION_STAGE_ORDER.map((stage) => {
         const meta = PRODUCTION_STAGE_META[stage];
-        const cards = byStage(stage);
-        const isOver = overStage === stage;
+        const cards = laneCards.filter((c) => c.stage === stage);
+        const overId = `${laneKey}|${stage}`;
+        const isOver = overStage === overId;
         return (
           <div
             key={stage}
             onDragOver={(e) => {
               if (!canEdit || !dragKey) return;
               e.preventDefault();
-              setOverStage(stage);
+              setOverStage(overId);
             }}
-            onDragLeave={() => setOverStage((s) => (s === stage ? null : s))}
+            onDragLeave={() => setOverStage((s) => (s === overId ? null : s))}
             onDrop={(e) => {
               e.preventDefault();
               setOverStage(null);
-              const g = groups.find((x) => x.group === dragKey);
+              const c = allCards.find((x) => x.key === dragKey);
               setDragKey(null);
-              if (g && g.stage !== stage) onMove(g, stage);
+              if (c && c.stage !== stage) onMove(c.g, stage);
             }}
             className="card"
             style={{ padding: 0, background: isOver ? "var(--accent-soft)" : undefined, transition: "background .12s" }}
@@ -56,45 +125,81 @@ export function ProductionKanban({
               <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{cards.length}</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, minHeight: 80 }}>
-              {cards.map((g) => (
-                <div
-                  key={g.group}
-                  draggable={canEdit}
-                  onDragStart={() => setDragKey(g.group)}
-                  onDragEnd={() => {
-                    setDragKey(null);
-                    setOverStage(null);
-                  }}
-                  onClick={() => navigate(`/prod/${encodeURIComponent(g.group)}`)}
-                  title="Open production"
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    padding: 10,
-                    background: "var(--bg)",
-                    cursor: canEdit ? "grab" : "pointer",
-                    opacity: dragKey === g.group ? 0.5 : 1,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span className="mono" style={{ fontWeight: 600 }}>{g.code}</span>
-                    <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>
-                      {g.independent ? `${pct(g.totalProduced, g.totalRequested)}%` : `${pct(g.produced, g.ordered)}%`}
-                    </span>
+              {cards.map((c) => {
+                const e = c.e;
+                const draggable = canEdit && c.kind === "remaining";
+                return (
+                  <div
+                    key={c.key}
+                    draggable={draggable}
+                    onDragStart={() => draggable && setDragKey(c.key)}
+                    onDragEnd={() => { setDragKey(null); setOverStage(null); }}
+                    onClick={() => navigate(`/prod/${encodeURIComponent(productionDetailKey(e))}`)}
+                    title="Open production"
+                    style={{
+                      position: "relative",
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: 10,
+                      background: "var(--bg)",
+                      cursor: draggable ? "grab" : "pointer",
+                      opacity: dragKey === c.key ? 0.5 : 1,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="mono" style={{ fontWeight: 600 }}>{c.g.code}</span>
+                      <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>{fmt(c.qty)} box</span>
+                      {c.kind === "remaining" && canEdit && (
+                        <button
+                          type="button"
+                          className="btn x"
+                          title="Log production"
+                          aria-label="Log production"
+                          style={{ padding: 2, height: 20, width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); onRecord(c.g); }}
+                        >
+                          <Icon name="plus" size={12} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="design-name" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {e.design || "—"}
+                    </div>
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {[e.size, e.independent ? "Independent" : e.orderNumber || e.poNumber, e.customer].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <ProgressBar value={e.producedSoFar} max={e.qtyRequested} color={meta.color} height={5} />
+                      <div className="dim" style={{ display: "flex", gap: 8, fontSize: "var(--t-sm)", marginTop: 3 }}>
+                        <span>{c.kind === "done" ? "Produced" : "Remaining"} {fmt(c.qty)}</span>
+                        <span style={{ marginLeft: "auto" }}>{fmt(e.producedSoFar)} / {fmt(e.qtyRequested)} boxes</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="design-name" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {g.designSummary}
-                  </div>
-                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {[g.independent ? "Independent" : g.orderNumber || g.poNumber, g.customer].filter(Boolean).join(" · ") || "—"}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               {cards.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 2px" }}>—</div>}
             </div>
           </div>
         );
       })}
+    </div>
+  );
+
+  if (groupBy === "item") return stageGrid(lanes[0].cards, lanes[0].key);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {lanes.map((lane) => (
+        <div key={lane.key}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontWeight: 600 }}>{lane.title}</span>
+            <span className="muted" style={{ fontSize: 12 }}>{lane.cards.length}</span>
+          </div>
+          {stageGrid(lane.cards, lane.key)}
+        </div>
+      ))}
+      {lanes.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 2px" }}>—</div>}
     </div>
   );
 }

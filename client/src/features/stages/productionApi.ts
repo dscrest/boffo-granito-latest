@@ -257,9 +257,27 @@ export function recordProduction(rowid: string, input: ProductionRecordInput) {
   return bust(op<{ produced_qty_boxes?: number; recorded?: number }>(`production-record/${encodeURIComponent(rowid)}`, input));
 }
 
-/** Move a production to a Kanban stage (manual) — sets `stage` on its plan lines. */
-export function setProductionStage(ids: string[], stage: ProductionStage) {
-  return bustProd(op<{ stage: string; lines: number }>("production-stage", { stage, ids }));
+/** Move a production to a Kanban stage (manual) — sets `stage` on its plan lines.
+    Optional per-line `notes` (e.g. item-wise QC remarks) + an overall `note` are
+    persisted on the stage transition and surface in the Activity feed. */
+export function setProductionStage(
+  ids: string[],
+  stage: ProductionStage,
+  extra?: { notes?: Record<string, string>; note?: string },
+) {
+  return bustProd(op<{ stage: string; lines: number }>("production-stage", { stage, ids, ...extra }));
+}
+
+/** Final completion — records the actual boxes produced per line (over- or
+    under-production allowed), bumps available stock, and flips every line to
+    Completed. `lines` is [{ id, qty_boxes }] per plan line. */
+export function completeProduction(input: {
+  lines: { id: string; qty_boxes: number }[];
+  production_date?: string;
+  performed_by?: string;
+  note?: string;
+}) {
+  return bustProd(op<{ lines: number }>("production-complete", input));
 }
 
 /** Edit a plan line's requested qty / note. */
@@ -288,7 +306,9 @@ export function statusChip(status: ProductionStatus): { label: string; color: st
 }
 
 /* ---- Kanban stages (replace approval statuses in the UI) ---- */
-export const PRODUCTION_STAGE_ORDER: ProductionStage[] = ["New", "InProduction", "QC", "Completed"];
+// QC hidden for now (2026-07-17): kept in the type union + META so legacy
+// stage:"QC" rows still render/rollup, but dropped from the board/tabs/flow.
+export const PRODUCTION_STAGE_ORDER: ProductionStage[] = ["New", "InProduction", "Completed"];
 export const PRODUCTION_STAGE_META: Record<ProductionStage, { label: string; color: string }> = {
   New: { label: "New Request", color: "var(--c-amber)" },
   InProduction: { label: "In Production", color: "var(--c-blue)" },
@@ -391,6 +411,24 @@ export function groupProductionRequests(entries: ProductionEntry[]): ProductionR
     (by.get(key) ?? by.set(key, []).get(key)!).push(e);
   }
   return [...by.entries()].map(([group, es]) => buildGroup(group, es));
+}
+
+/** The detail-route key for an entry — matches groupProductionByOrder's grouping
+    so an item-wise card/row navigates to its production detail. */
+export function productionDetailKey(entry: ProductionEntry): string {
+  return entry.salesOrderId ? `so-${entry.salesOrderId}` : entry.requestGroup || `solo-${entry.id}`;
+}
+
+/** One row per production LINE ITEM (ProductionLog entry), each its own card on
+    the item-wise board/grid. Sequential PROD id ordered by creation. */
+export function groupProductionByItem(entries: ProductionEntry[]): ProductionRequestGroup[] {
+  const groups = entries.map((e) => buildGroup(e.id, [e]));
+  [...groups]
+    .sort((a, b) => (a.createdTime < b.createdTime ? -1 : a.createdTime > b.createdTime ? 1 : a.group < b.group ? -1 : 1))
+    .forEach((g, i) => {
+      g.code = `PROD-${String(i + 1).padStart(3, "0")}`;
+    });
+  return groups;
 }
 
 /** Collapse ProductionLog entries into one row per Sales Order (independent

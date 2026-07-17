@@ -388,12 +388,12 @@ export default function App() {
       <header className="header">
         {/* Breadcrumbs removed 2026-07-06 — the sidebar shows location; search leads the header. */}
         <GlobalSearch />
-        <NotificationBell />
         {isAdmin && (
           <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/settings")}>
             <Icon name="settings" size={13} />
           </button>
         )}
+        <NotificationBell />
         <UserMenu user={user} />
       </header>
 

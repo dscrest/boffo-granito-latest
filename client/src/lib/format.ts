@@ -29,6 +29,16 @@ export function fmtLocalDateTime(s?: string): string {
   });
 }
 
+/** Catalyst datetime or date-only string → LOCAL date "Jun 29, 2026" (no time).
+    Matches the date portion of fmtLocalDateTime so date-only fields (e.g. a
+    production_date) read uniformly next to full timestamps. */
+export function fmtLocalDate(s?: string): string {
+  if (!s) return "—";
+  const t = parseDbTime(s);
+  if (Number.isNaN(t)) return s.slice(0, 10);
+  return new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+}
+
 /** Catalyst datetime string → epoch ms (NaN when unparseable). Same
     UTC-assumption as fmtLocalDateTime. */
 export function parseDbTime(s?: string): number {
