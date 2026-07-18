@@ -380,7 +380,7 @@ export function OrderForm({
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {d && <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />}
                         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                           <Combobox
