@@ -380,9 +380,9 @@ export function OrderForm({
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
                         {d && <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />}
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                           <Combobox
                             value={l.design}
                             onChange={(v) => setLine(i, "design", v)}
@@ -393,15 +393,15 @@ export function OrderForm({
                               hint: `${fmt(stockFor(x.name).available)} avail`,
                             }))}
                           />
+                          <textarea
+                            rows={1}
+                            tabIndex={-1}
+                            value={l.description}
+                            onChange={(e) => setLine(i, "description", e.target.value)}
+                            placeholder="Add a description to your item"
+                          />
                         </div>
                       </div>
-                      <textarea
-                        rows={1}
-                        tabIndex={-1}
-                        value={l.description}
-                        onChange={(e) => setLine(i, "description", e.target.value)}
-                        placeholder="Add a description to your item"
-                      />
                     </div>
                     <div className="form-field" style={{ gap: 2 }}>
                       <NumberInput
@@ -410,11 +410,6 @@ export function OrderForm({
                         onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
                         placeholder="0"
                       />
-                      {q && maxByDesign.has(l.design) && (
-                        <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                          remaining {maxByDesign.get(l.design)}
-                        </span>
-                      )}
                     </div>
                     <NumberInput
                       value={l.rate}
