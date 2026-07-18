@@ -335,8 +335,8 @@ export function PalletDetail() {
                       text("Name", pallet.name),
                       text("Type", pallet.palletType),
                       text("Packing", pallet.packingDetails),
-                      num("Coverage (m² / box)", pallet.coverageSqm),
                       num("Coverage (ft² / box)", pallet.coverageSqft),
+                      num("Coverage (m² / box)", pallet.coverageSqm),
                       num("Box Weight (kg)", pallet.boxWeightKg),
                     ]}
                   />
@@ -367,8 +367,8 @@ export function PalletDetail() {
                     rows={[
                       num("Total Boxes", pallet.totalBoxesPerContainer),
                       num("Total Pallets", pallet.totalPalletsPerContainer),
-                      num("Total Coverage (m²)", pallet.totalSqmPerContainer),
                       num("Total Coverage (ft²)", pallet.totalSqftPerContainer),
+                      num("Total Coverage (m²)", pallet.totalSqmPerContainer),
                       num("Total Box Weight (kg)", pallet.totalBoxWeightPerContainer),
                     ]}
                   />

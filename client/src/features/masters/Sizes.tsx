@@ -56,18 +56,18 @@ const SIZE_COLUMNS: ColumnDef<SizeRow>[] = [
     render: (r) => (r.pcsPerPacking > 0 ? String(r.pcsPerPacking) : dash),
   },
   {
-    key: "sqmPerBox",
-    label: "SQM / Box",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => (r.sqmPerBox > 0 ? String(r4(r.sqmPerBox)) : dash),
-  },
-  {
     key: "sqftPerBox",
     label: "SQFT / Box",
     className: "num mono",
     style: { textAlign: "right" },
     render: (r) => (r.sqftPerBox > 0 ? String(r2(r.sqftPerBox)) : dash),
+  },
+  {
+    key: "sqmPerBox",
+    label: "SQM / Box",
+    className: "num mono",
+    style: { textAlign: "right" },
+    render: (r) => (r.sqmPerBox > 0 ? String(r4(r.sqmPerBox)) : dash),
   },
   {
     key: "boxWeight",

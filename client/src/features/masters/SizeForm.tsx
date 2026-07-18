@@ -197,16 +197,6 @@ export function SizeForm({
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">Total SQM per Box</span>
-                <input
-                  value={sqmPerBox > 0 ? String(r4(sqmPerBox)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: (Width/1000) × (Length/1000) × Pcs. per Packing"
-                />
-              </label>
-              <label className="form-field">
                 <span className="lbl">Total SQFT per Box</span>
                 <input
                   value={sqftPerBox > 0 ? String(r2(sqftPerBox)) : "—"}
@@ -214,6 +204,16 @@ export function SizeForm({
                   tabIndex={-1}
                   className="calc"
                   title="Formula field: Total SQM per Box × 10.7639"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total SQM per Box</span>
+                <input
+                  value={sqmPerBox > 0 ? String(r4(sqmPerBox)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  className="calc"
+                  title="Formula field: (Width/1000) × (Length/1000) × Pcs. per Packing"
                 />
               </label>
             </div>

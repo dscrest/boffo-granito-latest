@@ -307,7 +307,7 @@ export function DesignFields({
         <span className="chip">{uniqueName || "—"}</span>
         <div style={{ flex: 1 }} />
         <span className="k">coverage</span>
-        <span className="chip">{cov.sqm ? `${cov.sqm} m² · ${cov.sqft} ft²` : "—"}</span>
+        <span className="chip">{cov.sqft ? `${cov.sqft} ft² · ${cov.sqm} m²` : "—"}</span>
         <div style={{ flex: 1 }} />
         <span className="k">sku</span>
         <span className="chip">{sku}</span>

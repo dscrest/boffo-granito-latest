@@ -1916,15 +1916,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 
 /* ---------- notification popups (ui/Toast.tsx) ----------
-   Centered popup per user mandate 2026-07-04 ("proper pop up, not in some
-   corner"). Success/info auto-dismiss; errors stay until closed. */
+   Top-right corner popups (user mandate 2026-07-18: keep them out of the
+   centre so they don't distract). Cards stack downward from the top-right;
+   the host never dims or blocks the screen. Success/info auto-dismiss;
+   errors stay until closed. */
 .toast-host {
   position: fixed; inset: 0; z-index: 1200;
   display: flex; flex-direction: column; gap: 10px;
-  align-items: center; justify-content: center;
+  align-items: flex-end; justify-content: flex-start;
+  padding: 16px;
   pointer-events: none; /* only the cards catch clicks */
 }
-.toast-host.has-error { background: rgba(15, 20, 25, 0.35); pointer-events: auto; }
 .toast {
   pointer-events: auto;
   background: var(--panel); color: var(--fg);

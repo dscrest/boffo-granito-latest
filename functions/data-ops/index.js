@@ -317,6 +317,28 @@ function badRequest(msg, code = 400) {
   return e;
 }
 
+/* Delete-guard map: table -> [childTable, fkColumn, humanLabel]. A row is
+   undeletable while a non-soft-deleted DOWNSTREAM record references it. Own
+   line items are deliberately excluded (see the delete handler). */
+const BLOCK_DELETE = {
+  Design: [
+    ["QuoteItem", "design", "quotation line"],
+    ["OrderItem", "design", "sales-order line"],
+    ["ProductionLog", "design", "production entry"],
+    ["PalletisedBatch", "design", "packed batch"],
+  ],
+  Customer: [
+    ["Quote", "customer", "quotation"],
+    ["SalesOrder", "customer", "sales order"],
+  ],
+  Quote: [["SalesOrder", "quote", "sales order"]], // downstream conversion; NOT QuoteItem
+  SalesOrder: [
+    ["ProductionLog", "sales_order", "production entry"],
+    ["PalletisedBatch", "sales_order", "packed batch"],
+    ["Invoice", "sales_order", "invoice"],
+  ], // NOT OrderItem
+};
+
 /** Resolve a REQUIRED FK name → ROWID; throw 400 if blank or unresolved. */
 function resolveOrThrow(map, name, label) {
   if (name == null || String(name).trim() === "") throw badRequest(`${label} is required`);
@@ -2559,6 +2581,30 @@ app.delete("/:table/:rowid", async (req, res) => {
     const table = assertTable(req.params.table);
     const ds = catalyst.datastore();
     const hard = req.query.hard === "1" || table === "OperationLog";
+
+    // HARD delete-guard: refuse to delete a record still referenced by a
+    // DOWNSTREAM transaction (its own line items don't count — a Quote owns
+    // QuoteItems, a SalesOrder owns OrderItems, blocking on those would make
+    // every quote/SO undeletable). Not bypassable by ?hard=1.
+    const blockers = BLOCK_DELETE[table];
+    if (blockers) {
+      const rid = String(req.params.rowid).replace(/[^0-9]/g, ""); // ROWIDs are numeric
+      const used = [];
+      for (const [child, col, label] of blockers) {
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM ${child} WHERE ${col} = ${rid} AND deleted_at is null LIMIT 1`,
+          ),
+        );
+        if (rows.length) used.push(label);
+      }
+      if (used.length)
+        throw badRequest(
+          `Cannot delete — still used by ${[...new Set(used)].join(", ")}. ` +
+            `Remove or reassign those first.`,
+          409,
+        );
+    }
 
     const result = await withOpLog(
       catalyst,

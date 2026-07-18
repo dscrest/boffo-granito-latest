@@ -11,7 +11,7 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { LineStock, useStockLookup } from "@/features/masters/LineStock";
+import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
@@ -380,17 +380,21 @@ export function OrderForm({
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
-                      <Combobox
-                        value={l.design}
-                        onChange={(v) => setLine(i, "design", v)}
-                        placeholder="Search design…"
-                        options={designs.map((x) => ({
-                          value: x.name,
-                          label: x.uniqueName || x.name,
-                          hint: [x.size, x.finish].filter(Boolean).join(" · "),
-                        }))}
-                      />
-                      {d && <LineStock stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {d && <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <Combobox
+                            value={l.design}
+                            onChange={(v) => setLine(i, "design", v)}
+                            placeholder="Search design…"
+                            options={designs.map((x) => ({
+                              value: x.name,
+                              label: x.uniqueName || x.name,
+                              hint: `${fmt(stockFor(x.name).available)} avail`,
+                            }))}
+                          />
+                        </div>
+                      </div>
                       <textarea
                         rows={1}
                         tabIndex={-1}

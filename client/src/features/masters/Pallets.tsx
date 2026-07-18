@@ -44,10 +44,10 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
   { key: "type", label: "Type", className: "muted", render: (r) => r.palletType || dash },
   {
     key: "coverage",
-    label: "Coverage (m² / ft²)",
+    label: "Coverage (ft² / m²)",
     className: "num mono",
     style: { textAlign: "right" },
-    render: (r) => (r.coverageSqm > 0 ? `${r.coverageSqm} / ${r.coverageSqft}` : dash),
+    render: (r) => (r.coverageSqft > 0 ? `${r.coverageSqft} / ${r.coverageSqm}` : dash),
   },
   {
     key: "boxesPerCont",

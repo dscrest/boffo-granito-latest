@@ -18,7 +18,6 @@ import {
   type TaxType,
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { LineStock, useStockLookup } from "@/features/masters/LineStock";
 import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
@@ -96,7 +95,6 @@ export function QuoteForm({
 }) {
   const editing = !!initial && !clone;
   const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
-  const stockFor = useStockLookup();
   const [h, setH] = useState<Head>({
     customer: initial?.customer ?? presetCustomer ?? "",
     address: initial?.address ?? "",
@@ -367,7 +365,6 @@ export function QuoteForm({
                 <span />
               </div>
               {lines.map((l, i) => {
-                const d = designs.find((x) => x.name === l.item);
                 const t = lineTotals(l);
                 return (
                   <div className="ord-line qt-line" key={i}>
@@ -382,7 +379,6 @@ export function QuoteForm({
                           hint: [x.size, x.finish].filter(Boolean).join(" · "),
                         }))}
                       />
-                      {d && <LineStock stock={stockFor(l.item)} qty={Number(l.qty) || 0} />}
                       <textarea
                         rows={1}
                         tabIndex={-1}

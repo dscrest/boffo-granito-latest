@@ -231,16 +231,6 @@ export function PalletForm({
             <div className="form-section-title">Coverage / Weight (per box) · from Size Master</div>
             <div className="form-grid">
               <label className="form-field">
-                <span className="lbl">Coverage (Sq.M.)</span>
-                <input
-                  value={coverageSqm > 0 ? String(r4(coverageSqm)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Total SQM per Box, from the selected Size"
-                />
-              </label>
-              <label className="form-field">
                 <span className="lbl">Coverage (Sq.Ft.)</span>
                 <input
                   value={coverageSqft > 0 ? String(r2(coverageSqft)) : "—"}
@@ -248,6 +238,16 @@ export function PalletForm({
                   tabIndex={-1}
                   className="calc"
                   title="Formula field: Total SQFT per Box, from the selected Size"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Coverage (Sq.M.)</span>
+                <input
+                  value={coverageSqm > 0 ? String(r4(coverageSqm)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  className="calc"
+                  title="Formula field: Total SQM per Box, from the selected Size"
                 />
               </label>
               <label className="form-field">
@@ -333,16 +333,6 @@ export function PalletForm({
                 />
               </label>
               <label className="form-field">
-                <span className="lbl">Total Sq.M / Container</span>
-                <input
-                  value={totalSqm > 0 ? String(r2(totalSqm)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Total Boxes × Coverage Sq.M"
-                />
-              </label>
-              <label className="form-field">
                 <span className="lbl">Total Sq.Ft / Container</span>
                 <input
                   value={totalSqft > 0 ? String(r2(totalSqft)) : "—"}
@@ -350,6 +340,16 @@ export function PalletForm({
                   tabIndex={-1}
                   className="calc"
                   title="Formula field: Total Boxes × Coverage Sq.Ft"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Total Sq.M / Container</span>
+                <input
+                  value={totalSqm > 0 ? String(r2(totalSqm)) : "—"}
+                  readOnly
+                  tabIndex={-1}
+                  className="calc"
+                  title="Formula field: Total Boxes × Coverage Sq.M"
                 />
               </label>
               <label className="form-field">
