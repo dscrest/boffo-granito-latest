@@ -120,7 +120,9 @@ export function ProductionDetail() {
     const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
     toast.success(`Production recorded — ${fmt(total)} boxes`);
     invalidateProductionLogs();
-    const dest = target ?? res.rowid;
+    // Independent clones key by their new request_group (groupProductionByOrder's
+    // fallback), not the row id.
+    const dest = target ?? res.data?.request_group ?? res.rowid;
     if (dest) navigate(`/prod/${encodeURIComponent(dest)}`);
     await load();
   };

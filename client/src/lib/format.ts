@@ -117,6 +117,19 @@ function changeLabel(k: string): string {
   return CHANGE_LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** A bare Catalyst ROWID (15+ digit numeric string). These are system ids and
+    must never surface in the UI — only user-friendly codes should. */
+export const isRowId = (s: unknown): boolean => /^\d{15,}$/.test(String(s ?? "").trim());
+
+/** True when a payload value is a ROWID or a list of ROWIDs (e.g. an `ids`
+    array stringifies to "6985…,6985…") — such FK values carry no meaning to a
+    reader, so we drop the whole pair from the activity summary. */
+function isRowIdValue(v: unknown): boolean {
+  const s = String(v ?? "").trim();
+  if (!s) return false;
+  return s.split(",").every((t) => isRowId(t));
+}
+
 function changeValue(k: string, v: unknown): string {
   if (v == null || v === "") return "cleared";
   const s = String(v);
@@ -158,7 +171,7 @@ export function describeChange(operation?: string, payloadSummary?: string): str
     return name != null ? `Created "${String(name)}"` : "Created";
   }
   const parts = Object.entries(payload)
-    .filter(([k]) => !CHANGE_HIDDEN.has(k))
+    .filter(([k, v]) => !CHANGE_HIDDEN.has(k) && !isRowIdValue(v))
     .map(([k, v]) => `${changeLabel(k)} → ${changeValue(k, v)}`);
   return parts.length > 0 ? parts.join(", ") : "—";
 }

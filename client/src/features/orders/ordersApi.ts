@@ -210,6 +210,12 @@ export function deleteSalesOrder(rowid: string) {
   return bust(remove("SalesOrder", rowid));
 }
 
+/** Delete a single order line. Server refuses (409) while a production entry
+    still references it — delete the downstream transaction first. */
+export function deleteOrderItem(orderItemId: string) {
+  return bust(remove("OrderItem", orderItemId));
+}
+
 /** Change SO status through the server-side state machine (/so-status —
     validates the transition, requires approval rights for verdicts, logs a
     StatusTransition row, and notifies the salesperson). */

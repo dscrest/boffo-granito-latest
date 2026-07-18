@@ -11,7 +11,10 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { can } from "@/lib/auth";
-import { fmt, fmtDateTime } from "@/lib/format";
+import { fmt, fmtDateTime, isRowId } from "@/lib/format";
+
+/** User-friendly SO number, never the raw ROWID fallback. */
+const soLabel = (r: SORow) => (r.head.orderNumber && !isRowId(r.head.orderNumber) ? r.head.orderNumber : "—");
 import { type Order } from "@/data";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { ViewToggle } from "./ViewToggle";
@@ -121,7 +124,7 @@ function soColumns(): ColumnDef<SORow>[] {
 // Sortable value per column key (header-click sorting — grid standard).
 function soSortVal(r: SORow, k: string): string | number {
   switch (k) {
-    case "so": return r.head.orderNumber || r.id;
+    case "so": return soLabel(r);
     case "party": return r.head.party;
     case "po": return r.head.poNumber || "";
     case "date": return r.head.orderDate || "";
@@ -388,7 +391,7 @@ export function OrdersTable() {
                   </td>
                   <td className="mono">
                     <Link className="linkish" to={`/orders/${r.id}`} onClick={(e) => e.stopPropagation()} title="View order">
-                      {r.head.orderNumber || r.id}
+                      {soLabel(r)}
                     </Link>
                   </td>
                   {visible.map((c) => (

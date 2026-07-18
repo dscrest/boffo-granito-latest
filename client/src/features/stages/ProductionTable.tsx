@@ -50,6 +50,14 @@ const TABS: Array<{ id: string; label: string; match?: ProductionStage; pending?
   { id: "completed", label: "Completed", match: "Completed" },
 ];
 
+// Board swimlane dimensions, in the menu order. Selecting several nests them.
+const GROUP_DIMS: Array<{ id: ProductionGroupBy; label: string }> = [
+  { id: "item", label: "Item" },
+  { id: "customer", label: "Customer" },
+  { id: "order", label: "Order" },
+  { id: "size", label: "Size" },
+];
+
 /* Data-driven columns (Production ID pinned outside the map as the row
    identity). Order matches the agreed default: Design, Order, Customer, Date,
    Status, Requested, Produced, Order Progress, Requested by. */
@@ -129,17 +137,44 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 
 export function ProductionTable() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("pending");
+  // Filter follows the view: board → All (see everything), grid → Pending (hide
+  // the completed pile). Seed from the persisted view so a board reload starts on All.
+  const [tab, setTab] = useState(() => (localStorage.getItem("productionView") === "board" ? "all" : "pending"));
   // View persists across visits (board stays board until switched back).
   const [view, setView] = useState<"grid" | "board">(() => (localStorage.getItem("productionView") === "board" ? "board" : "grid"));
   useEffect(() => {
     localStorage.setItem("productionView", view);
   }, [view]);
-  // Board grouping dimension → swimlanes (Item = flat, no lanes).
-  const [groupBy, setGroupBy] = useState<ProductionGroupBy>(() => (localStorage.getItem("productionGroup") as ProductionGroupBy) || "item");
+  // Switching view snaps the filter back to that view's default (board=All, grid=Pending).
+  const changeView = (v: "grid" | "board") => {
+    setView(v);
+    setTab(v === "board" ? "all" : "pending");
+  };
+  // Board grouping: an ordered list of dimensions → nested swimlanes (empty = flat).
+  const [groupBy, setGroupBy] = useState<ProductionGroupBy[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("productionGroups") || "[]");
+      return Array.isArray(v) ? v.filter((d) => GROUP_DIMS.some((o) => o.id === d)) : [];
+    } catch {
+      return [];
+    }
+  });
   useEffect(() => {
-    localStorage.setItem("productionGroup", groupBy);
+    localStorage.setItem("productionGroups", JSON.stringify(groupBy));
   }, [groupBy]);
+  // Reassign a grouping level: remove it, swap with an existing level (reorder), or set it.
+  const setLevel = (i: number, val: string) =>
+    setGroupBy((prev) => {
+      if (val === "__remove") return prev.filter((_, j) => j !== i);
+      const dim = val as ProductionGroupBy;
+      const j = prev.indexOf(dim);
+      const next = [...prev];
+      if (j !== -1 && j !== i) [next[i], next[j]] = [next[j], next[i]];
+      else next[i] = dim;
+      return next;
+    });
+  const addLevel = (val: string) =>
+    setGroupBy((prev) => (prev.includes(val as ProductionGroupBy) ? prev : [...prev, val as ProductionGroupBy]));
   const [query, setQuery] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
@@ -227,9 +262,14 @@ export function ProductionTable() {
   const tabCount = (t: (typeof TABS)[number]) =>
     t.match
       ? groups.filter((g) => g.stage === t.match).length
-      : t.pending
+      : // Board shows every lane (incl. Completed), so the "Pending" tab is
+        // effectively "All" there — count and label follow suit below.
+        t.pending && view === "grid"
         ? groups.filter((g) => g.stage !== "Completed").length
         : groups.length;
+
+  // In board view the pending tab doesn't filter anything, so call it "All".
+  const tabLabel = (t: (typeof TABS)[number]) => (t.pending && view === "board" ? "All" : t.label);
 
   const canEdit = can("stages", "edit");
 
@@ -346,7 +386,7 @@ export function ProductionTable() {
         <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
           {TABS.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.label} ({tabCount(t)})
+              {tabLabel(t)} ({tabCount(t)})
             </option>
           ))}
         </select>
@@ -361,7 +401,7 @@ export function ProductionTable() {
             <button
               key={v}
               type="button"
-              onClick={() => setView(v)}
+              onClick={() => changeView(v)}
               title={v === "grid" ? "Table view" : "Kanban board"}
               style={{
                 background: view === v ? "var(--accent-soft)" : "transparent",
@@ -374,12 +414,25 @@ export function ProductionTable() {
           ))}
         </div>
         {view === "board" && (
-          <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as ProductionGroupBy)} title="Group the board into swimlanes">
-            <option value="item">Group: Item</option>
-            <option value="customer">Group: Customer</option>
-            <option value="order">Group: Order</option>
-            <option value="size">Group: Size</option>
-          </select>
+          <span className="row" style={{ gap: 4, alignItems: "center" }}>
+            <span className="muted" style={{ fontSize: 12 }}>Group:</span>
+            {groupBy.map((d, i) => (
+              <select key={i} value={d} onChange={(e) => setLevel(i, e.target.value)} title={i === 0 ? "Top-level swimlanes" : "Nested swimlanes"}>
+                {GROUP_DIMS.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+                <option value="__remove">✕ Remove</option>
+              </select>
+            ))}
+            {groupBy.length < GROUP_DIMS.length && (
+              <select value="" onChange={(e) => e.target.value && addLevel(e.target.value)} title="Add a nesting level">
+                <option value="">{groupBy.length === 0 ? "None" : "+ Add level"}</option>
+                {GROUP_DIMS.filter((o) => !groupBy.includes(o.id)).map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+            )}
+          </span>
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {can("stages", "export") && (

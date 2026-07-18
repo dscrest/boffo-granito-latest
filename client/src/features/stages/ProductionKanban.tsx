@@ -4,8 +4,8 @@
    remaining portion stays in its In Production / New lane — so a partly-produced
    line appears in BOTH lanes. Stages: New Request → In Production → Completed
    (QC hidden 2026-07). Cards move by hand-rolled HTML5 drag-and-drop; the `+`
-   button on a remaining card logs output. Grouping adds horizontal swimlanes
-   (Customer / Order / Size); Item = no swimlanes.
+   button on a remaining card logs output. Grouping is an ordered list of
+   dimensions (Item / Customer / Order / Size) → nested swimlanes; empty = flat.
    ============================================================ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -52,6 +52,7 @@ function buildCards(groups: ProductionRequestGroup[]): Card[] {
 
 function laneKey(e: ProductionEntry, groupBy: ProductionGroupBy): string {
   switch (groupBy) {
+    case "item": return e.design || "—";
     case "customer": return e.customer || "—";
     case "order": return e.independent ? "Independent" : e.orderNumber || e.poNumber || "—";
     case "size": return e.size || "—";
@@ -67,7 +68,7 @@ export function ProductionKanban({
   onRecord,
 }: {
   groups: ProductionRequestGroup[];
-  groupBy: ProductionGroupBy;
+  groupBy: ProductionGroupBy[];
   canEdit: boolean;
   onMove: (group: ProductionRequestGroup, stage: ProductionStage) => void;
   onRecord: (group: ProductionRequestGroup) => void;
@@ -77,21 +78,6 @@ export function ProductionKanban({
   const [overStage, setOverStage] = useState<string | null>(null);
 
   const allCards = buildCards(groups);
-
-  // Build swimlanes: Item = one implicit lane; else group cards by the dimension.
-  const lanes: { key: string; title: string | null; cards: Card[] }[] =
-    groupBy === "item"
-      ? [{ key: "", title: null, cards: allCards }]
-      : (() => {
-          const by = new Map<string, Card[]>();
-          for (const c of allCards) {
-            const k = laneKey(c.e, groupBy);
-            (by.get(k) ?? by.set(k, []).get(k)!).push(c);
-          }
-          return [...by.entries()]
-            .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-            .map(([k, cards]) => ({ key: k, title: k, cards }));
-        })();
 
   const stageGrid = (laneCards: Card[], laneKey: string) => (
     <div style={{ display: "grid", gridTemplateColumns: `repeat(${PRODUCTION_STAGE_ORDER.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
@@ -186,20 +172,33 @@ export function ProductionKanban({
     </div>
   );
 
-  if (groupBy === "item") return stageGrid(lanes[0].cards, lanes[0].key);
+  // Nested swimlanes: partition by dims[0], recurse on the rest; at the leaf
+  // (no dims left) render the stage columns. Empty groupBy → flat board (today's
+  // default). keyPrefix composes the lane path so each leaf grid's drop targets
+  // stay unique across the tree (drag/onMove stay scoped per lane).
+  const renderLevel = (cards: Card[], dims: ProductionGroupBy[], depth: number, keyPrefix: string): JSX.Element => {
+    if (dims.length === 0) return stageGrid(cards, keyPrefix);
+    const by = new Map<string, Card[]>();
+    for (const c of cards) {
+      const k = laneKey(c.e, dims[0]);
+      (by.get(k) ?? by.set(k, []).get(k)!).push(c);
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {[...by.entries()]
+          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+          .map(([k, sub]) => (
+            <div key={k} style={{ marginLeft: depth * 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: depth === 0 ? undefined : 13, color: depth === 0 ? undefined : "var(--muted)" }}>{k}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
+              </div>
+              {renderLevel(sub, dims.slice(1), depth + 1, `${keyPrefix}/${dims[0]}=${k}`)}
+            </div>
+          ))}
+      </div>
+    );
+  };
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {lanes.map((lane) => (
-        <div key={lane.key}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span style={{ fontWeight: 600 }}>{lane.title}</span>
-            <span className="muted" style={{ fontSize: 12 }}>{lane.cards.length}</span>
-          </div>
-          {stageGrid(lane.cards, lane.key)}
-        </div>
-      ))}
-      {lanes.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 2px" }}>—</div>}
-    </div>
-  );
+  return renderLevel(allCards, groupBy, 0, "");
 }

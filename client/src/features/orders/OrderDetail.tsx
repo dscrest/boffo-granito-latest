@@ -12,15 +12,31 @@ import { can, canApprove } from "@/lib/auth";
 import { STAGES, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
+import { createSalesOrder, deleteSalesOrder, deleteOrderItem, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
 import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
-import { invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
+import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
+import { useMasters } from "@/features/masters/useMasters";
+import { designStock } from "@/lib/stock";
 
-const avail = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
+// Boxes produced on THIS order still waiting to be palletised — drives the
+// palletise selection/checkboxes only. NOT the sellable "Available" figure
+// (that's designStock.available, incl. opening stock — see the Items table).
+const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
+
+// Live stage for a line: OrderItem.stage is a manual field that never advances
+// when production completes, so a produced line stays stuck on "prod". When a
+// line's production is finished (≥1 linked ProductionLog, none still open) show
+// the next stage (QC). Display-only — the stored stage is untouched.
+function displayStage(o: Order, prodLogs: ProductionEntry[]): string {
+  if (o.stage !== "prod") return o.stage;
+  const lines = prodLogs.filter((e) => e.orderItemId === o.id);
+  const done = lines.length > 0 && lines.every((e) => e.stage === "Completed" || e.status === "Rejected");
+  return done ? "qc" : o.stage;
+}
 
 /* One meaningful header status. Approval/terminal statuses (Draft, Pending
    Approval, Rejected, Cancelled) show as-is. An active order (Confirmed /
@@ -116,6 +132,8 @@ export function OrderDetail() {
   const [prod, setProd] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [listQ, setListQ] = useState("");
+  const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const { designRows } = useMasters();
 
   const load = async () => {
     const res = await listOrders();
@@ -124,7 +142,14 @@ export function OrderDetail() {
   };
   useEffect(() => {
     void load();
+    void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
   }, []);
+
+  // Sellable stock per design, same source of truth as the Item master.
+  const availableStock = (o: Order) => {
+    const opening = designRows.find((d) => d.designName === o.design)?.accountingStock ?? 0;
+    return designStock(o.design, { openingStock: opening, orders, prodLogs }).available;
+  };
 
   // The clicked row is one OrderItem — or, from a pallet's related list, the
   // SalesOrder itself. Either way the detail below is the whole SalesOrder.
@@ -138,7 +163,7 @@ export function OrderDetail() {
     return head.salesOrderId ? orders.filter((o) => o.salesOrderId === head.salesOrderId) : [head];
   }, [orders, head]);
 
-  const selectable = useMemo(() => items.filter((o) => avail(o) > 0), [items]);
+  const selectable = useMemo(() => items.filter((o) => toPalletise(o) > 0), [items]);
   // Line items still owing production — pre-filled job list for "Send for
   // Production". Kept above the early returns so hook order stays stable.
   const prodJobs = useMemo(() => items.filter((o) => o.producedQty < o.orderQty), [items]);
@@ -171,7 +196,7 @@ export function OrderDetail() {
     return <RecordDetail backTo="/orders" title="Order not found" fields={[]} hiddenStorageKey="orderDetailFields" />;
   }
 
-  const totalAvail = items.reduce((s, o) => s + avail(o), 0);
+  const totalAvail = items.reduce((s, o) => s + toPalletise(o), 0);
   // Derived (no SO status change): every line fully produced AND boxes waiting
   // to be palletised → the order's stock is ready for palletisation.
   const readyForPalletisation =
@@ -254,7 +279,9 @@ export function OrderDetail() {
     toast.success(`Production request sent for approval — ${total} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
     invalidateProductionLogs();
     // Land on the new production record instead of reloading this SO page.
-    if (res.data?.request_group) navigate(`/prod/${encodeURIComponent(res.data.request_group)}`);
+    // The production detail keys order-linked batches by `so-<salesOrderId>`
+    // (see productionDetailKey), not the raw request_group.
+    if (head.salesOrderId) navigate(`/prod/${encodeURIComponent(`so-${head.salesOrderId}`)}`);
     else await load();
   };
 
@@ -268,6 +295,20 @@ export function OrderDetail() {
     }
     toast.success("Order deleted");
     navigate("/orders");
+  };
+
+  // Delete one line. The server refuses (409) while a production entry still
+  // references it — delete the downstream transaction first, then the line,
+  // then the (now empty) order.
+  const onDeleteLine = async (o: Order) => {
+    if (!(await confirmDialog({ message: `Delete line "${o.design} · ${o.size} · ${o.finish}"? This cannot be undone.`, danger: true }))) return;
+    const res = await deleteOrderItem(o.id);
+    if (!res.ok) {
+      toast.error(res.error || "Delete failed");
+      return;
+    }
+    toast.success("Line deleted");
+    await load();
   };
 
   // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
@@ -440,7 +481,7 @@ export function OrderDetail() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontWeight: 600 }}>Items</span>
           <span className="muted" style={{ fontSize: 12 }}>
-            {sel.size} selected · {totalAvail} boxes available
+            {sel.size} selected · {totalAvail} boxes to palletise
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             {notice && <span className="muted dim" style={{ fontSize: 12, marginRight: 4 }}>{notice}</span>}
@@ -476,12 +517,13 @@ export function OrderDetail() {
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
                 <th className="num" style={{ textAlign: "right" }}>Available</th>
                 <th>Stage</th>
+                {can("orders", "delete") && <th style={{ width: 34 }} />}
               </tr>
             </thead>
             <tbody>
               {items.map((o) => {
-                const a = avail(o);
-                const ready = a > 0;
+                const ready = toPalletise(o) > 0;
+                const stock = availableStock(o);
                 return (
                   <tr key={o.id}>
                     <td style={{ textAlign: "center" }}>
@@ -497,8 +539,20 @@ export function OrderDetail() {
                     <td className="num mono">{fmt(o.orderQty)}</td>
                     <td className="num mono">{fmt(o.producedQty)}</td>
                     <td className="num mono">{fmt(o.palletizedQty)}</td>
-                    <td className="num mono" style={{ color: ready ? "var(--c-green)" : "var(--dim)" }}>{a || "—"}</td>
-                    <td><StageBadge stage={o.stage} /></td>
+                    <td className="num mono" style={{ color: stock > 0 ? "var(--c-green)" : "var(--dim)" }}>{stock || "—"}</td>
+                    <td><StageBadge stage={displayStage(o, prodLogs)} /></td>
+                    {can("orders", "delete") && (
+                      <td style={{ textAlign: "center" }}>
+                        <button
+                          type="button"
+                          className="btn x"
+                          title="Delete this line"
+                          onClick={() => void onDeleteLine(o)}
+                        >
+                          <Icon name="x" size={13} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

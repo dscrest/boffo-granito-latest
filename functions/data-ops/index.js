@@ -331,12 +331,17 @@ const BLOCK_DELETE = {
     ["Quote", "customer", "quotation"],
     ["SalesOrder", "customer", "sales order"],
   ],
-  Quote: [["SalesOrder", "quote", "sales order"]], // downstream conversion; NOT QuoteItem
+  Quote: [["SalesOrder", "quote", "sales order"]], // downstream conversion; NOT QuoteItem (no line-delete UI yet)
   SalesOrder: [
+    ["OrderItem", "sales_order", "sales-order line"], // own lines — delete leaf-first, no cascade
     ["ProductionLog", "sales_order", "production entry"],
     ["PalletisedBatch", "sales_order", "packed batch"],
     ["Invoice", "sales_order", "invoice"],
-  ], // NOT OrderItem
+  ],
+  // A line item is the next rung down: it can't be removed while production
+  // exists against it (which is itself blocked while palletised). Delete the
+  // downstream transaction first, then channel backward.
+  OrderItem: [["ProductionLog", "order_item", "production entry"]],
 };
 
 /** Resolve a REQUIRED FK name → ROWID; throw 400 if blank or unresolved. */
@@ -2586,9 +2591,9 @@ app.delete("/:table/:rowid", async (req, res) => {
     // DOWNSTREAM transaction (its own line items don't count — a Quote owns
     // QuoteItems, a SalesOrder owns OrderItems, blocking on those would make
     // every quote/SO undeletable). Not bypassable by ?hard=1.
+    const rid = String(req.params.rowid).replace(/[^0-9]/g, ""); // ROWIDs are numeric
     const blockers = BLOCK_DELETE[table];
     if (blockers) {
-      const rid = String(req.params.rowid).replace(/[^0-9]/g, ""); // ROWIDs are numeric
       const used = [];
       for (const [child, col, label] of blockers) {
         const rows = rowList(
