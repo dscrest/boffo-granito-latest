@@ -183,16 +183,25 @@ export function ProductionKanban({
       const k = laneKey(c.e, dims[0]);
       (by.get(k) ?? by.set(k, []).get(k)!).push(c);
     }
+    // Top-level lanes get the bordered "section" box (like the item form's
+    // sections) so two lanes read as clearly separate; nested lanes just indent.
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: depth === 0 ? 0 : 16 }}>
         {[...by.entries()]
           .sort((a, b) => (a[0] < b[0] ? -1 : 1))
           .map(([k, sub]) => (
-            <div key={k} style={{ marginLeft: depth * 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: depth === 0 ? undefined : 13, color: depth === 0 ? undefined : "var(--muted)" }}>{k}</span>
-                <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
-              </div>
+            <div key={k} className={depth === 0 ? "form-section" : undefined} style={depth === 0 ? undefined : { marginLeft: depth * 16 }}>
+              {depth === 0 ? (
+                <div className="form-section-title">
+                  <span style={{ flex: 1 }}>{k}</span>
+                  <span className="muted" style={{ fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, color: "var(--muted)" }}>{k}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
+                </div>
+              )}
               {renderLevel(sub, dims.slice(1), depth + 1, `${keyPrefix}/${dims[0]}=${k}`)}
             </div>
           ))}

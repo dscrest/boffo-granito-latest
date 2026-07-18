@@ -162,19 +162,17 @@ export function ProductionTable() {
   useEffect(() => {
     localStorage.setItem("productionGroups", JSON.stringify(groupBy));
   }, [groupBy]);
-  // Reassign a grouping level: remove it, swap with an existing level (reorder), or set it.
-  const setLevel = (i: number, val: string) =>
-    setGroupBy((prev) => {
-      if (val === "__remove") return prev.filter((_, j) => j !== i);
-      const dim = val as ProductionGroupBy;
-      const j = prev.indexOf(dim);
-      const next = [...prev];
-      if (j !== -1 && j !== i) [next[i], next[j]] = [next[j], next[i]];
-      else next[i] = dim;
-      return next;
-    });
-  const addLevel = (val: string) =>
-    setGroupBy((prev) => (prev.includes(val as ProductionGroupBy) ? prev : [...prev, val as ProductionGroupBy]));
+  // Grouping picker (reuses the grid's ColumnPicker: checked = included, row
+  // order = nesting order). Checked dims first (in nesting order), rest after.
+  const groupCols = useMemo<ColumnDef<unknown>[]>(() => {
+    const ordered = [...groupBy, ...GROUP_DIMS.map((o) => o.id).filter((id) => !groupBy.includes(id))];
+    return ordered.map((id) => ({ key: id, label: GROUP_DIMS.find((o) => o.id === id)!.label }));
+  }, [groupBy]);
+  const groupHidden = useMemo(() => new Set(GROUP_DIMS.map((o) => o.id).filter((id) => !groupBy.includes(id))), [groupBy]);
+  const toggleGroup = (key: string) =>
+    setGroupBy((prev) => (prev.includes(key as ProductionGroupBy) ? prev.filter((d) => d !== key) : [...prev, key as ProductionGroupBy]));
+  // Apply commits the dragged row order → nesting order of the checked dims.
+  const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as ProductionGroupBy)) as ProductionGroupBy[]);
   const [query, setQuery] = useState("");
   const [criteria, setCriteria] = useState<FilterCriteria>({});
   const [showForm, setShowForm] = useState(false);
@@ -414,25 +412,16 @@ export function ProductionTable() {
           ))}
         </div>
         {view === "board" && (
-          <span className="row" style={{ gap: 4, alignItems: "center" }}>
-            <span className="muted" style={{ fontSize: 12 }}>Group:</span>
-            {groupBy.map((d, i) => (
-              <select key={i} value={d} onChange={(e) => setLevel(i, e.target.value)} title={i === 0 ? "Top-level swimlanes" : "Nested swimlanes"}>
-                {GROUP_DIMS.map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-                <option value="__remove">✕ Remove</option>
-              </select>
-            ))}
-            {groupBy.length < GROUP_DIMS.length && (
-              <select value="" onChange={(e) => e.target.value && addLevel(e.target.value)} title="Add a nesting level">
-                <option value="">{groupBy.length === 0 ? "None" : "+ Add level"}</option>
-                {GROUP_DIMS.filter((o) => !groupBy.includes(o.id)).map((o) => (
-                  <option key={o.id} value={o.id}>{o.label}</option>
-                ))}
-              </select>
-            )}
-          </span>
+          <ColumnPicker
+            columns={groupCols}
+            hidden={groupHidden}
+            onToggle={toggleGroup}
+            onMove={moveGroup}
+            onClear={() => setGroupBy([])}
+            label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
+            icon="menu"
+            title="Group the board into nested swimlanes — check dimensions, drag to set nesting order"
+          />
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {can("stages", "export") && (
