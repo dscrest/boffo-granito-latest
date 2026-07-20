@@ -286,8 +286,11 @@ export function OrderDetail() {
   // Editable until any work is recorded (server enforces the same guard with
   // a 409); editing a pending/approved order resets it to Draft.
   const workRecorded = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
+  // InProgress included: a production REQUEST doesn't record any work qty, so the
+  // order stays editable while a request is pending (server enforces the same —
+  // it blocks only on recorded quantities, not on status).
   const editable =
-    can("orders", "edit") && !workRecorded && ["Draft", "PendingApproval", "Confirmed"].includes(status);
+    can("orders", "edit") && !workRecorded && ["Draft", "PendingApproval", "Confirmed", "InProgress"].includes(status);
   // Edit stays visible on every order (consistency); when locked, explain why.
   const editLockReason = workRecorded
     ? "Can't edit — production/work already recorded"
