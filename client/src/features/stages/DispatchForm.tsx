@@ -121,7 +121,7 @@ export function DispatchForm({
           </button>
           <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Dispatching…" : "Dispatch"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

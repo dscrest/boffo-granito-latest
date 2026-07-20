@@ -129,7 +129,7 @@ export function ProductionCompleteForm({
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Completing…" : "Complete Production"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

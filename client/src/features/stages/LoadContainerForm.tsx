@@ -182,7 +182,7 @@ export function LoadContainerForm({
           {/* overCap stays disabled-gated: a capacity-busting write must never reach the saga. */}
           <button className="hbtn primary" disabled={overCap || saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Loading…" : "Load container"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
