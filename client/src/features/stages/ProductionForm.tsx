@@ -26,6 +26,59 @@ import { listPalletizable, type PalletizableItem } from "./palletisationApi";
 import { listProductionLogs, type ProductionRequestInput } from "./productionApi";
 import { NumberInput } from "../../ui/NumberInput";
 
+/** "In production" drill-down: which orders have this design running, so the
+    planner can prepone/postpone. Same modal look as the parent form; Escape is
+    handled on the capture phase so it dismisses ONLY this popup — the parent
+    form's own document-level Escape listener (useModalA11y) is on the same node,
+    where stopPropagation wouldn't reach it, so we stop the event before it. */
+function InProductionModal({ item, onClose }: { item: PalletizableItem; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); onClose(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
+  const orders = item.inProductionOrders;
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-panel card" role="dialog" aria-modal="true" aria-label={`${item.designLabel} — in production`} style={{ maxWidth: 520 }}>
+        <div className="row" style={{ marginBottom: 6 }}>
+          <div style={{ fontWeight: 600, fontSize: 16 }}>{item.designLabel} — in production</div>
+          <span className="muted" style={{ fontSize: 12 }}>{fmt(item.inProduction)} boxes</span>
+          <button className="btn x" onClick={onClose} title="Close" style={{ marginLeft: "auto" }} tabIndex={-1}>✕</button>
+        </div>
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 12 }}>
+          Boxes of this design currently in production across all orders (requested, not yet output).
+        </div>
+        <div className="modal-body" style={{ overflow: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Sales Order</th>
+                <th className="num" style={{ textAlign: "right" }}>In production</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.salesOrderId}>
+                  <td>{o.customer || "—"}</td>
+                  <td>{o.soLabel}</td>
+                  <td className="num mono">{fmt(o.qty)}</td>
+                </tr>
+              ))}
+              {orders.length === 0 && (
+                <tr><td colSpan={3}><span className="dim" style={{ padding: 8, display: "inline-block" }}>Nothing in production right now.</span></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProductionForm({
   presetSalesOrderId,
   presetDesignId,
@@ -49,6 +102,8 @@ export function ProductionForm({
   const [items, setItems] = useState<PalletizableItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [qtyByItem, setQtyByItem] = useState<Record<string, number>>({});
+  // Line whose "In production" drill-down popup is open (null = closed).
+  const [breakdown, setBreakdown] = useState<PalletizableItem | null>(null);
 
   // Independent mode — Quote/SO-style line items (Item + Request Qty).
   // ponytail: no dedupe of the same design across rows; add distinct-design guard if it ever matters.
@@ -319,7 +374,7 @@ export function ProductionForm({
                     <tr>
                       <th>Design</th>
                       <th className="num" style={{ textAlign: "right" }}>Ordered</th>
-                      <th className="num" style={{ textAlign: "right" }}>Produced</th>
+                      <th className="num" style={{ textAlign: "right" }}>In production</th>
                       <th className="num" style={{ textAlign: "right" }}>Stock in hand</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                       <th className="num" style={{ textAlign: "right", width: 120 }}>Desired qty</th>
@@ -330,7 +385,23 @@ export function ProductionForm({
                         <tr key={it.orderItemId}>
                           <td><span className="design-name">{it.designLabel}</span></td>
                           <td className="num mono">{fmt(it.ordered)}</td>
-                          <td className="num mono">{fmt(it.produced)}</td>
+                          {/* In production = this design's boxes running across ALL orders
+                              (not just this line). Click → which orders, so priority can be shuffled. */}
+                          <td className="num">
+                            {it.inProduction > 0 ? (
+                              <button
+                                type="button"
+                                className="linkish mono"
+                                onClick={() => setBreakdown(it)}
+                                title="See which orders have this design in production"
+                                style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                              >
+                                {fmt(it.inProduction)}
+                              </button>
+                            ) : (
+                              <span className="mono">{fmt(it.inProduction)}</span>
+                            )}
+                          </td>
                           <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
                           {/* Remaining = shortfall AFTER stock in hand (produce only
                               what stock can't cover): ordered 400, stock 50 → 350, not 400. */}
@@ -439,6 +510,7 @@ export function ProductionForm({
           </button>
         </div>
       </div>
+      {breakdown && <InProductionModal item={breakdown} onClose={() => setBreakdown(null)} />}
     </div>
   );
 }

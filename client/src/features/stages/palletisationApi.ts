@@ -27,6 +27,8 @@ export interface PalletizableItem {
   produced: number;
   palletized: number;
   toProduce: number; // ordered − produced − in-flight requests (boxes still to request → production)
+  inProduction: number; // this design's boxes currently in production (PendingApproval/Approved) across ALL orders — display only
+  inProductionOrders: { salesOrderId: string; soLabel: string; customer: string; qty: number }[]; // per-SO breakdown of inProduction
 }
 export interface PalletizableOrder {
   salesOrderId: string; // SalesOrder ROWID → close-pallet sales_order
@@ -95,6 +97,24 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   const sizeCodeById = new Map<string, string>();
   (sizes.rows || []).forEach((s) => sizeCodeById.set(String(s.ROWID), str(s.code)));
 
+  // Design-wide "in production": which orders have this design in production
+  // (PendingApproval/Approved) and how much, so a line can surface that a design
+  // is already running elsewhere. Keyed by design → salesOrder → qty.
+  const oiToDesignSo = new Map<string, { design: string; so: string }>();
+  (items.rows || []).forEach((it) =>
+    oiToDesignSo.set(String(it.ROWID), { design: str(it.design), so: str(it.sales_order) }),
+  );
+  const inProdByDesign = new Map<string, Map<string, number>>();
+  (prod.rows || []).forEach((p) => {
+    const s = str(p.status);
+    if (s !== "PendingApproval" && s !== "Approved") return;
+    const oi = oiToDesignSo.get(str(p.order_item));
+    if (!oi || !oi.design) return;
+    let bySo = inProdByDesign.get(oi.design);
+    if (!bySo) inProdByDesign.set(oi.design, (bySo = new Map()));
+    bySo.set(oi.so, (bySo.get(oi.so) || 0) + num(p.qty_requested));
+  });
+
   const preset = opts?.includeOrderId;
   const byOrder = new Map<string, PalletizableOrder>();
   for (const it of items.rows || []) {
@@ -122,6 +142,15 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
     }
     const designId = str(it.design);
     const sizeId = designSize.get(designId) || "";
+    const inProductionOrders = [...(inProdByDesign.get(designId)?.entries() || [])].map(([soId2, qty]) => {
+      const so = soById.get(soId2);
+      return {
+        salesOrderId: soId2,
+        soLabel: so ? str(so.order_number) || str(so.po_number) || soId2 : soId2,
+        customer: so ? custName.get(str(so.customer)) || "" : "",
+        qty,
+      };
+    });
     byOrder.get(soId)!.items.push({
       orderItemId: String(it.ROWID),
       designId,
@@ -133,6 +162,8 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       produced,
       palletized,
       toProduce: Math.max(0, ordered - produced - (inFlight.get(String(it.ROWID)) || 0)),
+      inProduction: inProductionOrders.reduce((s, o) => s + o.qty, 0),
+      inProductionOrders,
     });
   }
 
