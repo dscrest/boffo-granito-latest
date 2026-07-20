@@ -260,7 +260,7 @@ export function ProductionTable() {
     return applyFilters(base, criteria, filterFields);
   }, [tab, view, groups, query, criteria, filterFields]);
 
-  const sort = useSortRows(filtered, prodSortVal);
+  const sort = useSortRows(filtered, prodSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "productionPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
 

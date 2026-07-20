@@ -76,7 +76,7 @@ function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown<any>; onClose
   const total = bd.rows.length;
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={bd.title} style={{ maxWidth: 720 }}>
+      <div className="modal-panel card" ref={panelRef} role="dialog" aria-modal="true" aria-label={bd.title} style={{ maxWidth: 720 }}>
         <div className="row" style={{ marginBottom: 6 }}>
           <div style={{ fontWeight: 600, fontSize: 16 }}>{bd.title}</div>
           <span className="muted" style={{ fontSize: 12 }}>{total} order{total === 1 ? "" : "s"}</span>

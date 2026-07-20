@@ -281,7 +281,9 @@ export function PalletPackForm({
                         <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                         <th className="num" style={{ textAlign: "right", width: 130 }}>Need Palletization</th>
                         <th className="num" style={{ textAlign: "right" }}>Palletised</th>
-                        <th style={{ minWidth: 220 }}>Pallet</th>
+                        {/* Wide enough for the full pallet name on one line
+                            (the combo popup matches the control width). */}
+                        <th style={{ minWidth: 320 }}>Pallet</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -4,10 +4,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { SplitBar, StageBadge } from "@/ui/primitives";
+import { SplitBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { STAGES, type Order } from "@/data";
+import { type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
@@ -39,8 +39,6 @@ interface Group {
   dueDate: string;
   items: Order[];
   totals: Totals;
-  stageDist: Record<string, number>;
-  minStageIdx: number;
   progress: number;
 }
 
@@ -81,7 +79,7 @@ export function ByOrderView() {
   const fOrders = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
 
   const groups = useMemo<Group[]>(() => {
-    const m: Record<string, Omit<Group, "totals" | "stageDist" | "minStageIdx" | "progress">> = {};
+    const m: Record<string, Omit<Group, "totals" | "progress">> = {};
     fOrders.forEach((o) => {
       // One group per SalesOrder (a PO number can repeat across orders).
       const key = o.salesOrderId || `${o.poNumber}__${o.partyCode}`;
@@ -113,17 +111,7 @@ export function ByOrderView() {
         { qty: 0, produced: 0, palletized: 0, loaded: 0 },
       );
 
-      const stageDist: Record<string, number> = {};
-      STAGES.forEach((s) => (stageDist[s.id] = 0));
-      g.items.forEach((o) => (stageDist[o.stage] = (stageDist[o.stage] || 0) + 1));
-
-      // Unknown stage values (legacy/seed rows) index as 0 instead of -1 so
-      // STAGES[minStageIdx] below stays defined.
-      const minStageIdx = Math.min(
-        ...g.items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))),
-      );
-
-      return { ...g, totals, stageDist, minStageIdx, progress: pct(totals.loaded, totals.qty) };
+      return { ...g, totals, progress: pct(totals.loaded, totals.qty) };
     });
   }, [fOrders]);
 
@@ -206,8 +194,7 @@ function ByOrderGroup({
   onToggle: () => void;
   onOpenLineItem: (o: Order) => void;
 }) {
-  const { totals, stageDist, items } = group;
-  const bottleneckStage = STAGES[group.minStageIdx];
+  const { totals, items } = group;
 
   return (
     <div className={`bypo-group ${collapsed ? "collapsed" : ""}`}>
@@ -273,29 +260,10 @@ function ByOrderGroup({
               <SplitBar produced={totals.produced} palletized={totals.palletized} loaded={totals.loaded} total={totals.qty} />
             </div>
 
-            <div className="rail-stage-dist">
-              {STAGES.map(
-                (s) =>
-                  stageDist[s.id] > 0 && (
-                    <div className="row" key={s.id}>
-                      <span className={`dot ${s.color}`} />
-                      <span>{s.label}</span>
-                      <span className="ct">{stageDist[s.id]}</span>
-                    </div>
-                  ),
-              )}
-            </div>
-
             <div className="rail-footer">
               <Icon name="calendar" size={10} />
               <span>Due</span>
               <span className="mono">{group.dueDate}</span>
-              <span style={{ marginLeft: "auto" }}>
-                <span className={`stage xs ${bottleneckStage.color}`}>
-                  <span className={`dot ${bottleneckStage.color}`} />
-                  at {bottleneckStage.short}
-                </span>
-              </span>
             </div>
           </>
         )}
@@ -321,7 +289,6 @@ function ByOrderGroup({
                   Loaded (boxes)
                 </th>
                 <th>Progress</th>
-                <th>Stage</th>
                 <th colSpan={2} style={{ width: 136 }}>
                   Actions
                 </th>
@@ -368,9 +335,6 @@ function ByOrderGroup({
                       </div>
                       <span className="mono dim" style={{ fontSize: 11 }}>{pct(li.loadedQty, li.orderQty)}%</span>
                     </div>
-                  </td>
-                  <td>
-                    <StageBadge stage={li.stage} />
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <AdvanceButton order={li} />

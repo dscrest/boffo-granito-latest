@@ -34,7 +34,7 @@ interface Charges {
   taxPct: string;
 }
 
-const emptyLine = (): QuoteLine => ({ item: "", qty: 0, rate: 0, discount: 0, description: "" });
+const emptyLine = (): QuoteLine => ({ item: "", qty: 1, rate: 0, discount: 0, description: "" });
 
 /* The customer's addresses of one kind: the primary billing or shipping
    column set plus any same-typed extra addresses added from the customer

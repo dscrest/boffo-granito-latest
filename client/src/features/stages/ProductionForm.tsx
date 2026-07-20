@@ -53,9 +53,9 @@ export function ProductionForm({
   // Independent mode — Quote/SO-style line items (Item + Request Qty).
   // ponytail: no dedupe of the same design across rows; add distinct-design guard if it ever matters.
   type IndepLine = { design: string; qty: string };
-  const emptyLine = (): IndepLine => ({ design: "", qty: "" });
+  const emptyLine = (): IndepLine => ({ design: "", qty: "1" });
   const [indepLines, setIndepLines] = useState<IndepLine[]>(
-    presetDesignId ? [{ design: presetDesignId, qty: "" }] : [emptyLine()],
+    presetDesignId ? [{ design: presetDesignId, qty: "1" }] : [emptyLine()],
   );
   const setLine = (i: number, k: keyof IndepLine, v: string) =>
     setIndepLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
@@ -332,7 +332,9 @@ export function ProductionForm({
                           <td className="num mono">{fmt(it.ordered)}</td>
                           <td className="num mono">{fmt(it.produced)}</td>
                           <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
-                          <td className="num mono">{fmt(it.toProduce)}</td>
+                          {/* Remaining = shortfall AFTER stock in hand (produce only
+                              what stock can't cover): ordered 400, stock 50 → 350, not 400. */}
+                          <td className="num mono">{fmt(recommendedQty(it))}</td>
                           <td className="num">
                             {stockCovers(it) ? (
                               <span className="dim" style={{ color: "var(--c-green)", whiteSpace: "normal", fontSize: "var(--t-sm)" }} title="Available stock (opening + produced − loaded) already covers the ordered qty">
@@ -341,9 +343,9 @@ export function ProductionForm({
                             ) : (
                               <NumberInput
                                 min={0}
-                                max={it.toProduce}
+                                max={recommendedQty(it)}
                                 value={qtyByItem[it.orderItemId] || ""}
-                                onChange={(e) => setQty(it.orderItemId, e.target.value, it.toProduce)}
+                                onChange={(e) => setQty(it.orderItemId, e.target.value, recommendedQty(it))}
                                 placeholder="0"
                                 style={{ width: 100, textAlign: "right" }}
                               />

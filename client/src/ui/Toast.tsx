@@ -2,9 +2,10 @@
    Notification popups — tiny module-level pub/sub, no context.
 
    Anywhere in the app:  toast.success("Saved"); toast.error(msg);
-   <ToastHost/> (mounted once in App) renders top-right popups
-   (user mandate 2026-07-18: keep them out of the centre so they
-   don't distract). Success/info auto-dismiss after a few seconds;
+   <ToastHost/> (mounted once in App) renders bottom-right popups
+   (user mandate: keep them out of the centre so they don't distract;
+   position + opacity are set in styles.css .toast-host/.toast).
+   Success/info auto-dismiss after a few seconds;
    errors stay until closed but never dim or block the screen.
    Click a popup (or its ✕), or press Esc, to dismiss.
    ============================================================ */

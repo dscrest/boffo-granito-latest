@@ -10,7 +10,6 @@
 import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { nextSeqCode } from "@/lib/seq";
-import { sizeDisplayName } from "./sizesApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -109,6 +108,11 @@ const LOOKUP_KEY: Record<string, string> = {
 function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
   const key = LOOKUP_KEY[table];
   const withDims = table === "Size";
+  // Collapse rows that render an identical label (e.g. two Size rows sharing
+  // code+type+thickness+pcs) — visually identical options are unpickable apart,
+  // so show each distinct label once. True duplicate master rows are a separate
+  // data cleanup; this only fixes the picker surface.
+  const seen = new Set<string>();
   return (rows || [])
     .map((r) => {
       const o: LookupOption = { id: String(r.ROWID), label: str(r[key]) || str(r.name) || String(r.ROWID) };
@@ -119,15 +123,16 @@ function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
         o.lengthMm = num(r.length_mm);
         o.pcsPerPacking = num(r.pcs_per_packing);
         o.boxWeightKg = num(r.box_weight_kg);
-        // Size reads as the composed name everywhere it's picked.
-        o.label = sizeDisplayName({
-          code: r.code,
-          tileType: r.tile_type,
-          pcsPerPacking: r.pcs_per_packing,
-          thicknessMm: r.thickness_mm,
-        }) || o.label;
+        // Items carry a plain dimension ("300x300") only. Type / thickness / pcs
+        // belong to palletization, not the item — so the picker shows `code`
+        // (already set above) and same-code variants dedupe to one option.
       }
       return o;
+    })
+    .filter((o) => {
+      if (seen.has(o.label)) return false;
+      seen.add(o.label);
+      return true;
     })
     .sort((a, b) => a.label.localeCompare(b.label));
 }

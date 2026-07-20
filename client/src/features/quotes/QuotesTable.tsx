@@ -113,10 +113,11 @@ function quoteSortVal(q: Quote, k: string): string | number {
   }
 }
 
-// Draft is no longer convertible — quotes must pass approval + customer
-// acceptance flow before becoming Sales Orders.
+// Convert stays disabled until the customer has ACCEPTED the quote (user
+// mandate): a merely-Sent quote can't convert. PartiallyConverted keeps the
+// door open for the remaining, still-accepted lines.
 export const convertible = (s: QuoteStatus) =>
-  s === "Sent" || s === "Accepted" || s === "PartiallyConverted";
+  s === "Accepted" || s === "PartiallyConverted";
 
 export function quoteToInput(q: Quote): NewQuoteInput {
   return {
@@ -239,7 +240,7 @@ export function QuotesTable() {
     return applyFilters(base, criteria, filterFields);
   }, [tab, quotes, query, criteria, filterFields]);
 
-  const sort = useSortRows(filtered, quoteSortVal);
+  const sort = useSortRows(filtered, quoteSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "quotesPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
 

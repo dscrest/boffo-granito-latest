@@ -54,7 +54,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     listAll("SalesOrder", { order: "ROWID desc" }),
     listAll("OrderItem"),
     listAll("Customer", { columns: ["name", "code", "country_code"] }),
-    listAll("Design", { columns: ["design_name", "size", "finish", "brand"] }),
+    listAll("Design", { columns: ["design_name", "unique_name", "size", "finish", "brand"] }),
     list("Size", { limit: 300, columns: ["code"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
     list("Brand", { limit: 300, columns: ["name"] }),
@@ -69,6 +69,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
   const custCode = mapBy(customers.rows, "code");
   const custIso = mapBy(customers.rows, "country_code");
   const designName = mapBy(designs.rows, "design_name");
+  const designUnique = mapBy(designs.rows, "unique_name");
   const sizeName = mapBy(sizes.rows, "code");
   const finishName = mapBy(finishes.rows, "name");
   const brandName = mapBy(brands.rows, "name");
@@ -100,9 +101,10 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       party: custName.get(custId) || "",
       country: iso,
       flag: ISO_FLAG[iso] || "",
-      // Resolve the design FK to its name; if the design was removed (FK
-      // SET-NULL) or unresolved, show "—" rather than a raw ROWID (bug 16).
-      design: designName.get(str(it.design)) || "—",
+      // Resolve the design FK to its full unique label (name · size · finish —
+      // same as the picker) so the SO reads properly; fall back to the plain
+      // name, then "—" for a removed/unresolved FK (bug 16).
+      design: designUnique.get(str(it.design)) || designName.get(str(it.design)) || "—",
       size: sizeStr,
       finish: d ? finishName.get(str(d.finish)) || "" : "",
       brand: d ? brandName.get(str(d.brand)) || "" : "",

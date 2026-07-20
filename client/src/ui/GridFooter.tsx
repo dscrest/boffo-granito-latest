@@ -45,9 +45,14 @@ export type Pager = ReturnType<typeof usePagination>;
 /** Header-click sorting. `get(row, key)` returns the sortable value for a
     column key; numbers sort numerically, everything else localeCompares.
     Click a header to sort asc, click again to flip desc. */
-export function useSortRows<T>(rows: T[], get: (row: T, key: string) => unknown, initialKey = "") {
+export function useSortRows<T>(
+  rows: T[],
+  get: (row: T, key: string) => unknown,
+  initialKey = "",
+  initialDir: 1 | -1 = 1,
+) {
   const [sortKey, setSortKey] = useState(initialKey);
-  const [dir, setDir] = useState<1 | -1>(1);
+  const [dir, setDir] = useState<1 | -1>(initialDir);
   const onSort = (k: string) => {
     if (k === sortKey) setDir((d) => (d === 1 ? -1 : 1));
     else {

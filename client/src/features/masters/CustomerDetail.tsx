@@ -593,7 +593,7 @@ export function CustomerDetail() {
                     <table className="tbl">
                       <thead>
                         <tr>
-                          <th>PO Number</th>
+                          <th>SO Number</th>
                           <th>Design</th>
                           <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
                           <th>Stage</th>
@@ -605,7 +605,7 @@ export function CustomerDetail() {
                           <tr key={o.id}>
                             <td className="mono">
                               <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
-                                {o.poNumber}
+                                {o.orderNumber || o.poNumber || "—"}
                               </Link>
                             </td>
                             <td>{o.designs.length > 1 ? `${o.designs.length} designs` : o.designs[0]}</td>

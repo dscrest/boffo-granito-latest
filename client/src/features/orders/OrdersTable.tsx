@@ -229,7 +229,7 @@ export function OrdersTable() {
     return applyFilters(base, criteria, filterFields);
   }, [tab, rows, query, criteria, filterFields]);
 
-  const sort = useSortRows(filtered, soSortVal);
+  const sort = useSortRows(filtered, soSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "soGridPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
 

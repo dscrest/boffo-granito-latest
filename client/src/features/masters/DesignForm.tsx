@@ -338,9 +338,9 @@ export function DesignFields({
                     ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.
-                      // Size picker shows the composed name (code · type · thickness
-                      // · pcs) so distinct sizes that share a dimension (e.g. two
-                      // "600x600" specs) don't render as identical duplicates.
+                      // Size picker shows the plain dimension ("300x300") only —
+                      // type / thickness / pcs belong to palletization, not the
+                      // item — and same-code variants dedupe to one option.
                       const comboOpts: ComboOption[] = opts
                         ? opts.map((o) => ({ value: o.id, label: o.label }))
                         : f.options!.map((o) => ({ value: o, label: o }));

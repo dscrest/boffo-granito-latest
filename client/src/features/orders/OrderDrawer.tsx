@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { SplitBar, StageBadge } from "@/ui/primitives";
+import { SplitBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
-import { STAGES, type Order } from "@/data";
+import { type Order } from "@/data";
 import { useOrders } from "./useOrders";
 import { AdvanceButton } from "./AdvanceButton";
 import { EmptyState } from "@/ui/States";
@@ -39,8 +39,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
       ),
     [lineItems],
   );
-
-  const stageIdx = STAGES.findIndex((s) => s.id === order.stage);
 
   const navigate = useNavigate();
   // Same rule as OrderDetail's avail(): produced but not yet palletized.
@@ -94,21 +92,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
         </div>
 
         <div className="drawer-body">
-          <div className="stage-timeline">
-            {STAGES.map((s, i) => {
-              const cls = i < stageIdx ? "done" : i === stageIdx ? "curr" : "";
-              // No per-stage timestamps in the DB yet — say Done/In progress, never invent dates.
-              const when = i < stageIdx ? "Done" : i === stageIdx ? "In progress" : "—";
-              return (
-                <div className={`stage-step ${cls}`} key={s.id}>
-                  <div className="ring">{i < stageIdx ? <Icon name="check" size={11} /> : i + 1}</div>
-                  <div className="name">{s.label}</div>
-                  <div className="when">{when}</div>
-                </div>
-              );
-            })}
-          </div>
-
           <div className="mini-stats">
             <div className="mini-stat">
               <div className="l">Order Qty</div>
@@ -187,8 +170,8 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
           Line items
           <span className="right">Click a row to drill into the SKU</span>
         </div>
-        {/* .dpanel clips overflow — without this wrapper the Progress/Stage
-            columns get cut off in the narrow drawer grid. */}
+        {/* .dpanel clips overflow — without this wrapper the Progress column
+            gets cut off in the narrow drawer grid. */}
         <div style={{ overflow: "auto" }}>
         <table className="tbl">
           <thead>
@@ -204,7 +187,6 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
                 Produced (boxes)
               </th>
               <th>Progress</th>
-              <th>Stage</th>
             </tr>
           </thead>
           <tbody>
@@ -226,9 +208,6 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
                 <td className="num">{fmt(li.producedQty)}</td>
                 <td style={{ width: 90 }}>
                   <SplitBar produced={li.producedQty} palletized={li.palletizedQty} loaded={li.loadedQty} total={li.orderQty} />
-                </td>
-                <td>
-                  <StageBadge stage={li.stage} />
                 </td>
               </tr>
             ))}

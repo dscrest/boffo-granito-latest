@@ -191,7 +191,13 @@ export function ProductionKanban({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: depth === 0 ? 0 : 16 }}>
         {[...by.entries()]
-          .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+          // In-progress lanes (any card in InProduction) float to the top; then A→Z.
+          .sort((a, b) => {
+            const ap = a[1].some((c) => c.stage === "InProduction") ? 0 : 1;
+            const bp = b[1].some((c) => c.stage === "InProduction") ? 0 : 1;
+            if (ap !== bp) return ap - bp;
+            return a[0] < b[0] ? -1 : 1;
+          })
           .map(([k, sub]) => (
             <div key={k} className={depth === 0 ? "form-section" : undefined} style={depth === 0 ? undefined : { marginLeft: depth * 16 }}>
               {depth === 0 ? (

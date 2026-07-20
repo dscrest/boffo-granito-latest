@@ -357,6 +357,11 @@ export function OrderDetail() {
   // Independent), not deleted; the SO total is reshaped server-side. An order
   // must keep at least one line (server 409s on the last one).
   const onDeleteLine = async (o: Order) => {
+    // An order must always keep at least one line — block deleting the last one.
+    if (items.length <= 1) {
+      toast.error("An order must keep at least one line item");
+      return;
+    }
     const linked = prodLogs.some((e) => e.orderItemId === o.id);
     const warn = linked
       ? " Any production against it will be kept but disassociated from this order (made independent)."
@@ -387,7 +392,8 @@ export function OrderDetail() {
   ];
 
   // Left panel: one row per Sales Order (orders is per-line-item), filtered.
-  const soHeads = [...new Map(orders.map((o) => [o.salesOrderId || o.id, o])).values()];
+  const soHeads = [...new Map(orders.map((o) => [o.salesOrderId || o.id, o])).values()]
+    .sort((a, b) => Number(b.salesOrderId || b.id) - Number(a.salesOrderId || a.id));
   const needle = listQ.trim().toLowerCase();
   const listed = needle
     ? soHeads.filter((x) => `${x.orderNumber} ${x.poNumber} ${x.party}`.toLowerCase().includes(needle))

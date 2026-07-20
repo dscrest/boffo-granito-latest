@@ -278,10 +278,10 @@ export function OrderForm({
             <Icon name="orders" size={18} />
           </div>
           <div>
-            <div className="ttl">{q ? "Convert to Sales Order" : clone ? "Clone Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
+            <div className="ttl">{q ? "Sales Order" : clone ? "Clone Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
             <div className="sub2">
               {q
-                ? `From quote ${q.quoteNo} · adjust quantities, dates & terms`
+                ? "" // convert mode: no "From quote…" subtitle (user mandate)
                 : clone
                   ? `Copy of ${ed?.orderNumber || ed?.poNumber} · saves as a new order`
                   : ed
@@ -525,7 +525,7 @@ export function OrderForm({
           </button>
           <button className="hbtn primary" onClick={submit}>
             <Icon name="check" size={13} />
-            {q ? "Convert" : "Save"}
+            Save
           </button>
         </div>
       </div>
