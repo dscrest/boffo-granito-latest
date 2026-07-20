@@ -14,6 +14,7 @@ import { DateInput } from "@/ui/DateInput";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
+import { MoreMenu } from "@/features/common/DetailBits";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { NumberInput } from "../../ui/NumberInput";
@@ -21,12 +22,21 @@ import { NumberInput } from "../../ui/NumberInput";
 // Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
 const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
 
-// Distinct, stable colour per design for the truck load bar. Cheap hash → hue.
-const designColor = (id: string) => {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 62%, 52%)`;
-};
+// Distinct, on-theme colours for the truck load bar — assigned by first-seen
+// design in the batch so N items always get N visibly-different segments (a hash
+// gives no such guarantee and can collide two designs into the same hue). Brand
+// orange leads so a single-item load reads as "the app colour". Cycles if a batch
+// ever has more than 8 designs. Same OKLCH family as the theme's --c-* / --accent.
+const DESIGN_PALETTE = [
+  "oklch(0.68 0.17 55)",  // orange (brand)
+  "oklch(0.60 0.13 195)", // teal
+  "oklch(0.58 0.15 250)", // blue
+  "oklch(0.55 0.16 300)", // purple
+  "oklch(0.60 0.18 350)", // magenta
+  "oklch(0.60 0.15 150)", // green
+  "oklch(0.66 0.13 90)",  // gold
+  "oklch(0.58 0.18 25)",  // rust
+];
 
 // ponytail: no Truck master yet — one truck ≈ one container of the chosen
 // pallets. Falls back to a constant when no pallet spec is picked. Swap for a
@@ -63,7 +73,9 @@ export function PalletPackForm({
   const [remarks, setRemarks] = useState("");
   const [needByItem, setNeedByItem] = useState<Record<string, number>>({});
   const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
-  const [trucks, setTrucks] = useState(1);
+  // Vehicles the operator adds beyond what packing needs; the auto count grows
+  // on its own so no vehicle ever exceeds 100% (boxes spill to the next).
+  const [extra, setExtra] = useState(0);
 
   useEffect(() => {
     void (async () => {
@@ -153,26 +165,32 @@ export function PalletPackForm({
     return caps.length ? Math.max(...caps) : DEFAULT_TRUCK_BOXES;
   }, [batches, pallets]);
 
-  // Allocate each line's boxes across the trucks (first-fit) so the load bar can
-  // show per-item colour segments and flag over-capacity trucks in red.
+  // Only palletised lines ride a vehicle — a line without a pallet can't be
+  // saved and has no capacity basis until its pallet is chosen.
+  const palletLines = useMemo(() => saveLines.filter((l) => l.pallet), [saveLines]);
+  const allocBoxes = palletLines.reduce((s, l) => s + l.boxes, 0);
+  // Vehicle count grows so nothing exceeds one vehicle's capacity; the operator
+  // can add empty extras on top. autoVehicles is the trailing-extra threshold.
+  const autoVehicles = Math.max(1, Math.ceil(allocBoxes / truckCapacity));
+  const vehicleCount = autoVehicles + extra;
+
+  // First-fit each line's boxes across the vehicles so the load bar can show
+  // per-item colour segments. vehicleCount is sized so everything fits — a full
+  // vehicle spills into the next, never over capacity.
   const truckLoads = useMemo(() => {
-    const cap = trucks * truckCapacity;
-    const loads: { designId: string; label: string; boxes: number; color: string }[][] = Array.from({ length: trucks }, () => []);
+    const cap = vehicleCount * truckCapacity;
+    const loads: { designId: string; label: string; boxes: number; color: string }[][] = Array.from({ length: vehicleCount }, () => []);
     let idx = 0;
     let used = 0;
-    for (const l of saveLines) {
+    const colorByDesign = new Map<string, string>();
+    for (const l of palletLines) {
       const it = order?.items.find((x) => x.orderItemId === l.order_item);
       if (!it) continue;
       let remaining = l.boxes;
-      const color = designColor(it.designId);
-      while (remaining > 0) {
-        if (idx >= trucks) {
-          // Overflow — pile the rest onto the last truck (renders red).
-          loads[trucks - 1].push({ designId: it.designId, label: it.designLabel, boxes: remaining, color });
-          used += remaining;
-          remaining = 0;
-          break;
-        }
+      if (!colorByDesign.has(it.designId))
+        colorByDesign.set(it.designId, DESIGN_PALETTE[colorByDesign.size % DESIGN_PALETTE.length]);
+      const color = colorByDesign.get(it.designId)!;
+      while (remaining > 0 && idx < vehicleCount) {
         const space = truckCapacity - loads[idx].reduce((s, seg) => s + seg.boxes, 0);
         const put = Math.min(remaining, space);
         if (put > 0) {
@@ -184,7 +202,7 @@ export function PalletPackForm({
       }
     }
     return { loads, cap, used };
-  }, [saveLines, trucks, truckCapacity, order]);
+  }, [palletLines, vehicleCount, truckCapacity, order]);
 
   const missing = !orderId || saveLines.length === 0 || linesNeedingPallet > 0;
   const [showErrors, setShowErrors] = useState(false);
@@ -261,7 +279,7 @@ export function PalletPackForm({
                     {orderErr && <span className="field-err">{orderErr}</span>}
                   </label>
                   <label className="form-field">
-                    <span className="lbl">Palletization date</span>
+                    <span className="lbl">Palletization Date</span>
                     <DateInput value={palletDate} onChange={(e) => setPalletDate(e.target.value)} />
                   </label>
                   <label className="form-field">
@@ -323,64 +341,111 @@ export function PalletPackForm({
                 </div>
               )}
 
-              {order && totalBoxes > 0 && (
+              {order && palletLines.length > 0 && (
                 <div className="form-section">
                   <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>Truck load</span>
+                    <span>Vehicle loading</span>
                     <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
-                      {fmt(truckLoads.used)} / {fmt(truckLoads.cap)} boxes · {trucks} truck{trucks > 1 ? "s" : ""}
+                      {fmt(truckLoads.used)} / {fmt(truckLoads.cap)} boxes · {vehicleCount} vehicle{vehicleCount > 1 ? "s" : ""}
                     </span>
                     <button
                       type="button"
                       className="btn"
                       style={{ marginLeft: "auto", padding: "3px 8px" }}
-                      onClick={() => setTrucks((n) => n + 1)}
+                      onClick={() => setExtra((n) => n + 1)}
                     >
-                      <Icon name="plus" size={12} /> Add truck
+                      <Icon name="plus" size={12} /> Add vehicle
                     </button>
-                    {trucks > 1 && (
-                      <button type="button" className="btn" style={{ padding: "3px 8px" }} onClick={() => setTrucks((n) => Math.max(1, n - 1))}>
-                        Remove
-                      </button>
-                    )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {truckLoads.loads.map((segs, i) => {
                       const loaded = segs.reduce((s, seg) => s + seg.boxes, 0);
-                      const over = loaded > truckCapacity;
+                      const fillPct = truckCapacity > 0 ? Math.round((loaded / truckCapacity) * 100) : 0;
+                      // Fill %: exactly full → green, otherwise under-filled → amber.
+                      const fillColor = loaded === truckCapacity ? "var(--c-green)" : "var(--c-amber)";
+                      // Vehicles beyond the auto-needed count are operator-added extras —
+                      // removable (they're empty; auto vehicles carry the load and stay).
+                      const removable = i >= autoVehicles;
+                      const removeVehicle = () => setExtra((n) => Math.max(0, n - 1));
                       return (
                         <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          {removable && (
+                            <button type="button" className="btn x" title="Remove vehicle" onClick={removeVehicle} style={{ padding: 2 }}>
+                              <Icon name="x" size={14} />
+                            </button>
+                          )}
                           <Icon name="truck" size={20} />
                           <div style={{ flex: 1 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                height: 18,
-                                borderRadius: 5,
-                                overflow: "hidden",
-                                border: `1px solid ${over ? "var(--c-red)" : "var(--border)"}`,
-                                background: "var(--panel-2)",
-                              }}
-                              title={`${fmt(loaded)} / ${fmt(truckCapacity)} boxes${over ? " — over capacity" : ""}`}
-                            >
-                              {segs.map((seg, j) => (
-                                <div
-                                  key={j}
-                                  style={{ width: `${Math.min(100, (seg.boxes / truckCapacity) * 100)}%`, background: over ? "var(--c-red)" : seg.color }}
-                                  title={`${seg.label}: ${fmt(seg.boxes)} boxes`}
-                                />
-                              ))}
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div
+                                style={{
+                                  flex: 1,
+                                  display: "flex",
+                                  height: 18,
+                                  borderRadius: 5,
+                                  overflow: "hidden",
+                                  border: "1px solid var(--border)",
+                                  background: "var(--panel-2)",
+                                }}
+                                title={`${fmt(loaded)} / ${fmt(truckCapacity)} boxes`}
+                              >
+                                {segs.map((seg, j) => {
+                                  const pct = loaded > 0 ? Math.round((seg.boxes / loaded) * 100) : 0;
+                                  const wide = seg.boxes / truckCapacity >= 0.1;
+                                  return (
+                                    <div
+                                      key={j}
+                                      style={{
+                                        width: `${(seg.boxes / truckCapacity) * 100}%`,
+                                        background: seg.color,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        color: "#fff",
+                                        fontSize: 11,
+                                        fontWeight: 600,
+                                        textShadow: "0 1px 1px rgba(0,0,0,0.35)",
+                                        overflow: "hidden",
+                                      }}
+                                      title={`${seg.label}: ${fmt(seg.boxes)} boxes · ${pct}%`}
+                                    >
+                                      {wide ? `${pct}%` : ""}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: fillColor, minWidth: 44, textAlign: "right" }} title="Vehicle fill vs capacity">
+                                {fillPct}%
+                              </span>
                             </div>
-                            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, color: over ? "var(--c-red)" : loaded === truckCapacity ? "var(--c-green)" : undefined }}>
-                              Truck {i + 1} · {fmt(loaded)} / {fmt(truckCapacity)} boxes {over ? "· OVER" : ""}
+                            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+                              Vehicle {i + 1} · {fmt(loaded)} / {fmt(truckCapacity)} boxes
                             </div>
+                            {segs.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 4 }}>
+                                {/* ponytail: one row per segment — a design split across two
+                                    order-item lines would appear twice; fine until that happens. */}
+                                {segs.map((seg, j) => {
+                                  const pct = loaded > 0 ? Math.round((seg.boxes / loaded) * 100) : 0;
+                                  return (
+                                    <span key={j} className="dim" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }}>
+                                      <span style={{ width: 10, height: 10, borderRadius: 3, background: seg.color, flex: "0 0 auto" }} />
+                                      {seg.label} · {fmt(seg.boxes)} boxes · {pct}%
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
+                          {removable && (
+                            <MoreMenu kebab items={[{ label: "Remove vehicle", danger: true, onClick: removeVehicle }]} />
+                          )}
                         </div>
                       );
                     })}
                   </div>
-                  {/* TODO: list partially-empty trucks (undispatched, under-capacity)
-                     for reuse — source: open PalletisedBatch / a future Truck master.
+                  {/* TODO: list partially-empty vehicles (undispatched, under-capacity)
+                     for reuse — source: open PalletisedBatch / a future Vehicle master.
                      Deferred to a later phase per spec 4.12. */}
                 </div>
               )}

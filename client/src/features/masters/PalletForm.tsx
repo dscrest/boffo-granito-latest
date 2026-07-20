@@ -175,7 +175,7 @@ export function PalletForm({
                 ) : (
                   <Combobox
                     value={v.size}
-                    options={[{ value: "", label: "" }, ...sizeOptions.map((s) => ({ value: s.id, label: s.label }))]}
+                    options={sizeOptions.map((s) => ({ value: s.id, label: s.label }))}
                     onChange={(val) => setStr("size", val)}
                     placeholder="Search size…"
                   />
@@ -185,12 +185,9 @@ export function PalletForm({
                 <span className="lbl">Pallet Type</span>
                 <Combobox
                   value={v.pallet_type}
-                  options={[
-                    { value: "", label: "" },
-                    ...(isNewType ? [v.pallet_type.trim()] : [])
-                      .concat(typeOptions)
-                      .map((t) => ({ value: t, label: t })),
-                  ]}
+                  options={(isNewType ? [v.pallet_type.trim()] : [])
+                    .concat(typeOptions)
+                    .map((t) => ({ value: t, label: t }))}
                   onChange={(val) => setStr("pallet_type", val)}
                   onCreate={(name) => setStr("pallet_type", name)}
                   placeholder="Select or create type…"

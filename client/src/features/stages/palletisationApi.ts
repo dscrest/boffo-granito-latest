@@ -68,7 +68,7 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
     listAll("OrderItem"),
     listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer", "port_of_discharge"] }),
     listAll("Customer", { columns: ["name"] }),
-    listAll("Design", { columns: ["design_name", "size"] }),
+    listAll("Design", { columns: ["design_name", "unique_name", "size"] }),
     listAll("Size", { columns: ["code"] }),
     // Outstanding production requests (not yet produced) so "remaining to
     // produce" doesn't offer boxes already awaiting approval/output.
@@ -89,9 +89,11 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   const custName = new Map<string, string>();
   (customers.rows || []).forEach((c) => custName.set(String(c.ROWID), str(c.name)));
   const designName = new Map<string, string>();
+  const uniqueName = new Map<string, string>();
   const designSize = new Map<string, string>();
   (designs.rows || []).forEach((d) => {
     designName.set(String(d.ROWID), str(d.design_name));
+    uniqueName.set(String(d.ROWID), str(d.unique_name));
     designSize.set(String(d.ROWID), str(d.size));
   });
   const sizeCodeById = new Map<string, string>();
@@ -154,7 +156,7 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
     byOrder.get(soId)!.items.push({
       orderItemId: String(it.ROWID),
       designId,
-      designLabel: designName.get(designId) || designId,
+      designLabel: uniqueName.get(designId) || designName.get(designId) || designId,
       sizeId,
       sizeCode: sizeCodeById.get(sizeId) || "",
       ordered,

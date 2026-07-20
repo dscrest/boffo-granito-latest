@@ -348,7 +348,7 @@ export function DesignFields({
                       return (
                         <Combobox
                           value={value[f.key]}
-                          options={[{ value: "", label: "" }, ...comboOpts]}
+                          options={comboOpts}
                           onChange={(val) => handleField(f.key, val)}
                           placeholder={`Search ${f.label.toLowerCase()}…`}
                           invalid={!!err}
@@ -365,7 +365,7 @@ export function DesignFields({
                       return (
                         <Combobox
                           value={cur}
-                          options={[{ value: "", label: "" }, ...all.map((o) => ({ value: o, label: o }))]}
+                          options={all.map((o) => ({ value: o, label: o }))}
                           onChange={(val) => onChange(f.key, val)}
                           onCreate={(name) => void createPartyBrand(name)}
                           placeholder={`Search ${f.label.toLowerCase()}…`}

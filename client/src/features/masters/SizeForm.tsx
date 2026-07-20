@@ -145,12 +145,9 @@ export function SizeForm({
                 <span className="lbl">Type</span>
                 <Combobox
                   value={v.tile_type}
-                  options={[
-                    { value: "", label: "" },
-                    ...(isNewType ? [v.tile_type.trim()] : [])
-                      .concat(typeOptions)
-                      .map((t) => ({ value: t, label: t })),
-                  ]}
+                  options={(isNewType ? [v.tile_type.trim()] : [])
+                    .concat(typeOptions)
+                    .map((t) => ({ value: t, label: t }))}
                   onChange={(val) => setStr("tile_type", val)}
                   onCreate={(name) => setStr("tile_type", name)}
                   placeholder="Select or create type…"
