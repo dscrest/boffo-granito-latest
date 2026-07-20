@@ -1375,21 +1375,17 @@ async function closePallet(catalyst, ds, body) {
   });
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
 
-  // Aggregate per order item, then check palletized + new ≤ produced.
+  // Aggregate per order item. The old "palletized + new ≤ produced" guard was
+  // intentionally REMOVED (user mandate 2026-07-20): "Need Palletization" is a
+  // planning qty the operator sets independently of produced boxes, so more
+  // boxes can be palletised than have been produced (to ship more box orders).
+  // ponytail: relaxed invariant — re-add a cap here if palletising beyond
+  // produced ever needs to be blocked again.
   const reqByOi = new Map();
   for (const l of lines) reqByOi.set(l.order_item, (reqByOi.get(l.order_item) || 0) + l.boxes);
   const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage");
-  for (const [oiId, reqBoxes] of reqByOi) {
-    const oi = oiMap.get(oiId);
-    if (!oi) throw badRequest(`OrderItem not found: ${oiId}`, 404);
-    const produced = Number(oi.produced_qty_boxes) || 0;
-    const palletized = Number(oi.palletized_qty_boxes) || 0;
-    if (palletized + reqBoxes > produced) {
-      throw badRequest(
-        `OrderItem ${oiId}: palletizing ${reqBoxes} exceeds produced (${palletized}+${reqBoxes} > ${produced})`,
-        409,
-      );
-    }
+  for (const oiId of reqByOi.keys()) {
+    if (!oiMap.get(oiId)) throw badRequest(`OrderItem not found: ${oiId}`, 404);
   }
 
   // --- writes (compensate on failure) ---
@@ -2569,6 +2565,106 @@ app.patch("/:table/:rowid", async (req, res) => {
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Delete one SO line item. Unlike the generic delete (which blocks while
+   production references the line), this DISASSOCIATES any linked production:
+   its sales_order/order_item FKs are nulled so it becomes an Independent
+   (make-to-stock) production, an activity entry is logged, the line is
+   soft-deleted, and the SO total is recomputed over the remaining lines.
+   Refuses to remove the order's last line (an SO must keep ≥1 line item).
+   ---------------------------------------------------------------- */
+app.post("/delete-order-item/:id", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const zcql = catalyst.zcql();
+    const oiId = String(req.params.id).replace(/[^0-9]/g, ""); // ROWIDs are numeric
+
+    const [line] = rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID, sales_order FROM OrderItem WHERE ROWID = ${oiId} AND deleted_at is null LIMIT 1`,
+      ),
+    );
+    if (!line) throw badRequest("Order line not found", 404);
+    const soId = String(line.sales_order || "").replace(/[^0-9]/g, "");
+
+    // Keep at least one line on the order.
+    if (soId) {
+      const siblings = rowList(
+        await zcql.executeZCQLQuery(
+          `SELECT ROWID FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+        ),
+      );
+      if (siblings.length <= 1) throw badRequest("An order must keep at least one line item.", 409);
+    }
+
+    // Disassociate any production still linked to this line (→ Independent).
+    const prod = rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID FROM ProductionLog WHERE order_item = ${oiId} AND deleted_at is null`,
+      ),
+    );
+    for (const p of prod) {
+      await ds.table("ProductionLog").updateRow({ ROWID: p.ROWID, sales_order: null, order_item: null });
+      await logTransition(catalyst, {
+        entity_type: "ProductionLog",
+        entity_rowid: p.ROWID,
+        from_status: "SO-linked",
+        to_status: "Independent",
+        note: `SO line ${oiId} removed — production is now independent (make-to-stock).`,
+      });
+    }
+    if (prod.length) {
+      await writeOpLog(catalyst, {
+        table_name: "ProductionLog",
+        operation: "disassociate",
+        entity_rowid: oiId,
+        status: "success",
+        actor: await currentActor(catalyst),
+        payload_summary: summarize({ order_item: oiId, sales_order: soId, disassociated: prod.map((p) => p.ROWID) }),
+      });
+    }
+
+    // Soft-delete the line.
+    await ds.table("OrderItem").updateRow({
+      ROWID: oiId,
+      deleted_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+    });
+    delete _cache.OrderItem;
+
+    // Recompute the SO total over the remaining lines + doc-level charges.
+    if (soId) {
+      const remaining = rowList(
+        await zcql.executeZCQLQuery(
+          `SELECT sub_total FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+        ),
+      );
+      const lineSub = remaining.reduce((s, r) => s + (Number(r.sub_total) || 0), 0);
+      const [so] = rowList(
+        await zcql.executeZCQLQuery(
+          `SELECT discount, adjustment, tax_type, tax_pct FROM SalesOrder WHERE ROWID = ${soId} LIMIT 1`,
+        ),
+      );
+      const doc = docCompute(lineSub, so || {});
+      await ds.table("SalesOrder").updateRow({ ROWID: soId, total_amount: doc.total_amount, tax_amount: doc.tax_amount });
+      delete _cache.SalesOrder;
+    }
+
+    await writeOpLog(catalyst, {
+      table_name: "OrderItem",
+      operation: "soft-delete",
+      entity_rowid: oiId,
+      status: "success",
+      actor: await currentActor(catalyst),
+      payload_summary: summarize({ rowid: oiId, disassociatedProduction: prod.length }),
+    });
+
+    res.json({ ok: true, rowid: oiId, data: { disassociated: prod.length } });
   } catch (err) {
     sendErr(res, err);
   }

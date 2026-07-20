@@ -7,7 +7,6 @@ import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
-import { StageBadge } from "@/ui/primitives";
 import { can, canApprove } from "@/lib/auth";
 import { STAGES, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
@@ -16,7 +15,7 @@ import { createSalesOrder, deleteSalesOrder, deleteOrderItem, listOrders, setOrd
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
-import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
+import { closePallet, listOrderBatches, type ClosePalletInput, type OrderBatchRow } from "@/features/stages/palletisationApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
@@ -27,15 +26,13 @@ import { designStock } from "@/lib/stock";
 // (that's designStock.available, incl. opening stock — see the Items table).
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 
-// Live stage for a line: OrderItem.stage is a manual field that never advances
-// when production completes, so a produced line stays stuck on "prod". When a
-// line's production is finished (≥1 linked ProductionLog, none still open) show
-// the next stage (QC). Display-only — the stored stage is untouched.
-function displayStage(o: Order, prodLogs: ProductionEntry[]): string {
-  if (o.stage !== "prod") return o.stage;
-  const lines = prodLogs.filter((e) => e.orderItemId === o.id);
-  const done = lines.length > 0 && lines.every((e) => e.stage === "Completed" || e.status === "Rejected");
-  return done ? "qc" : o.stage;
+// Boxes currently in production for a line = open ("InProduction") ProductionLog
+// requests against it. Distinct from producedQty (already finished) — shown in
+// the Items table instead of "Produced" (user mandate 2026-07-20).
+function inProductionQty(orderItemId: string, prodLogs: ProductionEntry[]): number {
+  return prodLogs
+    .filter((e) => e.orderItemId === orderItemId && e.stage === "InProduction")
+    .reduce((s, e) => s + (e.qtyRequested || 0), 0);
 }
 
 /* One meaningful header status. Approval/terminal statuses (Draft, Pending
@@ -118,6 +115,58 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
   );
 }
 
+/** Palletised batches committed against this Sales Order (parallel to the
+    Production tab — per-line palletisation detail). */
+function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
+  const [rows, setRows] = useState<OrderBatchRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void listOrderBatches(salesOrderId).then((res) => {
+      if (alive) setRows(res.ok ? res.rows : []);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [salesOrderId]);
+
+  if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading palletisation…</div>;
+  return (
+    <div className="card">
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Palletization Date</th>
+              <th>Design</th>
+              <th>Pallet</th>
+              <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => (
+              <tr key={b.batchId}>
+                <td className="mono muted">{b.date}</td>
+                <td><span className="design-name">{b.design}</span></td>
+                <td>{b.pallet}</td>
+                <td className="num mono">{fmt(b.boxes)}</td>
+                <td><span className="chip">{b.status}</span></td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                  Nothing palletised against this order yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function OrderDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -176,15 +225,22 @@ export function OrderDetail() {
     });
   const toggleAll = () => setSel(allChecked ? new Set() : new Set(selectable.map((o) => o.id)));
 
-  const onPalletSave = async (input: ClosePalletInput) => {
+  const onPalletSave = async (inputs: ClosePalletInput[]) => {
     setPack(null);
-    setNotice("Closing pallet…");
-    const res = await closePallet(input);
-    if (!res.ok) {
-      setNotice(res.error || "Close-pallet failed");
-      return;
+    setNotice("Saving palletisation…");
+    let done = 0;
+    let boxes = 0;
+    for (const input of inputs) {
+      const res = await closePallet(input);
+      if (!res.ok) {
+        setNotice(res.error || "Palletisation failed");
+        await load();
+        return;
+      }
+      done += 1;
+      boxes += res.data?.boxes_packed ?? 0;
     }
-    setNotice(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    setNotice(`Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
     setSel(new Set());
     await load();
   };
@@ -297,25 +353,32 @@ export function OrderDetail() {
     navigate("/orders");
   };
 
-  // Delete one line. The server refuses (409) while a production entry still
-  // references it — delete the downstream transaction first, then the line,
-  // then the (now empty) order.
+  // Delete one line. Any production linked to it is DISASSOCIATED (made
+  // Independent), not deleted; the SO total is reshaped server-side. An order
+  // must keep at least one line (server 409s on the last one).
   const onDeleteLine = async (o: Order) => {
-    if (!(await confirmDialog({ message: `Delete line "${o.design} · ${o.size} · ${o.finish}"? This cannot be undone.`, danger: true }))) return;
+    const linked = prodLogs.some((e) => e.orderItemId === o.id);
+    const warn = linked
+      ? " Any production against it will be kept but disassociated from this order (made independent)."
+      : "";
+    if (!(await confirmDialog({ message: `Delete line "${o.design} · ${o.size} · ${o.finish}"?${warn} This cannot be undone.`, danger: true }))) return;
     const res = await deleteOrderItem(o.id);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
       return;
     }
-    toast.success("Line deleted");
+    const n = res.data?.disassociated || 0;
+    toast.success(n > 0 ? `Line deleted · ${n} production entr${n === 1 ? "y" : "ies"} made independent` : "Line deleted");
+    invalidateProductionLogs();
     await load();
   };
 
   // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
   // Items, Total Qty, Box Branding, Invoice) live in the Items table below.
   const fields: RecordField[] = [
-    // SO Number omitted here — it's the page title (line ~354).
-    { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
+    // SO Number shown in the details (user mandate 2026-07-20: customer details
+    // carry the SO number, not the PO number). It's also the page title.
+    { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
     // Stage omitted — the order's status is the header chip, not repeated here.
     { key: "orderDate", label: "Order Date", value: head.orderDate },
@@ -426,8 +489,8 @@ export function OrderDetail() {
             </>
           )}
           {status === "Confirmed" && can("orders", "edit") && (
-            <button className="hbtn primary" disabled={statusBusy} onClick={() => void changeStatus("InProgress", "Order in progress")} title="Mark this order as In Progress (work has started)">
-              <Icon name="check" size={13} /> Mark In Progress
+            <button className="hbtn primary" disabled={statusBusy} onClick={() => void changeStatus("InProgress", "Order sent to customer")} title="Mark as Sent — the salesperson has acknowledged this order to the customer">
+              <Icon name="check" size={13} /> Mark as Sent
             </button>
           )}
           {status === "Cancelled" && can("orders", "edit") && (
@@ -440,7 +503,7 @@ export function OrderDetail() {
               // Palletise only once the order is past approval (mirror of the
               // items-card buttons; the server never gates on status).
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
-                ? [{ label: "Palletise", onClick: () => setPack({ mode: "all" as const }) }]
+                ? [{ label: "Palletization", onClick: () => setPack({ mode: "all" as const }) }]
                 : []),
               ...(prodJobs.length > 0 && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
                 ? [{ label: "Record New Production", onClick: () => setProd(true) }]
@@ -465,11 +528,14 @@ export function OrderDetail() {
       }
       fields={fields}
       hiddenStorageKey="orderDetailFields"
-      defaultHidden={["orderNumber", "party", "CREATEDTIME", "MODIFIEDTIME"]}
+      defaultHidden={["party", "CREATEDTIME", "MODIFIEDTIME"]}
       hideFields
       extraTabs={
         head.salesOrderId
-          ? [{ id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} /> }]
+          ? [
+              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} /> },
+              { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
+            ]
           : undefined
       }
       activityTable="SalesOrder"
@@ -485,20 +551,15 @@ export function OrderDetail() {
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             {notice && <span className="muted dim" style={{ fontSize: 12, marginRight: 4 }}>{notice}</span>}
+            {/* "Send to Palletisation" (whole order) lives in the header More
+               menu as "Palletization" now (user mandate 2026-07-20). This
+               inline button stays for the ticked-rows path only. */}
             <button
               className="btn"
               disabled={sel.size === 0 || !head.salesOrderId}
               onClick={() => setPack({ mode: "selected" })}
             >
               Send selected ({sel.size})
-            </button>
-            <button
-              className="hbtn primary"
-              disabled={totalAvail === 0 || !head.salesOrderId}
-              onClick={() => setPack({ mode: "all" })}
-            >
-              <Icon name="palette" size={13} />
-              Send to Palletisation
             </button>
           </div>
         </div>
@@ -513,10 +574,9 @@ export function OrderDetail() {
                 <th>Size</th>
                 <th>Finish</th>
                 <th className="num" style={{ textAlign: "right" }}>Ordered</th>
-                <th className="num" style={{ textAlign: "right" }}>Produced</th>
+                <th className="num" style={{ textAlign: "right" }}>In Production</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
                 <th className="num" style={{ textAlign: "right" }}>Available</th>
-                <th>Stage</th>
                 {can("orders", "delete") && <th style={{ width: 34 }} />}
               </tr>
             </thead>
@@ -537,10 +597,9 @@ export function OrderDetail() {
                     <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
                     <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
                     <td className="num mono">{fmt(o.orderQty)}</td>
-                    <td className="num mono">{fmt(o.producedQty)}</td>
+                    <td className="num mono">{fmt(inProductionQty(o.id, prodLogs)) || "—"}</td>
                     <td className="num mono">{fmt(o.palletizedQty)}</td>
                     <td className="num mono" style={{ color: stock > 0 ? "var(--c-green)" : "var(--dim)" }}>{stock || "—"}</td>
-                    <td><StageBadge stage={displayStage(o, prodLogs)} /></td>
                     {can("orders", "delete") && (
                       <td style={{ textAlign: "center" }}>
                         <button

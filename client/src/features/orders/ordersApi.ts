@@ -100,7 +100,9 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       party: custName.get(custId) || "",
       country: iso,
       flag: ISO_FLAG[iso] || "",
-      design: designName.get(str(it.design)) || str(it.design),
+      // Resolve the design FK to its name; if the design was removed (FK
+      // SET-NULL) or unresolved, show "—" rather than a raw ROWID (bug 16).
+      design: designName.get(str(it.design)) || "—",
       size: sizeStr,
       finish: d ? finishName.get(str(d.finish)) || "" : "",
       brand: d ? brandName.get(str(d.brand)) || "" : "",
@@ -184,6 +186,9 @@ export const SO_STATUS_CHIP: Record<string, string> = {
 };
 export const SO_STATUS_LABEL: Record<string, string> = {
   PendingApproval: "Pending Approval",
+  // Stored value stays "Confirmed"; it reads as "Approved" everywhere (user
+  // mandate 2026-07-20: post-approval label is "Approved", not "Confirmed").
+  Confirmed: "Approved",
   InProgress: "In Progress",
 };
 export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
@@ -210,10 +215,13 @@ export function deleteSalesOrder(rowid: string) {
   return bust(remove("SalesOrder", rowid));
 }
 
-/** Delete a single order line. Server refuses (409) while a production entry
-    still references it — delete the downstream transaction first. */
+/** Delete a single order line. Any production still linked to the line is
+    DISASSOCIATED (made Independent — its sales_order/order_item FKs are nulled
+    and an activity entry is logged), NOT deleted, then the SO total is
+    recomputed over the remaining lines. Server refuses to delete the order's
+    last line (an SO must keep ≥1 line item). */
 export function deleteOrderItem(orderItemId: string) {
-  return bust(remove("OrderItem", orderItemId));
+  return bust(op<{ rowid: string; disassociated: number }>(`delete-order-item/${orderItemId}`, {}));
 }
 
 /** Change SO status through the server-side state machine (/so-status —

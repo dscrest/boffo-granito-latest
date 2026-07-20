@@ -21,6 +21,7 @@ export interface PalletizableItem {
   designId: string; // Design ROWID
   designLabel: string;
   sizeId: string; // Size ROWID via Design.size ("" when unset)
+  sizeCode: string; // Size.code e.g. "300x300" (for per-line pallet-size matching)
   ordered: number; // ordered_qty_boxes (confirmed demand)
   available: number; // produced − palletized (boxes free to palletize NOW)
   produced: number;
@@ -61,11 +62,12 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
   orders: PalletizableOrder[];
   error?: string;
 }> {
-  const [items, sos, customers, designs, prod] = await Promise.all([
+  const [items, sos, customers, designs, sizes, prod] = await Promise.all([
     listAll("OrderItem"),
     listAll("SalesOrder", { order: "ROWID desc", columns: ["po_number", "order_number", "customer", "port_of_discharge"] }),
     listAll("Customer", { columns: ["name"] }),
     listAll("Design", { columns: ["design_name", "size"] }),
+    listAll("Size", { columns: ["code"] }),
     // Outstanding production requests (not yet produced) so "remaining to
     // produce" doesn't offer boxes already awaiting approval/output.
     listAll("ProductionLog", { columns: ["order_item", "qty_requested", "status"] }),
@@ -90,6 +92,8 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
     designName.set(String(d.ROWID), str(d.design_name));
     designSize.set(String(d.ROWID), str(d.size));
   });
+  const sizeCodeById = new Map<string, string>();
+  (sizes.rows || []).forEach((s) => sizeCodeById.set(String(s.ROWID), str(s.code)));
 
   const preset = opts?.includeOrderId;
   const byOrder = new Map<string, PalletizableOrder>();
@@ -117,11 +121,13 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       });
     }
     const designId = str(it.design);
+    const sizeId = designSize.get(designId) || "";
     byOrder.get(soId)!.items.push({
       orderItemId: String(it.ROWID),
       designId,
       designLabel: designName.get(designId) || designId,
-      sizeId: designSize.get(designId) || "",
+      sizeId,
+      sizeCode: sizeCodeById.get(sizeId) || "",
       ordered,
       available,
       produced,
@@ -179,6 +185,44 @@ async function fetchLoadableBatches(): Promise<{
 }
 
 /* ---- close-pallet: produced → palletized ---- */
+/* ---- palletisation batches for one Sales Order (SO detail "Palletization" tab) ---- */
+export interface OrderBatchRow {
+  batchId: string;
+  design: string;
+  pallet: string;
+  boxes: number;
+  date: string; // palletization date (delivery_date)
+  status: string;
+}
+
+/** Palletised batches committed against one Sales Order — powers the SO
+    detail Palletization tab (parallel to the Production tab). */
+export async function listOrderBatches(
+  salesOrderId: string,
+): Promise<{ ok: boolean; rows: OrderBatchRow[]; error?: string }> {
+  const [batches, designs, pallets] = await Promise.all([
+    listAll("PalletisedBatch", { order: "ROWID desc" }),
+    listAll("Design", { columns: ["design_name"] }),
+    listAll("Pallet", { columns: ["name"] }),
+  ]);
+  if (!batches.ok) return { ok: false, rows: [], error: batches.error };
+  const designName = new Map<string, string>();
+  (designs.rows || []).forEach((d) => designName.set(String(d.ROWID), str(d.design_name)));
+  const palletName = new Map<string, string>();
+  (pallets.rows || []).forEach((p) => palletName.set(String(p.ROWID), str(p.name)));
+  const rows: OrderBatchRow[] = (batches.rows || [])
+    .filter((b) => str(b.sales_order) === String(salesOrderId))
+    .map((b) => ({
+      batchId: String(b.ROWID),
+      design: designName.get(str(b.design)) || "—",
+      pallet: palletName.get(str(b.pallet)) || "—",
+      boxes: num(b.boxes_packed),
+      date: str(b.delivery_date) || "—",
+      status: str(b.status) || "—",
+    }));
+  return { ok: true, rows };
+}
+
 export interface ClosePalletLine {
   order_item: string; // OrderItem ROWID
   boxes: number;

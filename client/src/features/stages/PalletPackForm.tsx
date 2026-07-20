@@ -1,21 +1,37 @@
 /* ============================================================
-   Close Pallet form — commits a PalletisedBatch via the close-pallet
-   saga. Operator picks a sales order, a pallet spec, and the boxes to
-   palletize per order item (capped at produced − already-palletized).
-   The server enforces palletized ≤ produced and compensates on any
-   mid-write failure. Reuses the shared form/modal CSS (df-*, form-*).
+   Palletization form — commits one or more PalletisedBatches via the
+   close-pallet saga. The operator picks a sales order, then per LINE ITEM
+   a pallet spec (filtered to the item's size) and a "Need Palletization"
+   qty (defaults to the ordered qty; intentionally NOT capped at produced —
+   the operator decides how many boxes to palletise). On save the lines are
+   grouped by their chosen pallet into one batch per pallet.
+   Reuses the shared form/modal CSS (df-*, form-*).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
 import { todayISO } from "@/lib/dates";
+import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
-import { listContainers, listContainerFill, type ContainerRow } from "@/features/masters/containersApi";
-import { listPalletizable, type ClosePalletInput, type PalletizableOrder } from "./palletisationApi";
+import { listPalletizable, type ClosePalletInput, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { NumberInput } from "../../ui/NumberInput";
+
+// Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
+const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
+
+// Distinct, stable colour per design for the truck load bar. Cheap hash → hue.
+const designColor = (id: string) => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return `hsl(${h}, 62%, 52%)`;
+};
+
+// ponytail: no Truck master yet — one truck ≈ one container of the chosen
+// pallets. Falls back to a constant when no pallet spec is picked. Swap for a
+// real Truck master + capacity when trucks get modelled.
+const DEFAULT_TRUCK_BOXES = 1000;
 
 export function PalletPackForm({
   onSave,
@@ -25,38 +41,35 @@ export function PalletPackForm({
   preselectItemIds,
   autoFillAll,
 }: {
-  onSave: (input: ClosePalletInput) => void | Promise<void>;
+  /** One batch per distinct pallet chosen across the lines. */
+  onSave: (inputs: ClosePalletInput[]) => void | Promise<void>;
   onClose: () => void;
   /** When set, scope the form to one confirmed Sales Order (locked select). */
   presetOrderId?: string;
-  /** When set, scope the form to one Pallet spec (locked select). */
+  /** When set, pre-fill every line's pallet to this spec. */
   presetPalletId?: string;
-  /** OrderItem ROWIDs to pre-fill to their full available qty on open. */
+  /** OrderItem ROWIDs to seed a Need-Palletization qty for (rest start at 0). */
   preselectItemIds?: string[];
-  /** Pre-fill every ready line to its available qty on open (full palletize). */
+  /** Seed every line's Need-Palletization to its ordered qty on open. */
   autoFillAll?: boolean;
 }) {
-  const navigate = useNavigate();
   const [orders, setOrders] = useState<PalletizableOrder[]>([]);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
-  const [containers, setContainers] = useState<ContainerRow[]>([]);
-  const [fill, setFill] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [orderId, setOrderId] = useState("");
-  const [palletId, setPalletId] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState(todayISO());
+  const [palletDate, setPalletDate] = useState(todayISO());
   const [remarks, setRemarks] = useState("");
-  const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
+  const [needByItem, setNeedByItem] = useState<Record<string, number>>({});
+  const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
+  const [trucks, setTrucks] = useState(1);
 
   useEffect(() => {
     void (async () => {
-      const [po, pl, cs, cf] = await Promise.all([
+      const [po, pl] = await Promise.all([
         listPalletizable(presetOrderId ? { includeOrderId: presetOrderId } : undefined),
         listPallets(),
-        listContainers(),
-        listContainerFill(),
       ]);
       setLoading(false);
       if (!po.ok) {
@@ -65,125 +78,118 @@ export function PalletPackForm({
       }
       setOrders(po.orders);
       setPallets(pl.ok ? pl.pallets : []);
-      // Advisory only — a failed container read just hides the fill hint.
-      setContainers(cs.ok ? cs.containers : []);
-      setFill(cf.ok ? cf.loadedBoxes : new Map());
-      // Auto-select the preset order, or the only order when there's just one.
       if (presetOrderId && po.orders.some((o) => o.salesOrderId === presetOrderId)) {
         setOrderId(presetOrderId);
       } else if (po.orders.length === 1) {
         setOrderId(po.orders[0].salesOrderId);
       }
-      // Launched from a Pallet's detail page — that spec is the batch's pallet.
-      if (presetPalletId && pl.ok && pl.pallets.some((p) => p.id === presetPalletId)) {
-        setPalletId(presetPalletId);
-      }
     })();
-  }, [presetOrderId, presetPalletId]);
+  }, [presetOrderId]);
 
   const order = useMemo(() => orders.find((o) => o.salesOrderId === orderId) || null, [orders, orderId]);
 
-  // Pallet specs offered = those matching the sizes being palletized (a batch
-  // has ONE spec). Before boxes are typed: any size on the order; once boxes
-  // are entered: only those lines' sizes. Size-less specs/items don't constrain.
-  const filteredPallets = useMemo(() => {
-    if (!order) return pallets;
-    const sizes = new Set<string>();
-    for (const it of order.items) {
-      if (it.sizeId && (boxesByItem[it.orderItemId] || 0) > 0) sizes.add(it.sizeId);
-    }
-    if (sizes.size === 0) {
-      for (const it of order.items) if (it.sizeId && it.available > 0) sizes.add(it.sizeId);
-    }
-    if (sizes.size === 0) return pallets;
-    return pallets.filter((p) => !p.sizeId || sizes.has(p.sizeId));
-  }, [order, pallets, boxesByItem]);
+  // Pallet specs offered for a line = those whose size WIDTH matches the item's
+  // (item 300x300 → any 300-series pallet). Size-agnostic pallets always show.
+  const palletsForItem = (it: PalletizableItem) => {
+    const w = widthOf(it.sizeCode);
+    return pallets.filter((p) => {
+      if (!p.sizeId) return true;
+      const pw = widthOf(p.sizeLabel);
+      return !w || !pw || pw === w;
+    });
+  };
 
-  // A previously chosen pallet that no longer matches the entered sizes clears.
-  // A locked pallet is exempt — the operator picked the spec, not the sizes.
-  useEffect(() => {
-    if (presetPalletId) return;
-    if (palletId && !filteredPallets.some((p) => p.id === palletId)) setPalletId("");
-  }, [filteredPallets, palletId, presetPalletId]);
-
-  // Reset per-item boxes whenever the chosen order changes, then apply any
-  // preselect / auto-fill-all requested by the launch point (Order detail).
+  // Seed per-line Need Palletization (default = ordered qty) + pallet whenever
+  // the chosen order changes, honouring any preselect / preset from the caller.
   useEffect(() => {
     if (!order) {
-      setBoxesByItem({});
+      setNeedByItem({});
+      setPalletByItem({});
       return;
     }
-    const pre: Record<string, number> = {};
+    const need: Record<string, number> = {};
+    const pal: Record<string, string> = {};
     const wanted = preselectItemIds ? new Set(preselectItemIds) : null;
     for (const it of order.items) {
-      if (it.available <= 0) continue;
-      if (autoFillAll || (wanted && wanted.has(it.orderItemId))) pre[it.orderItemId] = it.available;
+      const seed = autoFillAll || !wanted || wanted.has(it.orderItemId);
+      need[it.orderItemId] = seed ? it.ordered : 0;
+      if (presetPalletId) pal[it.orderItemId] = presetPalletId;
     }
-    setBoxesByItem(pre);
+    setNeedByItem(need);
+    setPalletByItem(pal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId, order, autoFillAll]);
 
-  const setBoxes = (itemId: string, raw: string, max: number) => {
-    const n = Math.max(0, Math.min(Number(raw) || 0, max));
-    setBoxesByItem((p) => ({ ...p, [itemId]: n }));
-  };
+  const setNeed = (itemId: string, raw: string) =>
+    setNeedByItem((p) => ({ ...p, [itemId]: Math.max(0, Number(raw) || 0) })); // no cap (user mandate)
+  const setPallet = (itemId: string, pid: string) => setPalletByItem((p) => ({ ...p, [itemId]: pid }));
 
-  /** Fill every ready line to its full available qty (manual "full palletize"). */
-  const fillAll = () => {
-    const next: Record<string, number> = {};
-    for (const it of order?.items || []) if (it.available > 0) next[it.orderItemId] = it.available;
-    setBoxesByItem(next);
-  };
-  const readyCount = (order?.items || []).filter((it) => it.available > 0).length;
-
-  const lines = useMemo(
+  // Save lines = every item with a Need qty > 0.
+  const saveLines = useMemo(
     () =>
       (order?.items || [])
-        .map((it) => ({ order_item: it.orderItemId, boxes: boxesByItem[it.orderItemId] || 0 }))
+        .map((it) => ({ order_item: it.orderItemId, boxes: needByItem[it.orderItemId] || 0, pallet: palletByItem[it.orderItemId] || "" }))
         .filter((l) => l.boxes > 0),
-    [order, boxesByItem],
+    [order, needByItem, palletByItem],
   );
-  const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+  const totalBoxes = saveLines.reduce((s, l) => s + l.boxes, 0);
+  const linesNeedingPallet = saveLines.filter((l) => !l.pallet).length;
 
-  /* Advisory container-fill math (arrangement A). Hint only — the batch is
-     still assigned to a container later, in the Loading stage. */
-  const pallet = useMemo(() => pallets.find((p) => p.id === palletId) || null, [pallets, palletId]);
-  const bpc = pallet?.boxesPerContainer || 0; // boxes_per_pallet × pallets_per_container
-  const palletsNeeded = pallet && pallet.boxesPerPallet > 0 ? Math.ceil(totalBoxes / pallet.boxesPerPallet) : 0;
-  const containersNeeded = bpc > 0 ? Math.ceil(totalBoxes / bpc) : 0;
-  const pctOfContainer = bpc > 0 ? Math.round((totalBoxes / bpc) * 100) : 0;
+  // Group lines by chosen pallet → one PalletisedBatch per pallet.
+  const batches = useMemo(() => {
+    const by = new Map<string, { order_item: string; boxes: number }[]>();
+    for (const l of saveLines) {
+      if (!l.pallet) continue;
+      (by.get(l.pallet) ?? by.set(l.pallet, []).get(l.pallet)!).push({ order_item: l.order_item, boxes: l.boxes });
+    }
+    return [...by.entries()].map(([pallet, lines]) => ({ pallet, lines }));
+  }, [saveLines]);
 
-  // Partially-full, undispatched containers headed to the order's destination
-  // (spec 8.1). POD is free text on both tables → case-insensitive trim match.
-  const podMatches = useMemo(() => {
-    const pod = (order?.portOfDischarge || "").trim().toLowerCase();
-    if (!pod) return [];
-    return containers
-      .filter((c) => c.status !== "dispatched" && c.capacityBoxes > 0)
-      .filter((c) => c.portOfDischarge.trim().toLowerCase() === pod)
-      .map((c) => ({ ...c, loaded: fill.get(c.id) || 0 }))
-      .filter((c) => c.loaded > 0 && c.loaded < c.capacityBoxes);
-  }, [containers, fill, order]);
-  // Lines with nothing ready to palletize but still owed production.
-  const needProduction = useMemo(
-    () => (order?.items || []).filter((it) => it.available <= 0 && it.toProduce > 0).length,
-    [order],
-  );
-  // With the pallet locked the size filter can't narrow it to the boxed lines,
-  // so a mismatch is possible. Say so — but don't block: the operator chose this spec.
-  const sizeMismatch = useMemo(() => {
-    if (!presetPalletId || !pallet?.sizeId) return 0;
-    return (order?.items || []).filter(
-      (it) => (boxesByItem[it.orderItemId] || 0) > 0 && it.sizeId && it.sizeId !== pallet.sizeId,
-    ).length;
-  }, [presetPalletId, pallet, order, boxesByItem]);
-  const missing = !orderId || !palletId || lines.length === 0;
+  // Truck capacity (boxes) ≈ one container of the chosen pallets. Advisory.
+  const truckCapacity = useMemo(() => {
+    const caps = batches
+      .map((b) => pallets.find((p) => p.id === b.pallet)?.boxesPerContainer || 0)
+      .filter((n) => n > 0);
+    return caps.length ? Math.max(...caps) : DEFAULT_TRUCK_BOXES;
+  }, [batches, pallets]);
 
-  // Errors stay hidden until the first submit attempt, then update live.
+  // Allocate each line's boxes across the trucks (first-fit) so the load bar can
+  // show per-item colour segments and flag over-capacity trucks in red.
+  const truckLoads = useMemo(() => {
+    const cap = trucks * truckCapacity;
+    const loads: { designId: string; label: string; boxes: number; color: string }[][] = Array.from({ length: trucks }, () => []);
+    let idx = 0;
+    let used = 0;
+    for (const l of saveLines) {
+      const it = order?.items.find((x) => x.orderItemId === l.order_item);
+      if (!it) continue;
+      let remaining = l.boxes;
+      const color = designColor(it.designId);
+      while (remaining > 0) {
+        if (idx >= trucks) {
+          // Overflow — pile the rest onto the last truck (renders red).
+          loads[trucks - 1].push({ designId: it.designId, label: it.designLabel, boxes: remaining, color });
+          used += remaining;
+          remaining = 0;
+          break;
+        }
+        const space = truckCapacity - loads[idx].reduce((s, seg) => s + seg.boxes, 0);
+        const put = Math.min(remaining, space);
+        if (put > 0) {
+          loads[idx].push({ designId: it.designId, label: it.designLabel, boxes: put, color });
+          used += put;
+          remaining -= put;
+        }
+        if (remaining > 0) idx++;
+      }
+    }
+    return { loads, cap, used };
+  }, [saveLines, trucks, truckCapacity, order]);
+
+  const missing = !orderId || saveLines.length === 0 || linesNeedingPallet > 0;
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const orderErr = showErrors && !orderId ? "Sales Order is required" : null;
-  const palletErr = showErrors && !palletId ? "Pallet is required" : null;
 
   const submit = async () => {
     if (missing) {
@@ -192,13 +198,15 @@ export function PalletPackForm({
     }
     setSaving(true);
     try {
-      await onSave({
-        sales_order: orderId,
-        pallet: palletId,
-        delivery_date: deliveryDate || undefined,
-        remarks: remarks.trim() || undefined,
-        lines,
-      });
+      await onSave(
+        batches.map((b) => ({
+          sales_order: orderId,
+          pallet: b.pallet,
+          delivery_date: palletDate || undefined,
+          remarks: remarks.trim() || undefined,
+          lines: b.lines,
+        })),
+      );
     } finally {
       setSaving(false);
     }
@@ -213,10 +221,7 @@ export function PalletPackForm({
           <div className="ico">
             <Icon name="palette" size={18} />
           </div>
-          <div>
-            <div className="ttl">Close Pallet</div>
-            <div className="sub2">Commits a palletised batch · produced → palletized</div>
-          </div>
+          <div style={{ flex: 1 }} />
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
@@ -230,9 +235,7 @@ export function PalletPackForm({
             </div>
           )}
           {!loading && !error && orders.length === 0 && (
-            <div className="muted" style={{ padding: 8 }}>
-              No produced boxes are waiting to be palletized. Log production first.
-            </div>
+            <div className="muted" style={{ padding: 8 }}>No sales orders available to palletise.</div>
           )}
 
           {!loading && orders.length > 0 && (
@@ -258,29 +261,8 @@ export function PalletPackForm({
                     {orderErr && <span className="field-err">{orderErr}</span>}
                   </label>
                   <label className="form-field">
-                    <span className="lbl">
-                      Pallet<span className="req"> *</span>
-                    </span>
-                    {presetPalletId ? (
-                      <input value={pallet?.name || presetPalletId} readOnly disabled />
-                    ) : (
-                      <Combobox
-                        value={palletId}
-                        options={filteredPallets.map((p) => ({
-                          value: p.id,
-                          label: p.name + (p.boxesPerPallet > 0 ? ` (${p.boxesPerPallet}/pallet)` : ""),
-                          hint: p.sizeLabel,
-                        }))}
-                        onChange={setPalletId}
-                        placeholder="Search pallets…"
-                        invalid={!!palletErr}
-                      />
-                    )}
-                    {palletErr && <span className="field-err">{palletErr}</span>}
-                  </label>
-                  <label className="form-field">
-                    <span className="lbl">Delivery Date</span>
-                    <DateInput value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+                    <span className="lbl">Palletization date</span>
+                    <DateInput value={palletDate} onChange={(e) => setPalletDate(e.target.value)} />
                   </label>
                   <label className="form-field">
                     <span className="lbl">Remarks</span>
@@ -291,139 +273,113 @@ export function PalletPackForm({
 
               {order && (
                 <div className="form-section">
-                  <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>Items from this Sales Order</span>
-                    <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={readyCount === 0}
-                        title="Palletize every produced box across all items"
-                        onClick={fillAll}
-                        style={{ padding: "3px 8px" }}
-                      >
-                        Fill all available
-                      </button>
-                      <button
-                        type="button"
-                        className="btn"
-                        disabled={totalBoxes === 0}
-                        onClick={() => setBoxesByItem({})}
-                        style={{ padding: "3px 8px" }}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
+                  <div className="form-section-title">Items from this Sales Order</div>
                   <table className="tbl">
                     <thead>
                       <tr>
                         <th>Design</th>
                         <th className="num" style={{ textAlign: "right" }}>Ordered</th>
-                        <th className="num" style={{ textAlign: "right" }}>Produced</th>
-                        <th className="num" style={{ textAlign: "right" }}>Palletized</th>
-                        <th className="num" style={{ textAlign: "right" }}>Available</th>
-                        <th className="num" style={{ textAlign: "right", width: 120 }}>Boxes</th>
+                        <th className="num" style={{ textAlign: "right", width: 130 }}>Need Palletization</th>
+                        <th className="num" style={{ textAlign: "right" }}>Palletised</th>
+                        <th style={{ minWidth: 220 }}>Pallet</th>
                       </tr>
                     </thead>
                     <tbody>
                       {order.items.map((it) => {
-                        const ready = it.available > 0;
+                        const opts = palletsForItem(it);
+                        const need = needByItem[it.orderItemId] || 0;
+                        const palletErr = showErrors && need > 0 && !palletByItem[it.orderItemId];
                         return (
                           <tr key={it.orderItemId}>
                             <td>
                               <span className="design-name">{it.designLabel}</span>
                             </td>
-                            <td className="num mono">{it.ordered}</td>
-                            <td className="num mono">{it.produced}</td>
-                            <td className="num mono">{it.palletized}</td>
-                            <td className="num mono">{it.available}</td>
+                            <td className="num mono">{fmt(it.ordered)}</td>
                             <td className="num">
-                              {ready ? (
-                                <NumberInput
-                                  max={it.available}
-                                  value={boxesByItem[it.orderItemId] || ""}
-                                  onChange={(e) => setBoxes(it.orderItemId, e.target.value, it.available)}
-                                  placeholder="0"
-                                  style={{ width: 100, textAlign: "right" }}
-                                />
-                              ) : (
-                                <span
-                                  className="chip"
-                                  title={`${it.toProduce} boxes still to produce`}
-                                  style={{ background: "var(--c-amber-bg, rgba(245,158,11,.12))", color: "var(--c-amber)" }}
-                                >
-                                  → Production
-                                </span>
-                              )}
+                              <NumberInput
+                                value={needByItem[it.orderItemId] ?? ""}
+                                onChange={(e) => setNeed(it.orderItemId, e.target.value)}
+                                placeholder="0"
+                                style={{ width: 110, textAlign: "right" }}
+                              />
+                            </td>
+                            <td className="num mono">{fmt(it.palletized)}</td>
+                            <td>
+                              <Combobox
+                                value={palletByItem[it.orderItemId] || ""}
+                                options={opts.map((p) => ({ value: p.id, label: p.name }))}
+                                onChange={(v) => setPallet(it.orderItemId, v)}
+                                placeholder={opts.length ? "Choose pallet…" : "No matching pallet"}
+                                invalid={palletErr}
+                              />
                             </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
-                  {needProduction > 0 && (
-                    <div
-                      className="muted"
-                      style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, fontSize: 12 }}
-                    >
-                      <span>
-                        {needProduction} item{needProduction > 1 ? "s" : ""} not yet produced.
-                      </span>
-                      <button
-                        type="button"
-                        className="btn"
-                        onClick={() => {
-                          onClose();
-                          navigate("/prod");
-                        }}
-                      >
-                        Send to production →
-                      </button>
-                    </div>
-                  )}
-                  {sizeMismatch > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, fontSize: 12, color: "var(--c-amber)" }}>
-                      <span>
-                        {sizeMismatch} boxed item{sizeMismatch > 1 ? "s are" : " is"} a different size than this pallet
-                        {pallet?.sizeLabel ? ` (${pallet.sizeLabel})` : ""}.
-                      </span>
-                    </div>
-                  )}
                 </div>
               )}
 
-              {pallet && totalBoxes > 0 && bpc > 0 && (
+              {order && totalBoxes > 0 && (
                 <div className="form-section">
-                  <div className="form-section-title">Container fill (estimate)</div>
-                  <div style={{ fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span>
-                      <b className="mono">{palletsNeeded}</b> pallet{palletsNeeded !== 1 ? "s" : ""} ·{" "}
-                      <b className="mono">{pctOfContainer}%</b> of one container ({pallet.boxesPerPallet} boxes ×{" "}
-                      {pallet.palletsPerContainer} pallets = {bpc} boxes)
+                  <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>Truck load</span>
+                    <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+                      {fmt(truckLoads.used)} / {fmt(truckLoads.cap)} boxes · {trucks} truck{trucks > 1 ? "s" : ""}
                     </span>
-                    {totalBoxes <= bpc ? (
-                      <span className="muted">Space left in this container: {bpc - totalBoxes} boxes</span>
-                    ) : (
-                      <span className="muted">
-                        Needs {containersNeeded} containers ({totalBoxes - bpc * (containersNeeded - 1)} boxes in the
-                        last one)
-                      </span>
-                    )}
-                    {podMatches.length > 0 && (
-                      <>
-                        <span className="muted" style={{ marginTop: 4 }}>
-                          Partially full containers to {order?.portOfDischarge}:
-                        </span>
-                        {podMatches.map((c) => (
-                          <span key={c.id} className="mono muted">
-                            {c.containerNumber} · {c.capacityBoxes - c.loaded} boxes free ·{" "}
-                            {Math.round((c.loaded / c.capacityBoxes) * 100)}% full
-                          </span>
-                        ))}
-                      </>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ marginLeft: "auto", padding: "3px 8px" }}
+                      onClick={() => setTrucks((n) => n + 1)}
+                    >
+                      <Icon name="plus" size={12} /> Add truck
+                    </button>
+                    {trucks > 1 && (
+                      <button type="button" className="btn" style={{ padding: "3px 8px" }} onClick={() => setTrucks((n) => Math.max(1, n - 1))}>
+                        Remove
+                      </button>
                     )}
                   </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {truckLoads.loads.map((segs, i) => {
+                      const loaded = segs.reduce((s, seg) => s + seg.boxes, 0);
+                      const over = loaded > truckCapacity;
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <Icon name="truck" size={20} />
+                          <div style={{ flex: 1 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                height: 18,
+                                borderRadius: 5,
+                                overflow: "hidden",
+                                border: `1px solid ${over ? "var(--c-red)" : "var(--border)"}`,
+                                background: "var(--panel-2)",
+                              }}
+                              title={`${fmt(loaded)} / ${fmt(truckCapacity)} boxes${over ? " — over capacity" : ""}`}
+                            >
+                              {segs.map((seg, j) => (
+                                <div
+                                  key={j}
+                                  style={{ width: `${Math.min(100, (seg.boxes / truckCapacity) * 100)}%`, background: over ? "var(--c-red)" : seg.color }}
+                                  title={`${seg.label}: ${fmt(seg.boxes)} boxes`}
+                                />
+                              ))}
+                            </div>
+                            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, color: over ? "var(--c-red)" : loaded === truckCapacity ? "var(--c-green)" : undefined }}>
+                              Truck {i + 1} · {fmt(loaded)} / {fmt(truckCapacity)} boxes {over ? "· OVER" : ""}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* TODO: list partially-empty trucks (undispatched, under-capacity)
+                     for reuse — source: open PalletisedBatch / a future Truck master.
+                     Deferred to a later phase per spec 4.12. */}
                 </div>
               )}
             </>
@@ -434,10 +390,14 @@ export function PalletPackForm({
           <span className="df-req-note">
             {showErrors && missing ? (
               <span className="field-err">
-                {lines.length === 0 ? "Enter boxes for at least one item" : "Fill the required fields above"}
+                {saveLines.length === 0
+                  ? "Enter a Need-Palletization qty for at least one item"
+                  : linesNeedingPallet > 0
+                    ? "Choose a pallet for every line with a qty"
+                    : "Fill the required fields above"}
               </span>
             ) : totalBoxes > 0 ? (
-              `${totalBoxes} boxes · ${lines.length} item${lines.length > 1 ? "s" : ""}`
+              `${fmt(totalBoxes)} boxes · ${batches.length} pallet${batches.length > 1 ? "s" : ""}`
             ) : (
               "* Indicates a mandatory field"
             )}
@@ -447,7 +407,7 @@ export function PalletPackForm({
           </button>
           <button className="hbtn primary" disabled={saving} onClick={submit}>
             <Icon name="check" size={13} />
-            {saving ? "Saving…" : "Close pallet"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>

@@ -50,18 +50,26 @@ export function PalletPacking() {
   }, [orders, sizeF, query]);
   const pager = usePagination(items.length, "packingPageSize", `${sizeF}|${query}`);
 
-  // Form stays open (showing "Saving…") until the saga resolves; closes on success.
-  const onSave = async (input: ClosePalletInput) => {
+  // Form stays open (showing "Saving…") until the sagas resolve; closes on
+  // success. One batch is committed per distinct pallet chosen on the lines.
+  const onSave = async (inputs: ClosePalletInput[]) => {
     setError(null);
-    setNotice("Closing pallet…");
-    const res = await closePallet(input);
-    if (!res.ok) {
-      setNotice(null);
-      setError(res.error || "Close-pallet failed");
-      toast.error(res.error || "Close-pallet failed");
-      return;
+    setNotice("Saving palletisation…");
+    let done = 0;
+    let boxes = 0;
+    for (const input of inputs) {
+      const res = await closePallet(input);
+      if (!res.ok) {
+        setNotice(null);
+        setError(res.error || "Palletisation failed");
+        toast.error(res.error || "Palletisation failed");
+        void load();
+        return;
+      }
+      done += 1;
+      boxes += res.data?.boxes_packed ?? 0;
     }
-    const msg = `Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`;
+    const msg = `Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`;
     setShowForm(false);
     setNotice(msg);
     toast.success(msg);

@@ -206,9 +206,16 @@ export function ProductionTable() {
     void load();
   }, []);
 
-  // One row/card per production LINE ITEM (item-wise), newest first.
+  // One row/card per production LINE ITEM (item-wise). In-progress
+  // ("InProduction") lanes float to the top; newest-first within each tier.
   const groups = useMemo(
-    () => groupProductionByItem(entries).sort((a, b) => (b.createdTime > a.createdTime ? 1 : -1)),
+    () =>
+      groupProductionByItem(entries).sort((a, b) => {
+        const ap = a.stage === "InProduction" ? 0 : 1;
+        const bp = b.stage === "InProduction" ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        return b.createdTime > a.createdTime ? 1 : -1;
+      }),
     [entries],
   );
 

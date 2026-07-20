@@ -76,6 +76,9 @@ export function ProductionKanban({
   const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
+  // Click a card → quick planning popup (Customer / SO / SO qty) so orders can
+  // be prepone/postponed at a glance (user mandate 2026-07-20).
+  const [info, setInfo] = useState<ProductionEntry | null>(null);
 
   const allCards = buildCards(groups);
 
@@ -120,8 +123,8 @@ export function ProductionKanban({
                     draggable={draggable}
                     onDragStart={() => draggable && setDragKey(c.key)}
                     onDragEnd={() => { setDragKey(null); setOverStage(null); }}
-                    onClick={() => navigate(`/prod/${encodeURIComponent(productionDetailKey(e))}`)}
-                    title="Open production"
+                    onClick={() => setInfo(e)}
+                    title="Order details (customer · SO · qty)"
                     style={{
                       position: "relative",
                       border: "1px solid var(--border)",
@@ -209,5 +212,49 @@ export function ProductionKanban({
     );
   };
 
-  return renderLevel(allCards, groupBy, 0, "");
+  return (
+    <>
+      {renderLevel(allCards, groupBy, 0, "")}
+      {info && (
+        <div className="modal-backdrop" onClick={() => setInfo(null)}>
+          <div className="modal-panel card" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+            <div className="df-head">
+              <div className="ico"><Icon name="factory" size={16} /></div>
+              <div>
+                <div className="ttl">{info.design || "—"}</div>
+                <div className="sub2">{[info.size, info.finish].filter(Boolean).join(" · ") || "Production order"}</div>
+              </div>
+              <button className="btn x" onClick={() => setInfo(null)} title="Close" tabIndex={-1}>✕</button>
+            </div>
+            <div className="df-body">
+              <div className="form-grid">
+                <div className="form-field">
+                  <span className="lbl">Customer</span>
+                  <span>{info.independent ? "Independent (make-to-stock)" : info.customer || "—"}</span>
+                </div>
+                <div className="form-field">
+                  <span className="lbl">Sales Order</span>
+                  <span>{info.independent ? "—" : info.orderNumber || info.poNumber || "—"}</span>
+                </div>
+                <div className="form-field">
+                  <span className="lbl">SO Qty (ordered)</span>
+                  <span className="mono">{info.independent ? "—" : fmt(info.ordered)}</span>
+                </div>
+                <div className="form-field">
+                  <span className="lbl">In this production</span>
+                  <span className="mono">{fmt(info.producedSoFar)} / {fmt(info.qtyRequested)} boxes</span>
+                </div>
+              </div>
+            </div>
+            <div className="df-foot">
+              <button className="btn" onClick={() => setInfo(null)}>Close</button>
+              <button className="hbtn primary" onClick={() => navigate(`/prod/${encodeURIComponent(productionDetailKey(info))}`)}>
+                Open production
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

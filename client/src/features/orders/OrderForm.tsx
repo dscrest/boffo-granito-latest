@@ -83,7 +83,9 @@ const HEADER: FieldSpec[] = [
   { key: "box_branding", label: "Box Branding" },
 ];
 
-const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "", rate: "", discount: "", description: "" });
+// Qty defaults to 1 (user mandate 2026-07-20) so a new line is immediately valid
+// once a design is picked.
+const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "1", rate: "", discount: "", description: "" });
 
 let _seq = 0;
 const newId = () =>
@@ -226,7 +228,12 @@ export function OrderForm({
       ),
     [lines, charge],
   );
-  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes);
+  // Rate is mandatory (user mandate 2026-07-20): a line only counts as valid
+  // once it has a design, a qty AND a rate.
+  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim());
+  // Lines with a design but no rate must block the save (rather than being
+  // silently dropped from validLines) so the operator sees the error.
+  const rateMissing = lines.some((l) => l.design && !String(l.rate).trim());
   // Convert mode: requested qty per design must fit within the quote's
   // remaining (qty − converted) boxes — mirrors the server-side guard.
   const overCap = useMemo(() => {
@@ -245,6 +252,7 @@ export function OrderForm({
   const missing =
     HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
     validLines.length === 0 ||
+    rateMissing ||
     !!overCap;
 
   // Errors stay hidden until the first submit attempt, then update live.
@@ -370,7 +378,7 @@ export function OrderForm({
               <div className="ord-line ord-line-head qt-line">
                 <span>Design</span>
                 <span>Qty (boxes)</span>
-                <span>Rate</span>
+                <span>Rate<span className="req"> *</span></span>
                 <span>Disc %</span>
                 <span>Sub Total</span>
                 <span />
@@ -423,6 +431,8 @@ export function OrderForm({
                       value={l.rate}
                       onChange={(e) => setLine(i, "rate", e.target.value)}
                       placeholder="0.00"
+                      aria-invalid={showErrors && !!l.design && !String(l.rate).trim()}
+                      style={showErrors && l.design && !String(l.rate).trim() ? { borderColor: "var(--c-red)" } : undefined}
                     />
                     <NumberInput
                       value={l.discount}

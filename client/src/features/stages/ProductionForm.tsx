@@ -94,6 +94,10 @@ export function ProductionForm({
   }, [designRows, orders]);
   const inHandFor = (it: PalletizableItem) => Math.max(0, availByDesign.get(it.designId) ?? 0);
   const recommendedQty = (it: PalletizableItem) => Math.max(0, it.toProduce - inHandFor(it));
+  // Available (on-hand: opening + produced − loaded) already covers the whole
+  // order → no production is needed for this line (user mandate 2026-07-20:
+  // compare ordered vs available; say so explicitly instead of showing a 0).
+  const stockCovers = (it: PalletizableItem) => inHandFor(it) >= it.ordered;
 
   // Sales Orders still owing production (ordered > produced). Collapsed to one
   // option per SO from the per-line orders list.
@@ -303,6 +307,11 @@ export function ProductionForm({
                 <div className="muted" style={{ padding: 8 }}>No line items on this order.</div>
               ) : producible.length === 0 ? (
                 <div className="muted" style={{ padding: 8 }}>All {items.length} item{items.length > 1 ? "s" : ""} on this order are fully produced — nothing left to request.</div>
+              ) : producible.every(stockCovers) ? (
+                <div style={{ padding: "10px 12px", color: "var(--c-green)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Icon name="check" size={14} />
+                  No production required — sufficient stock available to cover this order.
+                </div>
               ) : (
                 <>
                 <table className="tbl">
@@ -325,14 +334,20 @@ export function ProductionForm({
                           <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
                           <td className="num mono">{fmt(it.toProduce)}</td>
                           <td className="num">
-                            <NumberInput
-                              min={0}
-                              max={it.toProduce}
-                              value={qtyByItem[it.orderItemId] || ""}
-                              onChange={(e) => setQty(it.orderItemId, e.target.value, it.toProduce)}
-                              placeholder="0"
-                              style={{ width: 100, textAlign: "right" }}
-                            />
+                            {stockCovers(it) ? (
+                              <span className="dim" style={{ color: "var(--c-green)", whiteSpace: "normal", fontSize: "var(--t-sm)" }} title="Available stock (opening + produced − loaded) already covers the ordered qty">
+                                In stock — none needed
+                              </span>
+                            ) : (
+                              <NumberInput
+                                min={0}
+                                max={it.toProduce}
+                                value={qtyByItem[it.orderItemId] || ""}
+                                onChange={(e) => setQty(it.orderItemId, e.target.value, it.toProduce)}
+                                placeholder="0"
+                                style={{ width: 100, textAlign: "right" }}
+                              />
+                            )}
                           </td>
                         </tr>
                     ))}

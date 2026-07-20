@@ -145,15 +145,22 @@ export function PalletDetail() {
 
   // Pack an order onto this spec without leaving for the Palletization stage.
   // The saga busts the pallet-orders cache, so Associated Orders refetches.
-  const onPalletize = async (input: ClosePalletInput) => {
-    const res = await closePallet(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Close-pallet failed");
-      return;
+  const onPalletize = async (inputs: ClosePalletInput[]) => {
+    let done = 0;
+    let boxes = 0;
+    for (const input of inputs) {
+      const res = await closePallet(input);
+      if (!res.ok) {
+        // Keep the form open — closing here would discard everything typed.
+        toast.error(res.error || "Palletisation failed");
+        await refreshOrders();
+        return;
+      }
+      done += 1;
+      boxes += res.data?.boxes_packed ?? 0;
     }
     setPacking(false);
-    toast.success(`Pallet closed — batch #${res.rowid} · ${res.data?.boxes_packed ?? 0} boxes.`);
+    toast.success(`Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
     await refreshOrders();
   };
 

@@ -338,10 +338,11 @@ export function DesignFields({
                     ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.
-                      // Size picker shows only the unique dimension (code), not
-                      // the composed name.
+                      // Size picker shows the composed name (code · type · thickness
+                      // · pcs) so distinct sizes that share a dimension (e.g. two
+                      // "600x600" specs) don't render as identical duplicates.
                       const comboOpts: ComboOption[] = opts
-                        ? opts.map((o) => ({ value: o.id, label: f.key === "size" ? o.code || o.label : o.label }))
+                        ? opts.map((o) => ({ value: o.id, label: o.label }))
                         : f.options!.map((o) => ({ value: o, label: o }));
                       // House standard: every pick list is a searchable Combobox.
                       return (
