@@ -7,7 +7,7 @@
    the user's role. Quote.sales_person / SalesOrder.sales_person point
    here. Every write is recorded server-side in OperationLog.
    ============================================================ */
-import { listAll, update } from "@/lib/dataOps";
+import { listAll } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { storedAuth } from "@/lib/auth";
 
@@ -63,40 +63,9 @@ async function fetchSalesPersons(): Promise<{ ok: boolean; salesPersons: SalesPe
   return { ok: true, salesPersons };
 }
 
-export interface SalesPersonInput {
-  name: string;
-  email: string;
-  phone: string;
-  region: string;
-  active: boolean;
-  app_user: string; // AppUser ROWID (required by app convention)
-}
-
-function toPayload(input: SalesPersonInput): Record<string, unknown> {
-  const p: Record<string, unknown> = {
-    name: input.name.trim(),
-    email: input.email.trim(),
-    phone: input.phone.trim(),
-    region: input.region.trim(),
-    active: input.active,
-  };
-  if (input.app_user) p.app_user = input.app_user;
-  return p;
-}
-
-/* Mutations invalidate the cache so the next listSalesPersons() refetches. */
-function bust<T>(p: Promise<T>): Promise<T> {
-  return p.then((r) => {
-    cache.invalidate();
-    return r;
-  });
-}
-
-/* Create/delete removed 2026-07-13: reps are auto-synced from AppUser on
-   login (see functions/data-ops/lib/appauth.js syncSalesPersons). */
-export function updateSalesPerson(rowid: string, input: SalesPersonInput) {
-  return bust(update("SalesPerson", rowid, toPayload(input)));
-}
+/* Reps are read-only in the UI: auto-synced from AppUser on login (see
+   functions/data-ops/lib/appauth.js syncSalesPersons). The Sales Persons admin
+   page was removed 2026-07-20 — Users is the only rep master to maintain. */
 
 /** Name of the active SalesPerson linked to the logged-in AppUser, or "" if none. */
 export function currentSalespersonName(rows: SalesPersonRow[]): string {

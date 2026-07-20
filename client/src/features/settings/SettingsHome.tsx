@@ -28,7 +28,6 @@ const SECTIONS: SettingSection[] = [
     items: [
       { label: "Users", icon: "users", route: "/users" },
       { label: "Roles", icon: "shield-check", route: "/roles" },
-      { label: "Sales Persons", icon: "user", route: "/salespersons" },
     ],
   },
   {
