@@ -37,7 +37,10 @@ export function designStock(
   opts: { openingStock?: number; orders: Order[]; prodLogs: ProductionEntry[] },
 ): DesignStock {
   const { openingStock = 0, orders, prodLogs } = opts;
-  const ords = orders.filter((o) => o.design === designName);
+  // Key on the plain design_name — the shared stock key. Order.design is the
+  // full unique label (name · size · finish) for display, so match on
+  // Order.designName (plain), which lines up with ProductionEntry.design.
+  const ords = orders.filter((o) => (o.designName || o.design) === designName);
   const logs = prodLogs.filter((e) => e.design === designName);
 
   const soProduced = ords.reduce((s, o) => s + o.producedQty, 0);

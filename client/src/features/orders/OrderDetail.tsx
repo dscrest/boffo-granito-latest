@@ -190,8 +190,9 @@ export function OrderDetail() {
   // therefore the design-wide total across ALL orders (not just this line), with
   // its per-order breakdown for the drill-down popup.
   const stockOf = (o: Order) => {
-    const opening = designRows.find((d) => d.designName === o.design)?.accountingStock ?? 0;
-    return designStock(o.design, { openingStock: opening, orders, prodLogs });
+    const key = o.designName || o.design; // plain design_name is the stock key (o.design is the display label)
+    const opening = designRows.find((d) => d.designName === key)?.accountingStock ?? 0;
+    return designStock(key, { openingStock: opening, orders, prodLogs });
   };
   // Line whose "In production" drill-down popup is open (null = closed).
   const [ipBreak, setIpBreak] = useState<Order | null>(null);
