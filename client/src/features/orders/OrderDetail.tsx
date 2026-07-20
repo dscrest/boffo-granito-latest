@@ -11,7 +11,7 @@ import { can, canApprove } from "@/lib/auth";
 import { STAGES, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { createSalesOrder, deleteSalesOrder, deleteOrderItem, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
+import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
@@ -356,27 +356,6 @@ export function OrderDetail() {
   // Delete one line. Any production linked to it is DISASSOCIATED (made
   // Independent), not deleted; the SO total is reshaped server-side. An order
   // must keep at least one line (server 409s on the last one).
-  const onDeleteLine = async (o: Order) => {
-    // An order must always keep at least one line — block deleting the last one.
-    if (items.length <= 1) {
-      toast.error("An order must keep at least one line item");
-      return;
-    }
-    const linked = prodLogs.some((e) => e.orderItemId === o.id);
-    const warn = linked
-      ? " Any production against it will be kept but disassociated from this order (made independent)."
-      : "";
-    if (!(await confirmDialog({ message: `Delete line "${o.design} · ${o.size} · ${o.finish}"?${warn} This cannot be undone.`, danger: true }))) return;
-    const res = await deleteOrderItem(o.id);
-    if (!res.ok) {
-      toast.error(res.error || "Delete failed");
-      return;
-    }
-    const n = res.data?.disassociated || 0;
-    toast.success(n > 0 ? `Line deleted · ${n} production entr${n === 1 ? "y" : "ies"} made independent` : "Line deleted");
-    invalidateProductionLogs();
-    await load();
-  };
 
   // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
   // Items, Total Qty, Box Branding, Invoice) live in the Items table below.
@@ -583,7 +562,6 @@ export function OrderDetail() {
                 <th className="num" style={{ textAlign: "right" }}>In Production</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
                 <th className="num" style={{ textAlign: "right" }}>Available</th>
-                {can("orders", "delete") && <th style={{ width: 34 }} />}
               </tr>
             </thead>
             <tbody>
@@ -606,18 +584,6 @@ export function OrderDetail() {
                     <td className="num mono">{fmt(inProductionQty(o.id, prodLogs)) || "—"}</td>
                     <td className="num mono">{fmt(o.palletizedQty)}</td>
                     <td className="num mono" style={{ color: stock > 0 ? "var(--c-green)" : "var(--dim)" }}>{stock || "—"}</td>
-                    {can("orders", "delete") && (
-                      <td style={{ textAlign: "center" }}>
-                        <button
-                          type="button"
-                          className="btn x"
-                          title="Delete this line"
-                          onClick={() => void onDeleteLine(o)}
-                        >
-                          <Icon name="x" size={13} />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
