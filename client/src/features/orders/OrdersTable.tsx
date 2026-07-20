@@ -11,6 +11,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { can } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, isRowId } from "@/lib/format";
 
 /** User-friendly SO number, never the raw ROWID fallback. */
@@ -143,9 +144,9 @@ const STATUS_TABS = ["all", "Draft", "PendingApproval", "Confirmed", "InProgress
 
 export function OrdersTable() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<string>("all");
-  const [query, setQuery] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [tab, setTab] = usePersistedState<string>("orders.tab", "all");
+  const [query, setQuery] = usePersistedState("orders.query", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("orders.criteria", {});
   const [showForm, setShowForm] = useState(false);
   const COLS = useMemo(() => soColumns(), []);
   // Fresh storage key (old ordersTableColumns prefs were per-line-item columns).

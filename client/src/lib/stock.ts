@@ -14,9 +14,18 @@
 import type { Order } from "@/data";
 import type { ProductionEntry } from "@/features/stages/productionApi";
 
+/** Per-order slice of a design's in-production total (for the drill-down popup). */
+export interface InProductionOrder {
+  salesOrderId: string;
+  soLabel: string;
+  customer: string;
+  qty: number;
+}
+
 export interface DesignStock {
   ordered: number; // summed order-line target (open SOs for this design)
   inProduction: number; // committed to production, not yet produced
+  inProductionOrders: InProductionOrder[]; // that total, broken down per SO
   inLoading: number; // palletised, awaiting loading
   available: number; // opening + produced − loaded
 }
@@ -39,15 +48,32 @@ export function designStock(
 
   // In production = every open production line's remaining (requested − produced
   // so far). Completed lines net to 0; requires a real ProductionLog entry, so a
-  // fresh SO with no production request contributes nothing.
-  const inProduction = logs.reduce(
-    (s, e) => (e.stage !== "Completed" && e.status !== "Rejected" ? s + Math.max(0, e.qtyRequested - e.producedSoFar) : s),
-    0,
-  );
+  // fresh SO with no production request contributes nothing. Broken down per SO
+  // (independent make-to-stock lines group under one "Make-to-stock" entry) so
+  // the drill-down popup shows which orders are running this design.
+  const bySo = new Map<string, InProductionOrder>();
+  for (const e of logs) {
+    if (e.stage === "Completed" || e.status === "Rejected") continue;
+    const qty = Math.max(0, e.qtyRequested - e.producedSoFar);
+    if (qty <= 0) continue;
+    const key = e.salesOrderId || "independent";
+    const cur = bySo.get(key);
+    if (cur) cur.qty += qty;
+    else
+      bySo.set(key, {
+        salesOrderId: e.salesOrderId || "",
+        soLabel: e.orderNumber || e.poNumber || (e.independent ? "Make-to-stock" : e.salesOrderId || "—"),
+        customer: e.customer || "",
+        qty,
+      });
+  }
+  const inProductionOrders = [...bySo.values()];
+  const inProduction = inProductionOrders.reduce((s, o) => s + o.qty, 0);
 
   return {
     ordered: ords.reduce((s, o) => s + o.orderQty, 0),
     inProduction,
+    inProductionOrders,
     inLoading: ords.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
     available: openingStock + producedTot - loadedTot,
   };

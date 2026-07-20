@@ -147,7 +147,9 @@ export function OrderForm({
   const [lines, setLines] = useState<OrderLine[]>(() => {
     if (initial?.length)
       return initial.map((o) => ({
-        design: o.design,
+        // Picker options are keyed by plain design_name, so hydrate from
+        // designName (o.design is the full unique display label — won't match).
+        design: o.designName || o.design,
         ordered_qty_boxes: String(o.orderQty || ""),
         rate: o.rate ? String(o.rate) : "",
         discount: o.discount ? String(o.discount) : "",
@@ -278,12 +280,12 @@ export function OrderForm({
             <Icon name="orders" size={18} />
           </div>
           <div>
-            <div className="ttl">{q ? "Sales Order" : clone ? "Clone Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
+            <div className="ttl">{clone ? "Sales Order" : q ? "Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
             <div className="sub2">
               {q
                 ? "" // convert mode: no "From quote…" subtitle (user mandate)
                 : clone
-                  ? `Copy of ${ed?.orderNumber || ed?.poNumber} · saves as a new order`
+                  ? "" // clone is just create with prefilled info (user mandate)
                   : ed
                     ? `${ed.orderNumber || ed.poNumber} · line items are replaced on save`
                     : "Sales order · saves to the database on submit"}
@@ -390,7 +392,7 @@ export function OrderForm({
                     <div className="form-field" style={{ gap: 2 }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {d ? (
-                          <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} />
+                          <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} label={l.design} />
                         ) : (
                           <span style={{ width: 18, flexShrink: 0 }} />
                         )}

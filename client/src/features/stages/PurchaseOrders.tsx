@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { type Order } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
@@ -96,7 +97,7 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
 export function PurchaseOrders() {
   const { orders, loading, error, reload } = useOrders();
   const { ordered, visible, hidden, toggle, move } = useColumns("poTableColumns", PO_COLUMNS, ["created", "modified"]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = usePersistedState("po.query", "");
   // Group + sort only when the live orders snapshot changes.
   const pos = useMemo<PORow[]>(() => {
     const groups: Record<string, Order[]> = {};

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { type Order } from "@/data";
 import { useOrders } from "./useOrders";
@@ -48,7 +49,7 @@ export function ByOrderView() {
   const [openDrawer, setOpenDrawer] = useState<Order | null>(null);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // #20: shared choosable filter (Customer / PO / Stage) + free-text search.
-  const [filter, setFilter] = useState(EMPTY_FILTER);
+  const [filter, setFilter] = usePersistedState("orders.byorder.filter", EMPTY_FILTER);
   const [showForm, setShowForm] = useState(false);
 
   // #8: deep-link from Dashboard "New Order" (/byorder?new=1) opens the form directly.

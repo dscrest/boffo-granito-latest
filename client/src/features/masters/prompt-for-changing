@@ -1,0 +1,6 @@
+CHANGE:    <what should be different, one line — the outcome, not the code>
+WHERE:     <screen / form / master name, e.g. "Sales Order line items">
+WHY:       <the user goal behind it — so I build the right depth, not more>
+APPLY TO:  <"everywhere this pattern exists" | list the screens | "only here">
+LIKE:      <point at an existing thing to match, e.g. "same as Quote detail">
+DONE WHEN: <what I should see when it's correct — your acceptance check>

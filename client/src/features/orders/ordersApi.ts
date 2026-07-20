@@ -105,6 +105,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       // same as the picker) so the SO reads properly; fall back to the plain
       // name, then "—" for a removed/unresolved FK (bug 16).
       design: designUnique.get(str(it.design)) || designName.get(str(it.design)) || "—",
+      designName: designName.get(str(it.design)) || "",
       size: sizeStr,
       finish: d ? finishName.get(str(d.finish)) || "" : "",
       brand: d ? brandName.get(str(d.brand)) || "" : "",

@@ -17,6 +17,7 @@ import { draftToInput } from "./OrdersTable";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
 import { closePallet, listOrderBatches, type ClosePalletInput, type OrderBatchRow } from "@/features/stages/palletisationApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
+import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
 import { designStock } from "@/lib/stock";
@@ -25,15 +26,6 @@ import { designStock } from "@/lib/stock";
 // palletise selection/checkboxes only. NOT the sellable "Available" figure
 // (that's designStock.available, incl. opening stock — see the Items table).
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
-
-// Boxes currently in production for a line = open ("InProduction") ProductionLog
-// requests against it. Distinct from producedQty (already finished) — shown in
-// the Items table instead of "Produced" (user mandate 2026-07-20).
-function inProductionQty(orderItemId: string, prodLogs: ProductionEntry[]): number {
-  return prodLogs
-    .filter((e) => e.orderItemId === orderItemId && e.stage === "InProduction")
-    .reduce((s, e) => s + (e.qtyRequested || 0), 0);
-}
 
 /* One meaningful header status. Approval/terminal statuses (Draft, Pending
    Approval, Rejected, Cancelled) show as-is. An active order (Confirmed /
@@ -194,11 +186,15 @@ export function OrderDetail() {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
   }, []);
 
-  // Sellable stock per design, same source of truth as the Item master.
-  const availableStock = (o: Order) => {
+  // Per-design stock, same source of truth as the Item master. In-production is
+  // therefore the design-wide total across ALL orders (not just this line), with
+  // its per-order breakdown for the drill-down popup.
+  const stockOf = (o: Order) => {
     const opening = designRows.find((d) => d.designName === o.design)?.accountingStock ?? 0;
-    return designStock(o.design, { openingStock: opening, orders, prodLogs }).available;
+    return designStock(o.design, { openingStock: opening, orders, prodLogs });
   };
+  // Line whose "In production" drill-down popup is open (null = closed).
+  const [ipBreak, setIpBreak] = useState<Order | null>(null);
 
   // The clicked row is one OrderItem — or, from a pallet's related list, the
   // SalesOrder itself. Either way the detail below is the whole SalesOrder.
@@ -567,7 +563,8 @@ export function OrderDetail() {
             <tbody>
               {items.map((o) => {
                 const ready = toPalletise(o) > 0;
-                const stock = availableStock(o);
+                const st = stockOf(o);
+                const stock = st.available;
                 return (
                   <tr key={o.id}>
                     <td style={{ textAlign: "center" }}>
@@ -581,7 +578,7 @@ export function OrderDetail() {
                     <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
                     <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
                     <td className="num mono">{fmt(o.orderQty)}</td>
-                    <td className="num mono">{fmt(inProductionQty(o.id, prodLogs)) || "—"}</td>
+                    <td className="num"><InProductionCell total={st.inProduction} onOpen={() => setIpBreak(o)} /></td>
                     <td className="num mono">{fmt(o.palletizedQty)}</td>
                     <td className="num mono" style={{ color: stock > 0 ? "var(--c-green)" : "var(--dim)" }}>{stock || "—"}</td>
                   </tr>
@@ -592,6 +589,10 @@ export function OrderDetail() {
         </div>
       </div>
 
+      {ipBreak && (() => {
+        const s = stockOf(ipBreak);
+        return <InProductionModal label={ipBreak.design} total={s.inProduction} orders={s.inProductionOrders} onClose={() => setIpBreak(null)} />;
+      })()}
       {editing && <OrderForm initial={items} onSave={(d) => void onEditSave(d)} onClose={() => setEditing(false)} />}
       {cloning && <OrderForm initial={items} clone onSave={(d) => void onCloneSave(d)} onClose={() => setCloning(false)} />}
       {prod && head.salesOrderId && (

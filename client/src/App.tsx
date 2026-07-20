@@ -398,7 +398,10 @@ export default function App() {
       </header>
 
       <main className="main">
-        <ErrorBoundary key={location.pathname}>
+        {/* Key on the section (first path segment), not the full path, so moving
+            between a list and its own detail doesn't remount <main> and flash the
+            Suspense skeleton — only a genuine section change resets the boundary. */}
+        <ErrorBoundary key={location.pathname.split("/")[1] || "root"}>
         <Suspense fallback={<div style={{ padding: 24 }}><SkeletonRows rows={8} /></div>}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

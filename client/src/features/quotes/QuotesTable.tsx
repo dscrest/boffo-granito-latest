@@ -12,6 +12,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
@@ -147,9 +148,9 @@ export function quoteToInput(q: Quote): NewQuoteInput {
 
 export function QuotesTable() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("all");
-  const [query, setQuery] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [tab, setTab] = usePersistedState("quotes.tab", "all");
+  const [query, setQuery] = usePersistedState("quotes.query", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("quotes.criteria", {});
   const [showForm, setShowForm] = useState(false);
   // Customer name to preset in a fresh QuoteForm (deep-link from the
   // customer detail's "Create Quotation"); cleared when the form closes.

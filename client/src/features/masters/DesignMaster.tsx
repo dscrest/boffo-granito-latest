@@ -21,6 +21,7 @@ import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { finishClass, fmtDateTime } from "@/lib/format";
 import { can, canUpdate } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { DesignForm } from "./DesignForm";
 import {
   bulkDeleteDesigns,
@@ -195,8 +196,8 @@ export function DesignMaster() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [query, setQuery] = usePersistedState("design.query", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("design.criteria", {});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { ordered, visible, hidden, toggle, move } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
   const [showNew, setShowNew] = useState(false);

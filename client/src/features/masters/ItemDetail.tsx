@@ -23,6 +23,7 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
 import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { designStock } from "@/lib/stock";
+import { InProductionModal } from "@/features/stages/InProductionModal";
 import type { Order } from "@/data";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
@@ -187,6 +188,7 @@ export function ItemDetail() {
   const [stockVal, setStockVal] = useState("");
   const [stockBusy, setStockBusy] = useState(false);
   const [breakdown, setBreakdown] = useState<StockBreakdown<any> | null>(null); // stock-number drill-down
+  const [ipOpen, setIpOpen] = useState(false); // "In production" drill-down (shared per-SO popup)
   // Make-to-stock (independent) production has no SO line, so it never reaches
   // `allOrders` — pull the production log to fold its output into available stock.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
@@ -220,20 +222,8 @@ export function ItemDetail() {
   // Drill-downs: what adds up to each stock number (this item, all SOs).
   const orderCol = { head: "Order", val: (o: Order) => o.orderNumber || o.poNumber || "—" };
   const custCol = { head: "Customer", val: (o: Order) => o.party || "—" };
-  // In production now itemises the open production lines (not raw SO lines).
-  const prodInProd = design
-    ? prodLogs.filter((e) => e.design === design.designName && e.stage !== "Completed" && e.status !== "Rejected" && e.qtyRequested - e.producedSoFar > 0)
-    : [];
-  const bdInProduction: StockBreakdown<ProductionEntry> = {
-    title: "In production", note: "Boxes on an open production order, not yet produced — this item.",
-    rows: prodInProd,
-    columns: [
-      { head: "Order", val: (e) => (e.independent ? "Stock" : e.orderNumber || e.poNumber || "—") },
-      { head: "Customer", val: (e) => e.customer || "—" },
-      { head: "Requested", num: true, val: (e) => fmt(e.qtyRequested) },
-      { head: "Produced", num: true, val: (e) => fmt(e.producedSoFar) },
-      { head: "In production", num: true, val: (e) => fmt(Math.max(0, e.qtyRequested - e.producedSoFar)) }],
-  };
+  // In production uses the shared per-SO drill-down (designStock.inProductionOrders),
+  // so the popup matches Order detail / Production form everywhere.
   const bdInLoading: StockBreakdown<Order> = {
     title: "In loading", note: "Palletised boxes waiting to be loaded — across every open order for this item.",
     rows: orders.filter((o) => o.palletizedQty - o.loadedQty > 0),
@@ -370,6 +360,9 @@ export function ItemDetail() {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {breakdown && <StockBreakdownModal bd={breakdown} onClose={() => setBreakdown(null)} />}
+      {ipOpen && design && (
+        <InProductionModal label={design.designName} total={inProduction} orders={stock.inProductionOrders} onClose={() => setIpOpen(false)} />
+      )}
       {editing && design && (
         <DesignEdit
           idProp={design.id}
@@ -658,7 +651,7 @@ export function ItemDetail() {
                       </span>
                     )}
                   </div>
-                  <StockRow label="In production" value={inProduction} onClick={prodInProd.length > 0 ? () => setBreakdown(bdInProduction) : undefined} />
+                  <StockRow label="In production" value={inProduction} onClick={inProduction > 0 ? () => setIpOpen(true) : undefined} />
                   <StockRow label="In loading" value={inLoading} onClick={() => setBreakdown(bdInLoading)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", marginTop: 4, borderTop: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}>Available stock</span>

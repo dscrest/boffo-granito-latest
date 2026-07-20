@@ -13,6 +13,7 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { exportCsv } from "@/lib/csv";
 import { fmtDateTime, pct } from "@/lib/format";
 import { nextCustomerCode } from "@/lib/seq";
@@ -83,10 +84,10 @@ export function PartiesView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [query, setQuery] = useState("");
-  const [filterField, setFilterField] = useState<"" | keyof Row>("");
-  const [filterValue, setFilterValue] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [query, setQuery] = usePersistedState("parties.query", "");
+  const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
+  const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("parties.criteria", {});
   const { ordered, visible, hidden, toggle, move } = useColumns("partiesTableColumns", PARTY_COLUMNS, ["created", "modified"]);
 
   const load = () => {

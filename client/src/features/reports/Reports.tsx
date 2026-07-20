@@ -23,7 +23,8 @@ import { applyFilters, type FilterField, type FilterCriteria } from "@/ui/Advanc
 import { ReportShell, TotalsRow, inDateRange, type DateRangeState, type KpiSpec } from "./ReportShell";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
-import { designStock } from "@/lib/stock";
+import { designStock, type InProductionOrder } from "@/lib/stock";
+import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { listLoadableBatches, type LoadableBatch } from "@/features/stages/palletisationApi";
 import { listAll, type DSRow } from "@/lib/dataOps";
@@ -458,6 +459,7 @@ interface StockRow {
   sub: string;
   opening: number;
   inProduction: number;
+  inProductionOrders: InProductionOrder[];
   inLoading: number;
   available: number;
 }
@@ -466,6 +468,7 @@ function StockReport() {
   const { orders, loading, error, reload } = useOrders();
   const { designRows } = useMasters();
   const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [ipRow, setIpRow] = useState<StockRow | null>(null); // in-production drill-down
   // Production log folds into In production / Available (same lib/stock.ts basis
   // as the Item detail) — fetch once.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
@@ -483,6 +486,7 @@ function StockReport() {
         sub: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · "),
         opening,
         inProduction: s.inProduction,
+        inProductionOrders: s.inProductionOrders,
         inLoading: s.inLoading,
         available: s.available,
       };
@@ -553,7 +557,7 @@ function StockReport() {
                     <td style={{ color: "var(--fg)" }}>{r.label}</td>
                     <td className="muted">{r.sub || "—"}</td>
                     <td className="num mono">{fmt(r.opening)}</td>
-                    <td className="num mono">{fmt(r.inProduction)}</td>
+                    <td className="num"><InProductionCell total={r.inProduction} onOpen={() => setIpRow(r)} /></td>
                     <td className="num mono">{fmt(r.inLoading)}</td>
                     <td className="num mono" style={{ fontWeight: 600, color: r.available < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(r.available)}</td>
                   </tr>
@@ -580,6 +584,9 @@ function StockReport() {
           </div>
           <GridFooter {...pager} />
         </div>
+      )}
+      {ipRow && (
+        <InProductionModal label={ipRow.label} total={ipRow.inProduction} orders={ipRow.inProductionOrders} onClose={() => setIpRow(null)} />
       )}
     </ReportShell>
   );

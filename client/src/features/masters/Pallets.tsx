@@ -18,6 +18,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { PalletForm } from "./PalletForm";
 import { bulkDeletePallets, createPallet, listPallets, type PalletInput, type PalletRow, type SizeOption } from "./palletsApi";
 
@@ -74,7 +75,7 @@ export function Pallets() {
   const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = usePersistedState("pallets.query", "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { ordered, visible, hidden, toggle, move } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);

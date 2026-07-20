@@ -13,6 +13,7 @@ import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt, fmtDateTime } from "@/lib/format";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { listContainers, type ContainerRow } from "@/features/masters/containersApi";
 import {
   deleteInvoice,
@@ -48,9 +49,9 @@ export function Invoices() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showGen, setShowGen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [statusF, setStatusF] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [query, setQuery] = usePersistedState("invoices.query", "");
+  const [statusF, setStatusF] = usePersistedState("invoices.statusF", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("invoices.criteria", {});
   const { ordered, visible, hidden, toggle, move } = useColumns("invoicesTableColumns", INVOICE_COLUMNS, ["created", "modified"]);
 
   const load = () => {

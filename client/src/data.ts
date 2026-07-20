@@ -40,6 +40,9 @@ export interface Order {
   country: string;
   flag: string;
   design: string;
+  /** Plain design_name (matches the picker's option value); `design` above is
+      the full unique label for display. Used to re-hydrate the edit/clone form. */
+  designName: string;
   size: string;
   finish: string;
   brand: string;

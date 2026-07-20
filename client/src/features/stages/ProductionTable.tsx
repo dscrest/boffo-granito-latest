@@ -16,6 +16,7 @@ import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterFie
 import { ProgressBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
 import { exportCsv } from "@/lib/csv";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
@@ -173,8 +174,8 @@ export function ProductionTable() {
     setGroupBy((prev) => (prev.includes(key as ProductionGroupBy) ? prev.filter((d) => d !== key) : [...prev, key as ProductionGroupBy]));
   // Apply commits the dragged row order → nesting order of the checked dims.
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as ProductionGroupBy)) as ProductionGroupBy[]);
-  const [query, setQuery] = useState("");
-  const [criteria, setCriteria] = useState<FilterCriteria>({});
+  const [query, setQuery] = usePersistedState("production.query", "");
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("production.criteria", {});
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
