@@ -74,6 +74,8 @@ const ALLOWED = new Set([
   "DesignPallet",
   "PalletisedBatch",
   "PalletisedBatchLine",
+  "PalletizationPlan",
+  "PalletizationPlanLine",
   "Container",
   "ContainerLoading",
   "OrderItemEvent",
@@ -443,6 +445,7 @@ const NATURAL_KEY = {
   Invoice: "invoice_number",
   SalesPerson: "name",
   Currency: "code",
+  PalletizationPlan: "pal_number",
 };
 
 /**
@@ -1435,6 +1438,196 @@ async function closePallet(catalyst, ds, body) {
   }
   return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
 }
+
+/* ================================================================
+   Palletization Plan (vehicle load) — a first-class, human-numbered
+   record that groups order items from MULTIPLE Sales Orders onto a
+   vehicle and runs a 4-stage lifecycle. Header + line tables mirror
+   SalesOrder + OrderItem; the status machine mirrors /quote-status;
+   the number mint mirrors nextOrderNumber. Lines key on OrderItem
+   (planned before packing, when PalletisedBatches don't exist yet).
+   ================================================================ */
+
+/* Server-assigned PAL number: max numeric suffix for this fiscal year + 1.
+   ponytail: MAX-scan over PalletizationPlan, not TransactionSeries — same
+   rationale as nextOrderNumber; assertUnique is the race backstop. */
+async function nextPalNumber(catalyst) {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
+  const prefix = `PAL/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
+  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT pal_number FROM PalletizationPlan"));
+  let max = 0;
+  for (const r of rows) {
+    const n = String(r.pal_number || "");
+    if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
+  }
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
+/** Validate + normalize the plan lines (shared by create + update). */
+function normalizePlanLines(body) {
+  const rawLines = Array.isArray(body.lines) ? body.lines : [];
+  if (!rawLines.length) throw badRequest("At least one plan line is required");
+  return rawLines.map((l, i) => {
+    if (!l.order_item) throw badRequest(`Line ${i + 1}: order_item is required`);
+    const boxes = nonNeg(l.boxes, `Line ${i + 1} boxes`);
+    if (boxes <= 0) throw badRequest(`Line ${i + 1}: boxes must be > 0`);
+    return {
+      sales_order: l.sales_order ? String(l.sales_order) : null,
+      order_item: String(l.order_item),
+      design: l.design ? String(l.design) : null,
+      pallet: l.pallet ? String(l.pallet) : null,
+      boxes,
+      position: Number(l.position) || i,
+    };
+  });
+}
+
+/** Insert a PalletizationPlan header + its lines. Compensates on mid-write failure. */
+async function createPalPlan(catalyst, ds, body, sMap) {
+  // Blank pal_number → server assigns the next number (clients never mint it).
+  const palNumber = String(body.pal_number || "").trim() || (await nextPalNumber(catalyst));
+  await assertUnique(catalyst, "PalletizationPlan", "pal_number", palNumber);
+  const lines = normalizePlanLines(body);
+  const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
+
+  const planRow = await ds.table("PalletizationPlan").insertRow({
+    pal_number: palNumber,
+    // Every plan is born Planning — status only advances via /pal-status,
+    // so a crafted create can't skip the lifecycle.
+    status: "Planning",
+    vehicle_number: body.vehicle_number || "",
+    planned_date: body.planned_date || undefined, // date col rejects "" → omit
+    sales_person: salesPerson || undefined,
+    remarks: body.remarks || "",
+  });
+  const planId = planRow.ROWID;
+  const insertedLines = [];
+  try {
+    for (const l of lines) {
+      const lr = await ds.table("PalletizationPlanLine").insertRow({ plan: planId, ...l });
+      insertedLines.push(lr.ROWID);
+    }
+  } catch (e) {
+    for (const id of insertedLines) {
+      try { await ds.table("PalletizationPlanLine").deleteRow(id); } catch (_) {}
+    }
+    try { await ds.table("PalletizationPlan").deleteRow(planId); } catch (_) {}
+    throw e;
+  }
+  return { rowid: planId, data: { ROWID: planId, pal_number: palNumber } };
+}
+
+app.post("/pal-plan", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const sMap = await salesPersonMap(catalyst);
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlan", operation: "insert", payload: body },
+      async () => createPalPlan(catalyst, ds, body, sMap),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Update a plan header + REPLACE its lines (mirror of /update-so-with-items).
+   pal_number and status are never editable here (status → /pal-status). */
+app.post("/update-pal-plan/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const planId = req.params.rowid;
+    const sMap = await salesPersonMap(catalyst);
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlan", operation: "update", payload: { ROWID: planId, ...body } },
+      async () => {
+        const cur = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, pal_number FROM PalletizationPlan WHERE ROWID = ${planId}`,
+          ),
+        )[0];
+        if (!cur) throw badRequest(`Palletization plan not found: ${planId}`, 404);
+        const lines = normalizePlanLines(body);
+        const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
+
+        // Header (pal_number + status untouched).
+        await ds.table("PalletizationPlan").updateRow({
+          ROWID: planId,
+          vehicle_number: body.vehicle_number || "",
+          planned_date: body.planned_date || undefined,
+          sales_person: salesPerson || null,
+          remarks: body.remarks || "",
+        });
+        // Soft-delete old lines, insert the new set.
+        const old = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
+          ),
+        );
+        const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+        for (const r of old) await ds.table("PalletizationPlanLine").updateRow({ ROWID: r.ROWID, deleted_at: stamp });
+        for (const l of lines) await ds.table("PalletizationPlanLine").insertRow({ plan: planId, ...l });
+        return { rowid: planId, data: { ROWID: planId, pal_number: cur.pal_number } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Palletization plan status machine — mirror of /quote-status. All status
+   changes route here (generic PATCH rejects PalletizationPlan.status). */
+const PAL_TRANSITIONS = {
+  Planning: ["ReadyToLoad"],
+  ReadyToLoad: ["Loading", "Planning"], // step back before loading starts
+  Loading: ["Completed", "ReadyToLoad"],
+  Completed: [], // terminal (ready for dispatch)
+};
+
+app.post("/pal-status/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const planId = req.params.rowid;
+    const to = String((req.body || {}).status || "");
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlan", operation: "status", payload: { ROWID: planId, status: to } },
+      async () => {
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, pal_number, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`Palletization plan not found: ${planId}`, 404);
+        const from = String(rows[0].status || "Planning");
+        if (!(PAL_TRANSITIONS[from] || []).includes(to))
+          throw badRequest(`Cannot move palletization plan from ${from} to ${to}`, 409);
+
+        // Completed = ready for dispatch → stamp the dispatch date (IST).
+        const patch = { ROWID: planId, status: to };
+        if (to === "Completed") patch.dispatch_date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+        await ds.table("PalletizationPlan").updateRow(patch);
+        await logTransition(catalyst, {
+          entity_type: "PalletizationPlan", entity_rowid: planId, from_status: from, to_status: to,
+        });
+        return { rowid: planId, data: { ROWID: planId, status: to } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
 
 /* 3a2. Production requests + lifecycle (approval retired 2026-07).
    A "plan" ProductionLog row is request-first: created with `qty_requested`, no
@@ -2536,6 +2729,8 @@ app.patch("/:table/:rowid", async (req, res) => {
           throw badRequest("Quote status cannot be set directly — use /quote-status");
         if (table === "SalesOrder" && patch.status !== undefined)
           throw badRequest("Sales order status cannot be set directly — use /so-status");
+        if (table === "PalletizationPlan" && patch.status !== undefined)
+          throw badRequest("Palletization plan status cannot be set directly — use /pal-status");
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];

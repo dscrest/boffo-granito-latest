@@ -37,7 +37,8 @@ const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m)
 const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => ({ default: m.Invoices })));
 const ReportsHome = lazy(() => import("@/features/reports/ReportsHome").then((m) => ({ default: m.ReportsHome })));
 const ReportView = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.ReportView })));
-const PalletPacking = lazy(() => import("@/features/stages/PalletPacking").then((m) => ({ default: m.PalletPacking })));
+const PalPlans = lazy(() => import("@/features/stages/PalPlans").then((m) => ({ default: m.PalPlans })));
+const PalPlanDetail = lazy(() => import("@/features/stages/PalPlanDetail").then((m) => ({ default: m.PalPlanDetail })));
 const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
 const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
@@ -425,7 +426,8 @@ export default function App() {
             <Route path="/fit" element={<FitSuggest />} />
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
-            <Route path="/packing" element={<PalletPacking />} />
+            <Route path="/packing" element={<PalPlans />} />
+            <Route path="/packing/:id" element={<PalPlanDetail />} />
             <Route path="/loading" element={<Loading />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/invoices" element={<Invoices />} />

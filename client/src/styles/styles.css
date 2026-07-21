@@ -1781,6 +1781,13 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .chip.qstatus.q-converted { background: oklch(0.55 0.16 150 / 0.10); color: oklch(0.4 0.16 150); border-color: oklch(0.55 0.16 150 / 0.30); }
 .chip.qstatus.q-partial   { background: oklch(0.58 0.11 195 / 0.10); color: oklch(0.42 0.11 195); border-color: oklch(0.58 0.11 195 / 0.30); }
 
+/* Palletization-plan lifecycle: Planning → Ready to Load → Loading → Completed */
+.chip.palstatus { font-weight: 600; }
+.chip.palstatus.p-planning  { background: oklch(0.6 0.02 240 / 0.10); color: var(--fg-2); border-color: var(--border-2); }
+.chip.palstatus.p-ready     { background: oklch(0.62 0.16 70 / 0.10); color: oklch(0.45 0.16 70); border-color: oklch(0.62 0.16 70 / 0.30); }
+.chip.palstatus.p-loading   { background: oklch(0.55 0.16 245 / 0.10); color: oklch(0.42 0.16 245); border-color: oklch(0.55 0.16 245 / 0.30); }
+.chip.palstatus.p-completed { background: oklch(0.55 0.16 150 / 0.10); color: oklch(0.4 0.16 150); border-color: oklch(0.55 0.16 150 / 0.30); }
+
 /* Segmented control (full / partial convert) */
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .seg-btn { padding: 6px 16px; background: var(--panel); color: var(--fg-2); font-size: var(--t-md); border: 0; cursor: pointer; }

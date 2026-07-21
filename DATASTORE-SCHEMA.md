@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (33 tables)
+## Table Index (35 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -549,6 +549,33 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | position | int | |
 | container | FK → Container | **CASCADE** |
 | batch | FK → PalletisedBatch | SET-NULL |
+
+### PalletizationPlan — added 2026-07-21 (vehicle-load plan; PAL/FY/NNN)
+First-class, human-numbered record that groups OrderItems from **multiple** Sales Orders onto a vehicle. Lifecycle `Planning → ReadyToLoad → Loading → Completed` via `/pal-status` (generic PATCH rejects `status`). Number minted server-side (`nextPalNumber`, MAX-scan + assertUnique). Distinct from `PalletisedBatch` (per-pallet close-pallet artifact).
+| Column | Type | Notes |
+|---|---|---|
+| pal_number | varchar(40) | `PAL/2026-27/001`; server-minted; NATURAL_KEY |
+| status | varchar(30) | Planning / ReadyToLoad / Loading / Completed (default Planning) |
+| vehicle_number | varchar(50) | truck reg (typable) |
+| planned_date | date | defaults today; omit "" |
+| dispatch_date | date | stamped when Completed |
+| sales_person | FK → SalesPerson | SET-NULL; defaults to logged-in user |
+| remarks | text(10000) | |
+| deleted_at | datetime | soft delete |
+
+### PalletizationPlanLine — added 2026-07-21
+Order items pulled onto a plan (lines key on OrderItem — planned before packing).
+| Column | Type | Notes |
+|---|---|---|
+| plan | FK → PalletizationPlan | **CASCADE** (app-enforced) |
+| sales_order | FK → SalesOrder | SET-NULL (multi-SO grouping) |
+| order_item | FK → OrderItem | SET-NULL (source line) |
+| design | FK → Design | SET-NULL (denormalized for display/PDF) |
+| pallet | FK → Pallet | SET-NULL (drives vehicle-fill capacity) |
+| boxes | int | no-negative |
+| position | int | vehicle ordering |
+| palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
+| deleted_at | datetime | soft delete |
 
 ---
 
