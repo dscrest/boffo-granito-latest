@@ -1576,6 +1576,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Combobox — searchable single-select (customer pickers) */
 .combo { position: relative; width: 100%; }
 .combo-input { width: 100%; padding-right: 28px; }
+/* With a clear × present, leave room for both the × and the chevron. */
+.combo.has-clear .combo-input { padding-right: 46px; }
 /* Dropdown-affordance chevron — reuses the native <select> house chevron so
    comboboxes read as dropdowns. Pseudo-element (not a bg-image on the input) so
    it never collides with the required-field asterisk bg on .combo-input. */
@@ -1591,8 +1593,19 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   background: no-repeat center / 12px 12px
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
 }
+/* Clear affordance — an X that resets the selection to empty. Sits to the LEFT
+   of the chevron so both dropdown + clear affordances stay visible. */
+.combo-clear {
+  position: absolute; right: 26px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+  color: var(--dim); font-size: 16px; line-height: 1;
+}
+.combo-clear:hover { background: var(--accent-soft); color: var(--accent); }
 .combo-pop {
-  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0;
+  /* Portaled to <body>; JS sets position:fixed + left/top/width from the
+     control's rect so no scrollable-modal overflow can clip it. */
+  z-index: 1000;
   max-height: 240px; overflow-y: auto;
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 9px; box-shadow: 0 8px 24px oklch(0 0 0 / 0.18); padding: 4px;

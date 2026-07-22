@@ -15,7 +15,6 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
-import { exportCsv } from "@/lib/csv";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -432,30 +431,6 @@ export function ProductionTable() {
           />
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
-        {can("stages", "export") && (
-          <button
-            className="hbtn"
-            style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
-            title="Export the filtered rows as CSV"
-            onClick={() =>
-              exportCsv("production", filtered, [
-                { header: "Production ID", value: (g) => g.code },
-                { header: "Date", value: (g) => g.date },
-                { header: "Stage", value: (g) => stageChip(g.stage).label },
-                { header: "Design", value: (g) => g.designs.join(", ") },
-                { header: "Order", value: (g) => (g.independent ? "Independent" : g.orderNumber || g.poNumber) },
-                { header: "Customer", value: (g) => g.customer },
-                { header: "Items", value: (g) => g.lineCount },
-                { header: "Requested (boxes)", value: (g) => g.totalRequested },
-                { header: "Produced (boxes)", value: (g) => g.totalProduced },
-                { header: "Requested By", value: (g) => g.performedBy },
-              ])
-            }
-          >
-            <Icon name="docs" size={13} />
-            Export
-          </button>
-        )}
         {canEdit && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />

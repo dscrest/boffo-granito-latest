@@ -5,10 +5,13 @@
 
    Given per-design box lines + a per-vehicle capacity, it auto-derives the
    vehicle count so no vehicle exceeds 100% (a full vehicle spills into the
-   next), colours each design distinctly, and lets the operator add empty
-   extras. `extra` / `onExtraChange` are controlled by the parent.
+   next) and colours each design distinctly. The operator can then override
+   the auto plan: clear a vehicle, remove one, or re-assign the freed boxes
+   to another vehicle. Freed boxes sit in an "Unassigned" pool until placed —
+   nothing is ever forced over 100%. The allocation is advisory (display only);
+   callers persist item lines, not the per-vehicle split.
    ============================================================ */
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { fmt } from "@/lib/format";
 import { MoreMenu } from "@/features/common/DetailBits";
@@ -33,6 +36,10 @@ const DESIGN_PALETTE = [
   "oklch(0.58 0.18 25)", // rust
 ];
 
+type Seg = { designId: string; label: string; boxes: number; color: string };
+const loadOf = (segs: Seg[]) => segs.reduce((s, x) => s + x.boxes, 0);
+const clone = (slots: Seg[][]) => slots.map((s) => s.map((x) => ({ ...x })));
+
 export function VehicleFillBar({
   lines,
   truckCapacity,
@@ -43,42 +50,99 @@ export function VehicleFillBar({
   lines: VehicleLine[];
   /** Boxes one vehicle holds (advisory; ≈ one container of the chosen pallets). */
   truckCapacity: number;
-  /** Operator-added empty vehicles beyond the auto-derived count. */
+  /** Operator-added empty vehicles beyond the auto-derived count (auto mode only). */
   extra: number;
   onExtraChange: (updater: (n: number) => number) => void;
 }) {
+  const cap = Math.max(1, truckCapacity);
   const allocBoxes = lines.reduce((s, l) => s + l.boxes, 0);
   // Vehicle count grows so nothing exceeds one vehicle's capacity; the operator
-  // can add empty extras on top. autoVehicles is the trailing-extra threshold.
-  const autoVehicles = Math.max(1, Math.ceil(allocBoxes / Math.max(1, truckCapacity)));
-  const vehicleCount = autoVehicles + extra;
+  // can add empty extras on top.
+  const autoVehicles = Math.max(1, Math.ceil(allocBoxes / cap));
+  const autoCount = autoVehicles + extra;
 
-  // First-fit each line's boxes across the vehicles so the bar can show
-  // per-item colour segments. A full vehicle spills into the next, never over.
-  const truckLoads = useMemo(() => {
-    const cap = vehicleCount * truckCapacity;
-    const loads: { label: string; boxes: number; color: string }[][] = Array.from({ length: vehicleCount }, () => []);
+  // Stable colour per design across auto + manual views.
+  const colorByDesign = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of lines) if (!m.has(l.designId)) m.set(l.designId, DESIGN_PALETTE[m.size % DESIGN_PALETTE.length]);
+    return m;
+  }, [lines]);
+
+  // Auto first-fit: split each line across vehicles, spilling to the next.
+  const auto = useMemo(() => {
+    const slots: Seg[][] = Array.from({ length: autoCount }, () => []);
     let idx = 0;
-    let used = 0;
-    const colorByDesign = new Map<string, string>();
     for (const l of lines) {
-      let remaining = l.boxes;
-      if (!colorByDesign.has(l.designId))
-        colorByDesign.set(l.designId, DESIGN_PALETTE[colorByDesign.size % DESIGN_PALETTE.length]);
+      let rem = l.boxes;
       const color = colorByDesign.get(l.designId)!;
-      while (remaining > 0 && idx < vehicleCount) {
-        const space = truckCapacity - loads[idx].reduce((s, seg) => s + seg.boxes, 0);
-        const put = Math.min(remaining, space);
+      while (rem > 0 && idx < autoCount) {
+        const space = cap - loadOf(slots[idx]);
+        const put = Math.min(rem, space);
         if (put > 0) {
-          loads[idx].push({ label: l.label, boxes: put, color });
-          used += put;
-          remaining -= put;
+          slots[idx].push({ designId: l.designId, label: l.label, boxes: put, color });
+          rem -= put;
         }
-        if (remaining > 0) idx++;
+        if (rem > 0) idx++;
       }
     }
-    return { loads, cap, used };
-  }, [lines, vehicleCount, truckCapacity]);
+    return slots;
+  }, [lines, autoCount, cap, colorByDesign]);
+
+  // Manual override (null = follow auto). Reset whenever the inputs change
+  // materially (box qty / capacity edited above) so it never goes stale.
+  const [manual, setManual] = useState<{ slots: Seg[][]; unassigned: Seg[] } | null>(null);
+  const sig = useMemo(() => lines.map((l) => `${l.designId}:${l.boxes}`).join("|") + `#${cap}`, [lines, cap]);
+  const lastSig = useRef(sig);
+  useEffect(() => {
+    if (lastSig.current !== sig) {
+      lastSig.current = sig;
+      setManual(null);
+    }
+  }, [sig]);
+
+  const slots = manual ? manual.slots : auto;
+  const unassigned = manual ? manual.unassigned : [];
+  const vehicleCount = slots.length;
+  const usedBoxes = slots.reduce((s, seg) => s + loadOf(seg), 0);
+  const unassignedBoxes = loadOf(unassigned);
+  const totalCap = vehicleCount * cap;
+
+  // Snapshot the current auto plan into editable manual state on first edit.
+  const base = () => manual ?? { slots: clone(auto), unassigned: [] as Seg[] };
+
+  const clearVehicle = (i: number) => {
+    const b = base();
+    setManual({ slots: b.slots.map((s, k) => (k === i ? [] : s)), unassigned: [...b.unassigned, ...b.slots[i]] });
+  };
+  const removeVehicle = (i: number) => {
+    const b = base();
+    setManual({ slots: b.slots.filter((_, k) => k !== i), unassigned: [...b.unassigned, ...b.slots[i]] });
+  };
+  const addVehicle = () => {
+    if (manual) setManual({ ...manual, slots: [...manual.slots, []] });
+    else onExtraChange((n) => n + 1);
+  };
+  // Place an unassigned segment onto a vehicle, up to its free space (splits the
+  // remainder back into the pool); merges into an existing same-design segment.
+  const place = (b: { slots: Seg[][]; unassigned: Seg[] }, segIdx: number, vehI: number) => {
+    const seg = b.unassigned[segIdx];
+    const free = cap - loadOf(b.slots[vehI]);
+    if (!seg || free <= 0) return b;
+    const put = Math.min(seg.boxes, free);
+    const slots = b.slots.map((s, k) => {
+      if (k !== vehI) return s;
+      const ex = s.find((x) => x.designId === seg.designId && x.label === seg.label);
+      return ex ? s.map((x) => (x === ex ? { ...x, boxes: x.boxes + put } : x)) : [...s, { ...seg, boxes: put }];
+    });
+    const rest = seg.boxes - put;
+    const unassigned = b.unassigned.flatMap((u, k) => (k === segIdx ? (rest > 0 ? [{ ...u, boxes: rest }] : []) : [u]));
+    return { slots, unassigned };
+  };
+  const assign = (segIdx: number, vehI: number) => setManual(place(base(), segIdx, vehI));
+  const assignNew = (segIdx: number) => {
+    const b = base();
+    setManual(place({ slots: [...b.slots, []], unassigned: b.unassigned }, segIdx, b.slots.length));
+  };
 
   if (lines.length === 0) return null;
 
@@ -87,32 +151,69 @@ export function VehicleFillBar({
       <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span>Vehicle loading</span>
         <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
-          {fmt(truckLoads.used)} / {fmt(truckLoads.cap)} boxes · {vehicleCount} vehicle{vehicleCount > 1 ? "s" : ""}
+          {fmt(usedBoxes)} / {fmt(totalCap)} boxes · {vehicleCount} vehicle{vehicleCount === 1 ? "" : "s"}
+          {unassignedBoxes > 0 && <span style={{ color: "var(--c-red)" }}> · {fmt(unassignedBoxes)} not loaded</span>}
         </span>
+        {manual && (
+          <button type="button" className="btn" style={{ marginLeft: "auto", padding: "3px 8px" }} onClick={() => setManual(null)}>
+            Reset to auto
+          </button>
+        )}
         <button
           type="button"
           className="btn"
-          style={{ marginLeft: "auto", padding: "3px 8px" }}
-          onClick={() => onExtraChange((n) => n + 1)}
+          style={{ marginLeft: manual ? undefined : "auto", padding: "3px 8px" }}
+          onClick={addVehicle}
         >
           <Icon name="plus" size={12} /> Add vehicle
         </button>
       </div>
+
+      {unassignedBoxes > 0 && (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: "6px 12px",
+            padding: "8px 10px",
+            marginBottom: 10,
+            borderRadius: 6,
+            background: "var(--panel-2)",
+          }}
+        >
+          <span style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: "var(--c-red)" }}>
+            {fmt(unassignedBoxes)} boxes not loaded — assign:
+          </span>
+          {unassigned.map((seg, k) => {
+            const targets = slots
+              .map((s, vi) => ({ vi, free: cap - loadOf(s) }))
+              .filter((t) => t.free > 0)
+              .map((t) => ({ label: `Vehicle ${t.vi + 1} · ${fmt(t.free)} free`, onClick: () => assign(k, t.vi) }));
+            return (
+              <span key={k} className="dim" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: seg.color, flex: "0 0 auto" }} />
+                {seg.label} · {fmt(seg.boxes)} boxes
+                <MoreMenu kebab items={[...targets, { label: "New vehicle", onClick: () => assignNew(k) }]} />
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {truckLoads.loads.map((segs, i) => {
-          const loaded = segs.reduce((s, seg) => s + seg.boxes, 0);
-          const fillPct = truckCapacity > 0 ? Math.round((loaded / truckCapacity) * 100) : 0;
-          const fillColor = loaded === truckCapacity ? "var(--c-green)" : "var(--c-amber)";
-          // Vehicles beyond the auto-needed count are operator-added extras — removable.
-          const removable = i >= autoVehicles;
-          const removeVehicle = () => onExtraChange((n) => Math.max(0, n - 1));
+        {slots.map((segs, i) => {
+          const loaded = loadOf(segs);
+          const fillPct = Math.round((loaded / cap) * 100);
+          const fillColor = loaded === cap ? "var(--c-green)" : "var(--c-amber)";
+          const menu: { label: string; danger?: boolean; onClick: () => void }[] = [];
+          if (loaded > 0) menu.push({ label: "Clear items", onClick: () => clearVehicle(i) });
+          menu.push({ label: "Remove vehicle", danger: true, onClick: () => removeVehicle(i) });
           return (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              {removable && (
-                <button type="button" className="btn x" title="Remove vehicle" onClick={removeVehicle} style={{ padding: 2 }}>
-                  <Icon name="x" size={14} />
-                </button>
-              )}
+              <button type="button" className="btn x" title="Remove vehicle" onClick={() => removeVehicle(i)} style={{ padding: 2 }}>
+                <Icon name="x" size={14} />
+              </button>
               <Icon name="truck" size={20} />
               <div style={{ flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -126,16 +227,16 @@ export function VehicleFillBar({
                       border: "1px solid var(--border)",
                       background: "var(--panel-2)",
                     }}
-                    title={`${fmt(loaded)} / ${fmt(truckCapacity)} boxes`}
+                    title={`${fmt(loaded)} / ${fmt(cap)} boxes`}
                   >
                     {segs.map((seg, j) => {
                       const pct = loaded > 0 ? Math.round((seg.boxes / loaded) * 100) : 0;
-                      const wide = seg.boxes / truckCapacity >= 0.1;
+                      const wide = seg.boxes / cap >= 0.1;
                       return (
                         <div
                           key={j}
                           style={{
-                            width: `${(seg.boxes / truckCapacity) * 100}%`,
+                            width: `${(seg.boxes / cap) * 100}%`,
                             background: seg.color,
                             display: "flex",
                             alignItems: "center",
@@ -158,7 +259,7 @@ export function VehicleFillBar({
                   </span>
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  Vehicle {i + 1} · {fmt(loaded)} / {fmt(truckCapacity)} boxes
+                  Vehicle {i + 1} · {fmt(loaded)} / {fmt(cap)} boxes
                 </div>
                 {segs.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 4 }}>
@@ -174,9 +275,7 @@ export function VehicleFillBar({
                   </div>
                 )}
               </div>
-              {removable && (
-                <MoreMenu kebab items={[{ label: "Remove vehicle", danger: true, onClick: removeVehicle }]} />
-              )}
+              <MoreMenu kebab items={menu} />
             </div>
           );
         })}

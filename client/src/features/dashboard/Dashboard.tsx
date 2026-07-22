@@ -6,9 +6,7 @@ import { KPI, ProgressBar, StageBadge } from "@/ui/primitives";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { fmt, pct } from "@/lib/format";
 import { can } from "@/lib/auth";
-import { exportCsv } from "@/lib/csv";
 import { STAGES } from "@/data";
-import type { Order } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
 
 /** Monday 00:00 of the week containing `d`. */
@@ -41,27 +39,6 @@ export function Dashboard() {
     [allOrders, range],
   );
   const showSkeleton = loading && allOrders.length === 0;
-
-  const onExport = () => {
-    exportCsv<Order>(
-      `boffo-orders-${range === "week" ? "this-week" : "all"}-${new Date().toISOString().slice(0, 10)}`,
-      orders,
-      [
-        { header: "PO Number", value: (o) => o.poNumber },
-        { header: "Customer", value: (o) => o.party },
-        { header: "Country", value: (o) => o.country },
-        { header: "Design", value: (o) => o.design },
-        { header: "Size", value: (o) => o.size },
-        { header: "Finish", value: (o) => o.finish },
-        { header: "Stage", value: (o) => o.stage },
-        { header: "Order Qty (boxes)", value: (o) => o.orderQty },
-        { header: "Produced Qty (boxes)", value: (o) => o.producedQty },
-        { header: "Pallets", value: (o) => (o.boxesPerPallet > 0 ? Math.ceil(o.palletizedQty / o.boxesPerPallet) : 0) },
-        { header: "Order Date", value: (o) => o.orderDate },
-        { header: "Due Date", value: (o) => o.dueDate },
-      ],
-    );
-  };
 
   // Same rule as the old mock READY_TO_LOAD, over live orders.
   const readyToLoad = useMemo(
@@ -147,12 +124,6 @@ export function Dashboard() {
           </div>
         </div>
         <div className="right">
-          {can("orders", "export") && (
-            <button className="hbtn" onClick={onExport} title="Export current orders to CSV">
-              <Icon name="download" size={13} />
-              Export
-            </button>
-          )}
           <button
             className={`hbtn${range === "week" ? " primary" : ""}`}
             onClick={() => setRange((r) => (r === "week" ? "all" : "week"))}

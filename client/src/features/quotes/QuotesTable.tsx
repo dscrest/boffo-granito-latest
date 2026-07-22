@@ -13,7 +13,6 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { exportCsv } from "@/lib/csv";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
 import { QuoteForm } from "./QuoteForm";
@@ -382,29 +381,6 @@ export function QuotesTable() {
           </span>
           <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
-          {can("quotes", "export") && (
-            <button
-              className="hbtn"
-              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
-              title="Export the filtered rows as CSV"
-              onClick={() =>
-                exportCsv("quotes", filtered, [
-                  { header: "Quote No", value: (q) => q.quoteNo },
-                  { header: "Customer", value: (q) => q.customer },
-                  { header: "Date", value: (q) => q.quoteDate },
-                  { header: "Items", value: (q) => q.lines.length },
-                  { header: "Currency", value: (q) => q.currency },
-                  { header: "Final Total", value: (q) => quoteTotals(q).final },
-                  { header: "Terms", value: (q) => q.paymentTerm },
-                  { header: "Status", value: (q) => STATUS_LABEL[q.status] },
-                  { header: "SO", value: (q) => q.soNumber },
-                ])
-              }
-            >
-              <Icon name="docs" size={13} />
-              Export
-            </button>
-          )}
           {can("quotes", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>

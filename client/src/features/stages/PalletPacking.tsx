@@ -1,28 +1,30 @@
-/* Pallet Packing — table is live (listOrders, Data Store). The "New
-   Pallet" action opens the close-pallet saga form which commits a real
-   PalletisedBatch (produced → palletized); table reloads on success.
-   KPI tiles above remain static prototype figures. */
+/* Palletization — split-view detail page (same design as Item/Quote detail):
+   a resizable, searchable left sidebar of packing jobs and a right detail
+   panel for the selected job. The "New Palletization" action opens the
+   close-pallet saga form which commits a real PalletisedBatch (produced →
+   palletized); the list reloads on success. */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
-import { KPI, StageBadge } from "@/ui/primitives";
+import { StageBadge } from "@/ui/primitives";
+import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { finishClass, fmt } from "@/lib/format";
 import { type Order } from "@/data";
 import { listOrders } from "@/features/orders/ordersApi";
-import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { PalletPackForm } from "./PalletPackForm";
 import { closePallet, type ClosePalletInput } from "./palletisationApi";
 
 export function PalletPacking() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sizeF, setSizeF] = useState("");
   const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string>("");
 
   const load = async () => {
     const res = await listOrders();
@@ -38,17 +40,24 @@ export function PalletPacking() {
   }, []);
 
   const packable = orders.filter((o) => o.stage === "packing" || o.stage === "loading" || o.stage === "final");
-  // Size chips come from the live rows (DB-sourced), not a static list.
-  const sizeOptions = useMemo(() => [...new Set(packable.map((o) => o.size).filter(Boolean))].sort(), [orders]);
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
     return packable.filter((o) => {
-      if (sizeF && o.size !== sizeF) return false;
       if (!q) return true;
       return `${o.poNumber} ${o.design} ${o.party}`.toLowerCase().includes(q);
     });
-  }, [orders, sizeF, query]);
-  const pager = usePagination(items.length, "packingPageSize", `${sizeF}|${query}`);
+  }, [orders, query]);
+
+  // Auto-select the first job so the detail panel is never empty when jobs exist.
+  useEffect(() => {
+    if (items.length === 0) {
+      if (selectedId) setSelectedId("");
+    } else if (!items.some((o) => o.id === selectedId)) {
+      setSelectedId(items[0].id);
+    }
+  }, [items, selectedId]);
+
+  const selected = items.find((o) => o.id === selectedId) || null;
 
   // Form stays open (showing "Saving…") until the sagas resolve; closes on
   // success. One batch is committed per distinct pallet chosen on the lines.
@@ -76,143 +85,181 @@ export function PalletPacking() {
     void load();
   };
 
+  const moreItems = selected
+    ? [{ label: "Open Sales Order", onClick: () => navigate(`/orders/${encodeURIComponent(selected.id)}`) }]
+    : [];
+
   return (
     <div>
       {showForm && <PalletPackForm onSave={onSave} onClose={() => setShowForm(false)} />}
-      <div className="page-head">
-        <div>
-          <div className="title">Palletization</div>
-          <div className="sub">{loading ? "Loading…" : <span className="muted">{notice}</span>}</div>
-        </div>
-        <div className="right">
-          <button className="hbtn primary" onClick={() => setShowForm(true)}>
-            <Icon name="plus" size={13} />
-            New Palletization
-          </button>
-        </div>
-      </div>
 
-      {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
-
-      {/* Live figures computed from the loaded orders — no placeholder numbers. */}
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <KPI label="Packing Jobs" value={String(packable.length)} delta="in packing, loading & final" color="var(--c-violet)" />
-        <KPI label="Palletized" value={fmt(packable.reduce((s, o) => s + o.palletizedQty, 0))} unit="boxes" color="var(--c-violet)" />
-        <KPI
-          label="Remaining to Pack"
-          value={fmt(packable.reduce((s, o) => s + Math.max(o.orderQty - o.palletizedQty, 0), 0))}
-          unit="boxes"
-          color="var(--c-amber)"
-        />
-        <KPI label="Loaded" value={fmt(packable.reduce((s, o) => s + o.loadedQty, 0))} unit="boxes" color="var(--c-green)" />
-      </div>
-
-      <div className="fbar" style={{ marginTop: 14 }}>
-        {sizeOptions.map((s) => (
-          <button
-            key={s}
-            className={`btn${sizeF === s ? " active" : ""}`}
-            onClick={() => setSizeF(sizeF === s ? "" : s)}
-            title={sizeF === s ? "Clear size filter" : `Only ${s}`}
-          >
-            {s}
-          </button>
-        ))}
+      {/* Top toolbar — same aesthetic as the Quotes list (fbar + gsearch pill +
+          primary New button aligned on one row). */}
+      <div className="fbar" style={{ marginBottom: 12 }}>
+        <span className="muted" style={{ fontSize: "var(--t-sm)" }}>
+          {packable.length} packing job{packable.length === 1 ? "" : "s"}
+        </span>
         <div style={{ flex: 1 }} />
-        <input
-          type="text"
-          placeholder="Search PO, design, customer…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input
+            type="text"
+            placeholder="Search PO, design, customer…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
+        <button className="hbtn primary" onClick={() => setShowForm(true)}>
+          <Icon name="plus" size={13} />
+          New Palletization
+        </button>
+        {selected && (
+          <>
+            <MoreMenu items={moreItems} />
+            <button className="btn x" onClick={() => setSelectedId("")} title="Close selection">
+              <Icon name="x" size={13} />
+            </button>
+          </>
+        )}
       </div>
 
-      <div className="card">
-        {loading && orders.length === 0 ? (
-          <SkeletonRows rows={6} />
-        ) : (
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Customer</th>
-              <th>PO Number</th>
-              <th>Design</th>
-              <th>Size</th>
-              <th>Finish</th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Boxes / Pallet
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Pallets
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Ordered (boxes)
-              </th>
-              <th className="num" style={{ textAlign: "right" }}>
-                Loaded (boxes)
-              </th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pager.slice(items).map((o, i) => {
-              const loaded = o.loadedQty;
-              const total = o.orderQty;
-              const palletQty = Math.ceil(total / o.boxesPerPallet);
-              const status = o.loadedQty >= o.orderQty ? "final" : o.palletizedQty >= o.orderQty * 0.85 ? "loading" : "packing";
-              return (
-                <tr key={o.id + i}>
-                  <td>{o.party}</td>
-                  <td className="mono">
-                    <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {/* Left sidebar — list of packing jobs. Fixed viewport height with its OWN
+          scroll, sticky while the detail scrolls; drag the bottom-right corner
+          to resize. Mirrors Item/Quote detail. */}
+      <div
+        className="card"
+        style={{
+          width: 300,
+          minWidth: 220,
+          maxWidth: 420,
+          flexShrink: 0,
+          padding: 0,
+          resize: "horizontal",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          height: "calc(100vh - var(--header-h) - 24px)",
+          position: "sticky",
+          top: 12,
+        }}
+      >
+        <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
+          {loading && orders.length === 0 ? (
+            <SkeletonRows rows={6} />
+          ) : (
+            <>
+              {items.map((o) => {
+                const cur = o.id === selectedId;
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => setSelectedId(o.id)}
+                    title={o.poNumber}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "9px 12px",
+                      border: "none",
+                      borderBottom: "1px solid var(--border)",
+                      background: cur ? "var(--accent-soft)" : "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div className="mono" style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {o.poNumber}
-                    </Link>
-                  </td>
-                  <td>
-                    <span className="design-name">{o.design}</span>
-                  </td>
-                  <td>
-                    <span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span>
-                  </td>
-                  <td>
-                    <span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span>
-                  </td>
-                  <td className="num">{o.boxesPerPallet}</td>
-                  <td className="num">{palletQty}</td>
-                  <td className="num">{total}</td>
-                  <td className="num" style={{ color: loaded > 0 ? "var(--c-green)" : "var(--dim)" }}>
-                    {loaded || "—"}
-                  </td>
-                  <td>
-                    <StageBadge stage={status} />
-                  </td>
-                </tr>
-              );
-            })}
-            {!loading && !error && items.length === 0 && (
-              <tr>
-                <td colSpan={10}>
-                  {packable.length > 0 ? (
-                    <EmptyState title="No matching results" hint="Try a different size filter or search" />
-                  ) : (
-                    <EmptyState
-                      icon="package"
-                      title="No packing jobs"
-                      hint="Orders appear here once they reach the packing stage"
-                      action={
-                        <button className="hbtn primary" onClick={() => setShowForm(true)}>
-                          New Palletization
-                        </button>
-                      }
-                    />
-                  )}
-                </td>
-              </tr>
+                    </div>
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {o.party} · {o.size}
+                    </div>
+                  </button>
+                );
+              })}
+              {!loading && items.length === 0 && (
+                <div className="dim" style={{ padding: 12 }}>
+                  {packable.length > 0 ? "No matching jobs" : "No packing jobs"}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Detail panel */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
+
+        {!selected ? (
+          <div className="card" style={{ padding: 20 }}>
+            {packable.length > 0 ? (
+              <EmptyState title="No matching results" hint="Try a different search" />
+            ) : (
+              <EmptyState
+                icon="package"
+                title="No packing jobs"
+                hint="Orders appear here once they reach the packing stage"
+                action={
+                  <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                    New Palletization
+                  </button>
+                }
+              />
             )}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div
+                className="title mono"
+                style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                title={selected.poNumber}
+              >
+                {selected.poNumber}
+              </div>
+            </div>
+            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+              {selected.party} · {selected.design}
+              {notice && <span style={{ marginLeft: 10 }}>· {notice}</span>}
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <div className="form-section-title" style={{ marginBottom: 8 }}>Palletization Details</div>
+              {(() => {
+                const total = selected.orderQty;
+                const palletQty = Math.ceil(total / selected.boxesPerPallet);
+                const status = selected.loadedQty >= selected.orderQty ? "final" : selected.palletizedQty >= selected.orderQty * 0.85 ? "loading" : "packing";
+                return (
+                  <>
+                    <DetailRow label="Customer" value={selected.party} />
+                    <DetailRow label="PO Number" value={selected.poNumber} />
+                    <DetailRow label="Design" value={selected.design} />
+                    <div style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                      <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>Size</span>
+                      <span><span className={`chip size ${selected.size.startsWith("200") || selected.size.startsWith("75") ? "b" : ""}`}>{selected.size}</span></span>
+                    </div>
+                    <div style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                      <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>Finish</span>
+                      <span><span className={`chip finish ${finishClass(selected.finish)}`}>{selected.finish}</span></span>
+                    </div>
+                    <DetailRow label="Boxes / Pallet" value={String(selected.boxesPerPallet)} />
+                    <DetailRow label="Pallets" value={String(palletQty)} />
+                    <DetailRow label="Ordered (boxes)" value={fmt(total)} />
+                    <DetailRow label="Palletized (boxes)" value={fmt(selected.palletizedQty)} />
+                    <DetailRow label="Loaded (boxes)" value={selected.loadedQty ? fmt(selected.loadedQty) : "—"} />
+                    <div style={{ display: "flex", gap: 12, padding: "6px 0" }}>
+                      <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>Status</span>
+                      <span><StageBadge stage={status} /></span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
         )}
-        {!(loading && orders.length === 0) && <GridFooter {...pager} />}
+      </div>
       </div>
     </div>
   );
