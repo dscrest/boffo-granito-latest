@@ -9,7 +9,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { listVehicles, createVehicle, type VehicleRow } from "@/features/masters/vehiclesApi";
+import { listVehicles, createVehicle, formatVehicleNumber, type VehicleRow } from "@/features/masters/vehiclesApi";
 
 export function VehicleLoadModal({
   palNumber,
@@ -39,7 +39,7 @@ export function VehicleLoadModal({
     if (!creating.vehicle_number.trim() || !creating.driver_name.trim() || !creating.mobile_number.trim()) return;
     setSaving(true);
     const res = await createVehicle({
-      vehicle_number: creating.vehicle_number.trim(),
+      vehicle_number: formatVehicleNumber(creating.vehicle_number),
       driver_name: creating.driver_name.trim(),
       mobile_number: creating.mobile_number.trim(),
     });
@@ -76,7 +76,7 @@ export function VehicleLoadModal({
                 <label className="form-field">
                   <span className="lbl">Vehicle Number<span className="req"> *</span></span>
                   <input value={creating.vehicle_number} autoFocus placeholder="e.g. GJ-01-AB-1234"
-                    onChange={(e) => setCreating((c) => c && { ...c, vehicle_number: e.target.value })} />
+                    onChange={(e) => setCreating((c) => c && { ...c, vehicle_number: formatVehicleNumber(e.target.value) })} />
                 </label>
                 <label className="form-field">
                   <span className="lbl">Driver Name<span className="req"> *</span></span>
@@ -114,7 +114,7 @@ export function VehicleLoadModal({
                     hint: v.mobile,
                   }))}
                   onChange={setSelected}
-                  onCreate={(text) => setCreating({ vehicle_number: text, driver_name: "", mobile_number: "" })}
+                  onCreate={(text) => setCreating({ vehicle_number: formatVehicleNumber(text), driver_name: "", mobile_number: "" })}
                   placeholder="Search or add a vehicle…"
                 />
               </label>
@@ -132,7 +132,7 @@ export function VehicleLoadModal({
             <>
               <button className="btn" onClick={() => setCreating(null)} disabled={saving}>Cancel</button>
               <button className="hbtn primary" onClick={() => void saveVehicle()} disabled={saving || createInvalid}>
-                <Icon name="check" size={13} /> {saving ? "Saving…" : "Add vehicle"}
+                <Icon name="check" size={13} /> {saving ? "Saving…" : "Save"}
               </button>
             </>
           ) : (

@@ -16,6 +16,7 @@ import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
+import { formatVehicleNumber } from "./vehiclesApi";
 
 type FieldType = "text" | "number" | "select";
 
@@ -27,6 +28,8 @@ interface Field {
   required?: boolean;
   /** Background-assigned (e.g. seq_code): shown in the table, never typed. */
   auto?: boolean;
+  /** Optional as-you-type formatter (e.g. vehicle number → GJ-01-NR-4757). */
+  format?: (raw: string) => string;
 }
 
 interface MasterDef {
@@ -121,7 +124,7 @@ const MASTERS: MasterDef[] = [
     table: "Vehicle",
     lead: "vehicle_number",
     fields: [
-      { key: "vehicle_number", label: "Vehicle Number", required: true },
+      { key: "vehicle_number", label: "Vehicle Number", required: true, format: formatVehicleNumber },
       { key: "driver_name", label: "Driver Name", required: true },
       { key: "mobile_number", label: "Mobile", required: true },
     ],
@@ -190,7 +193,7 @@ function MasterEditor({
                 // Rule #5: numeric fields never accept negatives (server rejects too).
                 min={f.type === "number" ? 0 : undefined}
                 value={vals[f.key] ?? ""}
-                onChange={(e) => set(f.key, f.type === "number" ? e.target.value.replace(/^-/, "") : e.target.value)}
+                onChange={(e) => set(f.key, f.format ? f.format(e.target.value) : f.type === "number" ? e.target.value.replace(/^-/, "") : e.target.value)}
                 placeholder={f.label}
               />
             )}

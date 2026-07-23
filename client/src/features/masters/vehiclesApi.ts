@@ -10,6 +10,28 @@ import { createMaster } from "./mastersApi";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
+/** Format an Indian vehicle registration as the user types → SS-DD-L(L)-NNNN,
+    e.g. "gj01nr4757" or "GJ 01 NR 4757" → "GJ-01-NR-4757". Lenient: accepts
+    partial input and keeps unexpected trailing chars so it never blocks typing.
+    ponytail: heuristic for the common HSRP layout (2 letters, 2 digits, 0-2
+    letters, up to 4 digits); exotic plates (e.g. BH-series) still format best-effort. */
+export function formatVehicleNumber(raw: string): string {
+  const s = (raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const parts: string[] = [];
+  let i = 0;
+  const take = (re: RegExp, max: number) => {
+    let seg = "";
+    while (i < s.length && seg.length < max && re.test(s[i])) seg += s[i++];
+    if (seg) parts.push(seg);
+  };
+  take(/[A-Z]/, 2); // state code
+  take(/[0-9]/, 2); // RTO district
+  take(/[A-Z]/, 2); // series
+  take(/[0-9]/, 4); // running number
+  if (i < s.length) parts.push(s.slice(i)); // overflow → keep, don't block typing
+  return parts.join("-");
+}
+
 export interface VehicleRow {
   id: string; // ROWID
   vehicleNumber: string;

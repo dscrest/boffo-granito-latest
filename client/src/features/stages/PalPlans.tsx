@@ -14,7 +14,6 @@ import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterFie
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
-import { useOrders } from "@/features/orders/useOrders";
 import { PalPlanForm } from "./PalPlanForm";
 import { PalKanban } from "./PalKanban";
 import {
@@ -168,35 +167,11 @@ export function PalPlans() {
 
   const tabCount = (id: string) => (id === "all" ? plans.length : plans.filter((p) => p.status === id).length);
 
-  // Come-back hint: orders with produced boxes still waiting to be palletised.
-  const { orders } = useOrders();
-  const pending = useMemo(() => {
-    const bySo = new Map<string, number>();
-    orders.forEach((o) => {
-      const so = o.salesOrderId;
-      const r = Math.max(0, o.producedQty - o.palletizedQty);
-      if (so && r > 0) bySo.set(so, (bySo.get(so) || 0) + r);
-    });
-    return { orders: bySo.size, boxes: [...bySo.values()].reduce((s, n) => s + n, 0) };
-  }, [orders]);
-
   return (
     <div>
       {showForm && <PalPlanForm presetOrderId={presetOrderId || undefined} onSave={(i) => void onSave(i)} onClose={closeForm} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
-
-      {pending.orders > 0 && can("stages", "create") && (
-        <div className="fbar" style={{ marginBottom: 12, gap: 8 }}>
-          <Icon name="alert" size={13} />
-          <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
-            {pending.orders} order{pending.orders === 1 ? "" : "s"} · {fmt(pending.boxes)} boxes produced and still to palletise.
-          </span>
-          <button className="btn" style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setShowForm(true)}>
-            New palletization
-          </button>
-        </div>
-      )}
 
       <div className="fbar" style={{ marginBottom: 12 }}>
         <Icon name="filter" size={12} />
