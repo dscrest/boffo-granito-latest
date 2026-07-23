@@ -219,20 +219,27 @@ The **Sales Orders** menu item has a **List | Kanban** toggle at the top of the 
 
 - **Status buttons:** Submit for Approval → Approve → **Mark In Progress**; plus Cancel/Reopen.
 - **Items table** shows Ordered, Produced, Palletized, and **Available** boxes per line, with the stage.
-- **To palletize:** tick the produced lines and click **Send selected**, or **Send to Palletisation** to send everything available. This opens the Close Pallet form.
-- **More menu:** Palletise, Record New Production, Cancel, Clone, Delete.
+- **To palletize:** click **Send to Palletization** on the Items table, or the **More menu → Palletization** — both jump to the Palletization screen (`/packing`) with a new plan pre-scoped to this order, its items and available boxes already filled in (the same screen as *New Palletization* and Production's *Send to Palletization*).
+- **More menu:** Palletization, Record New Production, Cancel, Clone, Delete.
 
 > Editing locks once any work (production, palletize, or load) is recorded — the button tells you why.
 
 ### 5.5 Palletization
 
-*Pack produced boxes onto pallets, moving them from "produced" to "palletized".* (Menu label: Palletization / Pallet Packing.)
+*Group produced boxes onto pallets and run them through the load lifecycle.* (Menu label: **Palletization and Loading**; route `/packing`.) Every palletization is tied to a Sales Order — there is no independent (make-to-stock) palletization.
 
-**KPI tiles:** Packing Jobs, Palletized boxes, Remaining to Pack, Loaded boxes.
+**A Palletization Plan** is a first-class record with a server-minted **PAL/FY/NNN** number that groups a Sales Order's items onto a vehicle. Each item on the plan also carries its own sequential **`PAL-NNN`** code (like Production's `PROD-NNN`), so individual palletised items are traceable.
 
-**Each row** shows Boxes/Pallet, Pallets needed (`⌈Ordered ÷ Boxes-per-Pallet⌉`), Ordered, Loaded, and a status (Packing → Loading → Final).
+**Two views** (toggle in the filter bar):
 
-**To close a pallet:** click **New Palletization**, pick a **Sales Order** and a **Pallet spec** (the spec list is filtered to the sizes you're packing), set a Delivery Date, then enter **boxes per line** — each is capped at **Available (= Produced − already-palletized)**. Use **Fill all available** to speed it up. The form also shows an **advisory container-fit estimate** (how many pallets and containers the batch fills). Click **Close pallet** to commit; the system enforces palletized ≤ produced.
+- **Board (default)** — a Kanban with five stage columns: **In Palletization → Palletized → Ready for Loading → In Loading → Dispatched**. The board is **item-wise**: one card per palletised item (its `PAL-NNN`, design, boxes, SO and parent PAL number). **Drag a card** to the next stage to advance it — items of the same plan move together as a batch.
+- **List** — one row per plan (PAL number, vehicle, associated SOs, boxes, status), with the usual column picker, filters and pager.
+
+**To palletize:** click **New Palletization**, **pick a Sales Order** (only orders with produced-but-unpalletised stock appear), then enter **Load Boxes** and choose a **Pallet** for each line you want to palletise, and **Save**. Load Boxes start **blank** so you can palletise a subset — even a single item — and come back later for the rest; use the per-order **Fill available** button to fill them all at once. You land on the new plan. You can also arrive here pre-scoped from a **Sales Order → Send to Palletization** or from **Production → Send to Palletization**. No vehicle is captured here — it is assigned later, at the Loading step.
+
+**Vehicle & dispatch:** moving a plan into **In Loading** no longer asks for a vehicle. While a plan is **In Loading**, use the **Assign Vehicle** action (truck button on the card, or the button on the plan detail) to attach the vehicle — pick from the Vehicle master or add one inline (number, driver, mobile). A vehicle is **required before Dispatch**: the **Mark Dispatched** button stays disabled until one is assigned.
+
+**A plan's detail page** shows its items grouped by Sales Order (each with its `PAL-NNN` code), lifecycle transition buttons, **Assign Vehicle** (while In Loading), Edit, Clone, Print Palletization slip, and the activity timeline.
 
 ---
 

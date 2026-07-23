@@ -102,17 +102,19 @@ function soColumns(): ColumnDef<SORow>[] {
       label: "Status",
       render: (r) => {
         const s = r.head.status || "Confirmed";
-        // Derived: every line fully produced with boxes waiting to palletise.
-        const ready =
-          r.items.length > 0 &&
-          r.items.every((o) => o.producedQty >= o.orderQty) &&
-          r.items.reduce((sum, o) => sum + Math.max(0, o.producedQty - o.palletizedQty), 0) > 0;
+        // Produced boxes still waiting to be palletised (come-back-later signal).
+        const remaining = r.items.reduce((sum, o) => sum + Math.max(0, o.producedQty - o.palletizedQty), 0);
+        const partial = remaining > 0 && r.items.some((o) => o.palletizedQty > 0);
         return (
           <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
               {soStatusLabel(s)}
             </span>
-            {ready && <span className="chip qstatus q-accepted" title="Produced and waiting to be palletised">Ready for Palletisation</span>}
+            {remaining > 0 && (
+              <span className="chip qstatus q-accepted" title="Produced boxes still to palletise — come back to finish">
+                {partial ? `Partially palletised — ${fmt(remaining)} left` : `Ready for Palletisation — ${fmt(remaining)}`}
+              </span>
+            )}
           </span>
         );
       },

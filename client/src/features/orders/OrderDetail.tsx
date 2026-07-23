@@ -1,6 +1,6 @@
 /* Sales Order detail — header + all line items of the order.
-   Items are selectable; the action bar sends the whole order ("Palletize all")
-   or just the ticked rows ("Palletize selected") into the close-pallet form. */
+   "Send to Palletization" (inline button or the header More menu) opens the
+   PalPlan screen scoped to this order (/packing?fromOrder=). */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
@@ -14,8 +14,7 @@ import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
-import { PalletPackForm } from "@/features/stages/PalletPackForm";
-import { closePallet, listOrderBatches, type ClosePalletInput, type OrderBatchRow } from "@/features/stages/palletisationApi";
+import { listOrderBatches, type OrderBatchRow } from "@/features/stages/palletisationApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
@@ -40,7 +39,10 @@ function soDisplayStatus(
 ): { label: string; cls: string } {
   const base = { label: soStatusLabel(status), cls: SO_STATUS_CHIP[status] || "q-draft" };
   if (status !== "Confirmed" && status !== "InProgress") return base;
-  if (readyForPalletisation) return { label: "Ready for Palletisation", cls: "q-accepted" };
+  const remaining = items.reduce((s, o) => s + toPalletise(o), 0);
+  if (readyForPalletisation) return { label: `Ready for Palletisation — ${remaining} left`, cls: "q-accepted" };
+  // Partial: some boxes already palletised but produced stock still waits — come back to finish.
+  if (remaining > 0 && items.some((o) => o.palletizedQty > 0)) return { label: `Partially palletised — ${remaining} left`, cls: "q-accepted" };
   const workStarted = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
   if (!workStarted) return base;
   const stage = STAGES[Math.min(...items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))))];
@@ -166,12 +168,9 @@ export function OrderDetail() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [statusBusy, setStatusBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  const [pack, setPack] = useState<null | { mode: "selected" | "all" }>(null);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [prod, setProd] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
   const [listQ, setListQ] = useState("");
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const { designRows } = useMasters();
@@ -209,38 +208,9 @@ export function OrderDetail() {
     return head.salesOrderId ? orders.filter((o) => o.salesOrderId === head.salesOrderId) : [head];
   }, [orders, head]);
 
-  const selectable = useMemo(() => items.filter((o) => toPalletise(o) > 0), [items]);
   // Line items still owing production — pre-filled job list for "Send for
   // Production". Kept above the early returns so hook order stays stable.
   const prodJobs = useMemo(() => items.filter((o) => o.producedQty < o.orderQty), [items]);
-  const allChecked = selectable.length > 0 && selectable.every((o) => sel.has(o.id));
-  const toggle = (rowId: string) =>
-    setSel((p) => {
-      const n = new Set(p);
-      n.has(rowId) ? n.delete(rowId) : n.add(rowId);
-      return n;
-    });
-  const toggleAll = () => setSel(allChecked ? new Set() : new Set(selectable.map((o) => o.id)));
-
-  const onPalletSave = async (inputs: ClosePalletInput[]) => {
-    setPack(null);
-    setNotice("Saving palletisation…");
-    let done = 0;
-    let boxes = 0;
-    for (const input of inputs) {
-      const res = await closePallet(input);
-      if (!res.ok) {
-        setNotice(res.error || "Palletisation failed");
-        await load();
-        return;
-      }
-      done += 1;
-      boxes += res.data?.boxes_packed ?? 0;
-    }
-    setNotice(`Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
-    setSel(new Set());
-    await load();
-  };
 
   if (loading && !head) {
     return <div className="muted mono" style={{ padding: 24 }}>Loading order…</div>;
@@ -487,8 +457,11 @@ export function OrderDetail() {
             items={[
               // Palletise only once the order is past approval (mirror of the
               // items-card buttons; the server never gates on status).
+              // Send to Palletization → the same PalPlan screen as "New
+              // Palletization" and Production's button (unified entry, items
+              // pre-shown), scoped to this SO.
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
-                ? [{ label: "Palletization", onClick: () => setPack({ mode: "all" as const }) }]
+                ? [{ label: "Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
                 : []),
               ...(prodJobs.length > 0 && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
                 ? [{ label: "Record New Production", onClick: () => setProd(true) }]
@@ -532,19 +505,17 @@ export function OrderDetail() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontWeight: 600 }}>Items</span>
           <span className="muted" style={{ fontSize: 12 }}>
-            {sel.size} selected · {totalAvail} boxes to palletise
+            {totalAvail} boxes to palletise
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-            {notice && <span className="muted dim" style={{ fontSize: 12, marginRight: 4 }}>{notice}</span>}
-            {/* "Send to Palletisation" (whole order) lives in the header More
-               menu as "Palletization" now (user mandate 2026-07-20). This
-               inline button stays for the ticked-rows path only. */}
+            {/* Both send paths (this button and the header More → Palletization)
+               open the same PalPlan screen scoped to this order. */}
             <button
               className="btn"
-              disabled={sel.size === 0 || !head.salesOrderId}
-              onClick={() => setPack({ mode: "selected" })}
+              disabled={totalAvail === 0 || !head.salesOrderId}
+              onClick={() => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`)}
             >
-              Send selected ({sel.size})
+              Send to Palletization
             </button>
           </div>
         </div>
@@ -552,9 +523,6 @@ export function OrderDetail() {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width: 34, textAlign: "center" }}>
-                  <input type="checkbox" checked={allChecked} onChange={toggleAll} disabled={selectable.length === 0} title="Select all available" />
-                </th>
                 <th>Design</th>
                 <th>Size</th>
                 <th>Finish</th>
@@ -566,18 +534,10 @@ export function OrderDetail() {
             </thead>
             <tbody>
               {items.map((o) => {
-                const ready = toPalletise(o) > 0;
                 const st = stockOf(o);
                 const stock = st.available;
                 return (
                   <tr key={o.id}>
-                    <td style={{ textAlign: "center" }}>
-                      {ready ? (
-                        <input type="checkbox" checked={sel.has(o.id)} onChange={() => toggle(o.id)} />
-                      ) : (
-                        <span className="muted" title="Nothing produced yet to palletize">—</span>
-                      )}
-                    </td>
                     <td><span className="design-name">{o.design}</span></td>
                     <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
                     <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
@@ -604,16 +564,6 @@ export function OrderDetail() {
           presetSalesOrderId={head.salesOrderId}
           onSave={onProdSave}
           onClose={() => setProd(false)}
-        />
-      )}
-
-      {pack && head.salesOrderId && (
-        <PalletPackForm
-          presetOrderId={head.salesOrderId}
-          preselectItemIds={pack.mode === "selected" ? [...sel] : undefined}
-          autoFillAll={pack.mode === "all"}
-          onSave={onPalletSave}
-          onClose={() => setPack(null)}
         />
       )}
     </RecordDetail>

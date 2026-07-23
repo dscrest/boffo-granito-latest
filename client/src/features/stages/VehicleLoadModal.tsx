@@ -1,8 +1,8 @@
 /* ============================================================
-   Vehicle-loading screen — shown when a palletization plan starts loading
-   (Ready for Loading → In Loading). Pick a vehicle from the Vehicle master,
-   or create one inline (number + driver + mobile, all required). Confirm
-   returns the chosen Vehicle ROWID to the caller, which advances the plan.
+   Assign-vehicle screen — used while a palletization plan is In Loading (the
+   "Assign Vehicle" action) to attach the vehicle needed before dispatch. Pick a
+   vehicle from the Vehicle master, or create one inline (number + driver +
+   mobile, all required). Confirm returns the chosen Vehicle ROWID to the caller.
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -62,8 +62,8 @@ export function VehicleLoadModal({
         <div className="df-head">
           <div className="ico"><Icon name="truck" size={18} /></div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>Load Vehicle</div>
-            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Assign a vehicle to {palNumber} before loading</div>
+            <div style={{ fontWeight: 600 }}>Assign Vehicle</div>
+            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Assign a vehicle to {palNumber}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
@@ -128,7 +128,7 @@ export function VehicleLoadModal({
             <>
               <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
               <button className="hbtn primary" onClick={() => onConfirm(selected)} disabled={busy || !selected}>
-                <Icon name="check" size={13} /> {busy ? "Loading…" : "Begin Loading"}
+                <Icon name="check" size={13} /> {busy ? "Saving…" : "Assign vehicle"}
               </button>
             </>
           )}

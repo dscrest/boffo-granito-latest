@@ -3,9 +3,10 @@
 
    A PalletizationPlan is a first-class, human-numbered (PAL/FY/NNN)
    record that groups OrderItems from MULTIPLE Sales Orders onto a
-   vehicle and runs the 4-stage lifecycle Planning → ReadyToLoad →
-   Loading → Completed. Header (PalletizationPlan) + lines
-   (PalletizationPlanLine) mirror SalesOrder + OrderItem. All writes go
+   vehicle. Palletising is PER LINE (PalletizationPlanLine.status:
+   In Palletization → Ready for Loading); loading/dispatch is PER PLAN
+   (status: Planning → Loading → Completed). Header (PalletizationPlan)
+   + lines (PalletizationPlanLine) mirror SalesOrder + OrderItem. All writes go
    through the data-ops business routes and are logged in OperationLog.
    See containersApi.ts (cache) and palletisationApi.ts (op sagas).
    ============================================================ */
@@ -15,18 +16,29 @@ import { createListCache } from "@/lib/cache";
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-// Internal keys kept stable (existing rows keep their status); labels below are
-// the shop-floor names. "Palletized" is the one new stage.
-export const PAL_STATUSES = ["Planning", "Palletized", "ReadyToLoad", "Loading", "Completed"] as const;
+// PLAN status (per vehicle load). Palletising is tracked PER LINE (see PalLineStatus);
+// the plan only runs the loading/dispatch portion. The retired "Palletized"/plan-level
+// "ReadyToLoad" states are folded into Planning by the migration.
+export const PAL_STATUSES = ["Planning", "Loading", "Completed"] as const;
 export type PalStatus = (typeof PAL_STATUSES)[number];
 
-/** Allowed status transitions — mirrors the server PAL_TRANSITIONS. */
+/** Allowed PLAN status transitions — mirrors the server PAL_TRANSITIONS. */
 export const PAL_TRANSITIONS: Record<PalStatus, PalStatus[]> = {
-  Planning: ["Palletized"],
-  Palletized: ["ReadyToLoad", "Planning"],
-  ReadyToLoad: ["Loading", "Palletized"],
-  Loading: ["Completed", "ReadyToLoad"],
+  Planning: ["Loading"], // → Loading captures the vehicle
+  Loading: ["Completed", "Planning"],
   Completed: [],
+};
+
+// LINE status (per palletised item). The item-wise move on the kanban.
+export const PAL_LINE_STATUSES = ["Planning", "ReadyToLoad"] as const;
+export type PalLineStatus = (typeof PAL_LINE_STATUSES)[number];
+export const PAL_LINE_TRANSITIONS: Record<PalLineStatus, PalLineStatus[]> = {
+  Planning: ["ReadyToLoad"],
+  ReadyToLoad: ["Planning"],
+};
+export const PAL_LINE_STATUS_LABEL: Record<PalLineStatus, string> = {
+  Planning: "In Palletization",
+  ReadyToLoad: "Ready for Loading",
 };
 
 export interface PalPlanLine {
@@ -40,6 +52,8 @@ export interface PalPlanLine {
   palletName: string;
   boxes: number;
   position: number;
+  status: PalLineStatus; // In Palletization → Ready for Loading (per-item kanban move)
+  itemCode: string; // display-only sequential PAL-NNN (mirrors Production's PROD-NNN)
 }
 
 export interface PalPlan {
@@ -143,6 +157,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
       palletName: palletName.get(palletId) || "—",
       boxes: num(l.boxes),
       position: num(l.position),
+      status: (str(l.status) || "Planning") as PalLineStatus,
+      itemCode: "", // assigned below, once all plans are built
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
   });
@@ -177,6 +193,21 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
       };
     });
 
+  // Display-only sequential per-item code (PAL-NNN), oldest plan first then line
+  // position — mirrors Production's PROD-NNN so each palletised item reads as an
+  // individual record. ponytail: renumbers if lines change; a persistent code
+  // would need a server-assigned column like pal_number.
+  result
+    .flatMap((p) => p.lines.map((l) => ({ createdTime: p.createdTime, planId: p.id, line: l })))
+    .sort((a, b) =>
+      a.createdTime !== b.createdTime
+        ? a.createdTime < b.createdTime ? -1 : 1
+        : a.planId !== b.planId
+          ? a.planId < b.planId ? -1 : 1
+          : a.line.position - b.line.position,
+    )
+    .forEach((x, i) => { x.line.itemCode = `PAL-${String(i + 1).padStart(3, "0")}`; });
+
   return { ok: true, plans: result };
 }
 
@@ -196,9 +227,19 @@ export function updatePalPlan(rowid: string, input: PalPlanInput) {
   return bust(op<{ ROWID: string; pal_number: string }>(`update-pal-plan/${rowid}`, input));
 }
 
-/** Advance a plan. Moving to Loading requires `vehicle` (a Vehicle ROWID). */
+/** Advance a plan. Dispatch (→ Completed) requires a vehicle already assigned. */
 export function setPalStatus(rowid: string, status: PalStatus, vehicle?: string) {
   return bust(op<{ ROWID: string; status: string }>(`pal-status/${rowid}`, vehicle ? { status, vehicle } : { status }));
+}
+
+/** Assign (or reassign) the vehicle to a plan — only valid while it is In Loading. */
+export function setPalVehicle(rowid: string, vehicle: string) {
+  return bust(op<{ ROWID: string; vehicle: string }>(`pal-vehicle/${rowid}`, { vehicle }));
+}
+
+/** Palletise one item (In Palletization ↔ Ready for Loading) without touching its plan. */
+export function setPalLineStatus(lineId: string, status: PalLineStatus) {
+  return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status }));
 }
 
 export function deletePalPlan(rowid: string) {
@@ -224,11 +265,9 @@ export function planToInput(p: PalPlan): PalPlanInput {
   };
 }
 
-/** Human label for a status (spaced). */
+/** Human label for a PLAN status (spaced). */
 export const PAL_STATUS_LABEL: Record<PalStatus, string> = {
   Planning: "In Palletization",
-  Palletized: "Palletized",
-  ReadyToLoad: "Ready for Loading",
   Loading: "In Loading",
   Completed: "Dispatched",
 };

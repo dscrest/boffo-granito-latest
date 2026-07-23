@@ -1,9 +1,12 @@
 /* ============================================================
-   Palletization Plan form — plans a vehicle load that groups OrderItems
-   from MULTIPLE Sales Orders. Header (vehicle / planned date / salesperson)
-   + a per-SO item picker (boxes + pallet per line) + the shared vehicle-fill
-   bar. On save it emits a PalPlanInput; the PAL number is minted server-side.
-   Reuses the shared form/modal CSS (df-*, form-*) and VehicleFillBar.
+   Palletization Plan form — plans a palletization that groups OrderItems
+   from one Sales Order (or several, when editing). Header (planned date /
+   salesperson) + a per-SO item picker (boxes + pallet per line). Palletise Boxes
+   start blank so a partial (even single-item) palletization is allowed; a per-
+   order "Fill available" button fills them all. Only produced boxes can be
+   palletised (rows with nothing produced are disabled). Vehicle is NOT captured here —
+   it is assigned later, at the Loading step. On save it emits a PalPlanInput;
+   the PAL number is minted server-side. Reuses the shared form/modal CSS.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -15,14 +18,12 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
+import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
-import { VehicleFillBar, type VehicleLine } from "./VehicleFillBar";
-import { type PalPlan, type PalPlanInput } from "./palPlansApi";
+import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
 
 // Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
 const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
-// ponytail: no Truck master yet — one vehicle ≈ one container of the chosen pallets.
-const DEFAULT_TRUCK_BOXES = 1000;
 
 export function PalPlanForm({
   onSave,
@@ -48,15 +49,35 @@ export function PalPlanForm({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // New mode (no preset, no seed): scope the item table to one chosen SO, like
+  // "Send for Production". Edit/clone and preset (from SO/production) skip this.
+  const pickSo = !initial && !presetOrderId;
+  const [selectedSo, setSelectedSo] = useState("");
   const [plannedDate, setPlannedDate] = useState(initial?.plannedDate || todayISO());
   const [salesperson, setSalesperson] = useState(initial?.salespersonName || "");
   const [remarks, setRemarks] = useState(initial?.remarks || "");
   // Boxes + pallet chosen per order item (keyed by OrderItem ROWID).
   const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
   const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
-  const [extra, setExtra] = useState(0);
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
+  const stockFor = useStockLookup(); // per-design stock signal dot (same as the SO form)
+
+  // Dedup: which OrderItems already sit in an OPEN (non-dispatched) plan, so we can
+  // warn the user before they raise a duplicate palletization request.
+  const [existingPlans, setExistingPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
+  useEffect(() => {
+    void listPalPlans().then((r) => r.ok && setExistingPlans(r.plans));
+  }, []);
+  const usedByPlan = useMemo(() => {
+    const m = new Map<string, string>(); // orderItemId → PAL number of an open plan
+    existingPlans.forEach((p) => {
+      if (p.status === "Completed") return; // dispatched → done, no longer a duplicate
+      if (initial && p.id === initial.id) return; // don't warn about the plan we're editing
+      p.lines.forEach((l) => { if (!m.has(l.orderItemId)) m.set(l.orderItemId, p.palNumber); });
+    });
+    return m;
+  }, [existingPlans, initial]);
 
   useEffect(() => {
     void (async () => {
@@ -89,13 +110,9 @@ export function PalPlanForm({
         setBoxesByItem(b);
         setPalletByItem(p);
       } else {
+        // Pallet defaults from the SO; Load Boxes start blank so the user can
+        // palletise a subset (even one item) — "Fill available" fills them all.
         setPalletByItem(defPallet);
-        // Send-to-Palletization: prefill Load Boxes with the produced-available qty.
-        if (presetOrderId) {
-          const b: Record<string, number> = {};
-          po.orders.forEach((o) => o.items.forEach((it) => { if (it.available > 0) b[it.orderItemId] = it.available; }));
-          setBoxesByItem(b);
-        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,14 +128,36 @@ export function PalPlanForm({
     });
   };
 
-  const setBoxes = (itemId: string, raw: string) =>
-    setBoxesByItem((p) => ({ ...p, [itemId]: Math.max(0, Number(raw) || 0) }));
+  // Clamp to the produced-available qty — you can't palletise more than is produced.
+  const setBoxes = (itemId: string, raw: string, max: number) =>
+    setBoxesByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
   const setPallet = (itemId: string, pid: string) => setPalletByItem((p) => ({ ...p, [itemId]: pid }));
 
-  // Flatten every order item (across all SOs) for line building / lookup.
+  // Convenience: fill Load Boxes with produced-available for a set of items.
+  const fillAvailable = (items: PalletizableItem[]) =>
+    setBoxesByItem((p) => {
+      const next = { ...p };
+      items.forEach((it) => { if (it.available > 0) next[it.orderItemId] = it.available; });
+      return next;
+    });
+
+  // Orders shown as item sections: edit/clone/preset show what the API returned;
+  // New mode shows only the SO picked above (nothing until one is chosen).
+  const visibleOrders = useMemo(
+    () => (pickSo ? orders.filter((o) => o.salesOrderId === selectedSo) : orders),
+    [pickSo, orders, selectedSo],
+  );
+
+  // Picking an SO scopes the item table; Load Boxes stay blank (partial-friendly).
+  const onSelectSo = (soId: string) => {
+    setSelectedSo(soId);
+    setBoxesByItem({});
+  };
+
+  // Flatten every VISIBLE order item for line building / lookup.
   const allItems = useMemo(
-    () => orders.flatMap((o) => o.items.map((it) => ({ ...it, salesOrderId: o.salesOrderId }))),
-    [orders],
+    () => visibleOrders.flatMap((o) => o.items.map((it) => ({ ...it, salesOrderId: o.salesOrderId }))),
+    [visibleOrders],
   );
 
   // Save lines = every item with boxes > 0.
@@ -137,25 +176,6 @@ export function PalPlanForm({
   );
   const totalBoxes = saveLines.reduce((s, l) => s + l.boxes, 0);
   const linesNeedingPallet = saveLines.filter((l) => !l.pallet).length;
-
-  // Vehicle capacity (boxes) ≈ one container of the chosen pallets. Advisory.
-  const truckCapacity = useMemo(() => {
-    const caps = saveLines
-      .map((l) => pallets.find((p) => p.id === l.pallet)?.boxesPerContainer || 0)
-      .filter((n) => n > 0);
-    return caps.length ? Math.max(...caps) : DEFAULT_TRUCK_BOXES;
-  }, [saveLines, pallets]);
-
-  const vehicleLines = useMemo<VehicleLine[]>(
-    () =>
-      saveLines
-        .filter((l) => l.pallet)
-        .map((l) => {
-          const it = allItems.find((x) => x.orderItemId === l.order_item);
-          return { designId: it?.designId || l.order_item, label: it?.designLabel || "—", boxes: l.boxes };
-        }),
-    [saveLines, allItems],
-  );
 
   const missing = saveLines.length === 0 || linesNeedingPallet > 0;
 
@@ -190,7 +210,7 @@ export function PalPlanForm({
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600 }}>{editing ? `Edit ${initial!.palNumber}` : "New Palletization Plan"}</div>
-            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Group order items from one or more Sales Orders onto a vehicle</div>
+            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Choose the items and pallets to palletise — assign a vehicle later, at loading</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
@@ -211,6 +231,19 @@ export function PalPlanForm({
               <div className="form-section">
                 <div className="form-section-title">Plan</div>
                 <div className="form-grid">
+                  {pickSo && (
+                    <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+                      <span className="lbl">Sales Order<span className="req"> *</span></span>
+                      <Combobox
+                        value={selectedSo}
+                        options={orders.map((o) => ({ value: o.salesOrderId, label: o.label }))}
+                        onChange={onSelectSo}
+                        placeholder={orders.length ? "Search orders with palletisable stock…" : "No orders ready to palletise"}
+                        ariaLabel="Sales Order"
+                        invalid={showErrors && !selectedSo}
+                      />
+                    </label>
+                  )}
                   <label className="form-field">
                     <span className="lbl">Planned Date</span>
                     <DateInput value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} />
@@ -231,15 +264,38 @@ export function PalPlanForm({
                 </div>
               </div>
 
-              {orders.map((o) => (
+              {pickSo && !selectedSo && (
+                <div className="muted" style={{ padding: "8px 2px" }}>Choose a Sales Order above to load its items.</div>
+              )}
+
+              {visibleOrders.map((o) => {
+                // Distinct open plans that already hold items from this order (dedup hint).
+                const dupPals = [...new Set(o.items.map((it) => usedByPlan.get(it.orderItemId)).filter(Boolean))] as string[];
+                return (
                 <div className="form-section" key={o.salesOrderId}>
-                  <div className="form-section-title">{o.label}</div>
+                  <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1 }}>{o.label}</span>
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ height: 24, padding: "0 10px", fontWeight: 400, fontSize: "var(--t-sm)" }}
+                      onClick={() => fillAvailable(o.items)}
+                      title="Fill Palletise Boxes with the available qty for every line"
+                    >
+                      Fill available
+                    </button>
+                  </div>
+                  {dupPals.length > 0 && (
+                    <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>
+                      ⚠ This order already has an open palletization ({dupPals.join(", ")}) — avoid raising a duplicate.
+                    </div>
+                  )}
                   <table className="tbl">
                     <thead>
                       <tr>
                         <th>Design</th>
                         <th className="num" style={{ textAlign: "right" }}>Available</th>
-                        <th className="num" style={{ textAlign: "right", width: 130 }}>Load Boxes</th>
+                        <th className="num" style={{ textAlign: "right", width: 150 }}>Palletise Boxes</th>
                         <th style={{ minWidth: 320 }}>Pallet</th>
                       </tr>
                     </thead>
@@ -247,20 +303,32 @@ export function PalPlanForm({
                       {o.items.map((it) => {
                         const opts = palletsForItem(it);
                         const boxes = boxesByItem[it.orderItemId] || 0;
+                        const noStock = it.available <= 0; // nothing produced yet → can't palletise
                         const palletErr = showErrors && boxes > 0 && !palletByItem[it.orderItemId];
+                        const usedPal = usedByPlan.get(it.orderItemId);
                         return (
-                          <tr key={it.orderItemId}>
+                          <tr key={it.orderItemId} style={noStock ? { opacity: 0.55 } : undefined}>
                             <td>
-                              <span className="design-name">{it.designLabel}</span>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                <LineStockChip stock={stockFor(it.designName)} qty={boxes} label={it.designLabel} />
+                                <span className="design-name">{it.designLabel}</span>
+                                {usedPal && (
+                                  <span className="chip" style={{ fontSize: 11 }} title={`Already in open palletization ${usedPal}`}>in {usedPal}</span>
+                                )}
+                              </span>
                             </td>
                             <td className="num mono">{fmt(it.available)}</td>
                             <td className="num">
-                              <NumberInput
-                                value={boxesByItem[it.orderItemId] ?? ""}
-                                onChange={(e) => setBoxes(it.orderItemId, e.target.value)}
-                                placeholder="0"
-                                style={{ width: 110, textAlign: "right" }}
-                              />
+                              {noStock ? (
+                                <span className="dim" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>⚠ needs production</span>
+                              ) : (
+                                <NumberInput
+                                  value={boxesByItem[it.orderItemId] ?? ""}
+                                  onChange={(e) => setBoxes(it.orderItemId, e.target.value, it.available)}
+                                  placeholder="0"
+                                  style={{ width: 110, textAlign: "right" }}
+                                />
+                              )}
                             </td>
                             <td>
                               <Combobox
@@ -277,9 +345,8 @@ export function PalPlanForm({
                     </tbody>
                   </table>
                 </div>
-              ))}
-
-              <VehicleFillBar lines={vehicleLines} truckCapacity={truckCapacity} extra={extra} onExtraChange={setExtra} />
+                );
+              })}
             </>
           )}
         </div>
@@ -289,13 +356,13 @@ export function PalPlanForm({
             {showErrors && missing ? (
               <span className="field-err">
                 {saveLines.length === 0
-                  ? "Enter Load Boxes for at least one item"
+                  ? "Enter Palletise Boxes for at least one item"
                   : "Choose a pallet for every line with boxes"}
               </span>
             ) : totalBoxes > 0 ? (
               `${fmt(totalBoxes)} boxes · ${saveLines.length} line${saveLines.length > 1 ? "s" : ""} · ${[...new Set(saveLines.map((l) => l.sales_order))].length} order(s)`
             ) : (
-              "Pick items and their pallets to plan a vehicle load"
+              "Enter Palletise Boxes and a pallet for the items to palletise"
             )}
           </span>
           <button className="btn" onClick={onClose}>

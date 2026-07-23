@@ -1482,6 +1482,7 @@ function normalizePlanLines(body) {
       pallet: l.pallet ? String(l.pallet) : null,
       boxes,
       position: Number(l.position) || i,
+      status: "Planning", // every line born In Palletization; advances via /pal-line-status
     };
   });
 }
@@ -1588,15 +1589,20 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
 
 /* Palletization plan status machine — mirror of /quote-status. All status
    changes route here (generic PATCH rejects PalletizationPlan.status). */
-// Labels (client PAL_STATUS_LABEL): Planning=In Palletization, Palletized=Palletized,
-// ReadyToLoad=Ready for Loading, Loading=In Loading, Completed=Dispatched. Internal keys
-// kept stable so existing rows don't need migrating.
+// Two-level lifecycle. Palletising is PER LINE (PalletizationPlanLine.status:
+// Planning=In Palletization → ReadyToLoad=Ready for Loading). Loading/dispatch is
+// PER VEHICLE (PalletizationPlan.status): Planning → Loading (In Loading) →
+// Completed (Dispatched). The retired "Palletized"/plan-level "ReadyToLoad" states
+// are folded into Planning by the one-off migration.
 const PAL_TRANSITIONS = {
-  Planning: ["Palletized"],
-  Palletized: ["ReadyToLoad", "Planning"],
-  ReadyToLoad: ["Loading", "Palletized"], // → Loading captures the vehicle
-  Loading: ["Completed", "ReadyToLoad"],
+  Planning: ["Loading"], // → Loading captures the vehicle (via /pal-vehicle)
+  Loading: ["Completed", "Planning"], // Completed = dispatched; back = unload
   Completed: [], // terminal (dispatched)
+};
+// Per-line palletising toggle.
+const PAL_LINE_TRANSITIONS = {
+  Planning: ["ReadyToLoad"],
+  ReadyToLoad: ["Planning"],
 };
 
 app.post("/pal-status/:rowid", async (req, res) => {
@@ -1621,20 +1627,86 @@ app.post("/pal-status/:rowid", async (req, res) => {
           throw badRequest(`Cannot move palletization plan from ${from} to ${to}`, 409);
 
         const patch = { ROWID: planId, status: to };
-        // Loading = "In Loading" → a real vehicle (from the Vehicle master) is
-        // required. Accept it in the body, else the plan must already carry one.
-        if (to === "Loading") {
-          const vehicle = (req.body || {}).vehicle ? String((req.body || {}).vehicle) : String(rows[0].vehicle || "");
-          if (!vehicle) throw badRequest("A vehicle is required before loading", 400);
-          patch.vehicle = vehicle;
+        // Entering "In Loading" no longer gates on a vehicle — the vehicle is
+        // assigned at that step via /pal-vehicle. Dispatch requires it, though:
+        // Completed = dispatched → a vehicle must already be assigned, then stamp
+        // the dispatch date (IST).
+        if (to === "Completed") {
+          if (!String(rows[0].vehicle || "")) throw badRequest("Assign a vehicle before dispatch", 400);
+          patch.dispatch_date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
         }
-        // Completed = dispatched → stamp the dispatch date (IST).
-        if (to === "Completed") patch.dispatch_date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
         await ds.table("PalletizationPlan").updateRow(patch);
         await logTransition(catalyst, {
           entity_type: "PalletizationPlan", entity_rowid: planId, from_status: from, to_status: to,
         });
         return { rowid: planId, data: { ROWID: planId, status: to } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Per-line palletising toggle (In Palletization ↔ Ready for Loading). This is the
+   item-wise move on the kanban — advancing one line never touches its plan or siblings. */
+app.post("/pal-line-status/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const lineId = req.params.rowid;
+    const to = String((req.body || {}).status || "");
+
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to } },
+      async () => {
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status FROM PalletizationPlanLine WHERE ROWID = ${lineId}`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
+        const from = String(rows[0].status || "Planning");
+        if (!(PAL_LINE_TRANSITIONS[from] || []).includes(to))
+          throw badRequest(`Cannot move palletization line from ${from} to ${to}`, 409);
+        await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, status: to });
+        await logTransition(catalyst, {
+          entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: to,
+        });
+        return { rowid: lineId, data: { ROWID: lineId, status: to } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Assign (or reassign) a vehicle to a plan at the "In Loading" step. Split out of
+   /pal-status so entering In Loading no longer gates on a vehicle — the vehicle is
+   captured here, and /pal-status requires it before dispatch (Completed). */
+app.post("/pal-vehicle/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const planId = req.params.rowid;
+    const vehicle = (req.body || {}).vehicle ? String((req.body || {}).vehicle) : "";
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlan", operation: "vehicle-assign", payload: { ROWID: planId, vehicle } },
+      async () => {
+        if (!vehicle) throw badRequest("A vehicle is required", 400);
+        const rows = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
+          ),
+        );
+        if (!rows.length) throw badRequest(`Palletization plan not found: ${planId}`, 404);
+        if (String(rows[0].status || "") !== "Loading")
+          throw badRequest("A vehicle can only be assigned while the plan is In Loading", 409);
+        await ds.table("PalletizationPlan").updateRow({ ROWID: planId, vehicle });
+        return { rowid: planId, data: { ROWID: planId, vehicle } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2745,6 +2817,8 @@ app.patch("/:table/:rowid", async (req, res) => {
           throw badRequest("Sales order status cannot be set directly — use /so-status");
         if (table === "PalletizationPlan" && patch.status !== undefined)
           throw badRequest("Palletization plan status cannot be set directly — use /pal-status");
+        if (table === "PalletizationPlanLine" && patch.status !== undefined)
+          throw badRequest("Palletization line status cannot be set directly — use /pal-line-status");
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];

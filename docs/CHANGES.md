@@ -1,5 +1,67 @@
 # Changes
 
+## 2026-07-23 — Palletization: per-item stages, produced gate, detail tabs
+
+- **Per-item kanban movement** — palletising is now tracked **per line**, not per
+  plan. New `PalletizationPlanLine.status` (`Planning` → `ReadyToLoad`); dragging
+  one item card between **In Palletization** and **Ready for Loading** moves only
+  that item (`setPalLineStatus` → new server route `POST /pal-line-status/:rowid`).
+  Loading & Dispatch stay **per vehicle**: once every line of a plan is Ready, a
+  **Load vehicle** button on the Ready column assembles the whole plan onto a
+  vehicle and it advances as one card through **In Loading → Dispatched**.
+- **"Palletized" stage removed** — plan lifecycle simplified to `Planning →
+  Loading → Completed`; the board is now 4 columns. `PAL_TRANSITIONS` and
+  `STATUS_CHIP` updated on both client and `data-ops`. **Requires a migration**
+  (add `PalletizationPlanLine.status`; backfill lines of already-loaded/dispatched
+  plans to `ReadyToLoad`; remap plan `Palletized`/`ReadyToLoad` → `Planning`) and
+  a `functions/data-ops` redeploy.
+- **Palletization detail tabs** — `PalPlanDetail` splits into **Palletise items /
+  Timeline / Activity** tabs (default items).
+- **Form: Palletise Boxes** — renamed from "Load Boxes"; rows with **nothing
+  produced are disabled** ("⚠ needs production") and box entry is **capped at the
+  produced-available qty**. Added the SO-style **stock signal dot**
+  (`LineStockChip`) per line and a **dedup hint** ("in PAL-N") when an item is
+  already in an open plan.
+- **Come-back-later flag** — Sales Orders list + Order detail now show a
+  **"Partially palletised — N left"** / "Ready for Palletisation — N" chip; the
+  Palletization page shows a banner counting orders with produced boxes still to
+  palletise.
+
+## 2026-07-23 — Palletization: item-wise board + unified send flow
+
+- **Item-wise board** — the Palletization Kanban (`PalKanban`) now renders **one
+  card per plan line (item)** instead of one per plan. Each line gets a
+  display-only sequential **`PAL-NNN`** code (computed in
+  `palPlansApi.fetchPalPlans`, mirrors Production's `PROD-NNN`) shown on the card
+  and in the plan detail's item rows. Dragging any item card advances its whole
+  plan (a plan = one SO's palletised items; per-line stages were not added).
+- **Unified send flow** — Sales Order detail **More → Palletization** now opens
+  the same `/packing?fromOrder=<so>` screen as *New Palletization* and
+  Production's *Send to Palletization* (no longer the old Close Pallet form). The
+  inline "Send selected" per-line shortcut still opens the legacy Close Pallet
+  form.
+- **Select-SO on New Palletization** — `PalPlanForm` in New mode adds a **Sales
+  Order** picker (orders with produced-but-unpalletised stock); choosing one
+  scopes the item table to that SO and pre-fills Load Boxes with available.
+  Always SO-associated — no independent palletization.
+- **Vehicle moved to the Loading step** — entering **In Loading** no longer
+  prompts for a vehicle (the `VehicleLoadModal` gate is gone). A plan In Loading
+  now gets an **Assign Vehicle** action (truck button on the board card + a
+  button on the detail); the vehicle is **required before Dispatch** (Mark
+  Dispatched is disabled / server 400 until one is set). New server route
+  `POST /pal-vehicle/:rowid` + `setPalVehicle`; `/pal-status` swaps the
+  "vehicle required to enter Loading" guard for "vehicle required to Complete".
+  The advisory `VehicleFillBar` planning stays in the form.
+- **SO send fully unified** — the SO detail's inline **Send selected** (per-line
+  checkboxes) is replaced by a single **Send to Palletization** button →
+  `/packing?fromOrder=`; the old close-pallet form, `PalletPackForm`, and the
+  item-selection machinery are removed from `OrderDetail`.
+- **Partial-friendly palletization form** — `PalPlanForm` Load Boxes now start
+  **blank** (both New and Send-to-Palletise), so a subset — even one item — can be
+  palletised and the rest done later; a per-order **Fill available** button fills
+  them. The advisory **`VehicleFillBar` was removed** from the form (no vehicle at
+  palletization; it's assigned at the Loading step).
+
 ## 2026-07-11 — Quotation redesign (Books parity)
 
 - **Quotes list** — page heading removed, New Quote moved to the fbar (masters

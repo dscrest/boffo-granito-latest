@@ -7,7 +7,7 @@
 
    More menu: Clone (seed a new plan), Print Palletization slip (PDF), Delete.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
@@ -29,20 +29,26 @@ import {
   PAL_STATUS_LABEL,
   planToInput,
   setPalStatus,
+  setPalVehicle,
   updatePalPlan,
   type PalPlan,
   type PalPlanInput,
   type PalStatus,
 } from "./palPlansApi";
 
-// The single "advance" action offered from each state (back-steps stay implicit
-// via Edit; the primary flow is Planning → ReadyToLoad → Loading → Completed).
+// The single plan-level "advance" action offered from each state. Palletising is
+// per-line (on the board); the plan flow is Planning → Loading → Completed.
 const ADVANCE: Partial<Record<PalStatus, { to: PalStatus; label: string }>> = {
-  Planning: { to: "Palletized", label: "Mark Palletized" },
-  Palletized: { to: "ReadyToLoad", label: "Ready for Loading" },
-  ReadyToLoad: { to: "Loading", label: "Begin Loading" }, // opens the vehicle screen
+  Planning: { to: "Loading", label: "Begin Loading" },
   Loading: { to: "Completed", label: "Mark Dispatched" },
 };
+
+type DetailTab = "items" | "timeline" | "activity";
+const tabStyle = (active: boolean): CSSProperties => ({
+  padding: "8px 14px", border: "none", background: "none", cursor: "pointer",
+  font: "inherit", color: active ? "var(--text)" : "var(--muted)",
+  borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent", fontWeight: active ? 600 : 400,
+});
 
 export function PalPlanDetail() {
   const { id = "" } = useParams();
@@ -53,8 +59,9 @@ export function PalPlanDetail() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
-  const [loadingVehicle, setLoadingVehicle] = useState(false); // vehicle screen (→ In Loading)
+  const [assigning, setAssigning] = useState(false); // "Assign vehicle" modal (while In Loading)
   const [listQ, setListQ] = useState("");
+  const [tab, setTab] = useState<DetailTab>("items");
 
   const load = async () => {
     setLoading(true);
@@ -83,26 +90,37 @@ export function PalPlanDetail() {
     return [...m.values()];
   }, [plan]);
 
-  const changeStatus = async (to: PalStatus, msg: string, vehicle?: string) => {
+  const changeStatus = async (to: PalStatus, msg: string) => {
     if (!plan) return;
     setBusy(true);
-    const res = await setPalStatus(plan.id, to, vehicle);
+    const res = await setPalStatus(plan.id, to);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Status change failed");
       return;
     }
-    setLoadingVehicle(false);
     toast.success(msg);
     invalidatePalPlans();
     await load();
   };
 
-  // Advancing to "In Loading" opens the vehicle screen first; every other step
-  // is a direct status change.
-  const onAdvance = (to: PalStatus) => {
-    if (to === "Loading") setLoadingVehicle(true);
-    else void changeStatus(to, `Moved to ${PAL_STATUS_LABEL[to]}`);
+  // Vehicle is assigned while the plan is In Loading (not on entry) and is
+  // required before dispatch — every stage step is now a plain status change.
+  const onAdvance = (to: PalStatus) => void changeStatus(to, `Moved to ${PAL_STATUS_LABEL[to]}`);
+
+  const assignVehicle = async (vehicleId: string) => {
+    if (!plan) return;
+    setBusy(true);
+    const res = await setPalVehicle(plan.id, vehicleId);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Could not assign vehicle");
+      return;
+    }
+    setAssigning(false);
+    toast.success("Vehicle assigned");
+    invalidatePalPlans();
+    await load();
   };
 
   const onEditSave = async (input: PalPlanInput) => {
@@ -181,12 +199,12 @@ export function PalPlanDetail() {
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {editing && <PalPlanForm initial={plan} onSave={(i) => void onEditSave(i)} onClose={() => setEditing(false)} />}
       {cloning && <PalPlanForm initial={plan} clone onSave={(i) => void onCloneSave(i)} onClose={() => setCloning(false)} />}
-      {loadingVehicle && (
+      {assigning && (
         <VehicleLoadModal
           palNumber={plan.palNumber}
           busy={busy}
-          onConfirm={(vehicleId) => void changeStatus("Loading", "Vehicle assigned · loading started", vehicleId)}
-          onClose={() => setLoadingVehicle(false)}
+          onConfirm={(vehicleId) => void assignVehicle(vehicleId)}
+          onClose={() => setAssigning(false)}
         />
       )}
 
@@ -236,9 +254,18 @@ export function PalPlanDetail() {
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{plan.palNumber}</span>
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>
-            {advance && can("stages", "edit") && (
-              <button className="hbtn primary" disabled={busy} onClick={() => onAdvance(advance.to)} title={advance.label}>
-                <Icon name="check" size={13} /> {advance.label}
+            {advance && can("stages", "edit") && (() => {
+              // Dispatch (Loading → Completed) is blocked until a vehicle is assigned.
+              const blocked = advance.to === "Completed" && !plan.vehicleId;
+              return (
+                <button className="hbtn primary" disabled={busy || blocked} onClick={() => onAdvance(advance.to)} title={blocked ? "Assign a vehicle first" : advance.label}>
+                  <Icon name="check" size={13} /> {advance.label}
+                </button>
+              );
+            })()}
+            {plan.status === "Loading" && can("stages", "edit") && (
+              <button className="hbtn" disabled={busy} onClick={() => setAssigning(true)} title={plan.vehicleNumber ? "Reassign vehicle" : "Assign vehicle"}>
+                <Icon name="truck" size={13} /> {plan.vehicleNumber ? "Reassign Vehicle" : "Assign Vehicle"}
               </button>
             )}
             {can("stages", "edit") && plan.status !== "Completed" && (
@@ -251,10 +278,18 @@ export function PalPlanDetail() {
               <Icon name="x" size={13} />
             </button>
           </div>
-          <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+          <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
             {[plan.vehicleNumber && `Vehicle ${plan.vehicleNumber}`, `${fmt(plan.totalBoxes)} boxes`, plan.salespersonName].filter(Boolean).join("  ·  ")}
           </div>
 
+          {/* Tabs: palletise items · timeline · activity */}
+          <div className="row" style={{ display: "flex", gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
+            <button style={tabStyle(tab === "items")} onClick={() => setTab("items")}>Palletise items</button>
+            <button style={tabStyle(tab === "timeline")} onClick={() => setTab("timeline")}>Timeline</button>
+            <button style={tabStyle(tab === "activity")} onClick={() => setTab("activity")}>Activity</button>
+          </div>
+
+          {tab === "items" && (<>
           {/* Associated SO(s) — the grouped order items (replaces PO number). */}
           <div style={{ marginTop: 14 }}>
             <div className="form-section-title" style={{ marginBottom: 8 }}>
@@ -273,6 +308,7 @@ export function PalPlanDetail() {
                     <table className="tbl">
                       <thead>
                         <tr>
+                          <th>Item</th>
                           <th>Design</th>
                           <th>Pallet</th>
                           <th className="num" style={{ textAlign: "right" }}>Boxes</th>
@@ -281,13 +317,14 @@ export function PalPlanDetail() {
                       <tbody>
                         {g.lines.map((l) => (
                           <tr key={l.id}>
+                            <td className="mono">{l.itemCode}</td>
                             <td><span className="design-name">{l.designLabel}</span></td>
                             <td className="muted">{l.palletName}</td>
                             <td className="num mono">{fmt(l.boxes)}</td>
                           </tr>
                         ))}
                         <tr>
-                          <td colSpan={2} style={{ fontWeight: 500 }}>Subtotal</td>
+                          <td colSpan={3} style={{ fontWeight: 500 }}>Subtotal</td>
                           <td className="num mono" style={{ fontWeight: 500 }}>{fmt(subtotal)}</td>
                         </tr>
                       </tbody>
@@ -300,6 +337,7 @@ export function PalPlanDetail() {
 
           {/* Plan meta */}
           <div style={{ marginTop: 14 }}>
+            {/* TODO: rename to Dispatch Details */}
             <div className="form-section-title" style={{ marginBottom: 8 }}>Plan Details</div>
             <DetailRow label="Vehicle No." value={plan.vehicleNumber || "—"} />
             <DetailRow label="Driver" value={plan.driverName || "—"} />
@@ -309,12 +347,18 @@ export function PalPlanDetail() {
             <DetailRow label="Sales Person" value={plan.salespersonName || "—"} />
             <DetailRow label="Remarks" value={plan.remarks || "—"} />
           </div>
-        </div>
+          </>)}
 
-        {/* Activity — status timeline + operation log for this plan. */}
-        <div className="card" style={{ padding: 16 }}>
-          <StatusTimeline entityType="PalletizationPlan" entityId={plan.id} />
-          <ActivityLog table="PalletizationPlan" entityId={plan.id} />
+          {tab === "timeline" && (
+            <div style={{ marginTop: 14 }}>
+              <StatusTimeline entityType="PalletizationPlan" entityId={plan.id} />
+            </div>
+          )}
+          {tab === "activity" && (
+            <div style={{ marginTop: 14 }}>
+              <ActivityLog table="PalletizationPlan" entityId={plan.id} />
+            </div>
+          )}
         </div>
       </div>
     </div>
