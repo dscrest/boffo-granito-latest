@@ -113,6 +113,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       producedQty: num(it.produced_qty_boxes),
       palletizedQty: num(it.palletized_qty_boxes),
       loadedQty: num(it.loaded_qty_boxes),
+      palletId: str(it.pallet),
       boxesPerPallet,
       totalBoxes,
       pallets: Math.ceil(totalBoxes / boxesPerPallet),
@@ -174,7 +175,7 @@ export interface NewSalesOrderInput {
   adjustment: number;
   tax_type: string;
   tax_pct: number;
-  lines: { item: string; qty: number; rate: number; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
+  lines: { item: string; qty: number; rate: number; pallet?: string; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
 }
 
 /* SO status chips reuse the quote-status palette (no new CSS). Shared by

@@ -14,16 +14,21 @@ import { useMasters } from "@/features/masters/useMasters";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
+import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { NumberInput } from "../../ui/NumberInput";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
 
+// Leading dimension of a size string ("300x600 - GVT…" → "300"). Mirrors PalPlanForm.
+const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
+
 export interface OrderLine {
   design: string;
   ordered_qty_boxes: string;
   rate: string;
+  pallet: string; // Pallet ROWID — required at SO creation
   discount: string;
   description: string;
 }
@@ -85,7 +90,7 @@ const HEADER: FieldSpec[] = [
 
 // Qty defaults to 1 (user mandate 2026-07-20) so a new line is immediately valid
 // once a design is picked.
-const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "1", rate: "", discount: "", description: "" });
+const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "1", rate: "", pallet: "", discount: "", description: "" });
 
 let _seq = 0;
 const newId = () =>
@@ -152,6 +157,7 @@ export function OrderForm({
         design: o.designName || o.design,
         ordered_qty_boxes: String(o.orderQty || ""),
         rate: o.rate ? String(o.rate) : "",
+        pallet: o.palletId || "",
         discount: o.discount ? String(o.discount) : "",
         description: o.description || "",
       }));
@@ -162,6 +168,7 @@ export function OrderForm({
         design: l.item,
         ordered_qty_boxes: String((l.qty || 0) - (l.converted || 0)),
         rate: String(l.rate || ""),
+        pallet: "",
         discount: l.discount ? String(l.discount) : "",
         description: l.description || "",
       }));
@@ -173,6 +180,21 @@ export function OrderForm({
     () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
     [designs],
   );
+
+  // Pallet specs for the required per-line pallet picker (size-filtered by design).
+  const [pallets, setPallets] = useState<PalletRow[]>([]);
+  useEffect(() => {
+    void listPallets().then((r) => setPallets(r.ok ? r.pallets : []));
+  }, []);
+  // Pallets offered for a line = those whose size WIDTH matches the design's size.
+  const palletsForLine = (designName: string) => {
+    const w = widthOf(designs.find((d) => d.name === designName)?.size || "");
+    return pallets.filter((p) => {
+      if (!p.sizeId) return true;
+      const pw = widthOf(p.sizeLabel);
+      return !w || !pw || pw === w;
+    });
+  };
 
   // Default the salesperson to the rep linked to the logged-in user.
   const defaultedSp = useRef(false);
@@ -232,10 +254,12 @@ export function OrderForm({
   );
   // Rate is mandatory (user mandate 2026-07-20): a line only counts as valid
   // once it has a design, a qty AND a rate.
-  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim());
+  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim() && l.pallet);
   // Lines with a design but no rate must block the save (rather than being
   // silently dropped from validLines) so the operator sees the error.
   const rateMissing = lines.some((l) => l.design && !String(l.rate).trim());
+  // Pallet is mandatory per line (chosen at SO creation; pre-seeds palletization).
+  const palletMissing = lines.some((l) => l.design && !l.pallet);
   // Convert mode: requested qty per design must fit within the quote's
   // remaining (qty − converted) boxes — mirrors the server-side guard.
   const overCap = useMemo(() => {
@@ -255,6 +279,7 @@ export function OrderForm({
     HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
     validLines.length === 0 ||
     rateMissing ||
+    palletMissing ||
     !!overCap;
 
   // Errors stay hidden until the first submit attempt, then update live.
@@ -377,8 +402,9 @@ export function OrderForm({
             <div className="form-section-title">Line Items</div>
 
             <div className="ord-lines">
-              <div className="ord-line ord-line-head qt-line">
+              <div className="ord-line ord-line-head qt-line so-line">
                 <span>Design</span>
+                <span>Pallet<span className="req"> *</span></span>
                 <span>Qty (boxes)</span>
                 <span>Rate<span className="req"> *</span></span>
                 <span>Disc %</span>
@@ -388,7 +414,7 @@ export function OrderForm({
               {lines.map((l, i) => {
                 const d = designs.find((x) => x.name === l.design);
                 return (
-                  <div className="ord-line qt-line" key={i}>
+                  <div className="ord-line qt-line so-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {d ? (
@@ -420,6 +446,20 @@ export function OrderForm({
                           placeholder="Add a description to your item"
                         />
                       </div>
+                    </div>
+                    <div className="form-field" style={{ gap: 2 }}>
+                      {(() => {
+                        const opts = palletsForLine(l.design);
+                        return (
+                          <Combobox
+                            value={l.pallet}
+                            onChange={(v) => setLine(i, "pallet", v)}
+                            options={opts.map((p) => ({ value: p.id, label: p.name }))}
+                            placeholder={!l.design ? "Pick a design first" : opts.length ? "Choose pallet…" : "No matching pallet"}
+                            invalid={showErrors && !!l.design && !l.pallet}
+                          />
+                        );
+                      })()}
                     </div>
                     <div className="form-field" style={{ gap: 2 }}>
                       <NumberInput

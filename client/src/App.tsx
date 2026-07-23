@@ -124,7 +124,7 @@ function navTree(): NavNode[] {
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
-        { id: "packing", label: "Palletization", icon: "palette" },
+        { id: "packing", label: "Palletization and Loading", icon: "palette" },
       ],
     },
     {

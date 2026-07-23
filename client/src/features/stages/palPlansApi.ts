@@ -15,13 +15,16 @@ import { createListCache } from "@/lib/cache";
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-export const PAL_STATUSES = ["Planning", "ReadyToLoad", "Loading", "Completed"] as const;
+// Internal keys kept stable (existing rows keep their status); labels below are
+// the shop-floor names. "Palletized" is the one new stage.
+export const PAL_STATUSES = ["Planning", "Palletized", "ReadyToLoad", "Loading", "Completed"] as const;
 export type PalStatus = (typeof PAL_STATUSES)[number];
 
 /** Allowed status transitions — mirrors the server PAL_TRANSITIONS. */
 export const PAL_TRANSITIONS: Record<PalStatus, PalStatus[]> = {
-  Planning: ["ReadyToLoad"],
-  ReadyToLoad: ["Loading", "Planning"],
+  Planning: ["Palletized"],
+  Palletized: ["ReadyToLoad", "Planning"],
+  ReadyToLoad: ["Loading", "Palletized"],
   Loading: ["Completed", "ReadyToLoad"],
   Completed: [],
 };
@@ -43,7 +46,10 @@ export interface PalPlan {
   id: string; // ROWID
   palNumber: string;
   status: PalStatus;
-  vehicleNumber: string;
+  vehicleId: string; // Vehicle ROWID ("" until loading)
+  vehicleNumber: string; // from the Vehicle master (fallback: legacy free-text)
+  driverName: string;
+  mobileNumber: string;
   plannedDate: string;
   dispatchDate: string;
   salespersonId: string;
@@ -92,15 +98,21 @@ export function listPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
 
 async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?: string }> {
   // FKs are bigint ROWID strings; no JOINs — resolve names client-side (house convention).
-  const [plans, lines, sos, designs, pallets, reps] = await Promise.all([
+  const [plans, lines, sos, designs, pallets, reps, vehicles] = await Promise.all([
     listAll("PalletizationPlan", { order: "ROWID desc" }),
     listAll("PalletizationPlanLine"),
     listAll("SalesOrder", { columns: ["order_number", "po_number"] }),
     listAll("Design", { columns: ["design_name", "unique_name"] }),
     listAll("Pallet", { columns: ["name"] }),
     listAll("SalesPerson", { columns: ["name"] }),
+    listAll("Vehicle", { columns: ["vehicle_number", "driver_name", "mobile_number"] }),
   ]);
   if (!plans.ok) return { ok: false, plans: [], error: plans.error };
+
+  const vehicleById = new Map<string, { number: string; driver: string; mobile: string }>();
+  (vehicles.rows || []).forEach((v) =>
+    vehicleById.set(String(v.ROWID), { number: str(v.vehicle_number), driver: str(v.driver_name), mobile: str(v.mobile_number) }),
+  );
 
   const soNo = new Map<string, string>();
   (sos.rows || []).forEach((s) => soNo.set(String(s.ROWID), str(s.order_number) || str(s.po_number) || String(s.ROWID)));
@@ -143,11 +155,15 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
       const planLines = linesByPlan.get(id) || [];
       const soNumbers = [...new Set(planLines.map((l) => l.soNumber))];
       const repId = str(p.sales_person);
+      const veh = vehicleById.get(str(p.vehicle));
       return {
         id,
         palNumber: str(p.pal_number),
         status: (str(p.status) || "Planning") as PalStatus,
-        vehicleNumber: str(p.vehicle_number),
+        vehicleId: str(p.vehicle),
+        vehicleNumber: veh?.number || str(p.vehicle_number),
+        driverName: veh?.driver || "",
+        mobileNumber: veh?.mobile || "",
         plannedDate: str(p.planned_date),
         dispatchDate: str(p.dispatch_date),
         salespersonId: repId,
@@ -180,8 +196,9 @@ export function updatePalPlan(rowid: string, input: PalPlanInput) {
   return bust(op<{ ROWID: string; pal_number: string }>(`update-pal-plan/${rowid}`, input));
 }
 
-export function setPalStatus(rowid: string, status: PalStatus) {
-  return bust(op<{ ROWID: string; status: string }>(`pal-status/${rowid}`, { status }));
+/** Advance a plan. Moving to Loading requires `vehicle` (a Vehicle ROWID). */
+export function setPalStatus(rowid: string, status: PalStatus, vehicle?: string) {
+  return bust(op<{ ROWID: string; status: string }>(`pal-status/${rowid}`, vehicle ? { status, vehicle } : { status }));
 }
 
 export function deletePalPlan(rowid: string) {
@@ -209,8 +226,9 @@ export function planToInput(p: PalPlan): PalPlanInput {
 
 /** Human label for a status (spaced). */
 export const PAL_STATUS_LABEL: Record<PalStatus, string> = {
-  Planning: "Planning",
-  ReadyToLoad: "Ready to Load",
-  Loading: "Loading",
-  Completed: "Completed",
+  Planning: "In Palletization",
+  Palletized: "Palletized",
+  ReadyToLoad: "Ready for Loading",
+  Loading: "In Loading",
+  Completed: "Dispatched",
 };

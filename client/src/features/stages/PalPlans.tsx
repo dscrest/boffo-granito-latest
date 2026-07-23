@@ -4,7 +4,7 @@
    footer pager; whole-row click opens the detail. "New Palletization Plan"
    opens PalPlanForm and lands on the created record. */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -15,6 +15,7 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { PalPlanForm } from "./PalPlanForm";
+import { PalKanban } from "./PalKanban";
 import {
   cachedPalPlans,
   createPalPlan,
@@ -28,6 +29,7 @@ import {
 
 export const STATUS_CHIP: Record<PalStatus, string> = {
   Planning: "p-planning",
+  Palletized: "p-palletized",
   ReadyToLoad: "p-ready",
   Loading: "p-loading",
   Completed: "p-completed",
@@ -80,7 +82,12 @@ export function PalPlans() {
   const [tab, setTab] = usePersistedState("palplans.tab", "all");
   const [query, setQuery] = usePersistedState("palplans.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("palplans.criteria", {});
+  const [view, setView] = usePersistedState<"list" | "board">("palplans.view", "list");
   const [showForm, setShowForm] = useState(false);
+  // "Send to Palletization" lands here as /packing?fromOrder=<soId> → open a
+  // preset New-plan form scoped to that Sales Order.
+  const [params, setParams] = useSearchParams();
+  const presetOrderId = params.get("fromOrder") || "";
 
   const COLS = useMemo(() => planColumns(), []);
   const { ordered, visible, hidden, toggle, move } = useColumns("palPlansColumns", COLS, ["created", "modified"]);
@@ -105,6 +112,16 @@ export function PalPlans() {
   useEffect(() => {
     void load();
   }, []);
+
+  // Auto-open the create form when arrived via "Send to Palletization".
+  useEffect(() => {
+    if (presetOrderId) setShowForm(true);
+  }, [presetOrderId]);
+
+  const closeForm = () => {
+    setShowForm(false);
+    if (presetOrderId) setParams({}, { replace: true }); // drop ?fromOrder
+  };
 
   const onSave = async (input: Parameters<typeof createPalPlan>[0]) => {
     setShowForm(false);
@@ -154,7 +171,7 @@ export function PalPlans() {
 
   return (
     <div>
-      {showForm && <PalPlanForm onSave={(i) => void onSave(i)} onClose={() => setShowForm(false)} />}
+      {showForm && <PalPlanForm presetOrderId={presetOrderId || undefined} onSave={(i) => void onSave(i)} onClose={closeForm} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -173,7 +190,17 @@ export function PalPlans() {
           <input type="text" placeholder="Search PAL no, vehicle, SO…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <AdvancedFilterButton title="Palletization Plans" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="View" title="Switch view">
+          <button onClick={() => setView("list")} title="List" aria-label="List view"
+            style={{ background: view === "list" ? "var(--accent-soft)" : "transparent", color: view === "list" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+            <Icon name="orders" size={14} />
+          </button>
+          <button onClick={() => setView("board")} title="Board" aria-label="Board view"
+            style={{ background: view === "board" ? "var(--accent-soft)" : "transparent", color: view === "board" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
+            <Icon name="kanban" size={14} />
+          </button>
+        </span>
+        {view === "list" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {can("stages", "create") && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
@@ -182,6 +209,13 @@ export function PalPlans() {
         )}
       </div>
 
+      {view === "board" ? (
+        loading && plans.length === 0 ? (
+          <div className="card"><SkeletonRows rows={6} /></div>
+        ) : (
+          <PalKanban plans={filtered} canEdit={can("stages", "edit")} onChanged={() => void load()} />
+        )
+      ) : (
       <div className="card">
         <div style={{ overflow: "auto" }}>
           {loading && plans.length === 0 ? (
@@ -245,6 +279,7 @@ export function PalPlans() {
         </div>
         {!(loading && plans.length === 0) && <GridFooter {...pager} />}
       </div>
+      )}
     </div>
   );
 }

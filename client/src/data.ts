@@ -50,6 +50,8 @@ export interface Order {
   producedQty: number;
   palletizedQty: number;
   loadedQty: number;
+  /** OrderItem.pallet — the pallet spec chosen at SO creation (Pallet ROWID; "" if unset). */
+  palletId: string;
   boxesPerPallet: number;
   totalBoxes: number;
   pallets: number;

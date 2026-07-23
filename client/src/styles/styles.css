@@ -1752,6 +1752,11 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.qt-line {
   grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 26px;
 }
+/* Sales-order lines add a required Pallet column after Design (chosen at
+   creation; pre-seeds palletization). Scoped so Quotes keep their 6-col grid. */
+.ord-line.qt-line.so-line {
+  grid-template-columns: 2fr 1.3fr 0.8fr 0.9fr 0.7fr 1fr 26px;
+}
 /* Compact remove ✕ on quote lines (order lines keep the 35px button).
    Circular, pinned to the first input line (35px tall) rather than
    centered in the whole row — the description textarea makes rows tall. */
@@ -1796,7 +1801,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 
 /* Palletization-plan lifecycle: Planning → Ready to Load → Loading → Completed */
 .chip.palstatus { font-weight: 600; }
-.chip.palstatus.p-planning  { background: oklch(0.6 0.02 240 / 0.10); color: var(--fg-2); border-color: var(--border-2); }
+.chip.palstatus.p-planning   { background: oklch(0.6 0.02 240 / 0.10); color: var(--fg-2); border-color: var(--border-2); }
+.chip.palstatus.p-palletized { background: oklch(0.55 0.16 300 / 0.10); color: oklch(0.44 0.16 300); border-color: oklch(0.55 0.16 300 / 0.30); }
 .chip.palstatus.p-ready     { background: oklch(0.62 0.16 70 / 0.10); color: oklch(0.45 0.16 70); border-color: oklch(0.62 0.16 70 / 0.30); }
 .chip.palstatus.p-loading   { background: oklch(0.55 0.16 245 / 0.10); color: oklch(0.42 0.16 245); border-color: oklch(0.55 0.16 245 / 0.30); }
 .chip.palstatus.p-completed { background: oklch(0.55 0.16 150 / 0.10); color: oklch(0.4 0.16 150); border-color: oklch(0.55 0.16 150 / 0.30); }

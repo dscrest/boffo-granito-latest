@@ -115,6 +115,18 @@ const MASTERS: MasterDef[] = [
     ],
   },
   {
+    key: "vehicle",
+    label: "Vehicle",
+    icon: "truck",
+    table: "Vehicle",
+    lead: "vehicle_number",
+    fields: [
+      { key: "vehicle_number", label: "Vehicle Number", required: true },
+      { key: "driver_name", label: "Driver Name", required: true },
+      { key: "mobile_number", label: "Mobile", required: true },
+    ],
+  },
+  {
     key: "payment_term",
     label: "Payment Term",
     icon: "invoice",

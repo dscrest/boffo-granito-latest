@@ -150,6 +150,19 @@ export function ProductionKanban({
                           <Icon name="plus" size={12} />
                         </button>
                       )}
+                      {/* Completed boxes → hand off to palletization (order-linked only). */}
+                      {c.kind === "done" && canEdit && !e.independent && c.g.salesOrderId && (
+                        <button
+                          type="button"
+                          className="btn x"
+                          title="Send to Palletization"
+                          aria-label="Send to Palletization"
+                          style={{ padding: 2, height: 20, width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                          onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); navigate(`/packing?fromOrder=${encodeURIComponent(c.g.salesOrderId)}`); }}
+                        >
+                          <Icon name="truck" size={12} />
+                        </button>
+                      )}
                     </div>
                     <div className="design-name" style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {e.design || "—"}

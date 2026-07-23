@@ -29,6 +29,7 @@ export function PalPlanForm({
   onClose,
   initial,
   clone,
+  presetOrderId,
 }: {
   onSave: (input: PalPlanInput) => void | Promise<void>;
   onClose: () => void;
@@ -36,6 +37,9 @@ export function PalPlanForm({
   initial?: PalPlan;
   /** Clone mode: seed values but save as a NEW plan (blank PAL number). */
   clone?: boolean;
+  /** Scope to one Sales Order (from "Send to Palletization") and prefill each
+      line's Load Boxes with the produced-available qty. */
+  presetOrderId?: string;
 }) {
   const editing = !!initial && !clone;
   const [orders, setOrders] = useState<PalletizableOrder[]>([]);
@@ -44,7 +48,6 @@ export function PalPlanForm({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [vehicle, setVehicle] = useState(initial?.vehicleNumber || "");
   const [plannedDate, setPlannedDate] = useState(initial?.plannedDate || todayISO());
   const [salesperson, setSalesperson] = useState(initial?.salespersonName || "");
   const [remarks, setRemarks] = useState(initial?.remarks || "");
@@ -57,7 +60,11 @@ export function PalPlanForm({
 
   useEffect(() => {
     void (async () => {
-      const [po, pl, sp] = await Promise.all([listPalletizable(), listPallets(), listSalesPersons()]);
+      const [po, pl, sp] = await Promise.all([
+        listPalletizable(presetOrderId ? { includeOrderId: presetOrderId } : undefined),
+        listPallets(),
+        listSalesPersons(),
+      ]);
       setLoading(false);
       if (!po.ok) {
         setError(po.error || "Failed to load palletizable items");
@@ -68,16 +75,27 @@ export function PalPlanForm({
       setSalesPersons(sp.ok ? sp.salesPersons : []);
       // Salesperson defaults to the logged-in user (unless seeded from a record).
       if (!initial?.salespersonName) setSalesperson(currentSalespersonName(sp.ok ? sp.salesPersons : []));
-      // Seed boxes/pallet from an existing plan (edit / clone).
+      // Pallet defaults to the one chosen on the Sales Order (OrderItem.pallet).
+      const defPallet: Record<string, string> = {};
+      po.orders.forEach((o) => o.items.forEach((it) => { if (it.palletId) defPallet[it.orderItemId] = it.palletId; }));
+      // Seed boxes/pallet from an existing plan (edit / clone) — overrides the SO default.
       if (initial) {
         const b: Record<string, number> = {};
-        const p: Record<string, string> = {};
+        const p: Record<string, string> = { ...defPallet };
         for (const l of initial.lines) {
           b[l.orderItemId] = l.boxes;
           if (l.palletId) p[l.orderItemId] = l.palletId;
         }
         setBoxesByItem(b);
         setPalletByItem(p);
+      } else {
+        setPalletByItem(defPallet);
+        // Send-to-Palletization: prefill Load Boxes with the produced-available qty.
+        if (presetOrderId) {
+          const b: Record<string, number> = {};
+          po.orders.forEach((o) => o.items.forEach((it) => { if (it.available > 0) b[it.orderItemId] = it.available; }));
+          setBoxesByItem(b);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -150,7 +168,7 @@ export function PalPlanForm({
     try {
       await onSave({
         pal_number: editing ? initial!.palNumber : "", // edit keeps its number; create/clone mint server-side
-        vehicle_number: vehicle.trim(),
+        vehicle_number: "", // vehicle is captured at the loading step, not at planning
         planned_date: plannedDate || "",
         salesperson: salesperson || "",
         remarks: remarks.trim(),
@@ -193,10 +211,6 @@ export function PalPlanForm({
               <div className="form-section">
                 <div className="form-section-title">Plan</div>
                 <div className="form-grid">
-                  <label className="form-field">
-                    <span className="lbl">Vehicle No.</span>
-                    <input value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="e.g. GJ-01-AB-1234" />
-                  </label>
                   <label className="form-field">
                     <span className="lbl">Planned Date</span>
                     <DateInput value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} />

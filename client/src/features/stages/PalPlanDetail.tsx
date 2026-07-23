@@ -18,6 +18,7 @@ import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
 import { PalPlanForm } from "./PalPlanForm";
+import { VehicleLoadModal } from "./VehicleLoadModal";
 import { STATUS_CHIP } from "./PalPlans";
 import {
   cachedPalPlans,
@@ -37,9 +38,10 @@ import {
 // The single "advance" action offered from each state (back-steps stay implicit
 // via Edit; the primary flow is Planning → ReadyToLoad → Loading → Completed).
 const ADVANCE: Partial<Record<PalStatus, { to: PalStatus; label: string }>> = {
-  Planning: { to: "ReadyToLoad", label: "Start Loading Prep" },
-  ReadyToLoad: { to: "Loading", label: "Begin Loading" },
-  Loading: { to: "Completed", label: "Mark Completed" },
+  Planning: { to: "Palletized", label: "Mark Palletized" },
+  Palletized: { to: "ReadyToLoad", label: "Ready for Loading" },
+  ReadyToLoad: { to: "Loading", label: "Begin Loading" }, // opens the vehicle screen
+  Loading: { to: "Completed", label: "Mark Dispatched" },
 };
 
 export function PalPlanDetail() {
@@ -51,6 +53,7 @@ export function PalPlanDetail() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
+  const [loadingVehicle, setLoadingVehicle] = useState(false); // vehicle screen (→ In Loading)
   const [listQ, setListQ] = useState("");
 
   const load = async () => {
@@ -80,18 +83,26 @@ export function PalPlanDetail() {
     return [...m.values()];
   }, [plan]);
 
-  const changeStatus = async (to: PalStatus, msg: string) => {
+  const changeStatus = async (to: PalStatus, msg: string, vehicle?: string) => {
     if (!plan) return;
     setBusy(true);
-    const res = await setPalStatus(plan.id, to);
+    const res = await setPalStatus(plan.id, to, vehicle);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Status change failed");
       return;
     }
+    setLoadingVehicle(false);
     toast.success(msg);
     invalidatePalPlans();
     await load();
+  };
+
+  // Advancing to "In Loading" opens the vehicle screen first; every other step
+  // is a direct status change.
+  const onAdvance = (to: PalStatus) => {
+    if (to === "Loading") setLoadingVehicle(true);
+    else void changeStatus(to, `Moved to ${PAL_STATUS_LABEL[to]}`);
   };
 
   const onEditSave = async (input: PalPlanInput) => {
@@ -170,6 +181,14 @@ export function PalPlanDetail() {
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {editing && <PalPlanForm initial={plan} onSave={(i) => void onEditSave(i)} onClose={() => setEditing(false)} />}
       {cloning && <PalPlanForm initial={plan} clone onSave={(i) => void onCloneSave(i)} onClose={() => setCloning(false)} />}
+      {loadingVehicle && (
+        <VehicleLoadModal
+          palNumber={plan.palNumber}
+          busy={busy}
+          onConfirm={(vehicleId) => void changeStatus("Loading", "Vehicle assigned · loading started", vehicleId)}
+          onClose={() => setLoadingVehicle(false)}
+        />
+      )}
 
       {/* Plan list — sticky, resizable, own scroll (mirrors Quote detail). */}
       <div
@@ -218,7 +237,7 @@ export function PalPlanDetail() {
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>
             {advance && can("stages", "edit") && (
-              <button className="hbtn primary" disabled={busy} onClick={() => void changeStatus(advance.to, `Moved to ${PAL_STATUS_LABEL[advance.to]}`)} title={advance.label}>
+              <button className="hbtn primary" disabled={busy} onClick={() => onAdvance(advance.to)} title={advance.label}>
                 <Icon name="check" size={13} /> {advance.label}
               </button>
             )}
@@ -283,6 +302,8 @@ export function PalPlanDetail() {
           <div style={{ marginTop: 14 }}>
             <div className="form-section-title" style={{ marginBottom: 8 }}>Plan Details</div>
             <DetailRow label="Vehicle No." value={plan.vehicleNumber || "—"} />
+            <DetailRow label="Driver" value={plan.driverName || "—"} />
+            <DetailRow label="Driver Mobile" value={plan.mobileNumber || "—"} />
             <DetailRow label="Planned Date" value={plan.plannedDate || "—"} />
             <DetailRow label="Dispatch Date" value={plan.dispatchDate || "—"} />
             <DetailRow label="Sales Person" value={plan.salespersonName || "—"} />

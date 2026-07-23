@@ -20,6 +20,7 @@ export interface PalletizableItem {
   orderItemId: string; // OrderItem ROWID → close-pallet line.order_item
   designId: string; // Design ROWID
   designLabel: string;
+  palletId: string; // OrderItem.pallet — pallet chosen at SO creation ("" when unset)
   sizeId: string; // Size ROWID via Design.size ("" when unset)
   sizeCode: string; // Size.code e.g. "300x300" (for per-line pallet-size matching)
   ordered: number; // ordered_qty_boxes (confirmed demand)
@@ -157,6 +158,7 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       orderItemId: String(it.ROWID),
       designId,
       designLabel: uniqueName.get(designId) || designName.get(designId) || designId,
+      palletId: str(it.pallet),
       sizeId,
       sizeCode: sizeCodeById.get(sizeId) || "",
       ordered,

@@ -71,6 +71,7 @@ const ALLOWED = new Set([
   "Grade",
   "PartyBrand",
   "Pallet",
+  "Vehicle",
   "DesignPallet",
   "PalletisedBatch",
   "PalletisedBatchLine",
@@ -1072,6 +1073,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           await ds.table("OrderItem").insertRow({
             sales_order: soId,
             design: designIds[i],
+            pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
             ordered_qty_boxes: Number(l.qty) || 0,
             produced_qty_boxes: 0,
             purchased_qty_boxes: 0,
@@ -1174,6 +1176,7 @@ async function createSalesOrder(ds, body, maps) {
     await ds.table("OrderItem").insertRow({
       sales_order: soId,
       design: designIds[i],
+      pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
       ordered_qty_boxes: Number(l.qty) || 0,
       produced_qty_boxes: 0,
       purchased_qty_boxes: 0,
@@ -1585,11 +1588,15 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
 
 /* Palletization plan status machine — mirror of /quote-status. All status
    changes route here (generic PATCH rejects PalletizationPlan.status). */
+// Labels (client PAL_STATUS_LABEL): Planning=In Palletization, Palletized=Palletized,
+// ReadyToLoad=Ready for Loading, Loading=In Loading, Completed=Dispatched. Internal keys
+// kept stable so existing rows don't need migrating.
 const PAL_TRANSITIONS = {
-  Planning: ["ReadyToLoad"],
-  ReadyToLoad: ["Loading", "Planning"], // step back before loading starts
+  Planning: ["Palletized"],
+  Palletized: ["ReadyToLoad", "Planning"],
+  ReadyToLoad: ["Loading", "Palletized"], // → Loading captures the vehicle
   Loading: ["Completed", "ReadyToLoad"],
-  Completed: [], // terminal (ready for dispatch)
+  Completed: [], // terminal (dispatched)
 };
 
 app.post("/pal-status/:rowid", async (req, res) => {
@@ -1605,7 +1612,7 @@ app.post("/pal-status/:rowid", async (req, res) => {
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, pal_number, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
+            `SELECT ROWID, pal_number, status, vehicle FROM PalletizationPlan WHERE ROWID = ${planId}`,
           ),
         );
         if (!rows.length) throw badRequest(`Palletization plan not found: ${planId}`, 404);
@@ -1613,8 +1620,15 @@ app.post("/pal-status/:rowid", async (req, res) => {
         if (!(PAL_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move palletization plan from ${from} to ${to}`, 409);
 
-        // Completed = ready for dispatch → stamp the dispatch date (IST).
         const patch = { ROWID: planId, status: to };
+        // Loading = "In Loading" → a real vehicle (from the Vehicle master) is
+        // required. Accept it in the body, else the plan must already carry one.
+        if (to === "Loading") {
+          const vehicle = (req.body || {}).vehicle ? String((req.body || {}).vehicle) : String(rows[0].vehicle || "");
+          if (!vehicle) throw badRequest("A vehicle is required before loading", 400);
+          patch.vehicle = vehicle;
+        }
+        // Completed = dispatched → stamp the dispatch date (IST).
         if (to === "Completed") patch.dispatch_date = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
         await ds.table("PalletizationPlan").updateRow(patch);
         await logTransition(catalyst, {

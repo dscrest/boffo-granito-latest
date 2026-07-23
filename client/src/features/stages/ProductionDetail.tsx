@@ -266,6 +266,11 @@ export function ProductionDetail() {
   const recorded = group.records.length > 0;
   const moreItems = [
     ...(canRecord && hasRecordable ? [{ label: "Record all output", onClick: () => void onRecordAll() }] : []),
+    // Hand produced boxes to palletization (order-linked only — palletization
+    // keys on OrderItem+SO; independent make-to-stock has no order to scope to).
+    ...(!group.independent && group.salesOrderId && producedBoxes > 0
+      ? [{ label: "Send to Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(group.salesOrderId)}`) }]
+      : []),
     // Editing requested qty is only safe before any output is recorded.
     ...(can("stages", "edit") && !recorded ? [{ label: "Edit", onClick: () => setEditing(true) }] : []),
     ...(can("stages", "edit") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
