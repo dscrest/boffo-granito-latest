@@ -92,7 +92,18 @@ export function VehicleLoadModal({
             </div>
           ) : (
             <div className="form-section">
-              <div className="form-section-title">Vehicle</div>
+              <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1 }}>Vehicle</span>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{ height: 24, padding: "0 10px", fontWeight: 400, fontSize: "var(--t-sm)" }}
+                  onClick={() => setCreating({ vehicle_number: "", driver_name: "", mobile_number: "" })}
+                  title="Add a new vehicle to the master"
+                >
+                  <Icon name="plus" size={12} /> New vehicle
+                </button>
+              </div>
               <label className="form-field">
                 <span className="lbl">Vehicle<span className="req"> *</span></span>
                 <Combobox
