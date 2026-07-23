@@ -219,6 +219,80 @@ async function fetchLoadableBatches(): Promise<{
   return { ok: true, batches: rows };
 }
 
+/* ---- all palletised batches (the /packing "Palletization" list) ----
+   A palletised batch is the simple indicator that boxes are on a pallet in the
+   warehouse; loading may follow immediately or months later. Status is derived:
+   "Loaded" once a ContainerLoading row references the batch, else "Palletised". */
+export interface PalletisationRow {
+  id: string; // PalletisedBatch ROWID
+  salesOrderId: string;
+  soLabel: string; // "SO/…/NNN · Customer"
+  design: string;
+  pallet: string;
+  boxes: number;
+  date: string; // delivery_date (palletization date)
+  loaded: boolean; // has a ContainerLoading row → moved on to loading
+  createdTime: string;
+  modifiedTime: string;
+}
+
+/** Every palletised batch, newest first. Cached + deduped; sagas invalidate. */
+export function listPalletisations(): Promise<{
+  ok: boolean;
+  rows: PalletisationRow[];
+  error?: string;
+}> {
+  return palletisationsCache.load();
+}
+
+const palletisationsCache = createListCache(fetchPalletisations);
+
+async function fetchPalletisations(): Promise<{
+  ok: boolean;
+  rows: PalletisationRow[];
+  error?: string;
+}> {
+  const [batches, sos, customers, designs, pallets, loadings] = await Promise.all([
+    listAll("PalletisedBatch", { order: "ROWID desc" }),
+    listAll("SalesOrder", { columns: ["po_number", "order_number", "customer"] }),
+    listAll("Customer", { columns: ["name"] }),
+    listAll("Design", { columns: ["design_name", "unique_name"] }),
+    listAll("Pallet", { columns: ["name"] }),
+    listAll("ContainerLoading", { columns: ["batch"] }),
+  ]);
+  if (!batches.ok) return { ok: false, rows: [], error: batches.error };
+
+  const soById = new Map<string, DSRow>();
+  (sos.rows || []).forEach((s) => soById.set(String(s.ROWID), s));
+  const custName = new Map<string, string>();
+  (customers.rows || []).forEach((c) => custName.set(String(c.ROWID), str(c.name)));
+  const designName = new Map<string, string>();
+  (designs.rows || []).forEach((d) => designName.set(String(d.ROWID), str(d.unique_name) || str(d.design_name)));
+  const palletName = new Map<string, string>();
+  (pallets.rows || []).forEach((p) => palletName.set(String(p.ROWID), str(p.name)));
+  const loadedSet = new Set((loadings.rows || []).map((r) => str(r.batch)));
+
+  const rows: PalletisationRow[] = (batches.rows || []).map((b) => {
+    const soId = str(b.sales_order);
+    const so = soById.get(soId);
+    const po = so ? str(so.order_number) || str(so.po_number) : soId;
+    const party = so ? custName.get(str(so.customer)) || "" : "";
+    return {
+      id: String(b.ROWID),
+      salesOrderId: soId,
+      soLabel: party ? `${po} · ${party}` : po,
+      design: designName.get(str(b.design)) || "—",
+      pallet: palletName.get(str(b.pallet)) || "—",
+      boxes: num(b.boxes_packed),
+      date: str(b.delivery_date) || "—",
+      loaded: loadedSet.has(String(b.ROWID)),
+      createdTime: str(b.CREATEDTIME),
+      modifiedTime: str(b.MODIFIEDTIME),
+    };
+  });
+  return { ok: true, rows };
+}
+
 /* ---- close-pallet: produced → palletized ---- */
 /* ---- palletisation batches for one Sales Order (SO detail "Palletization" tab) ---- */
 export interface OrderBatchRow {
@@ -277,6 +351,7 @@ export interface ClosePalletInput {
 function bustStageCaches(): void {
   palletizableCache.invalidate();
   loadableCache.invalidate();
+  palletisationsCache.invalidate();
   invalidateOrders();
   invalidateContainers();
   // close-pallet inserts a PalletisedBatch — the pallet detail's order list is stale.

@@ -16,16 +16,10 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listPalletizable, type ClosePalletInput, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
-import { VehicleFillBar, type VehicleLine } from "./VehicleFillBar";
 import { NumberInput } from "../../ui/NumberInput";
 
 // Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
 const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
-
-// ponytail: no Truck master yet — one truck ≈ one container of the chosen
-// pallets. Falls back to a constant when no pallet spec is picked. Swap for a
-// real Truck master + capacity when trucks get modelled.
-const DEFAULT_TRUCK_BOXES = 1000;
 
 export function PalletPackForm({
   onSave,
@@ -57,9 +51,6 @@ export function PalletPackForm({
   const [remarks, setRemarks] = useState("");
   const [needByItem, setNeedByItem] = useState<Record<string, number>>({});
   const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
-  // Vehicles the operator adds beyond what packing needs; the auto count grows
-  // on its own so no vehicle ever exceeds 100% (boxes spill to the next).
-  const [extra, setExtra] = useState(0);
 
   useEffect(() => {
     void (async () => {
@@ -130,6 +121,9 @@ export function PalletPackForm({
   );
   const totalBoxes = saveLines.reduce((s, l) => s + l.boxes, 0);
   const linesNeedingPallet = saveLines.filter((l) => !l.pallet).length;
+  // ponytail: vehicle-fill preview lived here; it moved to the Loading step
+  // (palletization is just the warehouse indicator now). Revive from git if the
+  // Loading form wants the same VehicleFillBar.
 
   // Group lines by chosen pallet → one PalletisedBatch per pallet.
   const batches = useMemo(() => {
@@ -140,28 +134,6 @@ export function PalletPackForm({
     }
     return [...by.entries()].map(([pallet, lines]) => ({ pallet, lines }));
   }, [saveLines]);
-
-  // Truck capacity (boxes) ≈ one container of the chosen pallets. Advisory.
-  const truckCapacity = useMemo(() => {
-    const caps = batches
-      .map((b) => pallets.find((p) => p.id === b.pallet)?.boxesPerContainer || 0)
-      .filter((n) => n > 0);
-    return caps.length ? Math.max(...caps) : DEFAULT_TRUCK_BOXES;
-  }, [batches, pallets]);
-
-  // Only palletised lines ride a vehicle — a line without a pallet can't be
-  // saved and has no capacity basis until its pallet is chosen. Mapped to the
-  // shared VehicleFillBar's per-design line shape.
-  const vehicleLines = useMemo<VehicleLine[]>(
-    () =>
-      saveLines
-        .filter((l) => l.pallet)
-        .map((l) => {
-          const it = order?.items.find((x) => x.orderItemId === l.order_item);
-          return { designId: it?.designId || l.order_item, label: it?.designLabel || "—", boxes: l.boxes };
-        }),
-    [saveLines, order],
-  );
 
   const missing = !orderId || saveLines.length === 0 || linesNeedingPallet > 0;
   const [showErrors, setShowErrors] = useState(false);
@@ -198,7 +170,10 @@ export function PalletPackForm({
           <div className="ico">
             <Icon name="palette" size={18} />
           </div>
-          <div style={{ flex: 1 }} />
+          <div style={{ flex: 1 }}>
+            <div className="ttl">Palletise</div>
+            <div className="sub2">Move produced boxes onto pallets in the warehouse</div>
+          </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
           </button>
@@ -300,17 +275,6 @@ export function PalletPackForm({
                 </div>
               )}
 
-              {order && (
-                <VehicleFillBar
-                  lines={vehicleLines}
-                  truckCapacity={truckCapacity}
-                  extra={extra}
-                  onExtraChange={setExtra}
-                />
-              )}
-              {/* TODO: list partially-empty vehicles (undispatched, under-capacity)
-                 for reuse — source: open PalletisedBatch / a future Vehicle master.
-                 Deferred to a later phase per spec 4.12. */}
             </>
           )}
         </div>
