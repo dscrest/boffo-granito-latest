@@ -56,7 +56,6 @@ export function ProductionQCForm({
           <div className="ico"><Icon name="check" size={18} /></div>
           <div>
             <div className="ttl">QC Check — {group.code}</div>
-            <div className="sub2">Item-wise quality remarks before completion</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>

@@ -1,14 +1,15 @@
 /* ============================================================
    Palletization Plan form — plans a palletization that groups OrderItems
-   from one Sales Order (or several, when editing). Header (planned date /
-   salesperson) + a per-SO item picker (boxes + pallet per line). Palletise Boxes
-   start blank so a partial (even single-item) palletization is allowed; a per-
-   order "Fill available" button fills them all. Only produced boxes can be
-   palletised (rows with nothing produced are disabled). Vehicle is NOT captured here —
-   it is assigned later, at the Loading step. On save it emits a PalPlanInput;
-   the PAL number is minted server-side. Reuses the shared form/modal CSS.
+   from one Sales Order (or several, when editing). Header (palletization date /
+   salesperson / optional vehicle) + a per-SO item picker (boxes + pallet per
+   line). Palletise Boxes start blank so a partial (even single-item)
+   palletization is allowed. Only produced boxes can be palletised (rows with
+   nothing produced are disabled). Vehicle is optional — it can also be assigned
+   later, at the Loading step. On save it emits a PalPlanInput; the PAL number
+   is minted server-side. Reuses the shared form/modal CSS.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
@@ -18,6 +19,7 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
+import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
@@ -46,6 +48,7 @@ export function PalPlanForm({
   const [orders, setOrders] = useState<PalletizableOrder[]>([]);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
   const [salesPersons, setSalesPersons] = useState<SalesPersonRow[]>([]);
+  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +58,7 @@ export function PalPlanForm({
   const [selectedSo, setSelectedSo] = useState("");
   const [plannedDate, setPlannedDate] = useState(initial?.plannedDate || todayISO());
   const [salesperson, setSalesperson] = useState(initial?.salespersonName || "");
+  const [vehicle, setVehicle] = useState(initial?.vehicleId || ""); // optional — can also be assigned at Loading
   const [remarks, setRemarks] = useState(initial?.remarks || "");
   // Boxes + pallet chosen per order item (keyed by OrderItem ROWID).
   const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
@@ -70,21 +74,22 @@ export function PalPlanForm({
     void listPalPlans().then((r) => r.ok && setExistingPlans(r.plans));
   }, []);
   const usedByPlan = useMemo(() => {
-    const m = new Map<string, string>(); // orderItemId → PAL number of an open plan
+    const m = new Map<string, { id: string; pal: string }>(); // orderItemId → open plan holding it
     existingPlans.forEach((p) => {
       if (p.status === "Completed") return; // dispatched → done, no longer a duplicate
       if (initial && p.id === initial.id) return; // don't warn about the plan we're editing
-      p.lines.forEach((l) => { if (!m.has(l.orderItemId)) m.set(l.orderItemId, p.palNumber); });
+      p.lines.forEach((l) => { if (!m.has(l.orderItemId)) m.set(l.orderItemId, { id: p.id, pal: p.palNumber }); });
     });
     return m;
   }, [existingPlans, initial]);
 
   useEffect(() => {
     void (async () => {
-      const [po, pl, sp] = await Promise.all([
+      const [po, pl, sp, vh] = await Promise.all([
         listPalletizable(presetOrderId ? { includeOrderId: presetOrderId } : undefined),
         listPallets(),
         listSalesPersons(),
+        listVehicles(),
       ]);
       setLoading(false);
       if (!po.ok) {
@@ -94,6 +99,7 @@ export function PalPlanForm({
       setOrders(po.orders);
       setPallets(pl.ok ? pl.pallets : []);
       setSalesPersons(sp.ok ? sp.salesPersons : []);
+      setVehicles(vh.ok ? vh.vehicles : []);
       // Salesperson defaults to the logged-in user (unless seeded from a record).
       if (!initial?.salespersonName) setSalesperson(currentSalespersonName(sp.ok ? sp.salesPersons : []));
       // Pallet defaults to the one chosen on the Sales Order (OrderItem.pallet).
@@ -111,7 +117,7 @@ export function PalPlanForm({
         setPalletByItem(p);
       } else {
         // Pallet defaults from the SO; Load Boxes start blank so the user can
-        // palletise a subset (even one item) — "Fill available" fills them all.
+        // palletise a subset (even one item).
         setPalletByItem(defPallet);
       }
     })();
@@ -132,14 +138,6 @@ export function PalPlanForm({
   const setBoxes = (itemId: string, raw: string, max: number) =>
     setBoxesByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
   const setPallet = (itemId: string, pid: string) => setPalletByItem((p) => ({ ...p, [itemId]: pid }));
-
-  // Convenience: fill Load Boxes with produced-available for a set of items.
-  const fillAvailable = (items: PalletizableItem[]) =>
-    setBoxesByItem((p) => {
-      const next = { ...p };
-      items.forEach((it) => { if (it.available > 0) next[it.orderItemId] = it.available; });
-      return next;
-    });
 
   // Orders shown as item sections: edit/clone/preset show what the API returned;
   // New mode shows only the SO picked above (nothing until one is chosen).
@@ -188,7 +186,8 @@ export function PalPlanForm({
     try {
       await onSave({
         pal_number: editing ? initial!.palNumber : "", // edit keeps its number; create/clone mint server-side
-        vehicle_number: "", // vehicle is captured at the loading step, not at planning
+        vehicle_number: "", // legacy free-text, unused — vehicle below is the FK
+        vehicle: vehicle || "", // optional here; can also be assigned at Loading
         planned_date: plannedDate || "",
         salesperson: salesperson || "",
         remarks: remarks.trim(),
@@ -206,11 +205,10 @@ export function PalPlanForm({
       <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico">
-            <Icon name="truck" size={18} />
+            <Icon name="palette" size={18} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600 }}>{editing ? `Edit ${initial!.palNumber}` : "New Palletization Plan"}</div>
-            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Choose the items and pallets to palletise — assign a vehicle later, at loading</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
@@ -245,7 +243,7 @@ export function PalPlanForm({
                     </label>
                   )}
                   <label className="form-field">
-                    <span className="lbl">Planned Date</span>
+                    <span className="lbl">Palletization Date</span>
                     <DateInput value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} />
                   </label>
                   <label className="form-field">
@@ -255,6 +253,19 @@ export function PalPlanForm({
                       options={salesPersonOptions(salesPersons)}
                       onChange={setSalesperson}
                       placeholder="Search sales persons…"
+                    />
+                  </label>
+                  <label className="form-field">
+                    <span className="lbl">Vehicle</span>
+                    <Combobox
+                      value={vehicle}
+                      options={vehicles.map((v) => ({
+                        value: v.id,
+                        label: [v.vehicleNumber, v.driverName].filter(Boolean).join(" · "),
+                        hint: v.mobile,
+                      }))}
+                      onChange={setVehicle}
+                      placeholder="Search vehicles…"
                     />
                   </label>
                   <label className="form-field">
@@ -270,24 +281,24 @@ export function PalPlanForm({
 
               {visibleOrders.map((o) => {
                 // Distinct open plans that already hold items from this order (dedup hint).
-                const dupPals = [...new Set(o.items.map((it) => usedByPlan.get(it.orderItemId)).filter(Boolean))] as string[];
+                const dupPals = [
+                  ...new Map(
+                    o.items.flatMap((it) => { const d = usedByPlan.get(it.orderItemId); return d ? [[d.id, d] as const] : []; }),
+                  ).values(),
+                ];
                 return (
                 <div className="form-section" key={o.salesOrderId}>
-                  <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1 }}>{o.label}</span>
-                    <button
-                      type="button"
-                      className="btn"
-                      style={{ height: 24, padding: "0 10px", fontWeight: 400, fontSize: "var(--t-sm)" }}
-                      onClick={() => fillAvailable(o.items)}
-                      title="Fill Palletise Boxes with the available qty for every line"
-                    >
-                      Fill available
-                    </button>
-                  </div>
+                  <div className="form-section-title">{o.label}</div>
                   {dupPals.length > 0 && (
                     <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>
-                      ⚠ This order already has an open palletization ({dupPals.join(", ")}) — avoid raising a duplicate.
+                      ⚠ This order already has an open palletization (
+                      {dupPals.map((d, i) => (
+                        <span key={d.id}>
+                          {i > 0 && ", "}
+                          <Link to={`/packing/${d.id}`}>{d.pal}</Link>
+                        </span>
+                      ))}
+                      ) — avoid raising a duplicate.
                     </div>
                   )}
                   <table className="tbl">
@@ -313,7 +324,9 @@ export function PalPlanForm({
                                 <LineStockChip stock={stockFor(it.designName)} qty={boxes} label={it.designLabel} />
                                 <span className="design-name">{it.designLabel}</span>
                                 {usedPal && (
-                                  <span className="chip" style={{ fontSize: 11 }} title={`Already in open palletization ${usedPal}`}>in {usedPal}</span>
+                                  <span className="chip" style={{ fontSize: 11 }} title={`Already in open palletization ${usedPal.pal}`}>
+                                    in <Link to={`/packing/${usedPal.id}`}>{usedPal.pal}</Link>
+                                  </span>
                                 )}
                               </span>
                             </td>

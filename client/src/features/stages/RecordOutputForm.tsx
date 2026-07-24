@@ -70,7 +70,7 @@ export function RecordOutputForm({
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
             <div className="ttl">Record Output{step ? ` — Line ${step.n} of ${step.of}` : ""}</div>
-            <div className="sub2">Actual boxes produced · {entry.design}</div>
+            <div className="sub2">{entry.design}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>

@@ -52,7 +52,7 @@ function planColumns(): ColumnDef<PalPlan>[] {
       label: "Status",
       render: (p) => <span className={`chip palstatus ${STATUS_CHIP[p.status]}`}>{PAL_STATUS_LABEL[p.status]}</span>,
     },
-    { key: "planned", label: "Planned Date", className: "mono muted", render: (p) => p.plannedDate || "—" },
+    { key: "planned", label: "Palletization Date", className: "mono muted", render: (p) => p.plannedDate || "—" },
     { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: (p) => fmt(p.totalBoxes) },
     { key: "salesperson", label: "Sales Person", className: "muted", render: (p) => p.salespersonName || "—" },
     { key: "created", label: "Created", className: "muted mono", render: (p) => fmtDateTime(p.createdTime) },
@@ -146,7 +146,7 @@ export function PalPlans() {
       { key: "status", label: "Status", type: "multiselect", options: opts((r) => PAL_STATUS_LABEL[r.status]), get: (r) => PAL_STATUS_LABEL[r.status] },
       { key: "salesperson", label: "Sales Person", type: "multiselect", options: opts((r) => r.salespersonName), get: (r) => r.salespersonName },
       { key: "boxes", label: "Boxes", type: "numrange", get: (r) => r.totalBoxes },
-      { key: "planned", label: "Planned Date Between", type: "daterange", get: (r) => r.plannedDate },
+      { key: "planned", label: "Palletization Date Between", type: "daterange", get: (r) => r.plannedDate },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime || "" },
     ];
   }, [plans]);

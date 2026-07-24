@@ -126,7 +126,6 @@ function BulkEditModal({
           </div>
           <div>
             <div className="ttl">Bulk edit {count} item{count > 1 ? "s" : ""}</div>
-            <div className="sub2">Only the fields you set are changed. Blank = leave unchanged.</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close">
             ✕

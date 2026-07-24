@@ -212,7 +212,6 @@ export function ProductionForm({
           </div>
           <div>
             <div className="ttl">Record New Production</div>
-            <div className="sub2">Record a new production request</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

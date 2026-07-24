@@ -399,9 +399,7 @@ export function PartyForm({
           </div>
           <div>
             <div className="ttl">{isEdit ? "Edit Customer" : "New Customer"}</div>
-            <div className="sub2">
-              {isEdit ? "Editing saved customer — changes overwrite the database record" : "Customer · saves to the Customer master"}
-            </div>
+            <div className="sub2">Customer master</div>
           </div>
           <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close" tabIndex={-1}>
             ✕

@@ -306,15 +306,7 @@ export function OrderForm({
           </div>
           <div>
             <div className="ttl">{clone ? "Sales Order" : q ? "Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
-            <div className="sub2">
-              {q
-                ? "" // convert mode: no "From quote…" subtitle (user mandate)
-                : clone
-                  ? "" // clone is just create with prefilled info (user mandate)
-                  : ed
-                    ? `${ed.orderNumber || ed.poNumber} · line items are replaced on save`
-                    : "Sales order · saves to the database on submit"}
-            </div>
+            <div className="sub2">{ed && !q && !clone ? ed.orderNumber || ed.poNumber : ""}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

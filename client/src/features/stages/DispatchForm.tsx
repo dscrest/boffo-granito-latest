@@ -64,7 +64,6 @@ export function DispatchForm({
           </div>
           <div>
             <div className="ttl">Dispatch Container</div>
-            <div className="sub2">Closes out a loaded container · loaded → dispatched</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

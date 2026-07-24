@@ -1501,6 +1501,7 @@ async function createPalPlan(catalyst, ds, body, sMap) {
     // so a crafted create can't skip the lifecycle.
     status: "Planning",
     vehicle_number: body.vehicle_number || "",
+    vehicle: body.vehicle ? String(body.vehicle) : undefined, // optional at planning; also assignable via /pal-vehicle
     planned_date: body.planned_date || undefined, // date col rejects "" → omit
     sales_person: salesPerson || undefined,
     remarks: body.remarks || "",
@@ -1565,6 +1566,7 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
         await ds.table("PalletizationPlan").updateRow({
           ROWID: planId,
           vehicle_number: body.vehicle_number || "",
+          vehicle: body.vehicle ? String(body.vehicle) : null,
           planned_date: body.planned_date || undefined,
           sales_person: salesPerson || null,
           remarks: body.remarks || "",

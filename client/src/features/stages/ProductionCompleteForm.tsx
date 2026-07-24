@@ -69,7 +69,6 @@ export function ProductionCompleteForm({
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
             <div className="ttl">Production Completion — {group.code}</div>
-            <div className="sub2">Actual boxes produced · updates available stock</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>

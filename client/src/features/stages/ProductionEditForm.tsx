@@ -57,7 +57,7 @@ export function ProductionEditForm({
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
             <div className="ttl">Edit Production</div>
-            <div className="sub2">{group.code} · adjust requested quantities</div>
+            <div className="sub2">{group.code}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>

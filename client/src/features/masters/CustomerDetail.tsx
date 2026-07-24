@@ -156,7 +156,6 @@ function AddressModal({ initial, onSave, onClose }: { initial?: ExtraAddress; on
           </div>
           <div>
             <div className="ttl">{isEdit ? "Edit Address" : "Add Address"}</div>
-            <div className="sub2">Extra addresses — selectable as billing/shipping on quotations</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

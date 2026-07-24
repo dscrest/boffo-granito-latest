@@ -80,7 +80,6 @@ export function LoadContainerForm({
           </div>
           <div>
             <div className="ttl">Load Container</div>
-            <div className="sub2">Loads closed pallets · palletized → loaded</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

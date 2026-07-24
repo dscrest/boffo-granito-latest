@@ -241,13 +241,7 @@ export function QuoteForm({
           </div>
           <div>
             <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : clone ? "Clone Quote" : "New Quote"}</div>
-            <div className="sub2">
-              {editing
-                ? "Editing saved quote — changes overwrite the database record"
-                : clone
-                  ? `Copy of ${initial!.quoteNo} · saves as a new quote`
-                  : "Sales quote"}
-            </div>
+            <div className="sub2">{clone ? `Copy of ${initial!.quoteNo}` : ""}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

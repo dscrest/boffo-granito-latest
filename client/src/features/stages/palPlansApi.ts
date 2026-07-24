@@ -78,7 +78,8 @@ export interface PalPlan {
 
 export interface PalPlanInput {
   pal_number: string; // "" → server mints
-  vehicle_number: string;
+  vehicle_number: string; // legacy free-text (unused by the form)
+  vehicle: string; // Vehicle ROWID ("" = assign later, at Loading)
   planned_date: string; // "" omitted server-side
   salesperson: string; // SalesPerson name → resolved server-side ("" = none)
   remarks: string;
@@ -251,6 +252,7 @@ export function planToInput(p: PalPlan): PalPlanInput {
   return {
     pal_number: "",
     vehicle_number: p.vehicleNumber,
+    vehicle: p.vehicleId,
     planned_date: p.plannedDate,
     salesperson: p.salespersonName,
     remarks: p.remarks,

@@ -172,7 +172,6 @@ export function PalletPackForm({
           </div>
           <div style={{ flex: 1 }}>
             <div className="ttl">Palletise</div>
-            <div className="sub2">Move produced boxes onto pallets in the warehouse</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕

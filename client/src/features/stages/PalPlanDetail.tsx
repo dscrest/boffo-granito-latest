@@ -342,7 +342,7 @@ export function PalPlanDetail() {
             <DetailRow label="Vehicle No." value={plan.vehicleNumber || "—"} />
             <DetailRow label="Driver" value={plan.driverName || "—"} />
             <DetailRow label="Driver Mobile" value={plan.mobileNumber || "—"} />
-            <DetailRow label="Planned Date" value={plan.plannedDate || "—"} />
+            <DetailRow label="Palletization Date" value={plan.plannedDate || "—"} />
             <DetailRow label="Dispatch Date" value={plan.dispatchDate || "—"} />
             <DetailRow label="Sales Person" value={plan.salespersonName || "—"} />
             <DetailRow label="Remarks" value={plan.remarks || "—"} />

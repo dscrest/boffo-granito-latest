@@ -63,7 +63,7 @@ export function VehicleLoadModal({
           <div className="ico"><Icon name="truck" size={18} /></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600 }}>Assign Vehicle</div>
-            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>Assign a vehicle to {palNumber}</div>
+            <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{palNumber}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>

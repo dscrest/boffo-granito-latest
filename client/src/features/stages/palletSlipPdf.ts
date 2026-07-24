@@ -63,7 +63,7 @@ function buildPalletSlipDoc(plan: PalPlan): TDocumentDefinitions {
       metaLines([
         ["Status", PAL_STATUS_LABEL[plan.status]],
         ["Vehicle", plan.vehicleNumber || undefined],
-        ["Planned Date", prettyDate(plan.plannedDate)],
+        ["Palletization Date", prettyDate(plan.plannedDate)],
         ["Dispatch Date", plan.dispatchDate ? prettyDate(plan.dispatchDate) : undefined],
         ["Sales Person", plan.salespersonName || undefined],
         ["Remarks", plan.remarks || undefined],

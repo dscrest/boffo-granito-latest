@@ -290,7 +290,6 @@ function GenerateDialog({
           </div>
           <div>
             <div className="ttl">Generate Invoice</div>
-            <div className="sub2">One export invoice per container · numbered EX-NN/FY</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
