@@ -66,8 +66,10 @@ export async function checkSession(): Promise<SessionUser | null> {
   if (!stored) return null;
   try {
     const res = await fetch(`${API_BASE}/data-ops/auth/me`, {
-      // X-App-Token, not Authorization: the Catalyst gateway treats a Bearer
-      // header as a Zoho OAuth token and rejects it before the function runs.
+      // credentials:include → the httpOnly session cookie rides the request.
+      // X-App-Token stays as the back-compat/fallback path until the cookie
+      // spike confirms the gateway forwards cookies (then it can be dropped).
+      credentials: "include",
       headers: { Accept: "application/json", "X-App-Token": stored.token },
     });
     if (!res.ok) {
@@ -88,6 +90,7 @@ export async function checkSession(): Promise<SessionUser | null> {
 export async function signIn(email: string, password: string): Promise<SessionUser> {
   const res = await fetch(`${API_BASE}/data-ops/auth/login`, {
     method: "POST",
+    credentials: "include", // receive + store the httpOnly session cookie
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ email, password }),
   });
@@ -106,6 +109,7 @@ export function signOut(): void {
   if (stored) {
     void fetch(`${API_BASE}/data-ops/auth/logout`, {
       method: "POST",
+      credentials: "include", // send the cookie so the server can clear it
       headers: { "X-App-Token": stored.token },
     }).catch(() => undefined);
   }

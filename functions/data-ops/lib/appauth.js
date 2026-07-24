@@ -34,6 +34,17 @@ const crypto = require("crypto");
 const SESSION_HOURS = 24 * 7; // 7 days
 const CACHE_TTL_MS = 60_000; // token -> user cache per warm instance
 
+/* httpOnly session cookie: unreadable by JS (XSS-safe), Secure (https only),
+   SameSite=Lax (sent on top-level navigation → opening a link in a new tab
+   keeps the session). Path "/" so it rides every /server request same-origin. */
+const SESSION_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: true,
+  sameSite: "lax",
+  path: "/",
+  maxAge: SESSION_HOURS * 3600 * 1000,
+};
+
 /* Catalyst datetime columns hold project-timezone (IST) strings without an
    offset marker; "yyyy-MM-dd HH:mm:ss" strings compare lexicographically. */
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
@@ -99,6 +110,17 @@ const TABLE_MODULE = {
   Container: "stages", ContainerLoading: "stages",
   Invoice: "invoices",
 };
+
+/* GET on a table not in TABLE_MODULE used to be ungated (any authed user could
+   read it). Default-deny now applies, with two exceptions:
+   - GET_SHARED: cross-cutting lookup/reference tables every screen needs
+     regardless of module (names/codes, no sensitive content).
+   - ProductionLog / OperationLog: handled specially in the guard below
+     (multi-module read for stock/reports; audit trail gated to reports.view). */
+const GET_SHARED = new Set([
+  "Currency", "SalesPerson", "Notification", "PaymentTerm",
+  "PartyBrand", "StatusTransition", "Vehicle", "TransactionSeries",
+]);
 
 /* Business route (first path segment) -> [module, action]. Approval verdicts
    are re-checked inside the status handlers via perms.approve. */
@@ -215,10 +237,20 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     return entry;
   }
 
+  // Read the session token from the httpOnly cookie (no cookie-parser dep).
+  function cookieToken(req) {
+    const m = /(?:^|;\s*)boffo_session=([^;]+)/.exec(req.headers.cookie || "");
+    return m ? decodeURIComponent(m[1]).trim() : "";
+  }
+
   function bearer(req) {
-    // Primary: X-App-Token. The Catalyst gateway intercepts `Authorization:
-    // Bearer` and validates it as a Zoho OAuth token (401 INVALID_TOKEN before
-    // the function runs), so the app token must travel in a custom header.
+    // Preferred: httpOnly `boffo_session` cookie (not readable by JS → XSS-safe).
+    // Fallback: X-App-Token header — kept for backward compat during the cookie
+    // rollout and as the fallback path if the gateway strips cookies. The
+    // Catalyst gateway intercepts `Authorization: Bearer` (validates it as a Zoho
+    // OAuth token, 401s before the function runs), so that is last-resort only.
+    const cookie = cookieToken(req);
+    if (cookie) return cookie;
     const custom = req.headers["x-app-token"];
     if (custom) return String(custom).trim();
     const h = req.headers["authorization"] || "";
@@ -277,7 +309,26 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
         return next();
       }
 
-      // Legacy fallback: side tables and unmapped routes keep today's rules.
+      // Default-deny GET on unmapped tables (previously ungated → any authed
+      // user could read audit logs, production, etc). Writes still fall through
+      // to the legacy fallback below (unchanged).
+      if (req.method === "GET") {
+        if (GET_SHARED.has(seg)) return next(); // shared reference lookups
+        // ProductionLog feeds item stock + production + reports; allow any of those.
+        if (seg === "ProductionLog") {
+          if (hasPerm(perms, "items", "view") || hasPerm(perms, "stages", "view") || hasPerm(perms, "reports", "view"))
+            return next();
+          return res.status(403).json({ ok: false, error: "Your role cannot view this data" });
+        }
+        // OperationLog is the audit trail (change payloads) — reports.view only.
+        if (seg === "OperationLog") {
+          if (hasPerm(perms, "reports", "view")) return next();
+          return res.status(403).json({ ok: false, error: "Your role cannot view this data" });
+        }
+        return res.status(403).json({ ok: false, error: "Your role cannot view this data" });
+      }
+
+      // Legacy fallback: side tables and unmapped routes keep today's rules (writes).
       if (req.method === "DELETE" && !perms.can_delete)
         return res.status(403).json({ ok: false, error: "Your role cannot delete records" });
       if ((req.method === "POST" || req.method === "PATCH") && !perms.can_update)
@@ -368,6 +419,9 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
         app_user: String(user.ROWID),
         expires_at: istNow(SESSION_HOURS * 3600 * 1000),
       });
+      // Deliver the token in an httpOnly cookie (JS can't read it → XSS-safe).
+      // `token` stays in the JSON body too during rollout for back-compat.
+      res.cookie("boffo_session", token, SESSION_COOKIE_OPTS);
       res.json({ ok: true, token, user: publicUser(user, role) });
       syncSalesPersons(catalyst); // fire-and-forget — reps mirror app users
     } catch (err) {
@@ -385,6 +439,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       )[0];
       if (sess) await catalyst.datastore().table("AuthSession").deleteRow(sess.ROWID);
       sessionCache.delete(req.authToken);
+      res.clearCookie("boffo_session", { path: "/" });
       res.json({ ok: true });
     } catch (err) {
       sendErr(res, err);

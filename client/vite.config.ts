@@ -31,6 +31,10 @@ export default defineConfig(({ mode }) => {
           target: functionHost,
           changeOrigin: true,
           secure: true,
+          // Rewrite the Set-Cookie domain/path so the httpOnly session cookie
+          // from the Catalyst domain is stored for localhost during dev.
+          cookieDomainRewrite: "localhost",
+          cookiePathRewrite: "/",
         },
       },
     },

@@ -58,7 +58,7 @@ export function apiGet<T = unknown>(path: string): Promise<T> {
   const url = buildUrl(path);
   const existing = inflightGets.get(url);
   if (existing) return existing as Promise<T>;
-  const p = fetch(url, { headers: { Accept: "application/json", ...authHeader() } })
+  const p = fetch(url, { credentials: "include", headers: { Accept: "application/json", ...authHeader() } })
     .then((res) => parse<T>(res))
     .finally(() => inflightGets.delete(url));
   inflightGets.set(url, p);
@@ -68,6 +68,7 @@ export function apiGet<T = unknown>(path: string): Promise<T> {
 async function apiSend<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(buildUrl(path), {
     method,
+    credentials: "include",
     headers: { Accept: "application/json", "Content-Type": "application/json", ...authHeader() },
     body: body == null ? undefined : JSON.stringify(body),
   });

@@ -36,11 +36,26 @@ const app = express();
 // 10mb so a base64-encoded photo (one per upload request) fits the body.
 app.use(express.json({ limit: "10mb" }));
 
-// CORS — same-origin in prod; permissive so the dev proxy / probes never trip.
+// CORS — prod is same-origin (no Origin header → these headers don't apply).
+// For cross-origin browser calls we reflect an allowlisted origin and allow
+// credentials so the httpOnly session cookie can ride the request; a wildcard
+// "*" is incompatible with credentials and is dropped. Non-browser probes
+// ignore CORS entirely, so tightening this never affects them.
+// Override the allowlist with APP_CORS_ORIGINS (comma-separated) if needed.
+const CORS_ORIGINS = new Set(
+  (process.env.APP_CORS_ORIGINS ||
+    "http://localhost:5173,https://boffo-granito-export-tracker-925638796.development.catalystserverless.com")
+    .split(",").map((s) => s.trim()).filter(Boolean),
+);
 app.use((req, res, next) => {
-  res.set("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (origin && CORS_ORIGINS.has(origin)) {
+    res.set("Access-Control-Allow-Origin", origin);
+    res.set("Access-Control-Allow-Credentials", "true");
+    res.set("Vary", "Origin");
+  }
   res.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-App-Token");
   if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
@@ -318,6 +333,29 @@ function badRequest(msg, code = 400) {
   const e = new Error(msg);
   e.statusCode = code;
   return e;
+}
+
+/* ---- Generic-route input guards (ZCQL-injection defense) ----
+   The generic list/get/patch routes interpolate query params into ZCQL. The
+   client only ever builds SINGLE-predicate filters, so validate against a
+   strict grammar and reject anything else (fail-safe 400, never fail-open).
+   `columns` is validated inline where it's used (identifier allowlist). */
+
+// One predicate: `col = <int>` | `col = '<alnum/space/_/->'` | `col IN (<int,...>)`.
+const WHERE_RE =
+  /^[A-Za-z_][A-Za-z0-9_]*\s*(=\s*\d+|=\s*'[A-Za-z0-9 _-]*'|IN\s*\(\s*\d+(\s*,\s*\d+)*\s*\))$/;
+// `col` optionally followed by asc/desc.
+const ORDER_RE = /^[A-Za-z_][A-Za-z0-9_]*( (asc|desc))?$/i;
+
+function assertWhere(where) {
+  if (!WHERE_RE.test(String(where).trim())) throw badRequest("Invalid filter");
+}
+function assertOrder(order) {
+  if (!ORDER_RE.test(String(order).trim())) throw badRequest("Invalid order");
+}
+/** Coerce a route :rowid param to digits only — ROWIDs are numeric. */
+function rowidParam(v) {
+  return String(v == null ? "" : v).replace(/[^0-9]/g, "");
 }
 
 /* Delete-guard map: table -> [childTable, fkColumn, humanLabel]. A row is
@@ -2716,11 +2754,18 @@ app.get("/:table", async (req, res) => {
     // Soft-deleted rows are hidden unless ?include_deleted=1 (OperationLog
     // has no deleted_at column, so it is never filtered).
     const clauses = [];
-    if (req.query.where) clauses.push(`(${req.query.where})`);
+    if (req.query.where) {
+      assertWhere(req.query.where);
+      clauses.push(`(${req.query.where})`);
+    }
     if (req.query.include_deleted !== "1" && table !== "OperationLog")
       clauses.push("deleted_at is null");
     const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
-    const order = req.query.order ? ` ORDER BY ${req.query.order}` : "";
+    let order = "";
+    if (req.query.order) {
+      assertOrder(req.query.order);
+      order = ` ORDER BY ${req.query.order}`;
+    }
     // Optional column projection (?columns=a,b,c). Identifiers only — anything
     // else falls back to SELECT *. ROWID is always included so joins keep working.
     // CREATEDTIME/MODIFIEDTIME ride along on every query: ZCQL's SELECT *
@@ -2753,10 +2798,11 @@ app.get("/:table/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
+    const rid = rowidParam(req.params.rowid);
     const rows = rowList(
       await catalyst
         .zcql()
-        .executeZCQLQuery(`SELECT *, CREATEDTIME, MODIFIEDTIME FROM ${table} WHERE ROWID = ${req.params.rowid}`),
+        .executeZCQLQuery(`SELECT *, CREATEDTIME, MODIFIEDTIME FROM ${table} WHERE ROWID = ${rid}`),
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: "not found" });
     res.json({ ok: true, row: rows[0] });
@@ -2806,7 +2852,8 @@ app.patch("/:table/:rowid", async (req, res) => {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
     const ds = catalyst.datastore();
-    const patch = { ...(req.body || {}), ROWID: req.params.rowid };
+    const rid = rowidParam(req.params.rowid);
+    const patch = { ...(req.body || {}), ROWID: rid };
 
     const result = await withOpLog(
       catalyst,
@@ -2825,7 +2872,7 @@ app.patch("/:table/:rowid", async (req, res) => {
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];
         if (nk && patch[nk] !== undefined) {
-          await assertUnique(catalyst, table, nk, patch[nk], req.params.rowid);
+          await assertUnique(catalyst, table, nk, patch[nk], rid);
         }
         // OrderItem stage flips get a StatusTransition row; this PATCH is
         // the one path all client stage writes converge on.
@@ -2834,7 +2881,7 @@ app.patch("/:table/:rowid", async (req, res) => {
         if (transCol) {
           const prev = rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ${transCol} FROM ${table} WHERE ROWID = ${req.params.rowid}`,
+              `SELECT ${transCol} FROM ${table} WHERE ROWID = ${rid}`,
             ),
           )[0];
           transFrom = prev ? String(prev[transCol] || "") : "";
@@ -2842,11 +2889,11 @@ app.patch("/:table/:rowid", async (req, res) => {
         const row = await ds.table(table).updateRow(patch);
         if (transCol)
           await logTransition(catalyst, {
-            entity_type: table, entity_rowid: req.params.rowid,
+            entity_type: table, entity_rowid: rid,
             from_status: transFrom, to_status: String(patch[transCol] || ""),
           });
         delete _cache[table]; // FK-name lookup map is now stale
-        return { rowid: (row && row.ROWID) || req.params.rowid, data: row };
+        return { rowid: (row && row.ROWID) || rid, data: row };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2997,19 +3044,19 @@ app.delete("/:table/:rowid", async (req, res) => {
       {
         table_name: table,
         operation: hard ? "delete" : "soft-delete",
-        payload: { rowid: req.params.rowid },
+        payload: { rowid: rid },
       },
       async () => {
         if (hard) {
-          await ds.table(table).deleteRow(req.params.rowid);
+          await ds.table(table).deleteRow(rid);
         } else {
           await ds.table(table).updateRow({
-            ROWID: req.params.rowid,
+            ROWID: rid,
             deleted_at: new Date().toISOString().slice(0, 19).replace("T", " "),
           });
         }
         delete _cache[table]; // FK-name lookup map is now stale
-        return { rowid: req.params.rowid };
+        return { rowid: rid };
       },
     );
     res.json({ ok: true, rowid: result.rowid });
@@ -3026,13 +3073,14 @@ app.post("/:table/:rowid/restore", async (req, res) => {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
     const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
 
     const result = await withOpLog(
       catalyst,
-      { table_name: table, operation: "restore", payload: { rowid: req.params.rowid } },
+      { table_name: table, operation: "restore", payload: { rowid: rid } },
       async () => {
-        await ds.table(table).updateRow({ ROWID: req.params.rowid, deleted_at: null });
-        return { rowid: req.params.rowid };
+        await ds.table(table).updateRow({ ROWID: rid, deleted_at: null });
+        return { rowid: rid };
       },
     );
     res.json({ ok: true, rowid: result.rowid });
