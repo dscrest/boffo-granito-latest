@@ -22,8 +22,9 @@ export interface FilterField<T = any> {
   type: FilterFieldType;
   /** select / multiselect choices (value doubles as label). */
   options?: string[];
-  /** Raw row value: string for text/select/multiselect/daterange, number for numrange. */
-  get: (row: T) => string | number;
+  /** Raw row value: string for text/select/multiselect/daterange, number for numrange.
+      multiselect also accepts string[] — the row matches when ANY value is picked. */
+  get: (row: T) => string | number | string[];
 }
 
 export interface DateRange {
@@ -59,11 +60,11 @@ export function applyFilters<T>(rows: T[], criteria: FilterCriteria, fields: Fil
       const v = f.get(row);
       switch (f.type) {
         case "text":
-          return String(v).toLowerCase().includes(String(c).toLowerCase());
+          return String(Array.isArray(v) ? v.join(" ") : v).toLowerCase().includes(String(c).toLowerCase());
         case "select":
           return String(v) === String(c);
         case "multiselect":
-          return (c as string[]).includes(String(v));
+          return (Array.isArray(v) ? v : [String(v)]).some((x) => (c as string[]).includes(String(x)));
         case "daterange": {
           const { from, to } = c as DateRange;
           const day = String(v).slice(0, 10); // Catalyst datetime → date prefix

@@ -17,12 +17,14 @@ import { fmt, fmtDateTime } from "@/lib/format";
 import { PalPlanForm } from "./PalPlanForm";
 import { PalKanban } from "./PalKanban";
 import {
+  cachedLoadBoxes,
   cachedPalPlans,
   createPalPlan,
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
   PAL_STATUSES,
+  type LoadBox,
   type PalPlan,
   type PalStatus,
 } from "./palPlansApi";
@@ -40,7 +42,8 @@ const TABS: Array<{ id: string; label: string }> = [
 
 function planColumns(): ColumnDef<PalPlan>[] {
   return [
-    { key: "vehicle", label: "Vehicle", render: (p) => p.vehicleNumber || "—" },
+    { key: "customer", label: "Customer", render: (p) => (p.customerNames.length ? p.customerNames.join(", ") : "—") },
+    { key: "vehicle", label: "Vehicle", render: (p) => (p.vehicleNumbers.length ? p.vehicleNumbers.join(", ") : "—") },
     {
       key: "sos",
       label: "Associated SOs",
@@ -63,7 +66,8 @@ function planColumns(): ColumnDef<PalPlan>[] {
 function planSortVal(p: PalPlan, k: string): string | number {
   switch (k) {
     case "palNumber": return p.palNumber;
-    case "vehicle": return p.vehicleNumber;
+    case "customer": return p.customerNames.join(", ");
+    case "vehicle": return p.vehicleNumbers.join(", ");
     case "sos": return p.soNumbers.join(", ");
     case "status": return PAL_STATUS_LABEL[p.status];
     case "planned": return p.plannedDate || "";
@@ -91,6 +95,7 @@ export function PalPlans() {
   const { ordered, visible, hidden, toggle, move } = useColumns("palPlansColumns", COLS, ["created", "modified"]);
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
+  const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -105,6 +110,7 @@ export function PalPlans() {
     }
     setError(null);
     setPlans(res.plans);
+    setBoxes(res.boxes);
   };
 
   useEffect(() => {
@@ -140,9 +146,14 @@ export function PalPlans() {
 
   const filterFields = useMemo<FilterField<PalPlan>[]>(() => {
     const opts = (get: (r: PalPlan) => string) => [...new Set(plans.map(get).filter(Boolean))].sort();
+    // Multi-valued options (a plan spans customers/items/sizes) — DB-sourced from the loaded plans.
+    const manyOpts = (get: (r: PalPlan) => string[]) => [...new Set(plans.flatMap(get).filter(Boolean))].sort();
     return [
       { key: "palNumber", label: "PAL No", type: "text", get: (r) => r.palNumber },
-      { key: "vehicle", label: "Vehicle", type: "text", get: (r) => r.vehicleNumber },
+      { key: "customer", label: "Customer", type: "multiselect", options: manyOpts((r) => r.customerNames), get: (r) => r.customerNames },
+      { key: "item", label: "Item", type: "multiselect", options: manyOpts((r) => r.lines.map((l) => l.designLabel)), get: (r) => r.lines.map((l) => l.designLabel) },
+      { key: "size", label: "Size", type: "multiselect", options: manyOpts((r) => r.lines.map((l) => l.sizeCode)), get: (r) => r.lines.map((l) => l.sizeCode) },
+      { key: "vehicle", label: "Vehicle", type: "text", get: (r) => r.vehicleNumbers.join(" ") },
       { key: "status", label: "Status", type: "multiselect", options: opts((r) => PAL_STATUS_LABEL[r.status]), get: (r) => PAL_STATUS_LABEL[r.status] },
       { key: "salesperson", label: "Sales Person", type: "multiselect", options: opts((r) => r.salespersonName), get: (r) => r.salespersonName },
       { key: "boxes", label: "Boxes", type: "numrange", get: (r) => r.totalBoxes },
@@ -156,7 +167,7 @@ export function PalPlans() {
     const base = plans.filter((r) => {
       if (tab !== "all" && r.status !== tab) return false;
       if (!q) return true;
-      return `${r.palNumber} ${r.vehicleNumber} ${r.soNumbers.join(" ")}`.toLowerCase().includes(q);
+      return `${r.palNumber} ${r.vehicleNumbers.join(" ")} ${r.soNumbers.join(" ")} ${r.customerNames.join(" ")}`.toLowerCase().includes(q);
     });
     return applyFilters(base, criteria, filterFields);
   }, [tab, plans, query, criteria, filterFields]);
@@ -211,7 +222,7 @@ export function PalPlans() {
         loading && plans.length === 0 ? (
           <div className="card"><SkeletonRows rows={6} /></div>
         ) : (
-          <PalKanban plans={filtered} canEdit={can("stages", "edit")} onChanged={() => void load()} />
+          <PalKanban plans={filtered} boxes={boxes} canEdit={can("stages", "edit")} onChanged={() => void load()} />
         )
       ) : (
       <div className="card">

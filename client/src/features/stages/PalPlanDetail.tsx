@@ -17,10 +17,13 @@ import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
+import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { PalPlanForm } from "./PalPlanForm";
 import { VehicleLoadModal } from "./VehicleLoadModal";
+import { VehicleFillBar, type VehicleLine } from "./VehicleFillBar";
 import { STATUS_CHIP } from "./PalPlans";
 import {
+  cachedLoadBoxes,
   cachedPalPlans,
   createPalPlan,
   deletePalPlan,
@@ -31,6 +34,7 @@ import {
   setPalStatus,
   setPalVehicle,
   updatePalPlan,
+  type LoadBox,
   type PalPlan,
   type PalPlanInput,
   type PalStatus,
@@ -54,6 +58,8 @@ export function PalPlanDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
+  const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
+  const [pallets, setPallets] = useState<PalletRow[]>([]);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,6 +68,7 @@ export function PalPlanDetail() {
   const [assigning, setAssigning] = useState(false); // "Assign vehicle" modal (while In Loading)
   const [listQ, setListQ] = useState("");
   const [tab, setTab] = useState<DetailTab>("items");
+  const [extraVehicles, setExtraVehicles] = useState(0); // fill-chart "Add vehicle" extras
 
   const load = async () => {
     setLoading(true);
@@ -73,12 +80,32 @@ export function PalPlanDetail() {
     }
     setError(null);
     setPlans(res.plans);
+    setBoxes(res.boxes);
   };
   useEffect(() => {
     void load();
+    void listPallets().then((r) => r.ok && setPallets(r.pallets));
   }, []);
+  useEffect(() => setExtraVehicles(0), [id]); // chart extras are per-plan
 
   const plan = useMemo(() => plans.find((p) => p.id === id) || null, [plans, id]);
+  const boxById = useMemo(() => new Map(boxes.map((b) => [b.id, b])), [boxes]);
+  // Box flow owns the lifecycle once any line sits in a load box — the manual
+  // advance/assign-vehicle actions then disappear (dispatch happens per box).
+  const hasBoxedLines = !!plan?.lines.some((l) => l.loadBoxId);
+
+  // Fill chart inputs (advisory, same rules as the old form chart): one line per
+  // item coloured by design; capacity ≈ one container of the chosen pallets.
+  const chartLines = useMemo<VehicleLine[]>(
+    () => (plan?.lines || []).map((l) => ({ designId: l.designId, label: l.designLabel, boxes: l.boxes })),
+    [plan],
+  );
+  const truckCapacity = useMemo(() => {
+    const caps = (plan?.lines || [])
+      .map((l) => pallets.find((p) => p.id === l.palletId)?.boxesPerContainer || 0)
+      .filter((n) => n > 0);
+    return caps.length ? Math.max(...caps) : 1000;
+  }, [plan, pallets]);
 
   // Group the plan's lines by Sales Order for the "Associated SO(s)" section.
   const bySo = useMemo(() => {
@@ -254,8 +281,9 @@ export function PalPlanDetail() {
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{plan.palNumber}</span>
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>
-            {advance && can("stages", "edit") && (() => {
-              // Dispatch (Loading → Completed) is blocked until a vehicle is assigned.
+            {advance && !hasBoxedLines && can("stages", "edit") && (() => {
+              // Legacy (pre-box) flow only: once items sit in load boxes, loading and
+              // dispatch happen per box on the board. Dispatch is blocked w/o a vehicle.
               const blocked = advance.to === "Completed" && !plan.vehicleId;
               return (
                 <button className="hbtn primary" disabled={busy || blocked} onClick={() => onAdvance(advance.to)} title={blocked ? "Assign a vehicle first" : advance.label}>
@@ -263,7 +291,7 @@ export function PalPlanDetail() {
                 </button>
               );
             })()}
-            {plan.status === "Loading" && can("stages", "edit") && (
+            {plan.status === "Loading" && !hasBoxedLines && can("stages", "edit") && (
               <button className="hbtn" disabled={busy} onClick={() => setAssigning(true)} title={plan.vehicleNumber ? "Reassign vehicle" : "Assign vehicle"}>
                 <Icon name="truck" size={13} /> {plan.vehicleNumber ? "Reassign Vehicle" : "Assign Vehicle"}
               </button>
@@ -310,21 +338,36 @@ export function PalPlanDetail() {
                         <tr>
                           <th>Item</th>
                           <th>Design</th>
+                          <th>Size</th>
                           <th>Pallet</th>
+                          <th>Vehicle</th>
                           <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {g.lines.map((l) => (
-                          <tr key={l.id}>
-                            <td className="mono">{l.itemCode}</td>
-                            <td><span className="design-name">{l.designLabel}</span></td>
-                            <td className="muted">{l.palletName}</td>
-                            <td className="num mono">{fmt(l.boxes)}</td>
-                          </tr>
-                        ))}
+                        {g.lines.map((l) => {
+                          const box = boxById.get(l.loadBoxId);
+                          return (
+                            <tr key={l.id}>
+                              <td className="mono">{l.itemCode}</td>
+                              <td><span className="design-name">{l.designLabel}</span></td>
+                              <td className="muted mono">{l.sizeCode || "—"}</td>
+                              <td className="muted">{l.palletName}</td>
+                              <td className="muted">
+                                {box ? (
+                                  <span title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "In Loading"}>
+                                    {box.vehicleNumber || `Box ${box.boxNumber}`}
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td className="num mono">{fmt(l.boxes)}</td>
+                            </tr>
+                          );
+                        })}
                         <tr>
-                          <td colSpan={3} style={{ fontWeight: 500 }}>Subtotal</td>
+                          <td colSpan={5} style={{ fontWeight: 500 }}>Subtotal</td>
                           <td className="num mono" style={{ fontWeight: 500 }}>{fmt(subtotal)}</td>
                         </tr>
                       </tbody>
@@ -339,7 +382,7 @@ export function PalPlanDetail() {
           <div style={{ marginTop: 14 }}>
             {/* TODO: rename to Dispatch Details */}
             <div className="form-section-title" style={{ marginBottom: 8 }}>Plan Details</div>
-            <DetailRow label="Vehicle No." value={plan.vehicleNumber || "—"} />
+            <DetailRow label="Vehicle No." value={plan.vehicleNumbers.join(", ") || "—"} />
             <DetailRow label="Driver" value={plan.driverName || "—"} />
             <DetailRow label="Driver Mobile" value={plan.mobileNumber || "—"} />
             <DetailRow label="Palletization Date" value={plan.plannedDate || "—"} />
@@ -361,6 +404,17 @@ export function PalPlanDetail() {
           )}
         </div>
       </div>
+
+      {/* Vehicle fill chart — advisory view of how this plan's boxes spread
+          across vehicles (same shared VehicleFillBar, now beside the detail). */}
+      {chartLines.length > 0 && (
+        <div
+          className="card"
+          style={{ width: 360, minWidth: 300, flexShrink: 0, padding: 16, position: "sticky", top: 0, maxHeight: "calc(100vh - var(--header-h) - 46px)", overflowY: "auto" }}
+        >
+          <VehicleFillBar lines={chartLines} truckCapacity={truckCapacity} extra={extraVehicles} onExtraChange={setExtraVehicles} />
+        </div>
+      )}
     </div>
   );
 }

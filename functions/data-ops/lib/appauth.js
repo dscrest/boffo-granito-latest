@@ -108,6 +108,7 @@ const TABLE_MODULE = {
   Design: "items", DesignPallet: "items", Size: "items", Pallet: "items",
   Brand: "items", Grade: "items", Finish: "items", Glaze: "items", Category: "items",
   Container: "stages", ContainerLoading: "stages",
+  PalletizationPlan: "stages", PalletizationPlanLine: "stages", LoadBox: "stages",
   Invoice: "invoices",
 };
 
@@ -135,6 +136,16 @@ const ROUTE_PERM = {
   "production-log": ["stages", "edit"],
   "load-container": ["stages", "edit"],
   "dispatch": ["stages", "edit"],
+  "pal-plan": ["stages", "create"],
+  "update-pal-plan": ["stages", "edit"],
+  "pal-status": ["stages", "edit"],
+  "pal-line-status": ["stages", "edit"],
+  "pal-vehicle": ["stages", "edit"],
+  "pal-line-box": ["stages", "edit"],
+  "load-box": ["stages", "edit"],
+  "load-box-update": ["stages", "edit"],
+  "load-box-delete": ["stages", "edit"],
+  "load-box-dispatch": ["stages", "edit"],
   "invoice-for-container": ["invoices", "create"],
 };
 

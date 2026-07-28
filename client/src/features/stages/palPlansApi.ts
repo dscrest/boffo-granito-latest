@@ -54,6 +54,26 @@ export interface PalPlanLine {
   position: number;
   status: PalLineStatus; // In Palletization → Ready for Loading (per-item kanban move)
   itemCode: string; // display-only sequential PAL-NNN (mirrors Production's PROD-NNN)
+  customerId: string; // via SalesOrder.customer
+  customerName: string;
+  countryCode: string; // Customer.country_code (ISO-2) → export country
+  sizeCode: string; // via Design.size → Size.code
+  loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
+}
+
+/** A vehicle slot ("box") that Ready-for-Loading lines are dragged into. */
+export type LoadBoxStatus = "Open" | "Dispatched";
+export interface LoadBox {
+  id: string; // LoadBox ROWID
+  boxNumber: number; // display "Box N" (server-minted)
+  vehicleId: string; // Vehicle ROWID ("" until allocated)
+  vehicleNumber: string;
+  driverName: string;
+  mobileNumber: string;
+  capacity: number; // advisory boxes capacity
+  status: LoadBoxStatus;
+  dispatchDate: string;
+  createdTime: string;
 }
 
 export interface PalPlan {
@@ -71,6 +91,8 @@ export interface PalPlan {
   remarks: string;
   lines: PalPlanLine[];
   soNumbers: string[]; // distinct associated SO numbers (grid column)
+  customerNames: string[]; // distinct customers across lines (grid column + filter)
+  vehicleNumbers: string[]; // distinct vehicles: legacy plan vehicle + the lines' boxes
   totalBoxes: number;
   createdTime: string; // Catalyst CREATEDTIME
   modifiedTime: string; // Catalyst MODIFIEDTIME
@@ -99,6 +121,9 @@ const cache = createListCache(fetchPalPlans);
 export function cachedPalPlans(): PalPlan[] | null {
   return cache.cached()?.plans ?? null;
 }
+export function cachedLoadBoxes(): LoadBox[] | null {
+  return cache.cached()?.boxes ?? null;
+}
 export function subscribePalPlans(cb: () => void): () => void {
   return cache.subscribe(cb);
 }
@@ -106,23 +131,26 @@ export function invalidatePalPlans(): void {
   cache.invalidate();
 }
 
-/** All palletization plans (newest first). Cached + deduped. */
-export function listPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?: string }> {
+/** All palletization plans (newest first) + load boxes. Cached + deduped. */
+export function listPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: LoadBox[]; error?: string }> {
   return cache.load();
 }
 
-async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?: string }> {
+async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: LoadBox[]; error?: string }> {
   // FKs are bigint ROWID strings; no JOINs — resolve names client-side (house convention).
-  const [plans, lines, sos, designs, pallets, reps, vehicles] = await Promise.all([
+  const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes] = await Promise.all([
     listAll("PalletizationPlan", { order: "ROWID desc" }),
     listAll("PalletizationPlanLine"),
-    listAll("SalesOrder", { columns: ["order_number", "po_number"] }),
-    listAll("Design", { columns: ["design_name", "unique_name"] }),
+    listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
+    listAll("Design", { columns: ["design_name", "unique_name", "size"] }),
     listAll("Pallet", { columns: ["name"] }),
     listAll("SalesPerson", { columns: ["name"] }),
     listAll("Vehicle", { columns: ["vehicle_number", "driver_name", "mobile_number"] }),
+    listAll("Customer", { columns: ["name", "country_code"] }),
+    listAll("Size", { columns: ["code"] }),
+    listAll("LoadBox", { order: "ROWID asc" }),
   ]);
-  if (!plans.ok) return { ok: false, plans: [], error: plans.error };
+  if (!plans.ok) return { ok: false, plans: [], boxes: [], error: plans.error };
 
   const vehicleById = new Map<string, { number: string; driver: string; mobile: string }>();
   (vehicles.rows || []).forEach((v) =>
@@ -130,13 +158,46 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
   );
 
   const soNo = new Map<string, string>();
-  (sos.rows || []).forEach((s) => soNo.set(String(s.ROWID), str(s.order_number) || str(s.po_number) || String(s.ROWID)));
+  const soCustomer = new Map<string, string>(); // SalesOrder ROWID → Customer ROWID
+  (sos.rows || []).forEach((s) => {
+    soNo.set(String(s.ROWID), str(s.order_number) || str(s.po_number) || String(s.ROWID));
+    soCustomer.set(String(s.ROWID), str(s.customer));
+  });
+  const customerById = new Map<string, { name: string; countryCode: string }>();
+  (customers.rows || []).forEach((c) =>
+    customerById.set(String(c.ROWID), { name: str(c.name), countryCode: str(c.country_code) }),
+  );
+  const sizeCodeById = new Map<string, string>();
+  (sizes.rows || []).forEach((s) => sizeCodeById.set(String(s.ROWID), str(s.code)));
   const designLabel = new Map<string, string>();
-  (designs.rows || []).forEach((d) => designLabel.set(String(d.ROWID), str(d.unique_name) || str(d.design_name)));
+  const designSize = new Map<string, string>(); // Design ROWID → Size ROWID
+  (designs.rows || []).forEach((d) => {
+    designLabel.set(String(d.ROWID), str(d.unique_name) || str(d.design_name));
+    designSize.set(String(d.ROWID), str(d.size));
+  });
   const palletName = new Map<string, string>();
   (pallets.rows || []).forEach((p) => palletName.set(String(p.ROWID), str(p.name)));
   const repName = new Map<string, string>();
   (reps.rows || []).forEach((r) => repName.set(String(r.ROWID), str(r.name)));
+
+  const boxes: LoadBox[] = (loadBoxes.rows || [])
+    .filter((b) => !str(b.deleted_at))
+    .map((b) => {
+      const veh = vehicleById.get(str(b.vehicle));
+      return {
+        id: String(b.ROWID),
+        boxNumber: num(b.box_number),
+        vehicleId: str(b.vehicle),
+        vehicleNumber: veh?.number || "",
+        driverName: veh?.driver || "",
+        mobileNumber: veh?.mobile || "",
+        capacity: num(b.capacity) || 1000,
+        status: (str(b.status) || "Open") as LoadBoxStatus,
+        dispatchDate: str(b.dispatch_date),
+        createdTime: str(b.CREATEDTIME),
+      };
+    });
+  const boxById = new Map(boxes.map((b) => [b.id, b]));
 
   // Lines grouped by plan (soft-deleted skipped), ordered by position.
   const linesByPlan = new Map<string, PalPlanLine[]>();
@@ -147,6 +208,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
     const soId = str(l.sales_order);
     const designId = str(l.design);
     const palletId = str(l.pallet);
+    const customer = customerById.get(soCustomer.get(soId) || "");
     const row: PalPlanLine = {
       id: String(l.ROWID),
       salesOrderId: soId,
@@ -160,6 +222,11 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
       position: num(l.position),
       status: (str(l.status) || "Planning") as PalLineStatus,
       itemCode: "", // assigned below, once all plans are built
+      customerId: soCustomer.get(soId) || "",
+      customerName: customer?.name || "",
+      countryCode: customer?.countryCode || "",
+      sizeCode: sizeCodeById.get(designSize.get(designId) || "") || "",
+      loadBoxId: str(l.load_box),
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
   });
@@ -173,6 +240,11 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
       const soNumbers = [...new Set(planLines.map((l) => l.soNumber))];
       const repId = str(p.sales_person);
       const veh = vehicleById.get(str(p.vehicle));
+      const vehicleNumbers = [
+        ...new Set(
+          [veh?.number || str(p.vehicle_number), ...planLines.map((l) => boxById.get(l.loadBoxId)?.vehicleNumber || "")].filter(Boolean),
+        ),
+      ];
       return {
         id,
         palNumber: str(p.pal_number),
@@ -188,6 +260,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
         remarks: str(p.remarks),
         lines: planLines,
         soNumbers,
+        customerNames: [...new Set(planLines.map((l) => l.customerName).filter(Boolean))],
+        vehicleNumbers,
         totalBoxes: planLines.reduce((s, l) => s + l.boxes, 0),
         createdTime: str(p.CREATEDTIME),
         modifiedTime: str(p.MODIFIEDTIME),
@@ -209,7 +283,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; error?:
     )
     .forEach((x, i) => { x.line.itemCode = `PAL-${String(i + 1).padStart(3, "0")}`; });
 
-  return { ok: true, plans: result };
+  return { ok: true, plans: result, boxes };
 }
 
 /* Mutations invalidate the cache so the next listPalPlans() refetches. */
@@ -241,6 +315,32 @@ export function setPalVehicle(rowid: string, vehicle: string) {
 /** Palletise one item (In Palletization ↔ Ready for Loading) without touching its plan. */
 export function setPalLineStatus(lineId: string, status: PalLineStatus) {
   return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status }));
+}
+
+/* ---- Load boxes (vehicle slots on the board) ---- */
+
+export function createLoadBox(capacity?: number) {
+  return bust(op<{ ROWID: string; box_number: number }>("load-box", capacity ? { capacity } : {}));
+}
+
+/** Assign/reassign the box's vehicle or adjust its capacity (Open boxes only). */
+export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity?: number }) {
+  return bust(op<{ ROWID: string }>(`load-box-update/${rowid}`, patch));
+}
+
+/** Remove an Open box; its lines fall back to Ready for Loading. */
+export function deleteLoadBox(rowid: string) {
+  return bust(op<{ ROWID: string }>(`load-box-delete/${rowid}`, {}));
+}
+
+/** Dispatch a box (needs a vehicle + ≥1 line). Auto-completes fully-dispatched plans. */
+export function dispatchLoadBox(rowid: string) {
+  return bust(op<{ ROWID: string; status: string; dispatch_date: string }>(`load-box-dispatch/${rowid}`, {}));
+}
+
+/** Put a Ready line into an Open box (box="" pulls it back out). */
+export function setLineBox(lineId: string, box: string) {
+  return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, { box }));
 }
 
 export function deletePalPlan(rowid: string) {

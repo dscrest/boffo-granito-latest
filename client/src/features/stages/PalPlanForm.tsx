@@ -19,7 +19,6 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
-import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
@@ -48,7 +47,6 @@ export function PalPlanForm({
   const [orders, setOrders] = useState<PalletizableOrder[]>([]);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
   const [salesPersons, setSalesPersons] = useState<SalesPersonRow[]>([]);
-  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +56,6 @@ export function PalPlanForm({
   const [selectedSo, setSelectedSo] = useState("");
   const [plannedDate, setPlannedDate] = useState(initial?.plannedDate || todayISO());
   const [salesperson, setSalesperson] = useState(initial?.salespersonName || "");
-  const [vehicle, setVehicle] = useState(initial?.vehicleId || ""); // optional — can also be assigned at Loading
   const [remarks, setRemarks] = useState(initial?.remarks || "");
   // Boxes + pallet chosen per order item (keyed by OrderItem ROWID).
   const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
@@ -85,11 +82,10 @@ export function PalPlanForm({
 
   useEffect(() => {
     void (async () => {
-      const [po, pl, sp, vh] = await Promise.all([
+      const [po, pl, sp] = await Promise.all([
         listPalletizable(presetOrderId ? { includeOrderId: presetOrderId } : undefined),
         listPallets(),
         listSalesPersons(),
-        listVehicles(),
       ]);
       setLoading(false);
       if (!po.ok) {
@@ -99,7 +95,6 @@ export function PalPlanForm({
       setOrders(po.orders);
       setPallets(pl.ok ? pl.pallets : []);
       setSalesPersons(sp.ok ? sp.salesPersons : []);
-      setVehicles(vh.ok ? vh.vehicles : []);
       // Salesperson defaults to the logged-in user (unless seeded from a record).
       if (!initial?.salespersonName) setSalesperson(currentSalespersonName(sp.ok ? sp.salesPersons : []));
       // Pallet defaults to the one chosen on the Sales Order (OrderItem.pallet).
@@ -186,8 +181,10 @@ export function PalPlanForm({
     try {
       await onSave({
         pal_number: editing ? initial!.palNumber : "", // edit keeps its number; create/clone mint server-side
-        vehicle_number: "", // legacy free-text, unused — vehicle below is the FK
-        vehicle: vehicle || "", // optional here; can also be assigned at Loading
+        vehicle_number: "", // legacy free-text, unused
+        // No vehicle at palletization — vehicles attach to load boxes at the
+        // Loading step. Edit keeps a legacy plan's existing vehicle untouched.
+        vehicle: (editing && initial?.vehicleId) || "",
         planned_date: plannedDate || "",
         salesperson: salesperson || "",
         remarks: remarks.trim(),
@@ -253,19 +250,6 @@ export function PalPlanForm({
                       options={salesPersonOptions(salesPersons)}
                       onChange={setSalesperson}
                       placeholder="Search sales persons…"
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span className="lbl">Vehicle</span>
-                    <Combobox
-                      value={vehicle}
-                      options={vehicles.map((v) => ({
-                        value: v.id,
-                        label: [v.vehicleNumber, v.driverName].filter(Boolean).join(" · "),
-                        hint: v.mobile,
-                      }))}
-                      onChange={setVehicle}
-                      placeholder="Search vehicles…"
                     />
                   </label>
                   <label className="form-field">

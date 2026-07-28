@@ -25,7 +25,8 @@ export interface VehicleLine {
 // Distinct, on-theme colours assigned by first-seen design so N designs get N
 // visibly-different segments (a hash can collide two designs). Brand orange
 // leads so a single-item load reads as "the app colour". Cycles past 8.
-const DESIGN_PALETTE = [
+// Exported: PalKanban's box cards colour their mini fill bars the same way.
+export const DESIGN_PALETTE = [
   "oklch(0.68 0.17 55)", // orange (brand)
   "oklch(0.60 0.13 195)", // teal
   "oklch(0.58 0.15 250)", // blue

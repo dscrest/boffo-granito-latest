@@ -575,6 +575,25 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
+| load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box) |
+| deleted_at | datetime | soft delete |
+
+### LoadBox (69851000000089442) — added 2026-07-27 (cross-plan vehicle slots)
+A "box" on the Palletization board's Loading columns: Ready-for-Loading lines from ANY
+plan are dragged into it (one box can mix customers), a vehicle attaches while Open
+(in advance or later), and the box dispatches as one unit. Managed ONLY via the
+`/load-box*` routes (`/load-box` create, `/load-box-update` vehicle/capacity,
+`/load-box-delete` unallocates its lines, `/load-box-dispatch`); generic CRUD rejects it.
+Plan status follows the boxes: first allocated line → plan `Loading`; box dispatch
+sets plans whose lines all sit in dispatched boxes to `Completed` (+`dispatch_date`).
+Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
+| Column | Type | Notes |
+|---|---|---|
+| box_number | int | display "Box N" — server-minted (MAX-scan) |
+| vehicle | FK → Vehicle | SET-NULL; required before dispatch |
+| capacity | int | advisory boxes-per-vehicle (default 1000) |
+| status | varchar(20) | Open / Dispatched |
+| dispatch_date | date | stamped on dispatch (IST) |
 | deleted_at | datetime | soft delete |
 
 ---
