@@ -1,6 +1,6 @@
 /* Palletization Plans list — a real grid of vehicle-load plans (PalPlan),
    backed by the Catalyst Data Store via palPlansApi. Mirrors the Quotes grid:
-   status tabs + search + advanced filter + column picker + sortable headers +
+   status tabs + advanced filter + column picker + sortable headers +
    footer pager; whole-row click opens the detail. "New Palletization Plan"
    opens PalPlanForm and lands on the created record. */
 import { useEffect, useMemo, useState } from "react";
@@ -15,7 +15,7 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { PalPlanForm } from "./PalPlanForm";
-import { PalKanban } from "./PalKanban";
+import { DispatchBoard } from "./DispatchBoard";
 import {
   cachedLoadBoxes,
   cachedPalPlans,
@@ -82,7 +82,6 @@ function planSortVal(p: PalPlan, k: string): string | number {
 export function PalPlans() {
   const navigate = useNavigate();
   const [tab, setTab] = usePersistedState("palplans.tab", "all");
-  const [query, setQuery] = usePersistedState("palplans.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("palplans.criteria", {});
   const [view, setView] = usePersistedState<"list" | "board">("palplans.view", "board");
   const [showForm, setShowForm] = useState(false);
@@ -163,17 +162,13 @@ export function PalPlans() {
   }, [plans]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = plans.filter((r) => {
-      if (tab !== "all" && r.status !== tab) return false;
-      if (!q) return true;
-      return `${r.palNumber} ${r.vehicleNumbers.join(" ")} ${r.soNumbers.join(" ")} ${r.customerNames.join(" ")}`.toLowerCase().includes(q);
-    });
-    return applyFilters(base, criteria, filterFields);
-  }, [tab, plans, query, criteria, filterFields]);
+    const base = plans.filter((r) => tab === "all" || r.status === tab);
+    // Advanced filter is a list-view control — never filter the board invisibly.
+    return view === "list" ? applyFilters(base, criteria, filterFields) : base;
+  }, [tab, plans, criteria, filterFields, view]);
 
   const sort = useSortRows(filtered, planSortVal, "created", -1); // newest first
-  const pager = usePagination(filtered.length, "palPlansPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
+  const pager = usePagination(filtered.length, "palPlansPageSize", `${tab}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
 
   const tabCount = (id: string) => (id === "all" ? plans.length : plans.filter((p) => p.status === id).length);
@@ -194,11 +189,7 @@ export function PalPlans() {
           ))}
         </select>
         <div style={{ flex: 1 }} />
-        <span className="gsearch">
-          <Icon name="search" size={13} />
-          <input type="text" placeholder="Search PAL no, vehicle, SO…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        </span>
-        <AdvancedFilterButton title="Palletization Plans" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+        {view === "list" && <AdvancedFilterButton title="Palletization Plans" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="View" title="Switch view">
           <button onClick={() => setView("list")} title="List" aria-label="List view"
             style={{ background: view === "list" ? "var(--accent-soft)" : "transparent", color: view === "list" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}>
@@ -222,7 +213,7 @@ export function PalPlans() {
         loading && plans.length === 0 ? (
           <div className="card"><SkeletonRows rows={6} /></div>
         ) : (
-          <PalKanban plans={filtered} boxes={boxes} canEdit={can("stages", "edit")} onChanged={() => void load()} />
+          <DispatchBoard plans={filtered} boxes={boxes} canEdit={can("stages", "edit")} onChanged={() => void load()} />
         )
       ) : (
       <div className="card">

@@ -338,9 +338,10 @@ export function dispatchLoadBox(rowid: string) {
   return bust(op<{ ROWID: string; status: string; dispatch_date: string }>(`load-box-dispatch/${rowid}`, {}));
 }
 
-/** Put a Ready line into an Open box (box="" pulls it back out). */
-export function setLineBox(lineId: string, box: string) {
-  return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, { box }));
+/** Put a Ready line into an Open box (box="" pulls it back out). A `boxes`
+    count below the line's total loads that many and splits off a Ready remainder. */
+export function setLineBox(lineId: string, box: string, boxes?: number) {
+  return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, boxes ? { box, boxes } : { box }));
 }
 
 export function deletePalPlan(rowid: string) {
@@ -370,6 +371,6 @@ export function planToInput(p: PalPlan): PalPlanInput {
 /** Human label for a PLAN status (spaced). */
 export const PAL_STATUS_LABEL: Record<PalStatus, string> = {
   Planning: "In Palletization",
-  Loading: "In Loading",
+  Loading: "In Dispatch",
   Completed: "Dispatched",
 };

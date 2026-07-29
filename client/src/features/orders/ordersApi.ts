@@ -15,8 +15,12 @@ const toTaxType = (v: unknown): TaxType =>
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-// Data Store stores ISO country codes (no emoji). Map the ones we seed.
-const ISO_FLAG: Record<string, string> = { PL: "🇵🇱", LT: "🇱🇹", RO: "🇷🇴", HR: "🇭🇷" };
+// Data Store stores ISO country codes (no emoji). Any 2-letter code maps to
+// its flag via regional-indicator symbols — no hand-kept country list.
+const isoFlag = (iso: string) =>
+  /^[A-Za-z]{2}$/.test(iso)
+    ? String.fromCodePoint(...[...iso.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0)))
+    : "";
 
 function mapBy(rows: DSRow[] | undefined, field: string): Map<string, string> {
   const m = new Map<string, string>();
@@ -50,7 +54,7 @@ export function listOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
 async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: string }> {
   // listAll pages past ZCQL's 300-row cap; lookups project only the
   // columns this join actually reads (ROWID is always included).
-  const [sos, items, customers, designs, sizes, finishes, brands, salesPersons, paymentTerms] = await Promise.all([
+  const [sos, items, customers, designs, sizes, finishes, brands, salesPersons, paymentTerms, pallets, invoices] = await Promise.all([
     listAll("SalesOrder", { order: "ROWID desc" }),
     listAll("OrderItem"),
     listAll("Customer", { columns: ["name", "code", "country_code"] }),
@@ -60,6 +64,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     list("Brand", { limit: 300, columns: ["name"] }),
     list("SalesPerson", { limit: 300, columns: ["name"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
+    list("Pallet", { limit: 300, columns: ["boxes_per_pallet", "size"] }),
+    listAll("Invoice", { columns: ["invoice_number", "sales_order"] }),
   ]);
   if (!items.ok || !sos.ok) return { ok: false, orders: [], error: items.error || sos.error };
 
@@ -78,6 +84,23 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
   // Design row's own lookup FKs (size/finish/brand) → names.
   const designRow = new Map<string, DSRow>();
   (designs.rows || []).forEach((d) => designRow.set(String(d.ROWID), d));
+  // Pallet master: per-pallet capacity, plus a per-size default (first
+  // Pallet row for that size wins — capacities agree within a size).
+  const palletBpp = new Map<string, number>();
+  const sizeBpp = new Map<string, number>();
+  (pallets.rows || []).forEach((p) => {
+    const bpp = num(p.boxes_per_pallet);
+    if (!bpp) return;
+    palletBpp.set(String(p.ROWID), bpp);
+    const sizeId = str(p.size);
+    if (sizeId && !sizeBpp.has(sizeId)) sizeBpp.set(sizeId, bpp);
+  });
+  // SO → invoice number (rows come ROWID-asc, so the latest invoice wins).
+  const invoiceBySo = new Map<string, string>();
+  (invoices.rows || []).forEach((iv) => {
+    const soId = str(iv.sales_order);
+    if (soId && str(iv.invoice_number)) invoiceBySo.set(soId, str(iv.invoice_number));
+  });
 
   const orders: Order[] = (items.rows || []).map((it) => {
     const so = soById.get(str(it.sales_order));
@@ -88,8 +111,10 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
     const subTotal = num(it.sub_total);
     const sizeStr = d ? sizeName.get(str(d.size)) || "" : "";
     const orderQty = num(it.ordered_qty_boxes);
-    // Boxes/pallet by size (mirrors prototype: wide 200x1200 fits 38, else 32).
-    const boxesPerPallet = sizeStr === "200x1200" ? 38 : 32;
+    // Boxes/pallet from the Pallet master: the item's picked pallet first,
+    // else the default for the design's size; 32 only if neither exists.
+    const boxesPerPallet =
+      palletBpp.get(str(it.pallet)) || (d ? sizeBpp.get(str(d.size)) : undefined) || 32;
     // ordered_qty_boxes IS the box count — no unit conversion.
     const totalBoxes = orderQty;
     return {
@@ -100,7 +125,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       partyCode: custCode.get(custId) || "",
       party: custName.get(custId) || "",
       country: iso,
-      flag: ISO_FLAG[iso] || "",
+      flag: isoFlag(iso),
       // Resolve the design FK to its full unique label (name · size · finish —
       // same as the picker) so the SO reads properly; fall back to the plain
       // name, then "—" for a removed/unresolved FK (bug 16).
@@ -121,9 +146,12 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       status: so ? str(so.status) || "Confirmed" : "Confirmed",
       orderDate: so ? str(so.order_date) : "",
       dueDate: str(it.due_date) || "—",
-      invoice: null,
+      invoice: invoiceBySo.get(str(it.sales_order)) || null,
       priority: (str(it.priority_level) as Order["priority"]) || "normal",
-      daysFromPI: 0,
+      // Age since the order (PI) date — the PO grid's "Days from PI" column.
+      daysFromPI: so?.order_date
+        ? Math.max(0, Math.floor((Date.now() - new Date(str(so.order_date)).getTime()) / 86400000))
+        : 0,
       rate,
       discount: num(it.discount_pct),
       subTotal,

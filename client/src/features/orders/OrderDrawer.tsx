@@ -34,8 +34,12 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
           loaded: a.loaded + o.loadedQty,
           boxes: a.boxes + o.totalBoxes,
           pallets: a.pallets + o.pallets,
+          // Pallet counts are per-line ceils (each line packs its own pallet
+          // size) — never divide SO-wide box totals by one line's capacity.
+          palletsPacked: a.palletsPacked + Math.ceil(o.palletizedQty / o.boxesPerPallet),
+          palletsLoaded: a.palletsLoaded + Math.ceil(o.loadedQty / o.boxesPerPallet),
         }),
-        { qty: 0, produced: 0, palletized: 0, loaded: 0, boxes: 0, pallets: 0 },
+        { qty: 0, produced: 0, palletized: 0, loaded: 0, boxes: 0, pallets: 0, palletsPacked: 0, palletsLoaded: 0 },
       ),
     [lineItems],
   );
@@ -117,7 +121,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
                 {pct(totals.palletized, totals.qty)}
                 <small>%</small>
               </div>
-              <div className="sub">{Math.ceil(totals.palletized / order.boxesPerPallet)} pallets packed</div>
+              <div className="sub">{totals.palletsPacked} pallets packed</div>
             </div>
             <div className="mini-stat">
               <div className="l">Loaded</div>
@@ -152,7 +156,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
           </div>
 
           {tab === "overview" && <OverviewTab order={order} lineItems={lineItems} />}
-          {tab === "packing" && <PackingTab order={order} totals={totals} />}
+          {tab === "packing" && <PackingTab order={order} lineItems={lineItems} totals={totals} />}
           {tab === "docs" && <DocsTab order={order} />}
           {tab === "activity" && <ActivityTab order={order} />}
         </div>
@@ -244,14 +248,21 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
 
 function PackingTab({
   order,
+  lineItems,
   totals,
 }: {
   order: Order;
-  totals: { qty: number; palletized: number; loaded: number };
+  lineItems: Order[];
+  totals: { qty: number; loaded: number; pallets: number; palletsPacked: number; palletsLoaded: number };
 }) {
-  const palletsTotal = Math.max(1, Math.ceil(totals.qty / order.boxesPerPallet));
-  const packed = Math.ceil(totals.palletized / order.boxesPerPallet);
-  const loaded = Math.ceil(totals.loaded / order.boxesPerPallet);
+  // Per-line pallet math from the drawer's totals — matches the header tile.
+  const palletsTotal = totals.pallets;
+  const packed = totals.palletsPacked;
+  const loaded = totals.palletsLoaded;
+  // "N boxes each" is only true when every line packs the same pallet size.
+  const boxesEach = lineItems.every((li) => li.boxesPerPallet === lineItems[0].boxesPerPallet)
+    ? lineItems[0].boxesPerPallet
+    : 0;
   const cells = Array.from({ length: palletsTotal }, (_, i) => {
     if (i < loaded) return "loaded";
     if (i < packed) return "packed";
@@ -265,7 +276,7 @@ function PackingTab({
           <Icon name="palette" size={12} />
           Pallets{" "}
           <span className="right">
-            {palletsTotal} pallets total · {order.boxesPerPallet} boxes each
+            {palletsTotal} pallets total{boxesEach ? ` · ${boxesEach} boxes each` : ""}
           </span>
         </div>
         <div className="pallet-grid">
@@ -299,7 +310,7 @@ function PackingTab({
         <div className="spec-grid">
           <Spec l="Invoice No." v={order.invoice || "—"} mono />
           <Spec l="Loaded Pallets" v={`${loaded} of ${palletsTotal}`} />
-          <Spec l="Loaded Boxes" v={fmt(loaded * order.boxesPerPallet)} />
+          <Spec l="Loaded Boxes" v={fmt(totals.loaded)} />
           <Spec l="Truck No." v="—" mono />
           <Spec l="Container Seal" v="—" mono />
           <Spec l="ETA Port" v="—" />

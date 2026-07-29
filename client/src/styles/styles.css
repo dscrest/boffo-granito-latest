@@ -408,6 +408,8 @@ a { color: inherit; text-decoration: none; }
    footer floating above the window edge with rows peeking underneath. */
 .main { padding: 14px 18px 0; overflow: auto; }
 .main::after { content: ""; display: block; height: 32px; }
+/* Dispatch board sizes itself to the viewport — no bottom breathing room. */
+.main:has(.dispatch-fill)::after { height: 0; }
 
 /* Grid pager: fixed bar pinned to the viewport bottom, always visible
    (user mandate 2026-07-13: "Fixed footer. Always."). One per page —

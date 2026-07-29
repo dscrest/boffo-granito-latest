@@ -17,10 +17,8 @@ import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
-import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { PalPlanForm } from "./PalPlanForm";
 import { VehicleLoadModal } from "./VehicleLoadModal";
-import { VehicleFillBar, type VehicleLine } from "./VehicleFillBar";
 import { STATUS_CHIP } from "./PalPlans";
 import {
   cachedLoadBoxes,
@@ -43,7 +41,7 @@ import {
 // The single plan-level "advance" action offered from each state. Palletising is
 // per-line (on the board); the plan flow is Planning → Loading → Completed.
 const ADVANCE: Partial<Record<PalStatus, { to: PalStatus; label: string }>> = {
-  Planning: { to: "Loading", label: "Begin Loading" },
+  Planning: { to: "Loading", label: "Begin Dispatch" },
   Loading: { to: "Completed", label: "Mark Dispatched" },
 };
 
@@ -59,7 +57,6 @@ export function PalPlanDetail() {
   const navigate = useNavigate();
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
   const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
-  const [pallets, setPallets] = useState<PalletRow[]>([]);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,7 +65,6 @@ export function PalPlanDetail() {
   const [assigning, setAssigning] = useState(false); // "Assign vehicle" modal (while In Loading)
   const [listQ, setListQ] = useState("");
   const [tab, setTab] = useState<DetailTab>("items");
-  const [extraVehicles, setExtraVehicles] = useState(0); // fill-chart "Add vehicle" extras
 
   const load = async () => {
     setLoading(true);
@@ -84,28 +80,13 @@ export function PalPlanDetail() {
   };
   useEffect(() => {
     void load();
-    void listPallets().then((r) => r.ok && setPallets(r.pallets));
   }, []);
-  useEffect(() => setExtraVehicles(0), [id]); // chart extras are per-plan
 
   const plan = useMemo(() => plans.find((p) => p.id === id) || null, [plans, id]);
   const boxById = useMemo(() => new Map(boxes.map((b) => [b.id, b])), [boxes]);
   // Box flow owns the lifecycle once any line sits in a load box — the manual
   // advance/assign-vehicle actions then disappear (dispatch happens per box).
   const hasBoxedLines = !!plan?.lines.some((l) => l.loadBoxId);
-
-  // Fill chart inputs (advisory, same rules as the old form chart): one line per
-  // item coloured by design; capacity ≈ one container of the chosen pallets.
-  const chartLines = useMemo<VehicleLine[]>(
-    () => (plan?.lines || []).map((l) => ({ designId: l.designId, label: l.designLabel, boxes: l.boxes })),
-    [plan],
-  );
-  const truckCapacity = useMemo(() => {
-    const caps = (plan?.lines || [])
-      .map((l) => pallets.find((p) => p.id === l.palletId)?.boxesPerContainer || 0)
-      .filter((n) => n > 0);
-    return caps.length ? Math.max(...caps) : 1000;
-  }, [plan, pallets]);
 
   // Group the plan's lines by Sales Order for the "Associated SO(s)" section.
   const bySo = useMemo(() => {
@@ -355,7 +336,7 @@ export function PalPlanDetail() {
                               <td className="muted">{l.palletName}</td>
                               <td className="muted">
                                 {box ? (
-                                  <span title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "In Loading"}>
+                                  <span title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "In Dispatch"}>
                                     {box.vehicleNumber || `Box ${box.boxNumber}`}
                                   </span>
                                 ) : (
@@ -405,16 +386,6 @@ export function PalPlanDetail() {
         </div>
       </div>
 
-      {/* Vehicle fill chart — advisory view of how this plan's boxes spread
-          across vehicles (same shared VehicleFillBar, now beside the detail). */}
-      {chartLines.length > 0 && (
-        <div
-          className="card"
-          style={{ width: 360, minWidth: 300, flexShrink: 0, padding: 16, position: "sticky", top: 0, maxHeight: "calc(100vh - var(--header-h) - 46px)", overflowY: "auto" }}
-        >
-          <VehicleFillBar lines={chartLines} truckCapacity={truckCapacity} extra={extraVehicles} onExtraChange={setExtraVehicles} />
-        </div>
-      )}
     </div>
   );
 }

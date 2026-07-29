@@ -575,7 +575,7 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
-| load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box) |
+| load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box). Optional `boxes` in the body = partial load: the line SPLITS (loaded part + a Ready remainder line) |
 | deleted_at | datetime | soft delete |
 
 ### LoadBox (69851000000089442) — added 2026-07-27 (cross-plan vehicle slots)

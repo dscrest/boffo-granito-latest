@@ -10,6 +10,10 @@
    to another vehicle. Freed boxes sit in an "Unassigned" pool until placed —
    nothing is ever forced over 100%. The allocation is advisory (display only);
    callers persist item lines, not the per-vehicle split.
+
+   2026-07-28: PalPlanDetail dropped its advisory card ("remove the vehicle
+   part for now") — the component currently has no callers; DESIGN_PALETTE
+   below is still shared by the board's box cards and BoxPickerModal.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -25,7 +29,7 @@ export interface VehicleLine {
 // Distinct, on-theme colours assigned by first-seen design so N designs get N
 // visibly-different segments (a hash can collide two designs). Brand orange
 // leads so a single-item load reads as "the app colour". Cycles past 8.
-// Exported: PalKanban's box cards colour their mini fill bars the same way.
+// Exported: the Dispatch board's box cards colour their fill bars the same way.
 export const DESIGN_PALETTE = [
   "oklch(0.68 0.17 55)", // orange (brand)
   "oklch(0.60 0.13 195)", // teal
