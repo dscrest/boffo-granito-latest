@@ -25,6 +25,7 @@ import { GlobalSearch } from "@/features/search/GlobalSearch";
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({ default: m.QuotesTable })));
 const QuoteDetail = lazy(() => import("@/features/quotes/QuoteDetail").then((m) => ({ default: m.QuoteDetail })));
+const PlanContainerisation = lazy(() => import("@/features/quotes/PlanContainerisation").then((m) => ({ default: m.PlanContainerisation })));
 const Approvals = lazy(() => import("@/features/quotes/Approvals").then((m) => ({ default: m.Approvals })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
@@ -411,6 +412,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/quotes" element={<Quotes />} />
             <Route path="/quotes/:id" element={<QuoteDetail />} />
+            <Route path="/quotes/:id/containerise" element={<PlanContainerisation />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
             <Route path="/orders" element={<OrdersTable />} />

@@ -347,6 +347,7 @@ export function QuoteDetail() {
   const moreItems = [
     ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => setConverting(true) }] : []),
     ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    { label: "Plan Containerisation", onClick: () => navigate(`/quotes/${quote.id}/containerise`) },
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
     { label: "Copy Share Link", onClick: () => void onShare() },

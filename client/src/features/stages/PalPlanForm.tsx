@@ -289,6 +289,7 @@ export function PalPlanForm({
                     <thead>
                       <tr>
                         <th>Design</th>
+                        <th className="num" style={{ textAlign: "right" }}>Order Qty</th>
                         <th className="num" style={{ textAlign: "right" }}>Available</th>
                         <th className="num" style={{ textAlign: "right", width: 150 }}>Palletise Boxes</th>
                         <th style={{ minWidth: 320 }}>Pallet</th>
@@ -314,6 +315,7 @@ export function PalPlanForm({
                                 )}
                               </span>
                             </td>
+                            <td className="num mono dim">{fmt(it.ordered)}</td>
                             <td className="num mono">{fmt(it.available)}</td>
                             <td className="num">
                               {noStock ? (
