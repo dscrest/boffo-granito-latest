@@ -105,12 +105,19 @@ function soColumns(): ColumnDef<SORow>[] {
         // Produced boxes still waiting to be palletised (come-back-later signal).
         const remaining = r.items.reduce((sum, o) => sum + Math.max(0, o.producedQty - o.palletizedQty), 0);
         const partial = remaining > 0 && r.items.some((o) => o.palletizedQty > 0);
+        // Dispatch wins over palletisation: once boxes ship, show the shipping state.
+        const ordered = r.items.reduce((sum, o) => sum + o.orderQty, 0);
+        const dispatched = r.items.reduce((sum, o) => sum + o.dispatchedQty, 0);
         return (
           <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
               {soStatusLabel(s)}
             </span>
-            {remaining > 0 && (
+            {dispatched > 0 ? (
+              <span className="chip qstatus q-accepted" title="Boxes dispatched vs ordered">
+                {dispatched >= ordered ? "Dispatched" : `Partially Dispatched — ${fmt(ordered - dispatched)} left`}
+              </span>
+            ) : remaining > 0 && (
               <span className="chip qstatus q-accepted" title="Produced boxes still to palletise — come back to finish">
                 {partial ? `Partially palletised — ${fmt(remaining)} left` : `Ready for Palletisation — ${fmt(remaining)}`}
               </span>

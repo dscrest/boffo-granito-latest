@@ -8,13 +8,15 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, type Order } from "@/data";
+import { STAGES, parseContainerPlan, type Order, type Quote } from "@/data";
+import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
-import { listOrderBatches, type OrderBatchRow } from "@/features/stages/palletisationApi";
+import { listOrderBatches } from "@/features/stages/palletisationApi";
+import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
@@ -39,6 +41,14 @@ function soDisplayStatus(
 ): { label: string; cls: string } {
   const base = { label: soStatusLabel(status), cls: SO_STATUS_CHIP[status] || "q-draft" };
   if (status !== "Confirmed" && status !== "InProgress") return base;
+  // Dispatch wins over everything: once boxes ship, the order reads by its shipping state.
+  const orderedT = items.reduce((s, o) => s + o.orderQty, 0);
+  const dispatchedT = items.reduce((s, o) => s + o.dispatchedQty, 0);
+  if (dispatchedT > 0) {
+    return dispatchedT >= orderedT
+      ? { label: "Dispatched", cls: "q-accepted" }
+      : { label: `Partially Dispatched — ${fmt(orderedT - dispatchedT)} left`, cls: "q-sent" };
+  }
   const remaining = items.reduce((s, o) => s + toPalletise(o), 0);
   if (readyForPalletisation) return { label: `Ready for Palletisation — ${remaining} left`, cls: "q-accepted" };
   // Partial: some boxes already palletised but produced stock still waits — come back to finish.
@@ -50,6 +60,60 @@ function soDisplayStatus(
 }
 
 /** Production orders (ProductionLog entries) recorded against this Sales Order. */
+/* Container plan snapshot from the source quote (Plan Containerisation) —
+   read-only; tells ops how sales promised the containers would pack. */
+function SoContainerPlan({ salesOrderId }: { salesOrderId: string }) {
+  const [quote, setQuote] = useState<Quote | null>(() => findPlanQuote(cachedQuotes(), salesOrderId));
+  useEffect(() => {
+    let alive = true;
+    void listQuotes().then((r) => {
+      if (alive && r.ok) setQuote(findPlanQuote(r.quotes, salesOrderId));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [salesOrderId]);
+  const plan = parseContainerPlan(quote?.containerPlan);
+  if (!quote || !plan) return null;
+  const colors = ["var(--c-blue)", "var(--c-green)", "var(--c-amber)", "var(--c-violet)", "var(--c-cyan)"];
+  const colorOf = new Map<string, string>();
+  plan.containers.forEach((c) => c.lines.forEach((l) => {
+    if (!colorOf.has(l.design)) colorOf.set(l.design, colors[colorOf.size % colors.length]);
+  }));
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+        <span style={{ fontWeight: 600 }}>Container Plan</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {plan.containers.length} container{plan.containers.length === 1 ? "" : "s"} planned on{" "}
+          <Link className="linkish" to={`/quotes/${quote.id}/containerise`}>{quote.quoteNo}</Link>
+        </span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: 14 }}>
+        {plan.containers.map((c) => (
+          <div key={c.no} style={{ minWidth: 240, border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+              <span className="mono" style={{ fontWeight: 600 }}>{quote.quoteNo} · C{c.no}</span>
+              <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{c.pallets} pallets · {fmt(c.boxes)} boxes · {c.fillPct}%</span>
+            </div>
+            {c.lines.map((l, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--t-sm)", padding: "2px 0" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: colorOf.get(l.design), flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{l.design}</span>
+                <span className="mono dim">{l.pallets}P · {fmt(l.boxes)}B</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+/** The quote whose conversion produced this SO (quotes carry their SO list). */
+function findPlanQuote(quotes: Quote[] | null, salesOrderId: string): Quote | null {
+  return quotes?.find((q) => q.sos?.some((so) => so.id === salesOrderId)) ?? null;
+}
+
 function SoProduction({ salesOrderId }: { salesOrderId: string }) {
   const [rows, setRows] = useState<ProductionEntry[] | null>(null);
   useEffect(() => {
@@ -109,14 +173,44 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
   );
 }
 
-/** Palletised batches committed against this Sales Order (parallel to the
-    Production tab — per-line palletisation detail). */
+/** Palletisation committed against this Sales Order (parallel to the
+    Production tab). Sourced from the current PalPlan flow (PalletizationPlan
+    lines — this is what /packing writes); legacy PalletisedBatch rows are
+    appended so pre-rework history still shows. */
+type SoPalRow = { key: string; pal: string; date: string; design: string; pallet: string; boxes: number; status: string };
+
 function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
-  const [rows, setRows] = useState<OrderBatchRow[] | null>(null);
+  const [rows, setRows] = useState<SoPalRow[] | null>(null);
   useEffect(() => {
     let alive = true;
-    void listOrderBatches(salesOrderId).then((res) => {
-      if (alive) setRows(res.ok ? res.rows : []);
+    void Promise.all([listPalPlans(), listOrderBatches(salesOrderId)]).then(([plansRes, legacy]) => {
+      if (!alive) return;
+      const boxById = new Map(plansRes.boxes.map((b) => [b.id, b]));
+      const planRows: SoPalRow[] = plansRes.plans.flatMap((p) =>
+        p.lines
+          .filter((l) => l.salesOrderId === salesOrderId)
+          .map((l) => {
+            // Same derivation as the board's stageOf: box status wins, then the line's own status.
+            const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
+            const status = box
+              ? box.status === "Dispatched" ? "Dispatched" : "In Dispatch"
+              : p.status === "Completed" ? "Dispatched" // legacy pre-box dispatched plans
+                : PAL_LINE_STATUS_LABEL[l.status];
+            return {
+              key: l.id,
+              pal: p.palNumber,
+              date: p.plannedDate || p.createdTime.slice(0, 10),
+              design: l.designLabel,
+              pallet: l.palletName,
+              boxes: l.boxes,
+              status,
+            };
+          }),
+      );
+      const legacyRows: SoPalRow[] = (legacy.ok ? legacy.rows : []).map((b) => ({
+        key: `batch-${b.batchId}`, pal: "", date: b.date, design: b.design, pallet: b.pallet, boxes: b.boxes, status: b.status,
+      }));
+      setRows([...planRows, ...legacyRows]);
     });
     return () => {
       alive = false;
@@ -130,6 +224,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
         <table className="tbl">
           <thead>
             <tr>
+              <th>PAL</th>
               <th>Palletization Date</th>
               <th>Design</th>
               <th>Pallet</th>
@@ -139,7 +234,8 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
           </thead>
           <tbody>
             {rows.map((b) => (
-              <tr key={b.batchId}>
+              <tr key={b.key}>
+                <td className="mono">{b.pal || "—"}</td>
                 <td className="mono muted">{b.date}</td>
                 <td><span className="design-name">{b.design}</span></td>
                 <td>{b.pallet}</td>
@@ -149,7 +245,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   Nothing palletised against this order yet.
                 </td>
               </tr>
@@ -552,6 +648,8 @@ export function OrderDetail() {
           </table>
         </div>
       </div>
+
+      {head.salesOrderId && <SoContainerPlan salesOrderId={head.salesOrderId} />}
 
       {ipBreak && (() => {
         const s = stockOf(ipBreak);

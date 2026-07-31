@@ -87,7 +87,7 @@ export interface DesignRow {
   randomFaces: number;
   ratePerSqft: number;
   ratePerSqmt: number;
-  accountingStock: number;
+  accountingStock: number | null; // null = opening stock never set (edit unlocked)
   booksItemId: string;
   imageUrl: string;
   images: DesignImage[]; // #12: File Store images (id + original filename)
@@ -270,7 +270,7 @@ async function fetchDesigns(): Promise<{
       randomFaces: num(d.random_faces),
       ratePerSqft: num(d.rate_per_sqft),
       ratePerSqmt: num(d.rate_per_sqmt),
-      accountingStock: num(d.accounting_stock),
+      accountingStock: d.accounting_stock == null || d.accounting_stock === "" ? null : num(d.accounting_stock),
       booksItemId: str(d.books_item_id),
       imageUrl: str(d.image_url),
       images: parseImages(str(d.image_urls)),

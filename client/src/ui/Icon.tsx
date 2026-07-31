@@ -54,6 +54,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "check": return <svg {...common}><path d="M5 13l4 4L19 7"/></svg>;
     case "alert": return <svg {...common}><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>;
     case "clock": return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>;
+    case "lock": return <svg {...common}><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>;
     case "calendar": return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>;
     case "pin": return <svg {...common}><path d="M12 21v-7M7 4h10l-1 7H8z"/></svg>;
     case "download": return <svg {...common}><path d="M12 4v12M6 12l6 6 6-6M4 20h16"/></svg>;

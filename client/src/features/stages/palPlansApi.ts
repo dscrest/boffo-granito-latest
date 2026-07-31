@@ -50,6 +50,7 @@ export interface PalPlanLine {
   designLabel: string;
   palletId: string;
   palletName: string;
+  palletCapacity: number; // container capacity: A + B arrangements, as in palletsApi.totalBoxesPerContainer (0 = unknown)
   boxes: number;
   position: number;
   status: PalLineStatus; // In Palletization → Ready for Loading (per-item kanban move)
@@ -115,6 +116,25 @@ export interface PalPlanInput {
   }[];
 }
 
+/* ---- Fractional fill (box % is measured against each line's PALLET capacity,
+   not the LoadBox's advisory capacity column). A single-pallet box reads as
+   loaded/palletCapacity; mixed-pallet boxes sum per-line fractions. ---- */
+
+/** Fraction of a full container this line represents (0 when its pallet capacity is unknown). */
+export function lineFrac(l: PalPlanLine): number {
+  return l.palletCapacity > 0 ? l.boxes / l.palletCapacity : 0;
+}
+/** Box fill fraction (0..n) = Σ lines' pallet-relative fractions. */
+export function boxFill(lines: PalPlanLine[]): number {
+  return lines.reduce((s, l) => s + lineFrac(l), 0);
+}
+/** The one pallet capacity shared by all lines, or 0 when mixed/unknown —
+    lets the UI show absolute "X boxes short" only when that number is meaningful. */
+export function sharedCapacity(lines: PalPlanLine[]): number {
+  const caps = [...new Set(lines.map((l) => l.palletCapacity).filter((c) => c > 0))];
+  return caps.length === 1 ? caps[0] : 0;
+}
+
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
 const cache = createListCache(fetchPalPlans);
 
@@ -143,7 +163,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     listAll("PalletizationPlanLine"),
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size"] }),
-    listAll("Pallet", { columns: ["name"] }),
+    listAll("Pallet", { columns: ["name", "boxes_per_pallet", "pallets_per_container", "b_boxes_per_pallet", "b_pallets_per_container"] }),
     listAll("SalesPerson", { columns: ["name"] }),
     listAll("Vehicle", { columns: ["vehicle_number", "driver_name", "mobile_number"] }),
     listAll("Customer", { columns: ["name", "country_code"] }),
@@ -176,7 +196,15 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     designSize.set(String(d.ROWID), str(d.size));
   });
   const palletName = new Map<string, string>();
-  (pallets.rows || []).forEach((p) => palletName.set(String(p.ROWID), str(p.name)));
+  const palletCap = new Map<string, number>(); // Pallet ROWID → boxes per full container
+  (pallets.rows || []).forEach((p) => {
+    palletName.set(String(p.ROWID), str(p.name));
+    // Mixed-config pallets ("[64*12] + [32*4] = 896") stack a second B arrangement.
+    palletCap.set(
+      String(p.ROWID),
+      num(p.boxes_per_pallet) * num(p.pallets_per_container) + num(p.b_boxes_per_pallet) * num(p.b_pallets_per_container),
+    );
+  });
   const repName = new Map<string, string>();
   (reps.rows || []).forEach((r) => repName.set(String(r.ROWID), str(r.name)));
 
@@ -191,7 +219,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         vehicleNumber: veh?.number || "",
         driverName: veh?.driver || "",
         mobileNumber: veh?.mobile || "",
-        capacity: num(b.capacity) || 1000,
+        capacity: num(b.capacity),
         status: (str(b.status) || "Open") as LoadBoxStatus,
         dispatchDate: str(b.dispatch_date),
         createdTime: str(b.CREATEDTIME),
@@ -218,6 +246,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       designLabel: designLabel.get(designId) || "—",
       palletId,
       palletName: palletName.get(palletId) || "—",
+      palletCapacity: palletCap.get(palletId) || 0,
       boxes: num(l.boxes),
       position: num(l.position),
       status: (str(l.status) || "Planning") as PalLineStatus,

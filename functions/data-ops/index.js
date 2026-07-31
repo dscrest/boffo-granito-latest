@@ -701,6 +701,10 @@ app.post("/quote-with-items", async (req, res) => {
           tax_pct: doc.tax_pct,
           tax_amount: doc.tax_amount,
           total_amount: doc.total_amount,
+          // Container-plan snapshot (JSON, ≤10000 chars) — only when sent.
+          ...(typeof body.container_plan === "string"
+            ? { container_plan: body.container_plan.slice(0, 10000) }
+            : {}),
         });
         const quoteId = quoteRow.ROWID;
 
@@ -788,6 +792,11 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           tax_pct: doc.tax_pct,
           tax_amount: doc.tax_amount,
           total_amount: doc.total_amount,
+          // Container-plan snapshot — only when sent, so plain quote edits
+          // (QuoteForm doesn't send it) never wipe a saved plan.
+          ...(typeof body.container_plan === "string"
+            ? { container_plan: body.container_plan.slice(0, 10000) }
+            : {}),
         });
         if (nextStatus !== curStatus)
           await logTransition(catalyst, {
@@ -1375,8 +1384,10 @@ app.post("/convert-quote/:rowid", async (req, res) => {
    No DB transactions in Catalyst → each flow validates everything up
    front (so we never write a header then fail on a child), then writes
    in an ordered sequence. close-pallet compensates on mid-write failure.
-   Invariants enforced in code (no DB checks):
-     loaded ≤ palletized ≤ produced ≤ ordered ; dispatched ≤ loaded.
+   OrderItem's palletized/loaded/dispatched counters are a denormalised
+   cache recomputed from ground truth by recountOrderItems() after every
+   mutating op — idempotent, so a mid-write crash self-heals on the next
+   op (or the admin /recount-order-items backfill).
    ================================================================ */
 
 /** Load OrderItems by ROWID into a Map<id,row>. Returns empty Map for []. */
@@ -1387,6 +1398,120 @@ async function loadOrderItems(catalyst, ids, cols) {
     await catalyst.zcql().executeZCQLQuery(`SELECT ${cols} FROM OrderItem WHERE ROWID IN (${uniq.join(",")})`),
   );
   return new Map(rows.map((r) => [String(r.ROWID), r]));
+}
+
+/* ----------------------------------------------------------------
+   recountOrderItems — the ONE writer of OrderItem's shipping counters.
+   Recomputes palletized/loaded/dispatched_qty_boxes from ground truth
+   (PalletisedBatch lines + PalletizationPlan lines/LoadBoxes) instead of
+   incrementing, so the counters can't drift no matter which flow moved
+   the boxes. Every mutating op in both flows calls this after its
+   ground-truth writes. Stage is promote-only (packing→loading→final);
+   the manual po/prod/qc chain and produced_qty_boxes are never touched.
+   ---------------------------------------------------------------- */
+const STAGE_RANK = { po: 0, prod: 1, qc: 2, packing: 3, loading: 4, final: 5 };
+
+async function recountOrderItems(catalyst, ds, oiIds) {
+  const uniq = [...new Set((oiIds || []).map(String))].filter(Boolean);
+  if (!uniq.length) return;
+  const zcql = catalyst.zcql();
+  const inList = uniq.join(",");
+
+  // Legacy flow: batch lines + parent batch status (soft-deleted parents drop out).
+  const batchLines = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT batch, order_item, boxes FROM PalletisedBatchLine WHERE order_item IN (${inList}) AND deleted_at is null`,
+    ),
+  );
+  const batchIds = [...new Set(batchLines.map((l) => String(l.batch)))].filter(Boolean);
+  const batchStatus = new Map();
+  if (batchIds.length) {
+    rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID, status FROM PalletisedBatch WHERE ROWID IN (${batchIds.join(",")}) AND deleted_at is null`,
+      ),
+    ).forEach((b) => batchStatus.set(String(b.ROWID), String(b.status || "")));
+  }
+
+  // Live flow: plan lines (drop lines of soft-deleted plans) + LoadBox status.
+  const planLines = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT plan, order_item, boxes, status, load_box FROM PalletizationPlanLine WHERE order_item IN (${inList}) AND deleted_at is null`,
+    ),
+  );
+  const planIds = [...new Set(planLines.map((l) => String(l.plan)))].filter(Boolean);
+  const livePlans = new Set();
+  if (planIds.length) {
+    rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID FROM PalletizationPlan WHERE ROWID IN (${planIds.join(",")}) AND deleted_at is null`,
+      ),
+    ).forEach((p) => livePlans.add(String(p.ROWID)));
+  }
+  const boxIds = [...new Set(planLines.map((l) => String(l.load_box || "")))].filter(Boolean);
+  const boxStatus = new Map();
+  if (boxIds.length) {
+    rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID, status FROM LoadBox WHERE ROWID IN (${boxIds.join(",")}) AND deleted_at is null`,
+      ),
+    ).forEach((b) => boxStatus.set(String(b.ROWID), String(b.status || "")));
+  }
+
+  const totals = new Map(uniq.map((id) => [id, { palletized: 0, loaded: 0, dispatched: 0 }]));
+  for (const l of batchLines) {
+    const t = totals.get(String(l.order_item));
+    const st = batchStatus.get(String(l.batch));
+    if (!t || st == null) continue;
+    const boxes = Number(l.boxes) || 0;
+    t.palletized += boxes;
+    if (st === "loaded" || st === "dispatched") t.loaded += boxes;
+    if (st === "dispatched") t.dispatched += boxes;
+  }
+  for (const l of planLines) {
+    const t = totals.get(String(l.order_item));
+    if (!t || !livePlans.has(String(l.plan))) continue;
+    const boxes = Number(l.boxes) || 0;
+    const boxId = String(l.load_box || "");
+    const inBox = boxId && boxStatus.has(boxId);
+    if (String(l.status) === "ReadyToLoad" || inBox) t.palletized += boxes;
+    if (inBox) {
+      t.loaded += boxes;
+      if (boxStatus.get(boxId) === "Dispatched") t.dispatched += boxes;
+    }
+  }
+
+  const cur = await loadOrderItems(
+    catalyst,
+    uniq,
+    "ROWID, ordered_qty_boxes, palletized_qty_boxes, loaded_qty_boxes, dispatched_qty_boxes, stage",
+  );
+  for (const [oiId, t] of totals) {
+    const oi = cur.get(oiId);
+    if (!oi) continue;
+    const ordered = Number(oi.ordered_qty_boxes) || 0;
+    const derived =
+      t.dispatched >= ordered && ordered > 0 ? "final" : t.loaded > 0 ? "loading" : t.palletized > 0 ? "packing" : null;
+    const curStage = String(oi.stage || "");
+    const promote = derived && (STAGE_RANK[derived] ?? -1) > (STAGE_RANK[curStage] ?? -1);
+    const changed =
+      t.palletized !== (Number(oi.palletized_qty_boxes) || 0) ||
+      t.loaded !== (Number(oi.loaded_qty_boxes) || 0) ||
+      t.dispatched !== (Number(oi.dispatched_qty_boxes) || 0);
+    if (!changed && !promote) continue;
+    const patch = {
+      ROWID: oiId,
+      palletized_qty_boxes: t.palletized,
+      loaded_qty_boxes: t.loaded,
+      dispatched_qty_boxes: t.dispatched,
+    };
+    if (promote) patch.stage = derived;
+    await ds.table("OrderItem").updateRow(patch);
+    if (promote)
+      await logTransition(catalyst, {
+        entity_type: "OrderItem", entity_rowid: oiId, from_status: curStage, to_status: derived,
+      });
+  }
 }
 
 /* 3b. Close a pallet — PalletisedBatch + lines + OrderItem.palletized + events. */
@@ -1428,7 +1553,7 @@ async function closePallet(catalyst, ds, body) {
   // produced ever needs to be blocked again.
   const reqByOi = new Map();
   for (const l of lines) reqByOi.set(l.order_item, (reqByOi.get(l.order_item) || 0) + l.boxes);
-  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage");
+  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID");
   for (const oiId of reqByOi.keys()) {
     if (!oiMap.get(oiId)) throw badRequest(`OrderItem not found: ${oiId}`, 404);
   }
@@ -1445,20 +1570,12 @@ async function closePallet(catalyst, ds, body) {
   });
   const batchId = batchRow.ROWID;
   const insertedLines = [];
-  const updatedOi = []; // { id, prev }
   try {
     for (const l of lines) {
       const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes });
       insertedLines.push(lr.ROWID);
     }
     for (const [oiId, reqBoxes] of reqByOi) {
-      const prev = Number(oiMap.get(oiId).palletized_qty_boxes) || 0;
-      await ds.table("OrderItem").updateRow({ ROWID: oiId, palletized_qty_boxes: prev + reqBoxes, stage: "packing" });
-      await logTransition(catalyst, {
-        entity_type: "OrderItem", entity_rowid: oiId,
-        from_status: oiMap.get(oiId).stage || "", to_status: "packing",
-      });
-      updatedOi.push({ id: oiId, prev });
       await ds.table("OrderItemEvent").insertRow({
         order_item: oiId,
         event_type: "packed",
@@ -1468,16 +1585,14 @@ async function closePallet(catalyst, ds, body) {
       });
     }
   } catch (e) {
-    // Compensate: restore counters, delete lines + batch. Best-effort; events left as audit.
-    for (const u of updatedOi) {
-      try { await ds.table("OrderItem").updateRow({ ROWID: u.id, palletized_qty_boxes: u.prev }); } catch (_) {}
-    }
+    // Compensate: delete lines + batch. Best-effort; events left as audit.
     for (const id of insertedLines) {
       try { await ds.table("PalletisedBatchLine").deleteRow(id); } catch (_) {}
     }
     try { await ds.table("PalletisedBatch").deleteRow(batchId); } catch (_) {}
     throw e;
   }
+  await recountOrderItems(catalyst, ds, [...reqByOi.keys()]);
   return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
 }
 
@@ -1559,6 +1674,7 @@ async function createPalPlan(catalyst, ds, body, sMap) {
     try { await ds.table("PalletizationPlan").deleteRow(planId); } catch (_) {}
     throw e;
   }
+  await recountOrderItems(catalyst, ds, lines.map((l) => l.order_item));
   return { rowid: planId, data: { ROWID: planId, pal_number: palNumber } };
 }
 
@@ -1613,12 +1729,14 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
         // Soft-delete old lines, insert the new set.
         const old = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
+            `SELECT ROWID, order_item FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
           ),
         );
         const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
         for (const r of old) await ds.table("PalletizationPlanLine").updateRow({ ROWID: r.ROWID, deleted_at: stamp });
         for (const l of lines) await ds.table("PalletizationPlanLine").insertRow({ plan: planId, ...l });
+        // Wholesale line replace can raise OR lower an item's counters — recount both sets.
+        await recountOrderItems(catalyst, ds, [...old.map((r) => r.order_item), ...lines.map((l) => l.order_item)]);
         return { rowid: planId, data: { ROWID: planId, pal_number: cur.pal_number } };
       },
     );
@@ -1704,7 +1822,7 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status FROM PalletizationPlanLine WHERE ROWID = ${lineId}`,
+            `SELECT ROWID, status, order_item FROM PalletizationPlanLine WHERE ROWID = ${lineId}`,
           ),
         );
         if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -1715,6 +1833,7 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: to,
         });
+        await recountOrderItems(catalyst, ds, [rows[0].order_item]);
         return { rowid: lineId, data: { ROWID: lineId, status: to } };
       },
     );
@@ -1789,7 +1908,7 @@ async function getBox(catalyst, boxId) {
 async function boxLines(catalyst, boxId) {
   return rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, plan FROM PalletizationPlanLine WHERE load_box = ${boxId} AND deleted_at is null`,
+      `SELECT ROWID, plan, order_item, boxes FROM PalletizationPlanLine WHERE load_box = ${boxId} AND deleted_at is null`,
     ),
   );
 }
@@ -1806,8 +1925,8 @@ app.post("/load-box", async (req, res) => {
   try {
     const catalyst = init(req);
     const ds = catalyst.datastore();
-    const requested = Number((req.body || {}).capacity) || 0;
-    const capacity = requested > 0 ? requested : 1000; // advisory boxes-per-vehicle default
+    // Advisory only — fill % is measured against the lines' pallet capacity client-side.
+    const capacity = Number((req.body || {}).capacity) || 0;
     const result = await withOpLog(
       catalyst,
       { table_name: "LoadBox", operation: "insert", payload: req.body },
@@ -1874,6 +1993,7 @@ app.post("/load-box-delete/:rowid", async (req, res) => {
         await demoteEmptyPlans(catalyst, ds, [...new Set(lines.map((l) => String(l.plan)))]);
         const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
         await ds.table("LoadBox").updateRow({ ROWID: boxId, deleted_at: stamp });
+        await recountOrderItems(catalyst, ds, lines.map((l) => l.order_item));
         return { rowid: boxId, data: { ROWID: boxId } };
       },
     );
@@ -1922,6 +2042,23 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "LoadBox", entity_rowid: boxId, from_status: "Open", to_status: "Dispatched",
         });
+        // Cascade to the SALES ORDER items: audit events, then recount from
+        // ground truth (box is already Dispatched, so counts land correctly).
+        const addByOi = new Map();
+        for (const l of lines) {
+          const oiId = String(l.order_item || "");
+          if (oiId) addByOi.set(oiId, (addByOi.get(oiId) || 0) + (Number(l.boxes) || 0));
+        }
+        for (const [oiId, addQty] of addByOi) {
+          await ds.table("OrderItemEvent").insertRow({
+            order_item: oiId,
+            event_type: "dispatched",
+            qty_delta: addQty,
+            performed_by: "",
+            note: `Box ${box.box_number} dispatched`,
+          });
+        }
+        await recountOrderItems(catalyst, ds, [...addByOi.keys()]);
         // Complete plans whose lines are now all in dispatched boxes.
         const openBoxIds = new Set(
           rowList(
@@ -2034,6 +2171,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
           await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: null });
           if (planId) await demoteEmptyPlans(catalyst, ds, [planId]);
         }
+        await recountOrderItems(catalyst, ds, [line.order_item]);
         return { rowid: lineId, data: { ROWID: lineId, load_box: toBox || null } };
       },
     );
@@ -2658,40 +2796,30 @@ async function loadContainer(catalyst, ds, body) {
 
   // --- writes (idempotency-guarded; double-load already rejected above) ---
   const loadingIds = [];
+  const oiSet = new Set();
   for (let i = 0; i < batchIds.length; i++) {
     const bid = batchIds[i];
     const posSpec = raw[i] && typeof raw[i] === "object" && raw[i].position != null ? Number(raw[i].position) : palletCount + i + 1;
     const lr = await ds.table("ContainerLoading").insertRow({ container: containerId, batch: bid, position: posSpec });
     loadingIds.push(lr.ROWID);
     await ds.table("PalletisedBatch").updateRow({ ROWID: bid, status: "loaded" });
-    // Bump loaded_qty_boxes per order item from this batch's lines (clamp ≤ palletized).
     const lineRows = rowList(
-      await catalyst.zcql().executeZCQLQuery(`SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${bid}`),
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${bid} AND deleted_at is null`,
+      ),
     );
     for (const ln of lineRows) {
-      const oiRows = rowList(
-        await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, palletized_qty_boxes, loaded_qty_boxes, stage FROM OrderItem WHERE ROWID = ${ln.order_item}`,
-        ),
-      );
-      if (!oiRows.length) continue;
-      const oi = oiRows[0];
-      const addQty = Number(ln.boxes) || 0;
-      const next = Math.min((Number(oi.loaded_qty_boxes) || 0) + addQty, Number(oi.palletized_qty_boxes) || 0);
-      await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, loaded_qty_boxes: next, stage: "loading" });
-      await logTransition(catalyst, {
-        entity_type: "OrderItem", entity_rowid: ln.order_item,
-        from_status: oi.stage || "", to_status: "loading",
-      });
+      oiSet.add(String(ln.order_item));
       await ds.table("OrderItemEvent").insertRow({
         order_item: ln.order_item,
         event_type: "loaded",
-        qty_delta: addQty,
+        qty_delta: Number(ln.boxes) || 0,
         performed_by: String(body.loaded_by || ""),
         note: `Container #${containerId}`,
       });
     }
   }
+  await recountOrderItems(catalyst, ds, [...oiSet]);
   if (!container.status || String(container.status) === "planned") {
     await ds.table("Container").updateRow({ ROWID: containerId, status: "loading" });
   }
@@ -2727,38 +2855,67 @@ async function dispatchContainer(catalyst, ds, containerId, body) {
   );
   if (!loadings.length) throw badRequest("Container has no loaded pallets", 409);
 
+  const oiSet = new Set();
   for (const ld of loadings) {
     const lineRows = rowList(
-      await catalyst.zcql().executeZCQLQuery(`SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${ld.batch}`),
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT order_item, boxes FROM PalletisedBatchLine WHERE batch = ${ld.batch} AND deleted_at is null`,
+      ),
     );
     for (const ln of lineRows) {
-      const oiRows = rowList(
-        await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, loaded_qty_boxes, dispatched_qty_boxes, stage FROM OrderItem WHERE ROWID = ${ln.order_item}`,
-        ),
-      );
-      if (!oiRows.length) continue;
-      const oi = oiRows[0];
-      const addQty = Number(ln.boxes) || 0;
-      const next = Math.min((Number(oi.dispatched_qty_boxes) || 0) + addQty, Number(oi.loaded_qty_boxes) || 0);
-      await ds.table("OrderItem").updateRow({ ROWID: ln.order_item, dispatched_qty_boxes: next, stage: "final" });
-      await logTransition(catalyst, {
-        entity_type: "OrderItem", entity_rowid: ln.order_item,
-        from_status: oi.stage || "", to_status: "final",
-      });
+      oiSet.add(String(ln.order_item));
       await ds.table("OrderItemEvent").insertRow({
         order_item: ln.order_item,
         event_type: "dispatched",
-        qty_delta: addQty,
+        qty_delta: Number(ln.boxes) || 0,
         performed_by: String(body.performed_by || ""),
         note: `Container #${containerId} dispatched`,
       });
     }
     await ds.table("PalletisedBatch").updateRow({ ROWID: ld.batch, status: "dispatched" });
   }
+  // Recount AFTER every batch is flipped to dispatched — the recount reads batch status.
+  await recountOrderItems(catalyst, ds, [...oiSet]);
   await ds.table("Container").updateRow({ ROWID: containerId, status: "dispatched" });
   return { rowid: containerId, data: { container: containerId, batches: loadings.length } };
 }
+
+/* Admin backfill: recount EVERY order item's shipping counters from ground
+   truth. One-shot after deploying the recount migration; safe to re-run
+   (idempotent). Chunks of 100 keep each recount's IN(...) line queries
+   under ZCQL's 300-row cap. */
+app.post("/recount-order-items", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const ds = catalyst.datastore();
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "OrderItem", operation: "recount", payload: {} },
+      async () => {
+        let offset = 0;
+        let scanned = 0;
+        for (;;) {
+          const rows = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID FROM OrderItem WHERE deleted_at is null LIMIT ${offset}, 100`,
+            ),
+          );
+          if (!rows.length) break;
+          await recountOrderItems(catalyst, ds, rows.map((r) => r.ROWID));
+          scanned += rows.length;
+          offset += 100;
+          if (rows.length < 100) break;
+        }
+        return { rowid: "", data: { scanned } };
+      },
+    );
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
 
 /* ============================================================
    PHASE 5 — Invoicing
@@ -3102,6 +3259,27 @@ app.get("/:table/:rowid", async (req, res) => {
 /* ----------------------------------------------------------------
    Generic: insert
    ---------------------------------------------------------------- */
+/* One-time (idempotent) re-sync: push every Size's packing data out to its
+   Item + Pallet snapshots. Fixes rows that drifted before propagation existed,
+   and is safe to re-run (e.g. after a bulk Size import). Registered before the
+   generic POST /:table so its single-segment path isn't shadowed by it. */
+app.post("/resync-size-snapshots", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const sizes = rowList(await catalyst.zcql().executeZCQLQuery("SELECT ROWID FROM Size"));
+    let designs = 0;
+    let pallets = 0;
+    for (const s of sizes) {
+      const n = await propagateSizeSnapshots(catalyst, s.ROWID);
+      designs += n.designs;
+      pallets += n.pallets;
+    }
+    res.json({ ok: true, data: { sizes: sizes.length, designs, pallets } });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 app.post("/:table", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -3133,6 +3311,32 @@ app.post("/:table", async (req, res) => {
   }
 });
 
+/* Size owns per-box packing data (box weight, coverage, pcs); Item + Pallet
+   snapshot it. Push a Size edit out to every row referencing that Size so the
+   value stays global instead of frozen on the copy each was saved with.
+   ponytail: row-by-row (not atomic) — the re-sync route below is idempotent
+   and re-runs fix any partial fan-out. */
+async function propagateSizeSnapshots(catalyst, sizeId) {
+  const ds = catalyst.datastore();
+  const size = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT box_weight_kg, sqm_per_box, sqft_per_box, pcs_per_packing FROM Size WHERE ROWID = ${sizeId}`,
+    ),
+  )[0];
+  if (!size) return { designs: 0, pallets: 0 };
+  const bw = Number(size.box_weight_kg) || 0;
+  const sqm = Number(size.sqm_per_box) || 0;
+  const sqft = Number(size.sqft_per_box) || 0;
+  const pcs = Number(size.pcs_per_packing) || 0;
+  const designs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Design WHERE size = ${sizeId}`));
+  for (const d of designs)
+    await ds.table("Design").updateRow({ ROWID: d.ROWID, box_weight_kg: bw, coverage_sqm: sqm, coverage_sqft: sqft, pcs_per_box: pcs });
+  const pallets = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Pallet WHERE size = ${sizeId}`));
+  for (const p of pallets)
+    await ds.table("Pallet").updateRow({ ROWID: p.ROWID, box_weight_kg: bw, coverage_sqm: sqm, coverage_sqft: sqft });
+  return { designs: designs.length, pallets: pallets.length };
+}
+
 /* ----------------------------------------------------------------
    Generic: update
    ---------------------------------------------------------------- */
@@ -3143,6 +3347,9 @@ app.patch("/:table/:rowid", async (req, res) => {
     const ds = catalyst.datastore();
     const rid = rowidParam(req.params.rowid);
     const patch = { ...(req.body || {}), ROWID: rid };
+    // _reason is an audit-only note (e.g. an admin editing locked opening stock):
+    // it stays in the OperationLog payload below but is not a column.
+    delete patch._reason;
 
     const result = await withOpLog(
       catalyst,
@@ -3180,6 +3387,8 @@ app.patch("/:table/:rowid", async (req, res) => {
           transFrom = prev ? String(prev[transCol] || "") : "";
         }
         const row = await ds.table(table).updateRow(patch);
+        // Size edits fan out to the Item + Pallet packing-data snapshots.
+        if (table === "Size") await propagateSizeSnapshots(catalyst, rid);
         if (transCol)
           await logTransition(catalyst, {
             entity_type: table, entity_rowid: rid,
@@ -3350,6 +3559,9 @@ app.delete("/:table/:rowid", async (req, res) => {
           });
         }
         delete _cache[table]; // FK-name lookup map is now stale
+        // Deleting a plan/batch header removes its boxes from the pipeline —
+        // reconcile the affected order items' counters.
+        await recountAfterParentToggle(catalyst, ds, table, rid);
         return { rowid: rid };
       },
     );
@@ -3358,6 +3570,23 @@ app.delete("/:table/:rowid", async (req, res) => {
     sendErr(res, err);
   }
 });
+
+/** After soft-delete/restore of a PalletizationPlan or PalletisedBatch header,
+    recount the order items its lines reference. No-op for other tables. */
+async function recountAfterParentToggle(catalyst, ds, table, rid) {
+  const childOf = {
+    PalletizationPlan: ["PalletizationPlanLine", "plan"],
+    PalletisedBatch: ["PalletisedBatchLine", "batch"],
+  };
+  const spec = childOf[table];
+  if (!spec) return;
+  const lines = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT order_item FROM ${spec[0]} WHERE ${spec[1]} = ${rid} AND deleted_at is null`,
+    ),
+  );
+  await recountOrderItems(catalyst, ds, lines.map((l) => l.order_item));
+}
 
 /* ----------------------------------------------------------------
    Generic: restore a soft-deleted row.
@@ -3374,6 +3603,7 @@ app.post("/:table/:rowid/restore", async (req, res) => {
       { table_name: table, operation: "restore", payload: { rowid: rid } },
       async () => {
         await ds.table(table).updateRow({ ROWID: rid, deleted_at: null });
+        await recountAfterParentToggle(catalyst, ds, table, rid);
         return { rowid: rid };
       },
     );

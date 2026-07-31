@@ -1435,7 +1435,8 @@ a { color: inherit; text-decoration: none; }
 .form-field textarea,
 .modal-panel input,
 .modal-panel select,
-.modal-panel textarea {
+.modal-panel textarea,
+.qcplan input {
   width: 100%;
   box-sizing: border-box;
   height: 35px;
@@ -1467,10 +1468,12 @@ a { color: inherit; text-decoration: none; }
 }
 .form-field input:hover,
 .form-field select:hover,
-.form-field textarea:hover { border-color: var(--accent); }
+.form-field textarea:hover,
+.qcplan input:hover { border-color: var(--accent); }
 .form-field input:focus,
 .form-field select:focus,
-.form-field textarea:focus {
+.form-field textarea:focus,
+.qcplan input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);

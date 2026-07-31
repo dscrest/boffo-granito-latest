@@ -138,6 +138,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       producedQty: num(it.produced_qty_boxes),
       palletizedQty: num(it.palletized_qty_boxes),
       loadedQty: num(it.loaded_qty_boxes),
+      dispatchedQty: num(it.dispatched_qty_boxes),
       palletId: str(it.pallet),
       boxesPerPallet,
       totalBoxes,

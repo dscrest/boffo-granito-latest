@@ -8,7 +8,7 @@ import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
-import type { LoadBox, PalPlan, PalPlanLine } from "./palPlansApi";
+import { boxFill, lineFrac, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
 
 export function BoxDetailsModal({
   box,
@@ -23,6 +23,7 @@ export function BoxDetailsModal({
   const label = box.vehicleNumber || `Box ${box.boxNumber}`;
   const open = box.status === "Open";
   const loaded = entries.reduce((s, { l }) => s + l.boxes, 0);
+  const pct = Math.round(boxFill(entries.map(({ l }) => l)) * 100);
   // Stable colour per design (first-seen), same rule as the board's box cards.
   const colorByDesign = new Map<string, string>();
   entries.forEach(({ l }) => {
@@ -67,13 +68,13 @@ export function BoxDetailsModal({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div
               style={{ flex: 1, display: "flex", height: 14, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border)", background: "var(--panel-2)" }}
-              title={`${fmt(loaded)} / ${fmt(box.capacity)} boxes`}
+              title={`${fmt(loaded)} boxes · ${pct}% of a full container`}
             >
               {entries.map(({ l }) => (
-                <div key={l.id} style={{ width: `${(l.boxes / Math.max(1, box.capacity)) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
+                <div key={l.id} style={{ width: `${lineFrac(l) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
               ))}
             </div>
-            <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(loaded)} / {fmt(box.capacity)}</span>
+            <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{fmt(loaded)} box · {pct}%</span>
           </div>
 
           {/* Loaded items. */}

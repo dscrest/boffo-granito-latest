@@ -28,7 +28,7 @@ export interface OrderLine {
   design: string;
   ordered_qty_boxes: string;
   rate: string;
-  pallet: string; // Pallet ROWID — required at SO creation
+  pallet: string; // Pallet ROWID — optional at SO creation, required at palletisation
   discount: string;
   description: string;
 }
@@ -254,12 +254,12 @@ export function OrderForm({
   );
   // Rate is mandatory (user mandate 2026-07-20): a line only counts as valid
   // once it has a design, a qty AND a rate.
-  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim() && l.pallet);
+  const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim());
   // Lines with a design but no rate must block the save (rather than being
   // silently dropped from validLines) so the operator sees the error.
   const rateMissing = lines.some((l) => l.design && !String(l.rate).trim());
-  // Pallet is mandatory per line (chosen at SO creation; pre-seeds palletization).
-  const palletMissing = lines.some((l) => l.design && !l.pallet);
+  // Pallet is OPTIONAL at SO creation (2026-07-30) — it becomes mandatory at
+  // palletisation (PalPlanForm), which is where the capacity math needs it.
   // Convert mode: requested qty per design must fit within the quote's
   // remaining (qty − converted) boxes — mirrors the server-side guard.
   const overCap = useMemo(() => {
@@ -279,7 +279,6 @@ export function OrderForm({
     HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
     validLines.length === 0 ||
     rateMissing ||
-    palletMissing ||
     !!overCap;
 
   // Errors stay hidden until the first submit attempt, then update live.
@@ -396,7 +395,7 @@ export function OrderForm({
             <div className="ord-lines">
               <div className="ord-line ord-line-head qt-line so-line">
                 <span>Design</span>
-                <span>Pallet<span className="req"> *</span></span>
+                <span>Pallet</span>
                 <span>Qty (boxes)</span>
                 <span>Rate<span className="req"> *</span></span>
                 <span>Disc %</span>
@@ -448,7 +447,6 @@ export function OrderForm({
                             onChange={(v) => setLine(i, "pallet", v)}
                             options={opts.map((p) => ({ value: p.id, label: p.name }))}
                             placeholder={!l.design ? "Pick a design first" : opts.length ? "Choose pallet…" : "No matching pallet"}
-                            invalid={showErrors && !!l.design && !l.pallet}
                           />
                         );
                       })()}

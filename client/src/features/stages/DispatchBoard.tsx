@@ -19,17 +19,22 @@ import { toast } from "@/ui/Toast";
 import { KPI } from "@/ui/primitives";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { fmt } from "@/lib/format";
+import { parseContainerPlan, type ContainerPlan, type Quote } from "@/data";
+import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
 import { isoInfo } from "@/features/masters/customersApi";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { BoxPickerModal } from "./BoxPickerModal";
 import { BoxDetailsModal } from "./BoxDetailsModal";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import {
+  boxFill,
   createLoadBox,
   dispatchLoadBox,
   invalidatePalPlans,
+  lineFrac,
   setLineBox,
   setPalLineStatus,
+  sharedCapacity,
   updateLoadBox,
   type LoadBox,
   type PalPlan,
@@ -49,6 +54,8 @@ type ColKey = (typeof COLUMNS)[number]["key"];
 
 // ponytail: KPI strip + FIFO/Fits chips hidden for now — flip to restore.
 const SHOW_EXTRAS: boolean = false;
+// ponytail: swap hidden for now (swapped-out items dropped back mid-flow) — flip to restore.
+const SHOW_SWAP: boolean = false;
 
 type Entry = { p: PalPlan; l: PalPlanLine };
 type Drag = { lineIds: string[]; from: "Planning" | "Ready" } | null;
@@ -90,12 +97,41 @@ export function DispatchBoard({
   const [detailBoxId, setDetailBoxId] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ lineId: string; presetBoxId?: string } | null>(null);
 
+  // Container plans promised at quote time (Plan Containerisation snapshot),
+  // keyed by SalesOrder ROWID — the loading team packs load-boxes to plan.
+  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  useEffect(() => {
+    let alive = true;
+    void listQuotes().then((r) => {
+      if (alive && r.ok) setQuotes(r.quotes);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const planBySo = new Map<string, { quoteNo: string; quoteId: string; plan: ContainerPlan }>();
+  quotes.forEach((qt) => {
+    const plan = parseContainerPlan(qt.containerPlan);
+    if (plan) qt.sos?.forEach((so) => planBySo.set(so.id, { quoteNo: qt.quoteNo, quoteId: qt.id, plan }));
+  });
+  const planTitle = (quoteNo: string, plan: ContainerPlan) =>
+    plan.containers
+      .map((c) => `${quoteNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
+      .join("\n");
+
   // ---- derived ------------------------------------------------
   const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l })));
   const boxById = new Map(boxes.map((b) => [b.id, b]));
   const linesOfBox = (boxId: string) => allLines.filter(({ l }) => l.loadBoxId === boxId);
   const loadedOf = (b: LoadBox) => linesOfBox(b.id).reduce((s, { l }) => s + l.boxes, 0);
-  const remainingOf = (b: LoadBox) => b.capacity - loadedOf(b);
+  // Fill is fractional vs each line's PALLET capacity (bug #2) — a box holding
+  // 50 boxes of a 100-box pallet reads 50%, whatever the LoadBox.capacity says.
+  const fillOf = (b: LoadBox) => boxFill(linesOfBox(b.id).map(({ l }) => l));
+  // Hard 100% cap: how many of THIS line's boxes still fit (its pallet's boxes).
+  // Capacity-unknown lines can't be capped — they load whole.
+  const fitOf = (l: PalPlanLine, b: LoadBox) =>
+    l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - fillOf(b)) * l.palletCapacity) : l.boxes;
+  const isEmptyBox = (b: LoadBox) => linesOfBox(b.id).length === 0;
   const boxLabel = (b: LoadBox) => b.vehicleNumber || `Box ${b.boxNumber}`;
   // Lines carry no date — age comes from the owning plan (Catalyst "YYYY-MM-DD HH:mm:ss").
   const ageDays = (p: PalPlan) => {
@@ -110,13 +146,15 @@ export function DispatchBoard({
 
   const openBoxes = boxes.filter((b) => b.status === "Open");
   const focusBox = (focusBoxId && openBoxes.find((b) => b.id === focusBoxId)) || null;
-  const focusRemaining = focusBox ? remainingOf(focusBox) : 0;
+  const focusFree = focusBox ? Math.max(0, 1 - fillOf(focusBox)) : 0; // free FRACTION of the focused box
   const swapEntry = swapLineId ? allLines.find(({ l }) => l.id === swapLineId) ?? null : null;
 
   // Default / self-heal focus: first Open box once loaded, or after the
-  // focused box is dispatched/deleted.
+  // focused box is dispatched/deleted. Prefer a non-empty box (empties are
+  // hidden from the lane); an empty fallback still works — it appears on load.
   useEffect(() => {
-    if (!focusBoxId || !openBoxes.some((b) => b.id === focusBoxId)) setFocusBoxId(openBoxes[0]?.id ?? null);
+    if (!focusBoxId || !openBoxes.some((b) => b.id === focusBoxId))
+      setFocusBoxId((openBoxes.find((b) => !isEmptyBox(b)) ?? openBoxes[0])?.id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxes]);
 
@@ -153,17 +191,34 @@ export function DispatchBoard({
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
+  // Hard 100% cap: each line loads only what fits (server-side split keeps the
+  // remainder in Ready); once the box is full the rest stay behind for the next box.
+  // ponytail: cap is client-side only — every load path routes through here or
+  // confirmLoad; the pal-line-box route stays permissive for legacy data.
   const assignLines = async (ids: string[], box: LoadBox) => {
     if (busy || ids.length === 0) return;
     setBusy(true);
-    let ok = 0, err = "";
+    let fill = fillOf(box);
+    let ok = 0, leftBehind = 0, err = "";
     for (const id of ids) {
-      const res = await setLineBox(id, box.id);
-      if (res.ok) ok++; else err = res.error || "Could not load the item";
+      const l = allLines.find((e) => e.l.id === id)?.l;
+      if (!l) continue;
+      const fit = l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - fill) * l.palletCapacity) : l.boxes;
+      if (fit <= 0) { leftBehind++; continue; }
+      const n = Math.min(l.boxes, fit);
+      const res = await setLineBox(id, box.id, n < l.boxes ? n : undefined);
+      if (res.ok) { ok++; if (n < l.boxes) leftBehind++; } else err = res.error || "Could not load the item";
+      if (res.ok && l.palletCapacity > 0) fill += n / l.palletCapacity;
     }
     setBusy(false);
     setSelected(new Set());
-    after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${boxLabel(box)}`);
+    after(
+      !err,
+      err,
+      leftBehind > 0
+        ? `${boxLabel(box)} full at 100% — ${ok} loaded, the rest stay in Ready for Loading`
+        : `${ok} item${ok === 1 ? "" : "s"} → ${boxLabel(box)}`,
+    );
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
@@ -186,16 +241,34 @@ export function DispatchBoard({
     let toBox = boxId;
     let label = boxId ? boxLabel(boxes.find((b) => b.id === boxId)!) : "";
     if (!toBox) {
-      const created = await createLoadBox();
-      if (!created.ok || !created.data?.ROWID) {
-        setBusy(false);
-        after(false, created.error || "Could not add a box", "");
-        return;
+      // "New box": reuse a mistake-created empty box (hidden from the lane)
+      // before minting another, so box numbers don't pile up.
+      const empty = openBoxes.find(isEmptyBox);
+      if (empty) {
+        toBox = empty.id;
+        label = boxLabel(empty);
+      } else {
+        const created = await createLoadBox();
+        if (!created.ok || !created.data?.ROWID) {
+          setBusy(false);
+          after(false, created.error || "Could not add a box", "");
+          return;
+        }
+        toBox = String(created.data.ROWID);
+        label = `Box ${created.data.box_number ?? ""}`.trim();
       }
-      toBox = String(created.data.ROWID);
-      label = `Box ${created.data.box_number ?? ""}`.trim();
     }
-    const res = await setLineBox(line.id, toBox, count < line.boxes ? count : undefined);
+    // Hard 100% cap — the picker clamps too; this is the last gate before the write.
+    const targetBox = boxes.find((b) => b.id === toBox);
+    const fit = targetBox ? fitOf(line, targetBox) : line.boxes;
+    if (fit <= 0) {
+      setBusy(false);
+      setPicker(null);
+      after(false, `${label} is already at 100%`, "");
+      return;
+    }
+    const n = Math.min(count, fit, line.boxes);
+    const res = await setLineBox(line.id, toBox, n < line.boxes ? n : undefined);
     setBusy(false);
     setPicker(null);
     after(res.ok, res.error || "Could not load the item", `${line.itemCode} → ${label}`);
@@ -319,7 +392,7 @@ export function DispatchBoard({
   const colEntries = (key: ColKey) => {
     let list = visible.filter((e) => stageOf(e.p, e.l) === key);
     // "Fits" narrows the pickable columns to lines the focused box can absorb whole.
-    if (fitsFocused && focusBox && (key === "Planning" || key === "Ready")) list = list.filter(({ l }) => l.boxes <= focusRemaining);
+    if (fitsFocused && focusBox && (key === "Planning" || key === "Ready")) list = list.filter(({ l }) => lineFrac(l) <= focusFree);
     if (fifo) list = [...list].sort((a, b) => ageDays(b.p) - ageDays(a.p));
     return list;
   };
@@ -327,9 +400,11 @@ export function DispatchBoard({
   // ---- bay filtering ------------------------------------------
   const bayBoxes = boxes
     .filter((b) => {
+      // Mistake-created empty boxes never show — loading into one reveals it.
+      if (b.status === "Open" && isEmptyBox(b)) return false;
       if (bayStatus === "open" && b.status !== "Open") return false;
       if (bayStatus === "dispatched" && b.status !== "Dispatched") return false;
-      if (bayStatus === "short" && (b.status !== "Open" || remainingOf(b) <= 0)) return false;
+      if (bayStatus === "short" && (b.status !== "Open" || fillOf(b) >= 1)) return false;
       if (bayCountry && !linesOfBox(b.id).some(({ l }) => l.countryCode === bayCountry)) return false;
       return true;
     })
@@ -344,7 +419,7 @@ export function DispatchBoard({
   const pending = allLines.filter(({ p, l }) => { const s = stageOf(p, l); return s === "Planning" || s === "Ready"; });
   const aged = pending.filter(({ p }) => ageDays(p) > 7);
   const avgFill = openBoxes.length
-    ? Math.round(openBoxes.reduce((s, b) => s + (loadedOf(b) / Math.max(1, b.capacity)) * 100, 0) / openBoxes.length)
+    ? Math.round(openBoxes.reduce((s, b) => s + fillOf(b) * 100, 0) / openBoxes.length)
     : 0;
   const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
   const dispatchedToday = boxes.filter((b) => b.status === "Dispatched" && b.dispatchDate.slice(0, 10) === todayISO);
@@ -352,7 +427,8 @@ export function DispatchBoard({
   // ---- selection ----------------------------------------------
   const selEntries = allLines.filter(({ l }) => selected.has(l.id));
   const selBoxes = selEntries.reduce((s, { l }) => s + l.boxes, 0);
-  const selOver = focusBox ? selBoxes - focusRemaining : 0;
+  const selFrac = selEntries.reduce((s, { l }) => s + lineFrac(l), 0);
+  const selOverPct = focusBox ? Math.round((selFrac - focusFree) * 100) : 0;
   const toggleSelect = (l: PalPlanLine) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -383,7 +459,7 @@ export function DispatchBoard({
     const canDrag = canEdit && (stage === "Planning" || stage === "Ready");
     const age = ageDays(p);
     const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
-    const fitsHint = !!swapEntry && stage === "Ready" && focusBox && l.boxes <= focusRemaining + swapEntry.l.boxes;
+    const fitsHint = !!swapEntry && stage === "Ready" && focusBox && lineFrac(l) <= focusFree + lineFrac(swapEntry.l);
     return (
       <div
         key={l.id}
@@ -413,7 +489,13 @@ export function DispatchBoard({
           >
             {l.itemCode}
           </button>
-          <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>{fmt(l.boxes)} box</span>
+          <span
+            className="chip"
+            style={{ marginLeft: "auto", fontSize: 11 }}
+            title={l.palletCapacity > 0 ? `${fmt(l.boxes)} of ${fmt(l.palletCapacity)} boxes — a full ${l.palletName} container` : undefined}
+          >
+            {fmt(l.boxes)} box{l.palletCapacity > 0 ? ` · ${Math.round(lineFrac(l) * 100)}%` : ""}
+          </span>
           <span
             className="chip"
             title={`${age} days since the plan was created`}
@@ -431,6 +513,18 @@ export function DispatchBoard({
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {[l.soNumber, l.palletName].filter((s) => s && s !== "—").join("  ·  ") || "—"}
         </div>
+        {(() => {
+          const cp = planBySo.get(l.salesOrderId);
+          return cp ? (
+            <div
+              className="dim mono"
+              style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              title={planTitle(cp.quoteNo, cp.plan)}
+            >
+              Plan: {cp.plan.containers.length} container{cp.plan.containers.length === 1 ? "" : "s"} · {cp.quoteNo}
+            </div>
+          ) : null;
+        })()}
         {box && (
           <div className="dim mono" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>→ {boxLabel(box)}</div>
         )}
@@ -453,11 +547,13 @@ export function DispatchBoard({
   const boxCard = (box: LoadBox) => {
     const inBox = linesOfBox(box.id);
     const loaded = loadedOf(box);
-    const rem = box.capacity - loaded;
-    const pct = Math.round((loaded / Math.max(1, box.capacity)) * 100);
+    const fill = boxFill(inBox.map(({ l }) => l));
+    const pct = Math.round(fill * 100);
+    const cap = sharedCapacity(inBox.map(({ l }) => l)); // one pallet type → absolute box numbers are meaningful
+    const rem = cap ? cap - loaded : 0;
     const open = box.status === "Open";
     const isFocus = open && focusBox?.id === box.id;
-    const pctColor = rem < 0 ? "var(--c-red)" : rem === 0 ? "var(--c-green)" : pct >= 85 ? "var(--c-amber)" : "var(--c-blue)";
+    const pctColor = pct > 100 ? "var(--c-red)" : pct === 100 ? "var(--c-green)" : pct >= 85 ? "var(--c-amber)" : "var(--c-blue)";
     // Stable colour per design (first-seen), same rule as VehicleFillBar.
     const colorByDesign = new Map<string, string>();
     inBox.forEach(({ l }) => {
@@ -466,14 +562,14 @@ export function DispatchBoard({
     const isTarget = open && canEdit && !!drag;
 
     // Swap candidates — while swapping a line out of this box: Ready lines
-    // that fit the freed space (remaining + the swapped-out line's boxes).
-    const swapping = !!swapEntry && swapEntry.l.loadBoxId === box.id;
-    const avail = rem + (swapping ? swapEntry!.l.boxes : 0);
+    // that fit the freed space (free fraction + the swapped-out line's share).
+    const swapping = SHOW_SWAP && !!swapEntry && swapEntry.l.loadBoxId === box.id;
+    const avail = 1 - fill + (swapping ? lineFrac(swapEntry!.l) : 0);
     const showSug = open && canEdit && swapping && avail > 0;
     const sugs = showSug
       ? allLines
-          .filter(({ p, l }) => stageOf(p, l) === "Ready" && l.boxes <= avail)
-          .map((e) => ({ ...e, left: avail - e.l.boxes }))
+          .filter(({ p, l }) => stageOf(p, l) === "Ready" && lineFrac(l) <= avail)
+          .map((e) => ({ ...e, left: avail - lineFrac(e.l) }))
           .sort((a, b) => a.left - b.left)
           .slice(0, 4)
       : [];
@@ -499,7 +595,9 @@ export function DispatchBoard({
             {boxLabel(box)}
           </span>
           <span className={`chip palstatus ${open ? "p-loading" : "p-completed"}`}>{open ? "Loading" : "Dispatched"}</span>
-          <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>{fmt(loaded)} / {fmt(box.capacity)} box</span>
+          <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>
+            {cap ? `${fmt(loaded)} / ${fmt(cap)} box` : `${fmt(loaded)} box`}
+          </span>
           <button
             type="button"
             className="btn"
@@ -515,21 +613,25 @@ export function DispatchBoard({
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
           <div
             style={{ flex: 1, display: "flex", height: 14, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border)", background: "var(--panel-2)" }}
-            title={`${fmt(loaded)} / ${fmt(box.capacity)} boxes`}
+            title={`${fmt(loaded)} boxes · ${pct}% of a full container`}
           >
             {inBox.map(({ l }) => (
-              <div key={l.id} style={{ width: `${(l.boxes / Math.max(1, box.capacity)) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
+              <div key={l.id} style={{ width: `${lineFrac(l) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
             ))}
           </div>
-          <span style={{ fontSize: 12, fontWeight: 700, color: pctColor, minWidth: 38, textAlign: "right" }} title="Box fill vs capacity">
+          <span style={{ fontSize: 12, fontWeight: 700, color: pctColor, minWidth: 38, textAlign: "right" }} title="Box fill vs the items' pallet capacity">
             {pct}%
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-          <span style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: pctColor }}>
-            {rem > 0 ? `${fmt(rem)} boxes short` : rem === 0 ? "Full — ready to seal" : `${fmt(-rem)} boxes over`}
-          </span>
-        </div>
+        {inBox.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+            <span style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: pctColor }}>
+              {cap
+                ? rem > 0 ? `${fmt(rem)} boxes short` : rem === 0 ? "Full — ready to seal" : `${fmt(-rem)} boxes over`
+                : pct < 100 ? `${100 - pct}% short` : pct === 100 ? "Full — ready to seal" : `${pct - 100}% over`}
+            </span>
+          </div>
+        )}
 
         {/* Loaded items. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: inBox.length ? 8 : 0 }}>
@@ -551,20 +653,22 @@ export function DispatchBoard({
                 <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{fmt(l.boxes)}</span>
                 {canEdit && open && (
                   <>
-                    <button
-                      type="button"
-                      className="btn"
-                      title={isSwap ? "Cancel swap" : "Swap this item for another"}
-                      style={{
-                        height: 20, padding: "0 6px", fontSize: 11, flex: "0 0 auto",
-                        background: isSwap ? "var(--c-amber)" : undefined,
-                        color: isSwap ? "#fff" : "var(--c-amber)",
-                        borderColor: "var(--c-amber)",
-                      }}
-                      onClick={(ev) => { ev.stopPropagation(); setSwapLineId((s) => (s === l.id ? null : l.id)); setFocusBoxId(box.id); }}
-                    >
-                      {isSwap ? "Cancel" : "Swap"}
-                    </button>
+                    {SHOW_SWAP && (
+                      <button
+                        type="button"
+                        className="btn"
+                        title={isSwap ? "Cancel swap" : "Swap this item for another"}
+                        style={{
+                          height: 20, padding: "0 6px", fontSize: 11, flex: "0 0 auto",
+                          background: isSwap ? "var(--c-amber)" : undefined,
+                          color: isSwap ? "#fff" : "var(--c-amber)",
+                          borderColor: "var(--c-amber)",
+                        }}
+                        onClick={(ev) => { ev.stopPropagation(); setSwapLineId((s) => (s === l.id ? null : l.id)); setFocusBoxId(box.id); }}
+                      >
+                        {isSwap ? "Cancel" : "Swap"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn x"
@@ -604,8 +708,8 @@ export function DispatchBoard({
                 <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
                 <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.designLabel}</span>
                 <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
-                <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }} title={`${p.palNumber} · leaves ${fmt(left)} boxes`}>
-                  {left === 0 ? "exact fit" : `${fmt(l.boxes)} bx · ${fmt(left)} left`}
+                <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }} title={`${p.palNumber} · leaves ${Math.round(left * 100)}% free`}>
+                  {Math.round(left * 100) === 0 ? "exact fit" : `${fmt(l.boxes)} bx · ${Math.round(left * 100)}% left`}
                 </span>
                 <button
                   type="button"
@@ -638,7 +742,7 @@ export function DispatchBoard({
                     style={{ marginLeft: "auto", height: 24, padding: "0 10px", fontSize: "var(--t-sm)", display: "inline-flex", alignItems: "center", gap: 4, flex: "0 0 auto" }}
                     onClick={(ev) => { ev.stopPropagation(); box.vehicleId ? void dispatchBox(box) : setVehModal({ box, dispatch: true }); }}
                   >
-                    <Icon name="check" size={11} /> {rem <= 0 ? "Seal & dispatch" : `Dispatch at ${pct}%`}
+                    <Icon name="check" size={11} /> {pct >= 100 ? "Seal & dispatch" : `Dispatch at ${pct}%`}
                   </button>
                   <button
                     type="button"
@@ -704,7 +808,7 @@ export function DispatchBoard({
             {SHOW_EXTRAS && focusBox && chipBtn(
               fitsFocused,
               () => setFitsFocused((v) => !v),
-              `Fits ${boxLabel(focusBox)} (${fmt(focusRemaining)} bx left)`,
+              `Fits ${boxLabel(focusBox)} (${Math.round(focusFree * 100)}% left)`,
               "Only items that still fit whole in the focused box",
             )}
             {anyFilter && (
@@ -755,10 +859,10 @@ export function DispatchBoard({
 
           {/* Selection bar. */}
           {canEdit && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? (selOver > 0 ? "color-mix(in oklab, var(--c-red) 8%, transparent)" : "var(--accent-soft)") : "var(--panel-2)" }}>
-              <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? (selOver > 0 ? "var(--c-red)" : "var(--fg)") : "var(--muted)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? (selOverPct > 0 ? "color-mix(in oklab, var(--c-red) 8%, transparent)" : "var(--accent-soft)") : "var(--panel-2)" }}>
+              <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? (selOverPct > 0 ? "var(--c-red)" : "var(--fg)") : "var(--muted)" }}>
                 {selected.size
-                  ? `${selected.size} selected · ${fmt(selBoxes)} boxes${focusBox ? (selOver > 0 ? ` · exceeds ${boxLabel(focusBox)} by ${fmt(selOver)} bx` : ` · leaves ${fmt(focusRemaining - selBoxes)} bx in ${boxLabel(focusBox)}`) : ""}`
+                  ? `${selected.size} selected · ${fmt(selBoxes)} boxes${focusBox ? (selOverPct > 0 ? ` · exceeds ${boxLabel(focusBox)} by ${selOverPct}%` : ` · leaves ${Math.round((focusFree - selFrac) * 100)}% in ${boxLabel(focusBox)}`) : ""}`
                   : "Click Ready items to multi-select, or drag straight onto a box"}
               </span>
               <span style={{ flex: 1 }} />
@@ -772,7 +876,7 @@ export function DispatchBoard({
                 className="hbtn primary"
                 style={{ height: 26, padding: "0 10px", borderRadius: 5, flex: "0 0 auto" }}
                 disabled={busy || selected.size === 0 || !focusBox}
-                title={!focusBox ? "Click a box in Dispatch to focus it" : selOver > 0 ? "Exceeds capacity — capacity is advisory" : "Assign the selection to the focused box"}
+                title={!focusBox ? "Click a box in Dispatch to focus it" : selOverPct > 0 ? "Exceeds the pallet capacity — the load is advisory" : "Assign the selection to the focused box"}
                 onClick={() => focusBox && void assignLines([...selected], focusBox)}
               >
                 {focusBox ? `Assign ${selected.size || ""} → ${boxLabel(focusBox)}`.replace("  ", " ") : "Assign to box"}
@@ -818,7 +922,7 @@ export function DispatchBoard({
         return line ? (
           <BoxPickerModal
             line={line}
-            boxes={openBoxes}
+            boxes={openBoxes.filter((b) => !isEmptyBox(b))}
             linesOfBox={linesOfBox}
             presetBoxId={picker.presetBoxId}
             busy={busy}

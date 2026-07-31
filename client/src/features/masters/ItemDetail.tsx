@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
-import { can } from "@/lib/auth";
+import { can, isAdmin } from "@/lib/auth";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import { update } from "@/lib/dataOps";
 import { Icon } from "@/ui/Icon";
@@ -116,6 +116,7 @@ function ImageSlot({
   size = 110,
   onDelete,
   onOpen,
+  onUpload,
 }: {
   label: string;
   imageId?: string;
@@ -124,6 +125,8 @@ function ImageSlot({
   size?: number;
   onDelete?: () => void;
   onOpen?: () => void;
+  /** Empty slot becomes a click-to-upload target (bug #5). */
+  onUpload?: (files: FileList) => void;
 }) {
   return (
     <div style={{ maxWidth: size }}>
@@ -150,6 +153,25 @@ function ImageSlot({
             </button>
           )}
         </div>
+      ) : onUpload ? (
+        <label
+          className="dim"
+          title={`Upload ${label}`}
+          style={{ width: size, height: size, display: "flex", flexDirection: "column", gap: 4, alignItems: "center", justifyContent: "center", border: "1px dashed var(--border)", borderRadius: 8, fontSize: "var(--t-sm)", cursor: busy ? "wait" : "pointer" }}
+        >
+          <Icon name="plus" size={14} />
+          {busy ? "Uploading…" : "Upload"}
+          <input
+            type="file"
+            accept="image/*"
+            disabled={busy}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              if (e.target.files?.length) onUpload(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
       ) : (
         <div
           className="dim"
@@ -186,6 +208,7 @@ export function ItemDetail() {
   const [cloning, setCloning] = useState(false); // inline clone modal
   const [stockEdit, setStockEdit] = useState(false); // inline Opening-stock edit
   const [stockVal, setStockVal] = useState("");
+  const [stockReason, setStockReason] = useState(""); // required when a locked value is re-edited (admin)
   const [stockBusy, setStockBusy] = useState(false);
   const [breakdown, setBreakdown] = useState<StockBreakdown<any> | null>(null); // stock-number drill-down
   const [ipOpen, setIpOpen] = useState(false); // "In production" drill-down (shared per-SO popup)
@@ -233,6 +256,10 @@ export function ItemDetail() {
       { head: "In loading", num: true, val: (o) => fmt(Math.max(0, o.palletizedQty - o.loadedQty)) }],
   };
 
+  // Opening stock locks once a POSITIVE value is saved (0 stays freely editable);
+  // only an admin can re-edit a locked value, with a reason
+  // (kept in the OperationLog payload via the generic update's _reason note).
+  const stockLocked = (design?.accountingStock ?? 0) > 0;
   const saveOpeningStock = async () => {
     if (!design) return;
     // Empty field = "leave unchanged" (the current value shows only as a placeholder).
@@ -240,9 +267,16 @@ export function ItemDetail() {
       setStockEdit(false);
       return;
     }
+    if (stockLocked && !stockReason.trim()) {
+      toast.error("A reason is required to change a saved opening stock");
+      return;
+    }
     const next = Math.max(0, parseInt(stockVal, 10) || 0);
     setStockBusy(true);
-    const res = await update("Design", design.id, { accounting_stock: next });
+    const res = await update("Design", design.id, {
+      accounting_stock: next,
+      ...(stockLocked ? { _reason: `Opening stock ${fmt(openingStock)} → ${fmt(next)}: ${stockReason.trim()}` } : {}),
+    });
     setStockBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not update opening stock");
@@ -308,6 +342,19 @@ export function ItemDetail() {
     if (added.length) await saveImages([...design.images, ...added]);
     else setImgBusy(false);
     window.setTimeout(() => setUploads([]), 1500);
+  };
+
+  // Per-slot upload (bug #5): the empty Front/Rear dashed box takes a file
+  // directly. Slots are positional over the images array, so a direct upload is
+  // valid only when the slot is the next free position — which also makes
+  // rear-before-front impossible (the array can't hold a gap).
+  const uploadSlot = (idx: 0 | 1, files: FileList | null) => {
+    if (!design || !files?.length) return;
+    if (design.images.length !== idx) {
+      toast.info("Add the Front View image first");
+      return;
+    }
+    void uploadMany(files);
   };
 
   const deleteAt = async (idx: number) => {
@@ -527,6 +574,7 @@ export function ItemDetail() {
                     busy={imgBusy}
                     onDelete={() => void deleteAt(0)}
                     onOpen={design.images[0] ? () => setViewer(0) : undefined}
+                    onUpload={can("items", "edit") ? (files) => uploadSlot(0, files) : undefined}
                   />
                   <ImageSlot
                     label="Rear View"
@@ -535,6 +583,7 @@ export function ItemDetail() {
                     busy={imgBusy}
                     onDelete={() => void deleteAt(1)}
                     onOpen={design.images[1] ? () => setViewer(1) : undefined}
+                    onUpload={can("items", "edit") ? (files) => uploadSlot(1, files) : undefined}
                   />
                 </div>
                 <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
@@ -620,7 +669,16 @@ export function ItemDetail() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Opening stock</span>
                     {stockEdit ? (
-                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {stockLocked && (
+                          <input
+                            type="text"
+                            value={stockReason}
+                            placeholder="Reason for change *"
+                            onChange={(e) => setStockReason(e.target.value)}
+                            style={{ width: 150 }}
+                          />
+                        )}
                         <NumberInput
                           value={stockVal}
                           placeholder={String(openingStock)}
@@ -636,16 +694,17 @@ export function ItemDetail() {
                     ) : (
                       <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                         <span className="mono">{fmt(openingStock)}</span>
-                        {can("items", "edit") && (
+                        {can("items", "edit") && (!stockLocked || isAdmin()) && (
                           <button
                             className="btn x"
-                            title="Edit opening stock"
+                            title={stockLocked ? "Locked after first save — admin edit (reason required)" : "Edit opening stock"}
                             onClick={() => {
                               setStockVal("");
+                              setStockReason("");
                               setStockEdit(true);
                             }}
                           >
-                            <Icon name="edit" size={11} />
+                            <Icon name={stockLocked ? "lock" : "edit"} size={11} />
                           </button>
                         )}
                       </span>

@@ -21,11 +21,13 @@ import { PalletForm } from "./PalletForm";
 import {
   cachedPallets,
   createPallet,
+  invalidatePallets,
   listPallets,
   type PalletInput,
   type PalletRow,
   type SizeOption,
 } from "./palletsApi";
+import { invalidateDesigns } from "./designsApi";
 import { cachedSizes, createSize, deleteSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -104,7 +106,11 @@ export function SizeDetail() {
     }
     setEditing(false);
     toast.success("Size updated");
-    await refresh();
+    // Backend fans the new packing data out to Item + Pallet snapshots — drop
+    // their caches so every view refetches the propagated values.
+    invalidateDesigns();
+    invalidatePallets();
+    await Promise.all([refresh(), refreshPallets()]);
   };
 
   // Clone: same dimensions into a fresh size; seq_code left blank so

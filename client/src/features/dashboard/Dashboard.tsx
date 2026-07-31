@@ -40,12 +40,11 @@ export function Dashboard() {
   );
   const showSkeleton = loading && allOrders.length === 0;
 
-  // Same rule as the old mock READY_TO_LOAD, over live orders.
+  // Same rule as the old mock READY_TO_LOAD, over live orders. Unsliced so
+  // the KPI sums everything; the table below caps its own rows.
   const readyToLoad = useMemo(
     () =>
-      orders
-        .filter((o) => o.stage === "loading" || (o.stage === "packing" && o.palletizedQty >= o.orderQty * 0.85))
-        .slice(0, 7),
+      orders.filter((o) => o.stage === "loading" || (o.stage === "packing" && o.palletizedQty >= o.orderQty * 0.85)),
     [orders],
   );
   const readyPallets = readyToLoad.reduce((s, o) => s + Math.ceil(o.palletizedQty / o.boxesPerPallet), 0);
@@ -146,7 +145,7 @@ export function Dashboard() {
       ) : (
       <div className="kpi-grid">
         <KPI label="Total Order Qty" value={fmt(totalQty)} unit="boxes" delta={`${orders.length} active orders`} />
-        <KPI label="In Production" value={fmt(totalProd)} unit="boxes" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
+        <KPI label="Produced" value={fmt(totalProd)} unit="boxes" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
         <KPI label="Pallets Packed" value={fmt(packedPallets)} unit="pallets" delta={`${fmt(totalPal)} boxes total`} color="var(--c-violet)" />
         <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} color="var(--c-cyan)" />
         <KPI label="Loaded" value={fmt(loadedPallets)} unit="pallets" delta={`${fmt(loadedBoxes)} boxes loaded`} color="var(--c-green)" />
@@ -224,7 +223,7 @@ export function Dashboard() {
                     </td>
                   </tr>
                 )}
-                {readyToLoad.map((o) => (
+                {readyToLoad.slice(0, 7).map((o) => (
                   <tr key={o.id}>
                     <td>
                       <div className="mono" style={{ color: "var(--fg)" }}>

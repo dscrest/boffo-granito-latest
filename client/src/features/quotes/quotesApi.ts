@@ -145,6 +145,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       createdTime: str(r.CREATEDTIME),
       modifiedTime: str(r.MODIFIEDTIME),
       rejectReason: str(r.reject_reason),
+      containerPlan: str(r.container_plan),
     };
   });
 
@@ -174,6 +175,8 @@ export interface NewQuoteInput {
   tax_type: string;
   tax_pct: number;
   lines: { item: string; qty: number; rate: number; discount: number; description?: string }[];
+  /** Container-plan JSON snapshot; omit to leave the stored plan untouched. */
+  container_plan?: string;
 }
 
 /* Mutations invalidate the cache so the next listQuotes() refetches.

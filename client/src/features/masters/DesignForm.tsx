@@ -147,7 +147,7 @@ export function rowToValues(r: DesignRow): DesignValues {
     random_faces: s(r.randomFaces),
     rate_per_sqft: s(r.ratePerSqft),
     rate_per_sqmt: s(r.ratePerSqmt),
-    accounting_stock: s(r.accountingStock),
+    accounting_stock: s(r.accountingStock ?? 0),
     image_url: r.imageUrl,
   };
 }

@@ -50,6 +50,7 @@ export interface Order {
   producedQty: number;
   palletizedQty: number;
   loadedQty: number;
+  dispatchedQty: number;
   /** OrderItem.pallet — the pallet spec chosen at SO creation (Pallet ROWID; "" if unset). */
   palletId: string;
   boxesPerPallet: number;
@@ -212,6 +213,41 @@ export interface Quote {
   modifiedTime?: string;
   /** Reason captured when the quote was rejected (shown on the status hover). */
   rejectReason?: string;
+  /** JSON container-plan snapshot from Plan Containerisation ("" until planned). */
+  containerPlan?: string;
+}
+
+/* ---- Container-plan snapshot (Quote.container_plan JSON) ---- */
+export interface ContainerPlanLine {
+  design: string; // design_name — the key the rest of the client joins on
+  palletId: string;
+  palletName: string;
+  pallets: number;
+  boxes: number;
+}
+export interface ContainerPlanContainer {
+  no: number; // C1..Cn
+  fillPct: number;
+  pallets: number;
+  boxes: number;
+  tonnes?: number; // gross container weight (boxes * box weight); optional (older plans omit)
+  tonCapacity?: number; // this container's weight cap (per-container override; falls back to plan default)
+  lines: ContainerPlanLine[];
+}
+export interface ContainerPlan {
+  v: 1;
+  tonCapacity?: number; // per-container weight cap the plan was packed at (default 28); optional for older plans
+  containers: ContainerPlanContainer[];
+}
+/** Parse a Quote.containerPlan JSON string; null when absent/invalid. */
+export function parseContainerPlan(raw: string | undefined | null): ContainerPlan | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as ContainerPlan;
+    return Array.isArray(p?.containers) && p.containers.length > 0 ? p : null;
+  } catch {
+    return null;
+  }
 }
 
 // Payment terms now come from the live PaymentTerm master (useMasters().paymentTerms).
