@@ -236,19 +236,9 @@ export function PlanContainerisation() {
     return out;
   }, [lines, tonCapacity, capByIdx]);
 
-  // Boxes not fully packed per line — the leftover in each item's partial
-  // (not-full) trailing container. Packing is item-wise + sequential, so a
-  // line has at most one partial container.
-  const partialBoxesByIdx = useMemo(() => {
-    const m: Record<number, number> = {};
-    for (const c of containers)
-      if (c.fill < 1 - EPS) {
-        const s = c.segs[0];
-        if (s) m[s.idx] = (m[s.idx] ?? 0) + s.boxes;
-      }
-    return m;
-  }, [containers]);
-  const totalRemaining = Object.values(partialBoxesByIdx).reduce((s, n) => s + n, 0);
+  // Remaining to plan per line — ordered boxes not yet moved into the Boxes
+  // (plan) column: max(0, ordered − qty). New lines (no ordered) contribute 0.
+  const totalRemaining = rows.reduce((s, l) => s + (l.ordered == null ? 0 : Math.max(0, l.ordered - l.qty)), 0);
 
   const totalBoxes = lines.reduce((s, l) => s + l.qty, 0);
   const totalPalletsCount = lines.reduce((s, l) => s + l.pallets, 0);
@@ -460,8 +450,8 @@ export function PlanContainerisation() {
                 <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                 <th className="num" style={{ textAlign: "right" }}>Tonnes</th>
                 <th className="num" style={{ textAlign: "right", width: 110 }}>Rate</th>
-                <th style={{ minWidth: 220 }}>Pallet</th>
-                <th className="num" style={{ textAlign: "right" }}>Pallets</th>
+                <th style={{ minWidth: 220 }}>Pallet Type</th>
+                <th className="num" style={{ textAlign: "right" }}>Ready Pallets</th>
                 <th style={{ width: 34 }} />
               </tr>
             </thead>
@@ -505,7 +495,7 @@ export function PlanContainerisation() {
                       aria-label={`${l.item || "item"} boxes`}
                     />
                   </td>
-                  <td className="num mono dim">{l.packable ? fmt(partialBoxesByIdx[l.idx] ?? 0) : "—"}</td>
+                  <td className="num mono dim">{l.ordered == null ? "—" : fmt(Math.max(0, l.ordered - l.qty))}</td>
                   <td className="num mono" style={{ fontWeight: 600 }}>{l.boxWeightKg > 0 ? `${round1(l.tonnes).toFixed(1)} t` : "—"}</td>
                   <td className="num">
                     <NumberInput
