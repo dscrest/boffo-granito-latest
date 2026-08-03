@@ -10,9 +10,14 @@
      boxWeightKg) from the format's per-box weight (snapshotted from
      the Size master).
    Packing is strictly item-wise, in line order (line 1
-   first): every container holds a single item, so raising an item's
-   quantity refills its own partial container before opening a new one
-   — it never spills into another item's container.
+   first): every container starts with a single item, so raising an
+   item's quantity refills its own partial container before opening a
+   new one — it never spills into another item's container on its own.
+   On top of that auto-pack the user can MOVE boxes between containers
+   (drag a card onto another, or the Adjust panel's Move suggestions),
+   which may mix items in one container; fill is then fractional —
+   each item's boxes against its own capacity, as on the dispatch
+   board. Moves are session-only: reopening the page re-packs.
 
    Items are fully editable here: change the item, edit the quantity
    (no cap) and rate, add brand-new items, or remove lines. Save
@@ -24,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { Combobox } from "@/ui/Combobox";
 import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
@@ -91,11 +97,18 @@ interface Seg {
   idx: number;
   boxes: number;
 }
+/** A manual "move N boxes of a line from container A to B", layered on the auto-pack. */
+interface BoxMove {
+  key: string; // DraftLine key
+  from: number; // container positions in the compacted list the user saw
+  to: number;
+  boxes: number;
+}
 interface PackedContainer {
-  segs: Seg[]; // single-item now, but kept as a list for the snapshot shape
-  fill: number; // boxes / capBoxes — ≤ 1 by construction
-  capTons: number; // weight mode: this container's weight cap (override or global default) · boxes mode: derived (capBoxes · box weight)
-  capBoxes: number; // boxes mode: format boxes/container · weight mode: floor(capTons·1000 / owner box weight)
+  segs: Seg[]; // one seg per item; >1 after manual moves (mixed container)
+  fill: number; // Σ per-seg boxes / that line's capacity — ≤ 1 by construction
+  capTons: number; // weight mode: this container's weight cap (override or global default) · boxes mode: derived from the owner line
+  capBoxes: number; // owner (first) line's capacity in this container — per-item fits come from fitBoxesIn
 }
 
 export function PlanContainerisation() {
@@ -114,6 +127,13 @@ export function PlanContainerisation() {
   const [capByIdx, setCapByIdx] = useState<Record<number, number>>({}); // per-container ton overrides, by position
   // Editable plan lines — the local source of truth; seeded from the quote.
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
+  // Manual box moves (session-only) + drag/prompt state for the move flow.
+  const [moves, setMoves] = useState<BoxMove[]>([]);
+  const [dragFrom, setDragFrom] = useState<number | null>(null); // dragged container position
+  const [overIdx, setOverIdx] = useState<number | null>(null); // drop-target highlight
+  const [movePrompt, setMovePrompt] = useState<{ from: number; to: number } | null>(null);
+  const [moveCount, setMoveCount] = useState(0);
+  const promptRef = useModalA11y(() => setMovePrompt(null));
 
   const keySeq = useRef(0);
   const nextKey = () => `L${keySeq.current++}`;
@@ -149,6 +169,7 @@ export function PlanContainerisation() {
     const saved = parseContainerPlan(quote.containerPlan);
     // Saved plans reopen in their own mode; pre-mode plans were weight-packed.
     setMode(saved ? (saved.mode ?? "weight") : "boxes");
+    setMoves([]);
     const g = saved?.tonCapacity && saved.tonCapacity > 0 ? saved.tonCapacity : DEFAULT_TON_CAPACITY;
     setTonCapacity(g);
     const caps: Record<number, number> = {};
@@ -236,33 +257,75 @@ export function PlanContainerisation() {
 
   const lines = useMemo(() => rows.filter((r) => r.packable), [rows]);
 
-  /* ---- pack item-wise: each container holds a single item, in line order.
-     Boxes mode: each container's box capacity is the item's Pallet-format
-     boxes-per-container (capTons derived for display only). Weight mode:
-     each container (by position) fills to its own ton capacity — the global
-     default, or a per-container override (capByIdx) — converted to boxes by
-     the item's box weight. ---- */
+  /* ---- pack item-wise: each container starts with a single item, in line
+     order. Boxes mode: capacity from the item's Pallet-format boxes-per-
+     container. Weight mode: each container (by position) fills to its own ton
+     capacity (global default or capByIdx override), converted to boxes by the
+     item's box weight. Manual moves are then applied on top — moving boxes
+     into another container mixes items there, and fill becomes fractional
+     (each line's boxes / that line's own capacity). Stale moves (positions or
+     lines that no longer exist, or targets without room) are clamped/skipped
+     so line edits degrade gracefully instead of hard-resetting. ---- */
   const containers = useMemo<PackedContainer[]>(() => {
-    const out: PackedContainer[] = [];
+    const capTonsAt = (pos: number) => Math.max(1, capByIdx[pos] ?? tonCapacity);
+    const byIdx = (idx: number) => lines.find((x) => x.idx === idx);
+    // Boxes of line l a container at this position can hold on its own.
+    const lineCapIn = (l: ResolvedLine, pos: number) =>
+      mode === "boxes"
+        ? l.boxesPerContainer
+        : l.boxWeightKg > 0
+          ? Math.floor((capTonsAt(pos) * 1000) / l.boxWeightKg)
+          : l.capacityBoxes;
+    const fillOf = (c: { segs: Seg[] }, pos: number) =>
+      c.segs.reduce((s, x) => {
+        const l = byIdx(x.idx);
+        return l ? s + x.boxes / Math.max(1, lineCapIn(l, pos)) : s;
+      }, 0);
+
+    // Baseline: strictly item-wise, line order.
+    let list: { segs: Seg[] }[] = [];
     for (const l of lines) {
       let left = l.qty;
       while (left > 0) {
-        const capBoxes =
-          mode === "boxes"
-            ? l.boxesPerContainer
-            : l.boxWeightKg > 0
-              ? Math.floor((Math.max(1, capByIdx[out.length] ?? tonCapacity) * 1000) / l.boxWeightKg)
-              : l.capacityBoxes;
+        const capBoxes = lineCapIn(l, list.length);
         if (capBoxes < 1) break;
-        const capTons =
-          mode === "boxes" ? capBoxes * l.boxWeightKg / 1000 : Math.max(1, capByIdx[out.length] ?? tonCapacity);
         const take = Math.min(left, capBoxes);
-        out.push({ segs: [{ idx: l.idx, boxes: take }], fill: take / capBoxes, capTons, capBoxes });
+        list.push({ segs: [{ idx: l.idx, boxes: take }] });
         left -= take;
       }
     }
-    return out;
-  }, [lines, mode, tonCapacity, capByIdx]);
+
+    // Layer manual moves on top. Positions refer to the compacted list the
+    // user saw when the move was made, so compact after every application.
+    for (const m of moves) {
+      const l = lines.find((x) => x.key === m.key);
+      const src = list[m.from];
+      const dst = list[m.to];
+      if (!l || !src || !dst || m.from === m.to) continue;
+      const seg = src.segs.find((s) => s.idx === l.idx);
+      if (!seg) continue;
+      const room = Math.floor((1 - fillOf(dst, m.to)) * lineCapIn(l, m.to) + EPS);
+      const take = Math.min(m.boxes, seg.boxes, Math.max(0, room));
+      if (take < 1) continue;
+      seg.boxes -= take;
+      src.segs = src.segs.filter((s) => s.boxes > 0);
+      const dseg = dst.segs.find((s) => s.idx === l.idx);
+      if (dseg) dseg.boxes += take;
+      else dst.segs.push({ idx: l.idx, boxes: take });
+      list = list.filter((c) => c.segs.length > 0);
+    }
+
+    return list.map((c, pos) => {
+      const owner = byIdx(c.segs[0]?.idx);
+      const capBoxes = owner ? lineCapIn(owner, pos) : 0;
+      return {
+        segs: c.segs,
+        fill: fillOf(c, pos),
+        capBoxes,
+        capTons: mode === "boxes" ? (owner ? capBoxes * owner.boxWeightKg / 1000 : 0) : capTonsAt(pos),
+      };
+    });
+  }, [lines, mode, tonCapacity, capByIdx, moves]);
 
   // Remaining to plan per line — ordered boxes not yet moved into the Boxes
   // (plan) column: max(0, ordered − qty). New lines (no ordered) contribute 0.
@@ -280,10 +343,53 @@ export function PlanContainerisation() {
   const selContainer = containers[sel];
 
   const lineOf = (idx: number | null | undefined) => lines.find((x) => x.idx === idx);
-  const tonnesIn = (c: PackedContainer) => {
-    const l = lineOf(c.segs[0]?.idx);
-    const boxes = c.segs.reduce((s, x) => s + x.boxes, 0);
-    return l ? boxes * l.boxWeightKg / 1000 : 0;
+  const tonnesIn = (c: PackedContainer) =>
+    c.segs.reduce((s, x) => {
+      const l = lineOf(x.idx);
+      return l ? s + x.boxes * l.boxWeightKg / 1000 : s;
+    }, 0);
+
+  /* ---- box movability: fit hint + drag-a-card-onto-another + move prompt ---- */
+  // How many boxes of line l still fit in container i — the shared hint formula
+  // (free fraction × that line's own capacity, as on the dispatch board).
+  const fitBoxesIn = (l: ResolvedLine, i: number) => {
+    const c = containers[i];
+    if (!c) return 0;
+    const cap =
+      mode === "boxes"
+        ? l.boxesPerContainer
+        : l.boxWeightKg > 0 ? Math.floor((c.capTons * 1000) / l.boxWeightKg) : l.capacityBoxes;
+    return Math.max(0, Math.floor((1 - c.fill) * cap + EPS));
+  };
+  // Dragging a card moves its last seg's item (the movable one on mixed cards).
+  const movableSegOf = (i: number) => containers[i]?.segs[containers[i].segs.length - 1];
+  const dragLine = dragFrom != null ? lineOf(movableSegOf(dragFrom)?.idx) : undefined;
+  const onDropCard = (to: number) => {
+    const from = dragFrom;
+    setDragFrom(null);
+    setOverIdx(null);
+    if (from == null || from === to) return;
+    const seg = movableSegOf(from);
+    const l = seg ? lineOf(seg.idx) : undefined;
+    if (!seg || !l) return;
+    const fit = fitBoxesIn(l, to);
+    if (fit < 1) {
+      toast.error(`C${to + 1} has no room for ${l.item}`);
+      return;
+    }
+    setMoveCount(Math.min(seg.boxes, fit));
+    setMovePrompt({ from, to });
+  };
+  const promptSeg = movePrompt ? movableSegOf(movePrompt.from) : undefined;
+  const promptLine = promptSeg ? lineOf(promptSeg.idx) : undefined;
+  const promptFit = movePrompt && promptLine ? fitBoxesIn(promptLine, movePrompt.to) : 0;
+  const maxMove = promptSeg ? Math.min(promptSeg.boxes, promptFit) : 0;
+  const effMove = Math.max(0, Math.min(moveCount, maxMove));
+  const confirmMove = () => {
+    if (!movePrompt || !promptLine || effMove < 1) return;
+    setMoves((ms) => [...ms, { key: promptLine.key, from: movePrompt.from, to: movePrompt.to, boxes: effMove }]);
+    setSelected(movePrompt.to);
+    setMovePrompt(null);
   };
 
   /* ---- snapshot: what Save publishes for downstream (SO detail, dispatch board) ---- */
@@ -347,6 +453,11 @@ export function PlanContainerisation() {
     const r = rows[idx];
     if (r) setLine(r.key, { qty: Math.max(0, Number(raw) || 0) });
   };
+  // Mode switch re-packs under different capacities — manual moves don't carry over.
+  const switchMode = (m: "boxes" | "weight") => {
+    setMode(m);
+    setMoves([]);
+  };
   // Per-container ton override; setting it back to the global default clears it (inherits).
   const setCap = (i: number, raw: string) =>
     setCapByIdx((p) => {
@@ -357,14 +468,15 @@ export function PlanContainerisation() {
       return next;
     });
 
-  /* ---- suggestions: trim / add-to-fill on the selected container ---- */
+  /* ---- suggestions: trim / add-to-fill / move-here on the selected container ---- */
   let trim: { headline: string; detail: string; apply: () => void } | null = null;
   let add: { headline: string; detail: string; apply: () => void } | null = null;
+  const moveIns: { headline: string; detail: string; apply: () => void }[] = [];
   if (selContainer && selContainer.fill < 1 - EPS) {
     const l = lineOf(selContainer.segs[0]?.idx);
     const boxesIn = selContainer.segs.reduce((s, x) => s + x.boxes, 0);
     if (l) {
-      const upBoxes = selContainer.capBoxes - boxesIn;
+      const upBoxes = fitBoxesIn(l, sel);
       if (upBoxes > 0)
         add = {
           headline: `Add ${fmt(upBoxes)} boxes → fill C${sel + 1}`,
@@ -374,12 +486,37 @@ export function PlanContainerisation() {
               : `${fmt(upBoxes)} more boxes (~${Math.ceil(upBoxes / l.boxesPerPallet)} pallets) of ${l.item} tops C${sel + 1} up to ${fmt(selContainer.capTons)} t.`,
           apply: () => setLine(l.key, { qty: l.qty + upBoxes }),
         };
-      if (boxesIn > 0 && l.qty - boxesIn > 0)
+      if (selContainer.segs.length === 1 && boxesIn > 0 && l.qty - boxesIn > 0)
         trim = {
           headline: `Trim ${fmt(boxesIn)} boxes → drop part-full C${sel + 1}`,
           detail: `Drop ${l.item} by ${fmt(boxesIn)} boxes (~${Math.ceil(boxesIn / l.boxesPerPallet)} pallets) to ${fmt(l.qty - boxesIn)} so its earlier containers all ship full.`,
           apply: () => setLine(l.key, { qty: l.qty - boxesIn }),
         };
+    }
+    // Move-here: boxes from other containers that fit the selected one's free space.
+    const cands: { n: number; l: ResolvedLine; from: number; newPct: number }[] = [];
+    containers.forEach((c, j) => {
+      if (j === sel) return;
+      for (const s of c.segs) {
+        const l2 = lineOf(s.idx);
+        if (!l2) continue;
+        const fit = fitBoxesIn(l2, sel);
+        const n = Math.min(s.boxes, fit);
+        if (n < 1) continue;
+        const capIn =
+          mode === "boxes"
+            ? l2.boxesPerContainer
+            : l2.boxWeightKg > 0 ? Math.floor((selContainer.capTons * 1000) / l2.boxWeightKg) : l2.capacityBoxes;
+        cands.push({ n, l: l2, from: j, newPct: Math.min(100, Math.round((selContainer.fill + n / Math.max(1, capIn)) * 100)) });
+      }
+    });
+    cands.sort((a, b) => b.newPct - a.newPct);
+    for (const cand of cands.slice(0, 3)) {
+      moveIns.push({
+        headline: `Move ${fmt(cand.n)} boxes of ${cand.l.item} from C${cand.from + 1}`,
+        detail: `C${sel + 1} can take ${fmt(cand.n)} boxes of ${cand.l.item} — fills it to ${cand.newPct}%.`,
+        apply: () => setMoves((ms) => [...ms, { key: cand.l.key, from: cand.from, to: sel, boxes: cand.n }]),
+      });
     }
   }
 
@@ -607,11 +744,11 @@ export function PlanContainerisation() {
               : "No packable quantities yet"}
           </span>
           <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Fitting basis" title="Switch fitting basis">
-            <button onClick={() => setMode("boxes")} title="Capacity from the Pallet format: pallets/container × boxes/pallet"
+            <button onClick={() => switchMode("boxes")} title="Capacity from the Pallet format: pallets/container × boxes/pallet"
               style={{ background: mode === "boxes" ? "var(--accent-soft)" : "transparent", color: mode === "boxes" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
               Box Fitting
             </button>
-            <button onClick={() => setMode("weight")} title="Capacity from the container's ton limit"
+            <button onClick={() => switchMode("weight")} title="Capacity from the container's ton limit"
               style={{ background: mode === "weight" ? "var(--accent-soft)" : "transparent", color: mode === "weight" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
               Weight Fitting
             </button>
@@ -640,19 +777,37 @@ export function PlanContainerisation() {
             const full = c.fill >= 1 - EPS;
             const active = i === sel;
             const boxesIn = c.segs.reduce((s, x) => s + x.boxes, 0);
+            const mixed = c.segs.length > 1;
+            const isDropTarget = dragFrom != null && dragFrom !== i;
+            const isOver = isDropTarget && overIdx === i;
             return (
-              <div key={i} onClick={() => setSelected(i)} style={{ display: "flex", flexDirection: "column", gap: 6, cursor: "pointer" }}>
+              <div
+                key={i}
+                onClick={() => setSelected(i)}
+                draggable={canSave}
+                onDragStart={(e) => {
+                  // Don't hijack text-selection drags inside the ton-capacity input.
+                  if ((e.target as HTMLElement).tagName === "INPUT") { e.preventDefault(); return; }
+                  setDragFrom(i);
+                }}
+                onDragEnd={() => { setDragFrom(null); setOverIdx(null); }}
+                onDragOver={(e) => { if (isDropTarget) { e.preventDefault(); setOverIdx(i); } }}
+                onDragLeave={() => setOverIdx((o) => (o === i ? null : o))}
+                onDrop={(e) => { e.preventDefault(); onDropCard(i); }}
+                style={{ display: "flex", flexDirection: "column", gap: 6, cursor: canSave ? "grab" : "pointer", opacity: dragFrom === i ? 0.5 : 1 }}
+              >
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "0 2px" }}>
                   <span className="mono dim" style={{ fontSize: "var(--t-xs)" }}>{quote.quoteNo} · C{i + 1}</span>
                   <span className="mono" style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: full ? "var(--c-green)" : "var(--c-amber)" }}>{pct}%</span>
                 </div>
                 <div
                   style={{
-                    border: `1.5px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                    border: isOver ? "1.5px dashed var(--accent)" : `1.5px solid ${active ? "var(--accent)" : "var(--border)"}`,
                     borderRadius: 6,
-                    background: "var(--panel-2, var(--bg))",
+                    background: isOver ? "var(--accent-soft)" : "var(--panel-2, var(--bg))",
                     boxShadow: active ? "0 4px 14px oklch(0.71 0.17 55 / 0.22)" : "0 1px 2px rgba(0,0,0,0.06)",
                     overflow: "hidden",
+                    transition: "background .12s",
                   }}
                 >
                   {/* corrugated roof */}
@@ -688,10 +843,17 @@ export function PlanContainerisation() {
                   <div style={{ height: 6, background: full ? "var(--c-green)" : "var(--faint)", opacity: full ? 0.45 : 0.6 }} />
                 </div>
                 <div className="mono dim" style={{ fontSize: "var(--t-xs)", padding: "0 2px", display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                  {mode === "boxes" ? (
+                  {isDropTarget && dragLine ? (
+                    // Live fit hint while dragging — how many of the dragged item this card takes.
+                    <span style={{ color: "var(--c-amber)", fontWeight: 600 }}>
+                      can take {fmt(fitBoxesIn(dragLine, i))} boxes of {dragLine.item}
+                    </span>
+                  ) : mode === "boxes" ? (
                     <span>
                       {fmt(cells.length)} / {fmt(lineOf(c.segs[0]?.idx)?.palletsPerContainer || cells.length)} pallets · {fmt(boxesIn)} boxes · {round1(tonnesIn(c)).toFixed(1)} t
-                      {!full && <span style={{ color: "var(--c-amber)" }}> · {fmt(Math.max(0, c.capBoxes - boxesIn))} free</span>}
+                      {!full && (
+                        <span style={{ color: "var(--c-amber)" }}> · {mixed ? `${100 - pct}% free` : `${fmt(Math.max(0, c.capBoxes - boxesIn))} free`}</span>
+                      )}
                     </span>
                   ) : (
                     <>
@@ -708,7 +870,9 @@ export function PlanContainerisation() {
                       <span>
                         t · {fmt(boxesIn)} boxes
                         {capByIdx[i] != null && <span style={{ color: "var(--accent)" }}> · custom</span>}
-                        {!full && <span style={{ color: "var(--c-amber)" }}> · {fmt(Math.max(0, c.capBoxes - boxesIn))} free</span>}
+                        {!full && (
+                          <span style={{ color: "var(--c-amber)" }}> · {mixed ? `${100 - pct}% free` : `${fmt(Math.max(0, c.capBoxes - boxesIn))} free`}</span>
+                        )}
                       </span>
                     </>
                   )}
@@ -762,7 +926,9 @@ export function PlanContainerisation() {
                     <span style={{ width: 9, height: 9, borderRadius: 2, border: "1px dashed var(--dim)", flexShrink: 0 }} />
                     <span className="dim" style={{ flex: 1, fontSize: "var(--t-md)" }}>Free space</span>
                     <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>
-                      {round1(Math.max(0, freeTonnes)).toFixed(1)} t · {fmt(freeBoxes)} boxes free
+                      {selContainer.segs.length > 1
+                        ? `${Math.max(0, 100 - Math.round(selContainer.fill * 100))}% free`
+                        : `${round1(Math.max(0, freeTonnes)).toFixed(1)} t · ${fmt(freeBoxes)} boxes free`}
                     </span>
                   </div>
                 );
@@ -800,6 +966,18 @@ export function PlanContainerisation() {
                   )}
                 </div>
               )}
+              {moveIns.map((mv, k) => (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: "1px solid color-mix(in oklab, var(--c-violet) 35%, transparent)", background: "color-mix(in oklab, var(--c-violet) 5%, transparent)", borderRadius: 6 }}>
+                  <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--c-violet)" }}>⇄</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+                    <span style={{ fontSize: "var(--t-md)", fontWeight: 600 }}>{mv.headline}</span>
+                    <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{mv.detail}</span>
+                  </div>
+                  {canSave && (
+                    <button className="hbtn" style={{ whiteSpace: "nowrap" }} onClick={mv.apply}>Apply</button>
+                  )}
+                </div>
+              ))}
               {balanced && (
                 <div style={{ padding: "10px 12px", border: "1px solid var(--c-green)", borderRadius: 6, color: "var(--c-green)", fontWeight: 600, fontSize: "var(--t-md)" }}>
                   Load is balanced — every container ships full.
@@ -809,6 +987,48 @@ export function PlanContainerisation() {
           </div>
         )}
       </div>
+
+      {/* Move prompt — quantity + fit hint, opened by dropping a card on another. */}
+      {movePrompt && promptSeg && promptLine && (
+        <div className="modal-backdrop">
+          <div ref={promptRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+            <div className="df-head">
+              <div className="ico"><Icon name="truck" size={18} /></div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600 }}>Move into C{movePrompt.to + 1}</div>
+                <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{promptLine.item} · from C{movePrompt.from + 1}</div>
+              </div>
+              <button className="btn x" onClick={() => setMovePrompt(null)} title="Close" tabIndex={-1}>✕</button>
+            </div>
+            <div className="df-body">
+              <label className="form-field">
+                <span className="lbl">Boxes to move</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={maxMove}
+                    value={effMove}
+                    onChange={(e) => setMoveCount(Math.max(1, Math.floor(Number(e.target.value)) || 1))}
+                    style={{ width: 100, textAlign: "right" }}
+                  />
+                  <span className="dim" style={{ fontSize: "var(--t-sm)" }}>of {fmt(promptSeg.boxes)}</span>
+                </span>
+              </label>
+              <div style={{ fontSize: "var(--t-sm)", marginTop: 4, fontWeight: 600, color: promptFit < promptSeg.boxes ? "var(--c-amber)" : "var(--c-green)" }}>
+                C{movePrompt.to + 1} can take {fmt(promptFit)} boxes of {promptLine.item}
+              </div>
+            </div>
+            <div className="df-foot">
+              <div style={{ flex: 1 }} />
+              <button className="btn" onClick={() => setMovePrompt(null)}>Cancel</button>
+              <button className="hbtn primary" disabled={effMove < 1} onClick={confirmMove}>
+                <Icon name="check" size={13} /> Move
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
