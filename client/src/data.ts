@@ -231,12 +231,14 @@ export interface ContainerPlanContainer {
   pallets: number;
   boxes: number;
   tonnes?: number; // gross container weight (boxes * box weight); optional (older plans omit)
-  tonCapacity?: number; // this container's weight cap (per-container override; falls back to plan default)
+  tonCapacity?: number; // weight mode: this container's weight cap (per-container override; falls back to plan default)
+  palletCapacity?: number; // box mode: pallets per container from the Pallet format
   lines: ContainerPlanLine[];
 }
 export interface ContainerPlan {
   v: 1;
-  tonCapacity?: number; // per-container weight cap the plan was packed at (default 28); optional for older plans
+  mode?: "boxes" | "weight"; // fitting basis; absent on older plans (= weight)
+  tonCapacity?: number; // weight mode: per-container weight cap the plan was packed at (default 28)
   containers: ContainerPlanContainer[];
 }
 /** Parse a Quote.containerPlan JSON string; null when absent/invalid. */

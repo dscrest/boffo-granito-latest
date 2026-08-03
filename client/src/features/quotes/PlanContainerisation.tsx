@@ -1,11 +1,15 @@
 /* ============================================================
    Plan Containerisation — /quotes/:id/containerise (More menu).
 
-   Weight-based, item-wise container planning for a quote. Each
-   container has a Ton capacity (default 28 t, editable) and a
-   line's boxes-per-container = floor(tonCapacity·1000 / boxWeightKg)
-   from its chosen Pallet format (per-box weight snapshotted from the
-   Size master). Packing is strictly item-wise, in line order (line 1
+   Item-wise container planning for a quote, in one of two modes
+   (same view, same details):
+   · Box Fitting (default) — capacity from the chosen Pallet format:
+     pallets/container × boxes/pallet = boxes per container.
+   · Weight Fitting — each container has a Ton capacity (default 28 t,
+     editable) and boxes-per-container = floor(tonCapacity·1000 /
+     boxWeightKg) from the format's per-box weight (snapshotted from
+     the Size master).
+   Packing is strictly item-wise, in line order (line 1
    first): every container holds a single item, so raising an item's
    quantity refills its own partial container before opening a new one
    — it never spills into another item's container.
@@ -74,7 +78,9 @@ interface ResolvedLine {
   palletName: string;
   palletOptions: { value: string; label: string }[];
   boxesPerPallet: number;
-  capacityBoxes: number; // floor(tonCapacity·1000 / boxWeightKg)
+  boxesPerContainer: number; // Pallet format: total boxes per container (arr. A + B)
+  palletsPerContainer: number; // Pallet format: total pallets per container (arr. A + B)
+  capacityBoxes: number; // boxes mode: boxesPerContainer · weight mode: floor(tonCapacity·1000 / boxWeightKg)
   pallets: number; // ceil(qty / boxesPerPallet)
   color: string;
   packable: boolean;
@@ -88,8 +94,8 @@ interface Seg {
 interface PackedContainer {
   segs: Seg[]; // single-item now, but kept as a list for the snapshot shape
   fill: number; // boxes / capBoxes — ≤ 1 by construction
-  capTons: number; // this container's weight cap (per-container override or global default)
-  capBoxes: number; // floor(capTons·1000 / owner box weight)
+  capTons: number; // weight mode: this container's weight cap (override or global default) · boxes mode: derived (capBoxes · box weight)
+  capBoxes: number; // boxes mode: format boxes/container · weight mode: floor(capTons·1000 / owner box weight)
 }
 
 export function PlanContainerisation() {
@@ -103,7 +109,8 @@ export function PlanContainerisation() {
   const [saving, setSaving] = useState(false);
 
   const [selected, setSelected] = useState<number | null>(null); // container index; null = tail
-  const [tonCapacity, setTonCapacity] = useState<number>(DEFAULT_TON_CAPACITY); // global default
+  const [mode, setMode] = useState<"boxes" | "weight">("boxes"); // fitting basis
+  const [tonCapacity, setTonCapacity] = useState<number>(DEFAULT_TON_CAPACITY); // weight mode: global default
   const [capByIdx, setCapByIdx] = useState<Record<number, number>>({}); // per-container ton overrides, by position
   // Editable plan lines — the local source of truth; seeded from the quote.
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
@@ -140,6 +147,8 @@ export function PlanContainerisation() {
       })),
     );
     const saved = parseContainerPlan(quote.containerPlan);
+    // Saved plans reopen in their own mode; pre-mode plans were weight-packed.
+    setMode(saved ? (saved.mode ?? "weight") : "boxes");
     const g = saved?.tonCapacity && saved.tonCapacity > 0 ? saved.tonCapacity : DEFAULT_TON_CAPACITY;
     setTonCapacity(g);
     const caps: Record<number, number> = {};
@@ -165,6 +174,8 @@ export function PlanContainerisation() {
         palletName: "",
         palletOptions: extra.palletOptions ?? [],
         boxesPerPallet: 0,
+        boxesPerContainer: 0,
+        palletsPerContainer: 0,
         capacityBoxes: 0,
         pallets: 0,
         packable: false,
@@ -186,9 +197,16 @@ export function PlanContainerisation() {
       const chosen = opts.find((p) => p.id === dl.palletId) || opts[0];
       const boxWeightKg = chosen.boxWeightKg || d.boxWeightKg;
       const tonnes = base.qty * boxWeightKg / 1000;
-      const capacityBoxes = boxWeightKg > 0 ? Math.floor(tonKg / boxWeightKg) : 0;
+      const capacityBoxes =
+        mode === "boxes"
+          ? chosen.totalBoxesPerContainer
+          : boxWeightKg > 0 ? Math.floor(tonKg / boxWeightKg) : 0;
       if (capacityBoxes < 1) {
-        return fail(boxWeightKg > 0 ? "box heavier than container capacity" : "no box weight — set it on the Size/Item master", {
+        const reason =
+          mode === "boxes"
+            ? `no pallets/container on Pallet format “${chosen.name}”`
+            : boxWeightKg > 0 ? "box heavier than container capacity" : "no box weight — set it on the Size/Item master";
+        return fail(reason, {
           designId: d.id,
           boxWeightKg,
           tonnes,
@@ -206,35 +224,45 @@ export function PlanContainerisation() {
         palletName: chosen.name,
         palletOptions,
         boxesPerPallet: chosen.boxesPerPallet,
+        boxesPerContainer: chosen.totalBoxesPerContainer,
+        palletsPerContainer: chosen.totalPalletsPerContainer,
         capacityBoxes,
         pallets: Math.ceil(base.qty / chosen.boxesPerPallet),
         packable: base.qty > 0,
         reason: base.qty > 0 ? undefined : "quantity is 0",
       };
     });
-  }, [draftLines, tonCapacity, designRows, pallets]);
+  }, [draftLines, mode, tonCapacity, designRows, pallets]);
 
   const lines = useMemo(() => rows.filter((r) => r.packable), [rows]);
 
   /* ---- pack item-wise: each container holds a single item, in line order.
-     Each container (by position) fills to its own ton capacity — the global
-     default, or a per-container override (capByIdx). Box capacity converts
-     that container's tonnage by the item's box weight. ---- */
+     Boxes mode: each container's box capacity is the item's Pallet-format
+     boxes-per-container (capTons derived for display only). Weight mode:
+     each container (by position) fills to its own ton capacity — the global
+     default, or a per-container override (capByIdx) — converted to boxes by
+     the item's box weight. ---- */
   const containers = useMemo<PackedContainer[]>(() => {
     const out: PackedContainer[] = [];
     for (const l of lines) {
       let left = l.qty;
       while (left > 0) {
-        const capTons = Math.max(1, capByIdx[out.length] ?? tonCapacity);
-        const capBoxes = l.boxWeightKg > 0 ? Math.floor((capTons * 1000) / l.boxWeightKg) : l.capacityBoxes;
+        const capBoxes =
+          mode === "boxes"
+            ? l.boxesPerContainer
+            : l.boxWeightKg > 0
+              ? Math.floor((Math.max(1, capByIdx[out.length] ?? tonCapacity) * 1000) / l.boxWeightKg)
+              : l.capacityBoxes;
         if (capBoxes < 1) break;
+        const capTons =
+          mode === "boxes" ? capBoxes * l.boxWeightKg / 1000 : Math.max(1, capByIdx[out.length] ?? tonCapacity);
         const take = Math.min(left, capBoxes);
         out.push({ segs: [{ idx: l.idx, boxes: take }], fill: take / capBoxes, capTons, capBoxes });
         left -= take;
       }
     }
     return out;
-  }, [lines, tonCapacity, capByIdx]);
+  }, [lines, mode, tonCapacity, capByIdx]);
 
   // Remaining to plan per line — ordered boxes not yet moved into the Boxes
   // (plan) column: max(0, ordered − qty). New lines (no ordered) contribute 0.
@@ -263,7 +291,8 @@ export function PlanContainerisation() {
     if (!containers.length) return "";
     const plan: ContainerPlan = {
       v: 1,
-      tonCapacity: Math.max(1, tonCapacity),
+      mode,
+      ...(mode === "weight" ? { tonCapacity: Math.max(1, tonCapacity) } : {}),
       containers: containers.map((c, i) => {
         const segLines = c.segs.flatMap((s) => {
           const l = lineOf(s.idx);
@@ -277,14 +306,16 @@ export function PlanContainerisation() {
           pallets: segLines.reduce((s, x) => s + x.pallets, 0),
           boxes: segLines.reduce((s, x) => s + x.boxes, 0),
           tonnes: round1(tonnesIn(c)),
-          tonCapacity: c.capTons,
+          ...(mode === "weight"
+            ? { tonCapacity: c.capTons }
+            : { palletCapacity: lineOf(c.segs[0]?.idx)?.palletsPerContainer ?? 0 }),
           lines: segLines,
         };
       }),
     };
     return JSON.stringify(plan);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [containers, lines, tonCapacity]);
+  }, [containers, lines, mode, tonCapacity]);
 
   /** Colored pallet cells of a container (single item): ceil(boxes / box-per-pallet). */
   const cellsOf = (c: PackedContainer) => {
@@ -302,7 +333,7 @@ export function PlanContainerisation() {
     if (c.fill >= 1 - EPS) return 0;
     const l = lineOf(c.segs[0]?.idx);
     if (!l) return 0;
-    const capCells = Math.max(used, Math.ceil(c.capBoxes / l.boxesPerPallet));
+    const capCells = Math.max(used, mode === "boxes" ? l.palletsPerContainer : Math.ceil(c.capBoxes / l.boxesPerPallet));
     return Math.max(0, capCells - used);
   };
 
@@ -337,7 +368,10 @@ export function PlanContainerisation() {
       if (upBoxes > 0)
         add = {
           headline: `Add ${fmt(upBoxes)} boxes → fill C${sel + 1}`,
-          detail: `${fmt(upBoxes)} more boxes (~${Math.ceil(upBoxes / l.boxesPerPallet)} pallets) of ${l.item} tops C${sel + 1} up to ${fmt(selContainer.capTons)} t.`,
+          detail:
+            mode === "boxes"
+              ? `${fmt(upBoxes)} more boxes (~${Math.ceil(upBoxes / l.boxesPerPallet)} pallets) of ${l.item} tops C${sel + 1} up to ${fmt(l.palletsPerContainer)} pallets.`
+              : `${fmt(upBoxes)} more boxes (~${Math.ceil(upBoxes / l.boxesPerPallet)} pallets) of ${l.item} tops C${sel + 1} up to ${fmt(selContainer.capTons)} t.`,
           apply: () => setLine(l.key, { qty: l.qty + upBoxes }),
         };
       if (boxesIn > 0 && l.qty - boxesIn > 0)
@@ -519,7 +553,13 @@ export function PlanContainerisation() {
                   <td
                     className="num mono"
                     style={{ fontWeight: 600 }}
-                    title={l.capacityBoxes ? `ceil(${fmt(l.qty)} boxes ÷ ${fmt(l.boxesPerPallet)} box/pallet) = ${fmt(l.pallets)} · a ${fmt(tonCapacity)} t container holds ${fmt(l.capacityBoxes)} boxes` : ""}
+                    title={
+                      !l.capacityBoxes
+                        ? ""
+                        : mode === "boxes"
+                          ? `ceil(${fmt(l.qty)} boxes ÷ ${fmt(l.boxesPerPallet)} box/pallet) = ${fmt(l.pallets)} · a container holds ${fmt(l.palletsPerContainer)} pallets = ${fmt(l.capacityBoxes)} boxes`
+                          : `ceil(${fmt(l.qty)} boxes ÷ ${fmt(l.boxesPerPallet)} box/pallet) = ${fmt(l.pallets)} · a ${fmt(tonCapacity)} t container holds ${fmt(l.capacityBoxes)} boxes`
+                    }
                   >
                     {l.capacityBoxes ? fmt(l.pallets) : "—"}
                   </td>
@@ -566,17 +606,29 @@ export function PlanContainerisation() {
               ? `${totalFrac.toFixed(1)} containers filled · ${nContainers} needed · ${round1(totalTonnes).toFixed(1)} t`
               : "No packable quantities yet"}
           </span>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title="Default container weight capacity — override any container below">
-            <span className="dim">Default</span>
-            <NumberInput
-              value={tonCapacity}
-              onChange={(e) => setTonCapacity(Math.max(1, Number(e.target.value) || DEFAULT_TON_CAPACITY))}
-              disabled={!canSave}
-              style={{ width: 70, textAlign: "right" }}
-              aria-label="Default container ton capacity"
-            />
-            <span className="dim">t / container</span>
-          </label>
+          <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Fitting basis" title="Switch fitting basis">
+            <button onClick={() => setMode("boxes")} title="Capacity from the Pallet format: pallets/container × boxes/pallet"
+              style={{ background: mode === "boxes" ? "var(--accent-soft)" : "transparent", color: mode === "boxes" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
+              Box Fitting
+            </button>
+            <button onClick={() => setMode("weight")} title="Capacity from the container's ton limit"
+              style={{ background: mode === "weight" ? "var(--accent-soft)" : "transparent", color: mode === "weight" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
+              Weight Fitting
+            </button>
+          </span>
+          {mode === "weight" && (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title="Default container weight capacity — override any container below">
+              <span className="dim">Default</span>
+              <NumberInput
+                value={tonCapacity}
+                onChange={(e) => setTonCapacity(Math.max(1, Number(e.target.value) || DEFAULT_TON_CAPACITY))}
+                disabled={!canSave}
+                style={{ width: 70, textAlign: "right" }}
+                aria-label="Default container ton capacity"
+              />
+              <span className="dim">t / container</span>
+            </label>
+          )}
         </div>
 
         {/* Container cards — fixed 4-per-row grid so rows stay aligned. */}
@@ -636,21 +688,30 @@ export function PlanContainerisation() {
                   <div style={{ height: 6, background: full ? "var(--c-green)" : "var(--faint)", opacity: full ? 0.45 : 0.6 }} />
                 </div>
                 <div className="mono dim" style={{ fontSize: "var(--t-xs)", padding: "0 2px", display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                  <span>{round1(tonnesIn(c)).toFixed(1)} /</span>
-                  <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
-                    <NumberInput
-                      value={c.capTons}
-                      onChange={(e) => setCap(i, e.target.value)}
-                      disabled={!canSave}
-                      style={{ width: 46, textAlign: "right", padding: "1px 4px", height: 20 }}
-                      aria-label={`Container ${i + 1} ton capacity`}
-                    />
-                  </span>
-                  <span>
-                    t · {fmt(boxesIn)} boxes
-                    {capByIdx[i] != null && <span style={{ color: "var(--accent)" }}> · custom</span>}
-                    {!full && <span style={{ color: "var(--c-amber)" }}> · {fmt(Math.max(0, c.capBoxes - boxesIn))} free</span>}
-                  </span>
+                  {mode === "boxes" ? (
+                    <span>
+                      {fmt(cells.length)} / {fmt(lineOf(c.segs[0]?.idx)?.palletsPerContainer || cells.length)} pallets · {fmt(boxesIn)} boxes · {round1(tonnesIn(c)).toFixed(1)} t
+                      {!full && <span style={{ color: "var(--c-amber)" }}> · {fmt(Math.max(0, c.capBoxes - boxesIn))} free</span>}
+                    </span>
+                  ) : (
+                    <>
+                      <span>{round1(tonnesIn(c)).toFixed(1)} /</span>
+                      <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+                        <NumberInput
+                          value={c.capTons}
+                          onChange={(e) => setCap(i, e.target.value)}
+                          disabled={!canSave}
+                          style={{ width: 46, textAlign: "right", padding: "1px 4px", height: 20 }}
+                          aria-label={`Container ${i + 1} ton capacity`}
+                        />
+                      </span>
+                      <span>
+                        t · {fmt(boxesIn)} boxes
+                        {capByIdx[i] != null && <span style={{ color: "var(--accent)" }}> · custom</span>}
+                        {!full && <span style={{ color: "var(--c-amber)" }}> · {fmt(Math.max(0, c.capBoxes - boxesIn))} free</span>}
+                      </span>
+                    </>
+                  )}
                 </div>
                 <div style={{ height: 2, borderRadius: 2, background: active ? "var(--accent)" : "transparent" }} />
               </div>
@@ -671,7 +732,11 @@ export function PlanContainerisation() {
                 <span className="dim" style={{ fontSize: "var(--t-xs)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                   Inside C{sel + 1}
                 </span>
-                <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{round1(tonnesIn(selContainer)).toFixed(1)} / {fmt(selContainer.capTons)} t</span>
+                <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>
+                  {mode === "boxes"
+                    ? `${fmt(cellsOf(selContainer).length)} / ${fmt(lineOf(selContainer.segs[0]?.idx)?.palletsPerContainer || cellsOf(selContainer).length)} pallets`
+                    : `${round1(tonnesIn(selContainer)).toFixed(1)} / ${fmt(selContainer.capTons)} t`}
+                </span>
               </div>
               {selContainer.segs.map((s, i) => {
                 const l = lineOf(s.idx);
