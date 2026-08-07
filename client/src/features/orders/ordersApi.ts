@@ -7,7 +7,6 @@
    ============================================================ */
 import { list, listAll, remove, update, op, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
-import { invalidateProductionLogs } from "@/features/stages/productionApi";
 import type { Order, TaxType } from "@/data";
 
 const toTaxType = (v: unknown): TaxType =>
@@ -264,8 +263,10 @@ export function deleteOrderItem(orderItemId: string) {
 export function setOrderStatus(salesOrderId: string, status: string, reason?: string) {
   const p = bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason }));
   // Confirmation auto-enqueues the order's items into the production waitlist
-  // server-side, so the production cache is stale. (Cycle-safe: used in a fn.)
-  if (status === "Confirmed") void p.then(() => invalidateProductionLogs());
+  // server-side, so the production cache is stale. Dynamic import breaks the
+  // ordersApi↔productionApi cycle (a static import TDZ-crashes at module init).
+  if (status === "Confirmed")
+    void p.then(() => import("@/features/stages/productionApi").then((m) => m.invalidateProductionLogs()));
   return p;
 }
 
