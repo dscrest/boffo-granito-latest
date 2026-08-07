@@ -269,6 +269,18 @@ export function ProductionTable() {
   const sort = useSortRows(filtered, prodSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "productionPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
+  // One-level section key for the sheet from the selected group dimensions.
+  // Declared before sheetSorted, which calls it inside its useMemo (TDZ else).
+  const groupKeyOf = (g: ProductionRequestGroup): string =>
+    groupBy
+      .map((d) =>
+        d === "item" ? g.designSummary || "—"
+        : d === "customer" ? g.customer || "—"
+        : d === "order" ? g.orderNumber || g.poNumber || (g.independent ? "Independent" : "—")
+        : g.entries[0]?.size || "—",
+      )
+      .join("  ›  ");
+
   // Sheet groups rows into sections by the selected dims (adjacent within page).
   const sheetSorted = useMemo(
     () => (groupBy.length ? [...sort.sorted].sort((a, b) => groupKeyOf(a).localeCompare(groupKeyOf(b))) : sort.sorted),
@@ -361,16 +373,6 @@ export function ProductionTable() {
   };
 
   // One-level section key for the sheet from the selected group dimensions.
-  const groupKeyOf = (g: ProductionRequestGroup): string =>
-    groupBy
-      .map((d) =>
-        d === "item" ? g.designSummary || "—"
-        : d === "customer" ? g.customer || "—"
-        : d === "order" ? g.orderNumber || g.poNumber || (g.independent ? "Independent" : "—")
-        : g.entries[0]?.size || "—",
-      )
-      .join("  ›  ");
-
   // Bulk selection (same master-page convention as OrdersTable). `selected`
   // holds group keys and accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.group));
