@@ -12,7 +12,9 @@ import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
+import { Combobox } from "@/ui/Combobox";
 import type { ProductionEntry, ProductionRecordInput } from "./productionApi";
+import { cachedProductionLogs } from "./productionApi";
 import { NumberInput } from "../../ui/NumberInput";
 
 export function RecordOutputForm({
@@ -39,8 +41,32 @@ export function RecordOutputForm({
 
   const [qty, setQty] = useState(String(remaining));
   const [date, setDate] = useState(entry.productionDate || todayISO());
+  const [batch, setBatch] = useState("");
+  const [shade, setShade] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Seed the batch picker from this design's prior batches so operators can
+  // append output to an existing batch; typing a new value creates it; blank
+  // = server auto-mints B/FY/NNN. One batch = one shade → prefill shade to match.
+  const batchOptions = useMemo(() => {
+    const seen = new Map<string, string>(); // batch → its shade
+    (cachedProductionLogs() || []).forEach((e) =>
+      e.records.forEach((r) => {
+        if (r.design === entry.design && r.batchNumber && !seen.has(r.batchNumber)) seen.set(r.batchNumber, r.shade);
+      }),
+    );
+    return [...seen.keys()].sort().reverse().map((b) => ({ value: b, label: b }));
+  }, [entry.design]);
+  const shadeByBatch = useMemo(() => {
+    const m = new Map<string, string>();
+    (cachedProductionLogs() || []).forEach((e) =>
+      e.records.forEach((r) => {
+        if (r.batchNumber && r.shade && !m.has(r.batchNumber)) m.set(r.batchNumber, r.shade);
+      }),
+    );
+    return m;
+  }, [entry.design]);
 
   const qtyNum = parseInt(qty, 10) || 0;
   const over = qtyNum > cap;
@@ -56,6 +82,8 @@ export function RecordOutputForm({
         qty_boxes: qtyNum,
         production_date: date,
         performed_by: loggedBy,
+        batch_number: batch.trim() || undefined,
+        shade: shade.trim() || undefined,
         note: note.trim() || undefined,
       });
     } finally {
@@ -98,6 +126,21 @@ export function RecordOutputForm({
               <label className="form-field">
                 <span className="lbl">Date</span>
                 <DateInput value={date} onChange={(e) => setDate(e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Batch No. <span className="dim" title="ƒx — blank auto-generates B/FY/NNN">ƒx</span></span>
+                <Combobox
+                  value={batch}
+                  options={batchOptions}
+                  onChange={(v) => { setBatch(v); const s = shadeByBatch.get(v); if (s) setShade(s); }}
+                  onCreate={(label) => setBatch(label.trim())}
+                  placeholder="Blank = auto-generate"
+                  ariaLabel="Batch number"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Shade</span>
+                <input value={shade} onChange={(e) => setShade(e.target.value)} placeholder="e.g. Dark / L2" />
               </label>
               <label className="form-field">
                 <span className="lbl">Logged by</span>

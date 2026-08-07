@@ -40,6 +40,10 @@ export interface ProductionRecordRow {
   shift: string;
   performedBy: string;
   note: string;
+  /** Production batch (B/FY/NNN) this output belongs to. One batch = one shade. */
+  batchNumber: string;
+  /** Shade of the batch (a property recorded once with the batch). */
+  shade: string;
   orderItemId: string;
   createdTime: string;
 }
@@ -68,6 +72,9 @@ export interface ProductionEntry {
   shift: string;
   performedBy: string;
   note: string;
+  /** Batch/shade of the latest recorded output on this line (blank if none). */
+  batchNumber: string;
+  shade: string;
   /** SO link — empty on independent production. */
   salesOrderId: string;
   orderItemId: string;
@@ -150,6 +157,8 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
       shift: str(r.shift),
       performedBy: str(r.performed_by),
       note: str(r.note),
+      batchNumber: str(r.batch_number),
+      shade: str(r.shade),
       orderItemId: str(r.order_item),
       createdTime: str(r.CREATEDTIME),
     };
@@ -168,6 +177,7 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
       const id = String(r.ROWID);
       const records = (recordsByParent.get(id) ?? []).sort((a, b) => (a.createdTime < b.createdTime ? -1 : 1));
       const producedSoFar = num(r.qty_boxes) + records.reduce((s, rec) => s + rec.qtyBoxes, 0);
+      const lastRec = records[records.length - 1];
       return {
         id,
         designId,
@@ -185,6 +195,8 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
         shift: str(r.shift),
         performedBy: str(r.performed_by),
         note: str(r.note),
+        batchNumber: lastRec ? lastRec.batchNumber : "",
+        shade: lastRec ? lastRec.shade : "",
         salesOrderId: soId,
         orderItemId: str(r.order_item),
         orderNumber: so ? str(so.order_number) : "",
@@ -224,6 +236,9 @@ export interface ProductionRecordInput {
   shift?: string;
   performed_by?: string;
   note?: string;
+  /** Batch number; blank → server auto-mints B/FY/NNN. One batch = one shade. */
+  batch_number?: string;
+  shade?: string;
 }
 
 /* Requests / approvals don't move counters — only production cache is stale.
@@ -254,7 +269,7 @@ export function setProductionStatus(group: string, status: "Approved" | "Rejecte
 
 /** Record actual output on a plan line → inserts a dated record child, bumps produced. */
 export function recordProduction(rowid: string, input: ProductionRecordInput) {
-  return bust(op<{ produced_qty_boxes?: number; recorded?: number }>(`production-record/${encodeURIComponent(rowid)}`, input));
+  return bust(op<{ produced_qty_boxes?: number; recorded?: number; batch_number?: string }>(`production-record/${encodeURIComponent(rowid)}`, input));
 }
 
 /** Move a production to a Kanban stage (manual) — sets `stage` on its plan lines.

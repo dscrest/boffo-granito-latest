@@ -784,6 +784,150 @@ function AgingReport() {
   );
 }
 
+/* ─────────────────────────── Production batches (batch/date-wise) ─────────────────────────── */
+
+interface BatchRow {
+  key: string;
+  batch: string;
+  shade: string;
+  design: string;
+  boxes: number;
+  date: string;
+  lines: number;
+}
+
+function BatchReport() {
+  const [entries, setEntries] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const [loaded, setLoaded] = useState(() => cachedProductionLogs() != null);
+  const [error, setError] = useState<string | null>(null);
+  const [date, setDate] = useState<DateRangeState>({ from: "", to: "" });
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
+
+  useEffect(() => {
+    void listProductionLogs().then((r) => {
+      if (!r.ok) setError(r.error || "Failed to load production log");
+      else { setError(null); setEntries(r.entries); }
+      setLoaded(true);
+    });
+  }, []);
+
+  // One row per production batch, summing its dated output records. One batch =
+  // one shade, so shade/design are taken from the batch's records.
+  const allRows = useMemo<BatchRow[]>(() => {
+    const m = new Map<string, BatchRow & { earliest: string }>();
+    for (const e of entries) {
+      for (const rec of e.records) {
+        if (!rec.batchNumber) continue;
+        const when = rec.productionDate || rec.createdTime.slice(0, 10);
+        const r =
+          m.get(rec.batchNumber) ??
+          { key: rec.batchNumber, batch: rec.batchNumber, shade: rec.shade || "—", design: rec.design || e.design || "—", boxes: 0, date: when, lines: 0, earliest: when };
+        r.boxes += rec.qtyBoxes;
+        r.lines += 1;
+        if (when && (!r.earliest || when < r.earliest)) { r.earliest = when; r.date = when; }
+        if (rec.shade && r.shade === "—") r.shade = rec.shade;
+        m.set(rec.batchNumber, r);
+      }
+    }
+    return [...m.values()].map(({ earliest: _e, ...r }) => r);
+  }, [entries]);
+
+  const fields = useMemo<FilterField<BatchRow>[]>(
+    () => [
+      { key: "design", label: "Design", type: "select", options: distinct(allRows.map((r) => r.design)), get: (r) => r.design },
+      { key: "shade", label: "Shade", type: "select", options: distinct(allRows.map((r) => r.shade)), get: (r) => r.shade },
+      { key: "batch", label: "Batch", type: "text", get: (r) => r.batch },
+    ],
+    [allRows],
+  );
+  const rows = useMemo(
+    () => applyFilters(allRows.filter((r) => inDateRange(r.date, date)), criteria, fields),
+    [allRows, date, criteria, fields],
+  );
+
+  const tot = useMemo(() => rows.reduce((a, r) => ({ boxes: a.boxes + r.boxes, lines: a.lines + r.lines }), { boxes: 0, lines: 0 }), [rows]);
+  const sort = useSortRows(rows, (r, k) => (r as unknown as Record<string, number | string>)[k], "date", -1);
+  const pager = usePagination(rows.length, "reportBatchPageSize", `${date.from}|${date.to}|${JSON.stringify(criteria)}|${sort.sortKey}|${sort.dir}`);
+  const pageRows = pager.slice(sort.sorted);
+
+  const kpis: KpiSpec[] = [
+    { label: "Batches", value: fmt(rows.length) },
+    { label: "Boxes produced", value: fmt(tot.boxes), color: "var(--c-blue)" },
+    { label: "Shades", value: fmt(distinct(rows.map((r) => (r.shade === "—" ? "" : r.shade))).length) },
+  ];
+
+  return (
+    <ReportShell
+      title="Production Batches"
+      subtitle="Boxes produced per batch and shade — batch/date-wise, live data"
+      kpis={kpis}
+      date={{ value: date, onChange: setDate }}
+      filter={{ title: "batches", fields, criteria, onChange: setCriteria }}
+      csv={{
+        name: "report-production-batches",
+        rows,
+        columns: [
+          { header: "Batch", value: (r) => r.batch },
+          { header: "Shade", value: (r) => r.shade },
+          { header: "Design", value: (r) => r.design },
+          { header: "Boxes", value: (r) => r.boxes },
+          { header: "Date", value: (r) => r.date },
+        ],
+      }}
+    >
+      {error && <ErrorCard message={error} onRetry={() => setLoaded(false)} />}
+      {!loaded && entries.length === 0 ? (
+        <SkeletonRows rows={8} />
+      ) : (
+        <div className="card">
+          <div style={{ overflow: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <SortTh id="batch" label="Batch" sort={sort} />
+                  <SortTh id="shade" label="Shade" sort={sort} />
+                  <SortTh id="design" label="Design" sort={sort} />
+                  <SortTh id="date" label="Date" sort={sort} />
+                  <SortTh id="boxes" label="Boxes" sort={sort} className="num" style={numTh} />
+                  <SortTh id="lines" label="Entries" sort={sort} className="num" style={numTh} />
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="mono" style={{ color: "var(--fg)" }}>{r.batch}</td>
+                    <td>{r.shade}</td>
+                    <td>{r.design}</td>
+                    <td className="mono muted">{r.date || "—"}</td>
+                    <td className="num mono">{fmt(r.boxes)}</td>
+                    <td className="num mono">{fmt(r.lines)}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ padding: 0 }}>
+                      <EmptyState icon="factory" title="No batches yet" hint="Record production output to see batches here." />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {rows.length > 0 && (
+                <TotalsRow>
+                  <td>Total</td>
+                  <td className="muted" colSpan={3}>{rows.length} batches</td>
+                  <td className="num mono">{fmt(tot.boxes)}</td>
+                  <td className="num mono">{fmt(tot.lines)}</td>
+                </TotalsRow>
+              )}
+            </table>
+          </div>
+          <GridFooter {...pager} />
+        </div>
+      )}
+    </ReportShell>
+  );
+}
+
 /* ─────────────────────────── Registry + dispatcher ─────────────────────────── */
 
 export type ReportSection = "Sales" | "Customer" | "Item" | "Inventory";
@@ -802,6 +946,7 @@ export const REPORTS: ReportDef[] = [
   { id: "customer-sales", title: "Customer Sales", subtitle: "Revenue and volume per customer", icon: "users", Component: () => <SalesReport groupBy="customer" /> },
   { id: "salesperson-sales", title: "Salesperson Sales", subtitle: "Revenue and volume per sales person", icon: "user", Component: () => <SalesReport groupBy="salesperson" /> },
   { id: "size", title: "Size-wise", subtitle: "Ordered boxes grouped by size", icon: "tile", Component: SizeReport },
+  { id: "production-batches", title: "Production Batches", subtitle: "Boxes produced per batch and shade, batch/date-wise", icon: "factory", Component: BatchReport },
   { id: "stock", title: "Live Stock", subtitle: "Opening + produced − loaded, per design", icon: "package", Component: StockReport },
   { id: "ready", title: "Ready Pallets", subtitle: "Closed batches awaiting loading", icon: "truck", Component: ReadyReport },
   { id: "aging", title: "Quote Aging", subtitle: "Where quotes are stuck", icon: "clock", Component: AgingReport },
@@ -811,8 +956,8 @@ export const REPORTS: ReportDef[] = [
 export const REPORT_SECTIONS: { section: ReportSection; icon: string; ids: string[] }[] = [
   { section: "Sales", icon: "chart", ids: ["by-po", "salesperson-sales", "size"] },
   { section: "Customer", icon: "users", ids: ["customer-sales", "aging"] },
-  { section: "Item", icon: "tile", ids: ["by-item", "size"] },
-  { section: "Inventory", icon: "package", ids: ["stock", "ready"] },
+  { section: "Item", icon: "tile", ids: ["by-item", "size", "production-batches"] },
+  { section: "Inventory", icon: "package", ids: ["stock", "ready", "production-batches"] },
 ];
 
 const BY_ID = Object.fromEntries(REPORTS.map((r) => [r.id, r]));

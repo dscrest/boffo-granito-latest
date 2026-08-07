@@ -5,7 +5,7 @@
    detail, not here. "Send for Production" creates a request (goes to
    Approvals). Row click / Production-ID link opens the detail; output is
    recorded there, per line. */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
@@ -14,6 +14,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
+import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
@@ -141,12 +142,15 @@ export function ProductionTable() {
   // the completed pile). Seed from the persisted view so a board reload starts on All.
   const [tab, setTab] = useState(() => (localStorage.getItem("productionView") === "board" ? "all" : "pending"));
   // View persists across visits (board stays board until switched back).
-  const [view, setView] = useState<"grid" | "board">(() => (localStorage.getItem("productionView") === "board" ? "board" : "grid"));
+  const [view, setView] = useState<"grid" | "board" | "sheet">(() => {
+    const v = localStorage.getItem("productionView");
+    return v === "board" || v === "sheet" ? v : "grid";
+  });
   useEffect(() => {
     localStorage.setItem("productionView", view);
   }, [view]);
-  // Switching view snaps the filter back to that view's default (board=All, grid=Pending).
-  const changeView = (v: "grid" | "board") => {
+  // Switching view snaps the filter back to that view's default (board=All; grid/sheet=Pending).
+  const changeView = (v: "grid" | "board" | "sheet") => {
     setView(v);
     setTab(v === "board" ? "all" : "pending");
   };
@@ -182,6 +186,8 @@ export function ProductionTable() {
   // Logging output (the `+` on a card, or dragging a remaining card → Completed)
   // opens the record dialog; all output flows through recordProduction.
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
+  // Sheet view: in-flight inline qty edits, keyed by production-line id.
+  const [qtyEdits, setQtyEdits] = useState<Record<string, string>>({});
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
@@ -263,6 +269,13 @@ export function ProductionTable() {
   const sort = useSortRows(filtered, prodSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "productionPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(sort.sorted);
+  // Sheet groups rows into sections by the selected dims (adjacent within page).
+  const sheetSorted = useMemo(
+    () => (groupBy.length ? [...sort.sorted].sort((a, b) => groupKeyOf(a).localeCompare(groupKeyOf(b))) : sort.sorted),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sort.sorted, groupBy],
+  );
+  const sheetRows = pager.slice(sheetSorted);
 
   const tabCount = (t: (typeof TABS)[number]) =>
     t.match
@@ -316,6 +329,47 @@ export function ProductionTable() {
     invalidateProductionLogs();
     await load();
   };
+
+  // ---- Sheet view: inline commit of produced qty + stage ----
+  // Editing the Produced cell records the DELTA over what's already logged (a
+  // batch auto-mints; use RecordOutputForm/detail to set batch+shade explicitly).
+  // Lowering produced isn't clawed back here — do that on the detail page.
+  const commitQty = async (e: ProductionEntry) => {
+    const raw = qtyEdits[e.id];
+    setQtyEdits((p) => { const n = { ...p }; delete n[e.id]; return n; });
+    if (raw == null) return;
+    const newTotal = Math.max(0, parseInt(raw, 10) || 0);
+    const delta = newTotal - e.producedSoFar;
+    if (delta === 0) return;
+    if (delta < 0) { toast.error("Lowering produced isn't supported here — use the detail page"); return; }
+    const orderCap = e.orderItemId ? Math.max(0, e.ordered - e.produced) : Infinity;
+    const capped = Math.min(delta, e.qtyRequested - e.producedSoFar, orderCap);
+    if (capped <= 0) { toast.error("Nothing left to produce on this line"); return; }
+    const res = await recordProduction(e.id, { qty_boxes: capped });
+    if (!res.ok) { toast.error(res.error || "Record failed"); return; }
+    if (e.producedSoFar + capped >= e.qtyRequested) await setProductionStage([e.id], "Completed");
+    toast.success(`+${fmt(capped)} boxes${res.data?.batch_number ? ` · ${res.data.batch_number}` : ""}`);
+    invalidateProductionLogs();
+    await load();
+  };
+  const commitStage = async (e: ProductionEntry, stage: ProductionStage) => {
+    if (stage === e.stage) return;
+    const res = await setProductionStage([e.id], stage);
+    if (!res.ok) { toast.error(res.error || "Could not change stage"); return; }
+    invalidateProductionLogs();
+    await load();
+  };
+
+  // One-level section key for the sheet from the selected group dimensions.
+  const groupKeyOf = (g: ProductionRequestGroup): string =>
+    groupBy
+      .map((d) =>
+        d === "item" ? g.designSummary || "—"
+        : d === "customer" ? g.customer || "—"
+        : d === "order" ? g.orderNumber || g.poNumber || (g.independent ? "Independent" : "—")
+        : g.entries[0]?.size || "—",
+      )
+      .join("  ›  ");
 
   // Bulk selection (same master-page convention as OrdersTable). `selected`
   // holds group keys and accumulates across pages.
@@ -402,23 +456,23 @@ export function ProductionTable() {
         </span>
         <AdvancedFilterButton title="Production" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-          {(["grid", "board"] as const).map((v) => (
+          {(["grid", "sheet", "board"] as const).map((v) => (
             <button
               key={v}
               type="button"
               onClick={() => changeView(v)}
-              title={v === "grid" ? "Table view" : "Kanban board"}
+              title={v === "grid" ? "Table view" : v === "sheet" ? "Sheet — inline edit qty & stage" : "Kanban board"}
               style={{
                 background: view === v ? "var(--accent-soft)" : "transparent",
                 color: view === v ? "var(--fg)" : "var(--muted)",
                 border: 0, padding: "4px 8px", cursor: "pointer", font: "inherit", display: "inline-flex", alignItems: "center",
               }}
             >
-              <Icon name={v === "grid" ? "columns" : "kanban"} size={13} />
+              <Icon name={v === "grid" ? "columns" : v === "sheet" ? "edit" : "kanban"} size={13} />
             </button>
           ))}
         </div>
-        {view === "board" && (
+        {(view === "board" || view === "sheet") && (
           <ColumnPicker
             columns={groupCols}
             hidden={groupHidden}
@@ -427,7 +481,7 @@ export function ProductionTable() {
             onClear={() => setGroupBy([])}
             label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
             icon="menu"
-            title="Group the board into nested swimlanes — check dimensions, drag to set nesting order"
+            title="Group into sections — check dimensions, drag to set order"
           />
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
@@ -446,6 +500,100 @@ export function ProductionTable() {
         ) : (
           <ProductionKanban groups={filtered} groupBy={groupBy} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} onRecord={onRecord} />
         )
+      ) : view === "sheet" ? (
+        <div className="card">
+          <div style={{ overflow: "auto" }}>
+            {loading && entries.length === 0 ? (
+              <SkeletonRows rows={6} />
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <SortTh id="code" label="Production ID" sort={sort} />
+                    <th>Design</th>
+                    <th>Order</th>
+                    <th>Customer</th>
+                    <th className="num" style={{ textAlign: "right" }}>Requested</th>
+                    <th className="num" style={{ textAlign: "right", width: 120 }}>Produced</th>
+                    <th style={{ width: 150 }}>Stage</th>
+                    <th>Batch</th>
+                    <th>Shade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const out: ReactNode[] = [];
+                    let prevKey: string | null = null;
+                    for (const g of sheetRows) {
+                      const e = g.entries[0];
+                      if (groupBy.length) {
+                        const key = groupKeyOf(g);
+                        if (key !== prevKey) {
+                          prevKey = key;
+                          out.push(
+                            <tr key={`h-${key}`}>
+                              <td colSpan={9} style={{ background: "var(--bg-2)", fontWeight: 600 }}>{key}</td>
+                            </tr>,
+                          );
+                        }
+                      }
+                      const remaining = Math.max(0, e.qtyRequested - e.producedSoFar);
+                      const detail = `/prod/${encodeURIComponent(productionDetailKey(e))}`;
+                      out.push(
+                        <tr key={g.group}>
+                          <td className="mono">
+                            <Link className="linkish" to={detail} title="View production">{g.code}</Link>
+                          </td>
+                          <td><span className="design-name">{g.designSummary}</span></td>
+                          <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
+                          <td>{g.customer || (g.independent ? "—" : "")}</td>
+                          <td className="num mono" style={{ textAlign: "right" }}>{fmt(e.qtyRequested)}</td>
+                          <td className="num">
+                            {canEdit ? (
+                              <NumberInput
+                                value={qtyEdits[e.id] ?? String(e.producedSoFar)}
+                                onChange={(ev) => setQtyEdits((p) => ({ ...p, [e.id]: ev.target.value }))}
+                                onBlur={() => void commitQty(e)}
+                                onKeyDown={(ev) => { if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); }}
+                                min={0}
+                                style={{ width: 90, textAlign: "right" }}
+                                title={`${fmt(remaining)} still to produce`}
+                              />
+                            ) : (
+                              fmt(e.producedSoFar)
+                            )}
+                          </td>
+                          <td>
+                            {canEdit ? (
+                              <select value={e.stage} onChange={(ev) => void commitStage(e, ev.target.value as ProductionStage)}>
+                                {PRODUCTION_STAGE_ORDER.map((s) => (
+                                  <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              stageChip(e.stage).label
+                            )}
+                          </td>
+                          <td className="mono">{e.batchNumber || "—"}</td>
+                          <td>{e.shade || "—"}</td>
+                        </tr>,
+                      );
+                    }
+                    if (!loading && sheetRows.length === 0) {
+                      out.push(
+                        <tr key="empty">
+                          <td colSpan={9}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                        </tr>,
+                      );
+                    }
+                    return out;
+                  })()}
+                </tbody>
+              </table>
+            )}
+          </div>
+          {!(loading && entries.length === 0) && <GridFooter {...pager} />}
+        </div>
       ) : (
       <div className="card">
         <div style={{ overflow: "auto" }}>

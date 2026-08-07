@@ -37,6 +37,7 @@ import {
   sharedCapacity,
   updateLoadBox,
   type LoadBox,
+  type LoadingCapture,
   type PalPlan,
   type PalPlanLine,
   type PalLineStatus,
@@ -274,23 +275,25 @@ export function DispatchBoard({
     after(res.ok, res.error || "Could not load the item", `${line.itemCode} → ${label}`);
   };
 
-  const dispatchBox = async (box: LoadBox) => {
+  const dispatchBox = async (box: LoadBox, capture?: LoadingCapture) => {
     setBusy(true);
-    const res = await dispatchLoadBox(box.id);
+    const res = await dispatchLoadBox(box.id, capture);
     setBusy(false);
     after(res.ok, res.error || "Could not dispatch", `${boxLabel(box)} dispatched`);
   };
 
-  const assignVehicle = async (vehicleId: string) => {
+  const assignVehicle = async (vehicleId: string, capture: LoadingCapture) => {
     const t = vehModal;
     setVehModal(null);
     if (!t) return;
     setBusy(true);
-    const res = await updateLoadBox(t.box.id, { vehicle: vehicleId });
+    // Only send `vehicle` when chosen (server rejects an empty vehicle); a box
+    // already carrying a vehicle just gets its loading-capture fields updated.
+    const res = await updateLoadBox(t.box.id, { ...(vehicleId ? { vehicle: vehicleId } : {}), ...capture });
     setBusy(false);
     if (t.dispatch) {
       if (!res.ok) { after(false, res.error || "Could not assign vehicle", ""); return; }
-      await dispatchBox(t.box);
+      await dispatchBox(t.box, capture);
       return;
     }
     after(res.ok, res.error || "Could not assign vehicle", "Vehicle assigned");
@@ -740,7 +743,7 @@ export function DispatchBoard({
                     disabled={busy || inBox.length === 0}
                     title={inBox.length === 0 ? "Load at least one item" : "Dispatch this vehicle"}
                     style={{ marginLeft: "auto", height: 24, padding: "0 10px", fontSize: "var(--t-sm)", display: "inline-flex", alignItems: "center", gap: 4, flex: "0 0 auto" }}
-                    onClick={(ev) => { ev.stopPropagation(); box.vehicleId ? void dispatchBox(box) : setVehModal({ box, dispatch: true }); }}
+                    onClick={(ev) => { ev.stopPropagation(); setVehModal({ box, dispatch: true }); }}
                   >
                     <Icon name="check" size={11} /> {pct >= 100 ? "Seal & dispatch" : `Dispatch at ${pct}%`}
                   </button>
@@ -943,7 +946,14 @@ export function DispatchBoard({
         <VehicleLoadModal
           palNumber={boxLabel(vehModal.box)}
           busy={busy}
-          onConfirm={(vehicleId) => void assignVehicle(vehicleId)}
+          initialVehicleId={vehModal.box.vehicleId}
+          initialCapture={{
+            container_number: vehModal.box.containerNumber,
+            line_seal: vehModal.box.lineSeal,
+            electronic_seal: vehModal.box.electronicSeal,
+            loading_supervisor: vehModal.box.loadingSupervisor,
+          }}
+          onConfirm={(vehicleId, capture) => void assignVehicle(vehicleId, capture)}
           onClose={() => setVehModal(null)}
         />
       )}

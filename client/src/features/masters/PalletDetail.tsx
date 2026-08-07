@@ -20,7 +20,7 @@ import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { PalletPackForm } from "@/features/stages/PalletPackForm";
-import { closePallet, type ClosePalletInput } from "@/features/stages/palletisationApi";
+import { closePallet, combineLeftovers, type ClosePalletInput, type CombineLeftoversInput } from "@/features/stages/palletisationApi";
 import { PalletForm } from "./PalletForm";
 import {
   cachedPalletOrders,
@@ -145,7 +145,7 @@ export function PalletDetail() {
 
   // Pack an order onto this spec without leaving for the Palletization stage.
   // The saga busts the pallet-orders cache, so Associated Orders refetches.
-  const onPalletize = async (inputs: ClosePalletInput[]) => {
+  const onPalletize = async (inputs: ClosePalletInput[], mixed?: CombineLeftoversInput[]) => {
     let done = 0;
     let boxes = 0;
     for (const input of inputs) {
@@ -153,6 +153,16 @@ export function PalletDetail() {
       if (!res.ok) {
         // Keep the form open — closing here would discard everything typed.
         toast.error(res.error || "Palletisation failed");
+        await refreshOrders();
+        return;
+      }
+      done += 1;
+      boxes += res.data?.boxes_packed ?? 0;
+    }
+    for (const m of mixed ?? []) {
+      const res = await combineLeftovers(m);
+      if (!res.ok) {
+        toast.error(res.error || "Mixed-pallet combine failed");
         await refreshOrders();
         return;
       }

@@ -7,6 +7,7 @@
    ============================================================ */
 import { list, listAll, remove, update, op, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { invalidateProductionLogs } from "@/features/stages/productionApi";
 import type { Order, TaxType } from "@/data";
 
 const toTaxType = (v: unknown): TaxType =>
@@ -261,7 +262,11 @@ export function deleteOrderItem(orderItemId: string) {
     validates the transition, requires approval rights for verdicts, logs a
     StatusTransition row, and notifies the salesperson). */
 export function setOrderStatus(salesOrderId: string, status: string, reason?: string) {
-  return bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason }));
+  const p = bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason }));
+  // Confirmation auto-enqueues the order's items into the production waitlist
+  // server-side, so the production cache is stale. (Cycle-safe: used in a fn.)
+  if (status === "Confirmed") void p.then(() => invalidateProductionLogs());
+  return p;
 }
 
 /** Manual stage advance — only the judgment transitions (po→prod→qc→packing).

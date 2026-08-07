@@ -44,10 +44,10 @@
 | Design | 76673000000052723 | Product/design master |
 | Glaze | 76673000000053001 | Lookup |
 | OrderItemEvent | 76673000000053367 | Qty-stage audit events |
-| PalletisedBatchLine | 76673000000053726 | Batch↔OrderItem allocation |
+| PalletisedBatchLine | 69851000000041727 | Batch↔OrderItem allocation |
 | Quote | 76673000000054021 | Quotes |
 | Activity | 76673000000054380 | Generic activity feed |
-| PalletisedBatch | 76673000000055018 | Packed pallet batches |
+| PalletisedBatch | 69851000000051080 | Packed pallet batches (incl. mixed pallets) |
 | Container | 76673000000055377 | Shipping containers |
 | OperationLog | 76673000000056094 | Mutation op log (data-ops) |
 | ContainerLoading | 76673000000058115 | Container↔Batch loading |
@@ -492,6 +492,10 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | design | bigint | Design ROWID (logical FK) |
 | sales_order | bigint | SalesOrder ROWID — null on independent (logical FK) |
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
+| batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
+| shade | varchar(60) | shade of the batch (one batch = one shade) — added 2026-08-07 |
+
+Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`. **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
 
 ### Invoice (76673000000047747)
 | Column | Type | Notes |
@@ -508,7 +512,7 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 
 ## Logistics
 
-### PalletisedBatch (76673000000055018)
+### PalletisedBatch (live id 69851000000051080)
 | Column | Type | Notes |
 |---|---|---|
 | boxes_packed | int | |
@@ -517,15 +521,20 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | remarks | text(10000) | |
 | sales_order | FK → SalesOrder | SET-NULL |
 | pallet | FK → Pallet | SET-NULL |
-| design | FK → Design | SET-NULL |
+| design | FK → Design | SET-NULL (null on a mixed pallet) |
 | is_demo | boolean, default false | demo pool flag (fit tier 3) |
+| is_mixed | boolean, default false | mixed pallet — combined sub-pallet leftovers across items (design null; batch/shade per line). Created via `/combine-leftovers` — added 2026-08-07 |
+| batch_number | varchar(40) | denormalised header batch for a single-batch pallet's slip (blank on mixed) — added 2026-08-07 |
+| shade | varchar(60) | header shade for a single-batch pallet (blank on mixed) — added 2026-08-07 |
 
-### PalletisedBatchLine (76673000000053726)
+### PalletisedBatchLine (live id 69851000000041727)
 | Column | Type | Notes |
 |---|---|---|
 | boxes | int | |
 | batch | FK → PalletisedBatch | **CASCADE** |
 | order_item | FK → OrderItem | SET-NULL |
+| batch_number | varchar(40) | per-line production batch — mixed-pallet truth (each leftover keeps its own) — added 2026-08-07 |
+| shade | varchar(60) | per-line shade — added 2026-08-07 |
 
 ### Container (76673000000055377)
 | Column | Type | Notes |
@@ -594,6 +603,10 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | capacity | int | advisory boxes-per-vehicle (default 1000) |
 | status | varchar(20) | Open / Dispatched |
 | dispatch_date | date | stamped on dispatch (IST) |
+| container_number | varchar(50) | loading capture; set via `/load-box-update` or `/load-box-dispatch` — added 2026-08-07 |
+| line_seal | varchar(50) | loading capture — added 2026-08-07 |
+| electronic_seal | varchar(50) | loading capture — added 2026-08-07 |
+| loading_supervisor | varchar(120) | loading capture — added 2026-08-07 |
 | deleted_at | datetime | soft delete |
 
 ---

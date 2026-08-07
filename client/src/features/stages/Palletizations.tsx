@@ -17,7 +17,7 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { PalletPackForm } from "./PalletPackForm";
-import { closePallet, listPalletisations, type ClosePalletInput, type PalletisationRow } from "./palletisationApi";
+import { closePallet, combineLeftovers, listPalletisations, type ClosePalletInput, type CombineLeftoversInput, type PalletisationRow } from "./palletisationApi";
 
 const statusLabel = (r: PalletisationRow) => (r.loaded ? "Loaded" : "Palletised");
 
@@ -103,8 +103,9 @@ export function Palletizations() {
     if (presetOrderId) setParams({}, { replace: true }); // drop ?fromOrder
   };
 
-  // One batch is committed per distinct pallet chosen on the lines.
-  const onSave = async (inputs: ClosePalletInput[]) => {
+  // One batch is committed per distinct pallet chosen on the lines; leftovers
+  // combine into mixed pallets.
+  const onSave = async (inputs: ClosePalletInput[], mixed?: CombineLeftoversInput[]) => {
     setError(null);
     let done = 0;
     let boxes = 0;
@@ -113,6 +114,17 @@ export function Palletizations() {
       if (!res.ok) {
         setError(res.error || "Palletisation failed");
         toast.error(res.error || "Palletisation failed");
+        void load();
+        return;
+      }
+      done += 1;
+      boxes += res.data?.boxes_packed ?? 0;
+    }
+    for (const m of mixed ?? []) {
+      const res = await combineLeftovers(m);
+      if (!res.ok) {
+        setError(res.error || "Mixed-pallet combine failed");
+        toast.error(res.error || "Mixed-pallet combine failed");
         void load();
         return;
       }
@@ -158,7 +170,7 @@ export function Palletizations() {
         <PalletPackForm
           presetOrderId={presetOrderId || undefined}
           autoFillAll={!!presetOrderId}
-          onSave={(i) => void onSave(i)}
+          onSave={(i, m) => void onSave(i, m)}
           onClose={closeForm}
         />
       )}
@@ -212,7 +224,10 @@ export function Palletizations() {
                     onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget && r.salesOrderId) navigate(`/orders/${encodeURIComponent(r.salesOrderId)}`); }}
                     style={{ cursor: r.salesOrderId ? "pointer" : "default" }}
                   >
-                    <td><span className="design-name">{r.design}</span></td>
+                    <td>
+                      <span className="design-name">{r.design}</span>
+                      {r.isMixed && <span className="pill" style={{ marginLeft: 6, background: "var(--c-violet, var(--c-blue))", color: "#fff" }}>Mixed</span>}
+                    </td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}

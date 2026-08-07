@@ -15,7 +15,14 @@ import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
-import { listPalletizable, type ClosePalletInput, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
+import {
+  listPalletizable,
+  packRemaindersIntoMixed,
+  type ClosePalletInput,
+  type CombineLeftoversInput,
+  type PalletizableItem,
+  type PalletizableOrder,
+} from "./palletisationApi";
 import { NumberInput } from "../../ui/NumberInput";
 
 // Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
@@ -29,8 +36,9 @@ export function PalletPackForm({
   preselectItemIds,
   autoFillAll,
 }: {
-  /** One batch per distinct pallet chosen across the lines. */
-  onSave: (inputs: ClosePalletInput[]) => void | Promise<void>;
+  /** One batch per distinct pallet chosen across the lines, plus any mixed
+      pallets combining sub-pallet leftovers. */
+  onSave: (inputs: ClosePalletInput[], mixed?: CombineLeftoversInput[]) => void | Promise<void>;
   onClose: () => void;
   /** When set, scope the form to one confirmed Sales Order (locked select). */
   presetOrderId?: string;
@@ -51,6 +59,14 @@ export function PalletPackForm({
   const [remarks, setRemarks] = useState("");
   const [needByItem, setNeedByItem] = useState<Record<string, number>>({});
   const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
+  // Auto-combine sub-pallet leftovers across items into a real mixed pallet.
+  const [combineMix, setCombineMix] = useState(true);
+
+  const palletById = useMemo(() => {
+    const m = new Map<string, PalletRow>();
+    pallets.forEach((p) => m.set(p.id, p));
+    return m;
+  }, [pallets]);
 
   useEffect(() => {
     void (async () => {
@@ -125,15 +141,44 @@ export function PalletPackForm({
   // (palletization is just the warehouse indicator now). Revive from git if the
   // Loading form wants the same VehicleFillBar.
 
-  // Group lines by chosen pallet → one PalletisedBatch per pallet.
-  const batches = useMemo(() => {
-    const by = new Map<string, { order_item: string; boxes: number }[]>();
+  // Split each line into whole-pallet boxes + a sub-pallet leftover (against the
+  // chosen pallet's capacity). Full boxes → one PalletisedBatch per pallet;
+  // leftovers (when combining) → real mixed pallet(s) grouped by pallet type.
+  const { batches, mixedInputs, remByItem, fullPalletsTotal, mixBoxesTotal } = useMemo(() => {
+    const remByItem: Record<string, number> = {};
+    const fullByPallet = new Map<string, { order_item: string; boxes: number }[]>();
+    const remByPallet = new Map<string, { order_item: string; boxes: number }[]>();
+    let fullPalletsTotal = 0;
+    let mixBoxesTotal = 0;
     for (const l of saveLines) {
       if (!l.pallet) continue;
-      (by.get(l.pallet) ?? by.set(l.pallet, []).get(l.pallet)!).push({ order_item: l.order_item, boxes: l.boxes });
+      const bpp = palletById.get(l.pallet)?.boxesPerPallet || 0;
+      const physicalRem = bpp > 0 ? l.boxes % bpp : 0; // leftover regardless of the toggle
+      remByItem[l.order_item] = physicalRem;
+      // Only route to a mixed pallet when combining; else the whole qty stays in
+      // its own batch (leftover boxes ride along on the last partial pallet).
+      const rem = combineMix ? physicalRem : 0;
+      const full = l.boxes - rem;
+      if (bpp > 0) fullPalletsTotal += Math.floor(full / bpp);
+      if (full > 0) (fullByPallet.get(l.pallet) ?? fullByPallet.set(l.pallet, []).get(l.pallet)!).push({ order_item: l.order_item, boxes: full });
+      if (rem > 0) {
+        mixBoxesTotal += rem;
+        (remByPallet.get(l.pallet) ?? remByPallet.set(l.pallet, []).get(l.pallet)!).push({ order_item: l.order_item, boxes: rem });
+      }
     }
-    return [...by.entries()].map(([pallet, lines]) => ({ pallet, lines }));
-  }, [saveLines]);
+    const batches = [...fullByPallet.entries()].map(([pallet, lines]) => ({ pallet, lines }));
+    const mixedInputs: CombineLeftoversInput[] = [];
+    for (const [pallet, rems] of remByPallet) {
+      const bpp = palletById.get(pallet)?.boxesPerPallet || 0;
+      const splits = rems.map((r) => ({ item: { orderItemId: r.order_item, salesOrderId: orderId, qty: r.boxes, boxesPerPallet: bpp }, fullPallets: 0, remainder: r.boxes }));
+      for (const mp of packRemaindersIntoMixed(splits, bpp)) {
+        mixedInputs.push({ sales_order: orderId, pallet, lines: mp.lines });
+      }
+    }
+    return { batches, mixedInputs, remByItem, fullPalletsTotal, mixBoxesTotal };
+  }, [saveLines, palletById, combineMix, orderId]);
+  const leftoverTotal = Object.values(remByItem).reduce((s, v) => s + v, 0);
+  const anyRemainder = leftoverTotal > 0;
 
   const missing = !orderId || saveLines.length === 0 || linesNeedingPallet > 0;
   const [showErrors, setShowErrors] = useState(false);
@@ -155,6 +200,7 @@ export function PalletPackForm({
           remarks: remarks.trim() || undefined,
           lines: b.lines,
         })),
+        mixedInputs.map((m) => ({ ...m, performed_by: undefined })),
       );
     } finally {
       setSaving(false);
@@ -219,6 +265,15 @@ export function PalletPackForm({
                     <span className="lbl">Remarks</span>
                     <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional" />
                   </label>
+                  {anyRemainder && (
+                    <label className="form-field" style={{ gridColumn: "1 / -1", flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <input type="checkbox" checked={combineMix} onChange={(e) => setCombineMix(e.target.checked)} style={{ width: "auto" }} />
+                      <span className="lbl" style={{ margin: 0 }}>
+                        Combine sub-pallet leftovers into a mixed pallet
+                        <span className="dim"> — {fmt(leftoverTotal)} box{leftoverTotal === 1 ? "" : "es"} across items</span>
+                      </span>
+                    </label>
+                  )}
                 </div>
               </div>
 
@@ -255,6 +310,17 @@ export function PalletPackForm({
                                 placeholder="0"
                                 style={{ width: 110, textAlign: "right" }}
                               />
+                              {(() => {
+                                const bpp = palletById.get(palletByItem[it.orderItemId] || "")?.boxesPerPallet || 0;
+                                const rem = remByItem[it.orderItemId] || 0;
+                                if (!bpp || need <= 0) return null;
+                                const full = Math.floor((need - (combineMix ? rem : 0)) / bpp);
+                                return (
+                                  <div className="dim" style={{ fontSize: "var(--t-sm)", textAlign: "right", marginTop: 2 }}>
+                                    {full} full{rem > 0 ? ` + ${rem} ${combineMix ? "→ mix" : "leftover"}` : ""}
+                                  </div>
+                                );
+                              })()}
                             </td>
                             <td className="num mono">{fmt(it.palletized)}</td>
                             <td>
@@ -289,7 +355,7 @@ export function PalletPackForm({
                     : "Fill the required fields above"}
               </span>
             ) : totalBoxes > 0 ? (
-              `${fmt(totalBoxes)} boxes · ${batches.length} pallet${batches.length > 1 ? "s" : ""}`
+              `${fmt(totalBoxes)} boxes · ${fullPalletsTotal} full pallet${fullPalletsTotal === 1 ? "" : "s"}${mixedInputs.length ? ` · ${mixedInputs.length} mixed (${fmt(mixBoxesTotal)} leftover)` : ""}`
             ) : (
               "* Indicates a mandatory field"
             )}

@@ -10,20 +10,32 @@ import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listVehicles, createVehicle, formatVehicleNumber, type VehicleRow } from "@/features/masters/vehiclesApi";
+import type { LoadingCapture } from "./palPlansApi";
 
 export function VehicleLoadModal({
   palNumber,
   busy,
+  initialVehicleId,
+  initialCapture,
   onConfirm,
   onClose,
 }: {
   palNumber: string;
   busy?: boolean;
-  onConfirm: (vehicleId: string) => void;
+  initialVehicleId?: string;
+  initialCapture?: LoadingCapture;
+  onConfirm: (vehicleId: string, capture: LoadingCapture) => void;
   onClose: () => void;
 }) {
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useState(initialVehicleId || "");
+  const [capture, setCapture] = useState<LoadingCapture>({
+    container_number: initialCapture?.container_number || "",
+    line_seal: initialCapture?.line_seal || "",
+    electronic_seal: initialCapture?.electronic_seal || "",
+    loading_supervisor: initialCapture?.loading_supervisor || "",
+  });
+  const setCap = (k: keyof LoadingCapture, v: string) => setCapture((c) => ({ ...c, [k]: v }));
   // Inline-create state ("" = picking; object = the new-vehicle form is open).
   const [creating, setCreating] = useState<{ vehicle_number: string; driver_name: string; mobile_number: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -122,6 +134,29 @@ export function VehicleLoadModal({
                 const v = vehicles.find((x) => x.id === selected);
                 return v ? <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>{[v.driverName, v.mobile].filter(Boolean).join("  ·  ")}</div> : null;
               })()}
+              <div className="form-section-title" style={{ marginTop: 14 }}>Loading details</div>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span className="lbl">Container No.</span>
+                  <input value={capture.container_number} placeholder="e.g. MSCU1234567"
+                    onChange={(e) => setCap("container_number", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Loading Supervisor</span>
+                  <input value={capture.loading_supervisor} placeholder="Name"
+                    onChange={(e) => setCap("loading_supervisor", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Line Seal</span>
+                  <input value={capture.line_seal} placeholder="Line seal no."
+                    onChange={(e) => setCap("line_seal", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Electronic Seal</span>
+                  <input value={capture.electronic_seal} placeholder="E-seal no."
+                    onChange={(e) => setCap("electronic_seal", e.target.value)} />
+                </label>
+              </div>
             </div>
           )}
         </div>
@@ -138,7 +173,7 @@ export function VehicleLoadModal({
           ) : (
             <>
               <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-              <button className="hbtn primary" onClick={() => onConfirm(selected)} disabled={busy || !selected}>
+              <button className="hbtn primary" onClick={() => onConfirm(selected, capture)} disabled={busy || !selected}>
                 <Icon name="check" size={13} /> {busy ? "Saving…" : "Assign vehicle"}
               </button>
             </>

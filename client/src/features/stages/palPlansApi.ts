@@ -74,6 +74,11 @@ export interface LoadBox {
   capacity: number; // advisory boxes capacity
   status: LoadBoxStatus;
   dispatchDate: string;
+  // Loading capture (entered at the box / at dispatch).
+  containerNumber: string;
+  lineSeal: string;
+  electronicSeal: string;
+  loadingSupervisor: string;
   createdTime: string;
 }
 
@@ -222,6 +227,10 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         capacity: num(b.capacity),
         status: (str(b.status) || "Open") as LoadBoxStatus,
         dispatchDate: str(b.dispatch_date),
+        containerNumber: str(b.container_number),
+        lineSeal: str(b.line_seal),
+        electronicSeal: str(b.electronic_seal),
+        loadingSupervisor: str(b.loading_supervisor),
         createdTime: str(b.CREATEDTIME),
       };
     });
@@ -352,8 +361,17 @@ export function createLoadBox(capacity?: number) {
   return bust(op<{ ROWID: string; box_number: number }>("load-box", capacity ? { capacity } : {}));
 }
 
-/** Assign/reassign the box's vehicle or adjust its capacity (Open boxes only). */
-export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity?: number }) {
+/** Loading-capture fields entered at the box or at dispatch. */
+export interface LoadingCapture {
+  container_number?: string;
+  line_seal?: string;
+  electronic_seal?: string;
+  loading_supervisor?: string;
+}
+
+/** Assign/reassign the box's vehicle, adjust capacity, or set loading-capture
+    fields (Open boxes only). */
+export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity?: number } & LoadingCapture) {
   return bust(op<{ ROWID: string }>(`load-box-update/${rowid}`, patch));
 }
 
@@ -363,8 +381,8 @@ export function deleteLoadBox(rowid: string) {
 }
 
 /** Dispatch a box (needs a vehicle + ≥1 line). Auto-completes fully-dispatched plans. */
-export function dispatchLoadBox(rowid: string) {
-  return bust(op<{ ROWID: string; status: string; dispatch_date: string }>(`load-box-dispatch/${rowid}`, {}));
+export function dispatchLoadBox(rowid: string, capture?: LoadingCapture) {
+  return bust(op<{ ROWID: string; status: string; dispatch_date: string }>(`load-box-dispatch/${rowid}`, capture || {}));
 }
 
 /** Put a Ready line into an Open box (box="" pulls it back out). A `boxes`

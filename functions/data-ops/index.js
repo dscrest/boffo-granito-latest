@@ -991,6 +991,45 @@ app.post("/so-status/:rowid", async (req, res) => {
           const verdict = to === "Confirmed" ? "approved" : `rejected: ${reason}`;
           await notifyUser(catalyst, sp && sp.app_user, `Order ${so.order_number} ${verdict}`, `#/orders/${soId}`);
         }
+
+        // On confirmation, auto-enqueue the order's items into the production
+        // waitlist as editable plan rows. Dedupe on order_item so a re-confirm
+        // (Cancelled → Confirmed) never double-inserts. Manual "Record New
+        // Production" still works alongside this.
+        if (to === "Confirmed") {
+          const items = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID, design, ordered_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+            ),
+          );
+          if (items.length) {
+            const existing = rowList(
+              await catalyst.zcql().executeZCQLQuery(
+                `SELECT order_item FROM ProductionLog WHERE entry_type = 'plan' AND sales_order = ${soId} AND deleted_at is null`,
+              ),
+            );
+            const seen = new Set(existing.map((r) => String(r.order_item || "")));
+            const group = `so-${soId}`;
+            for (const it of items) {
+              const oiId = String(it.ROWID);
+              if (seen.has(oiId)) continue;
+              const row = await ds.table("ProductionLog").insertRow({
+                design: String(it.design || "") || null,
+                sales_order: soId,
+                order_item: oiId,
+                qty_requested: Number(it.ordered_qty_boxes) || 0,
+                qty_boxes: 0,
+                status: "Approved",
+                entry_type: "plan",
+                stage: "New",
+                request_group: group,
+              });
+              await logTransition(catalyst, {
+                entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "New",
+              });
+            }
+          }
+        }
         return { rowid: soId, data: { ROWID: soId, status: to } };
       },
     );
@@ -1541,7 +1580,13 @@ async function closePallet(catalyst, ds, body) {
     if (!l.order_item) throw badRequest(`Line ${i + 1}: order_item is required`);
     const boxes = nonNeg(l.boxes, `Line ${i + 1} boxes`);
     if (boxes <= 0) throw badRequest(`Line ${i + 1}: boxes must be > 0`);
-    return { order_item: String(l.order_item), boxes };
+    return {
+      order_item: String(l.order_item),
+      boxes,
+      // Batch/shade rides per line so a mixed pallet keeps each leftover's own.
+      batch_number: String(l.batch_number || body.batch_number || "").trim(),
+      shade: String(l.shade || body.shade || "").trim(),
+    };
   });
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
 
@@ -1566,13 +1611,16 @@ async function closePallet(catalyst, ds, body) {
     boxes_packed: totalBoxes,
     delivery_date: body.delivery_date || undefined, // date col rejects "" → omit
     status: "closed",
+    // Denormalised header batch/shade for a single-batch pallet's slip (blank on mixed).
+    batch_number: String(body.batch_number || "").trim(),
+    shade: String(body.shade || "").trim(),
     remarks: body.remarks || "",
   });
   const batchId = batchRow.ROWID;
   const insertedLines = [];
   try {
     for (const l of lines) {
-      const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes });
+      const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number, shade: l.shade });
       insertedLines.push(lr.ROWID);
     }
     for (const [oiId, reqBoxes] of reqByOi) {
@@ -1586,6 +1634,90 @@ async function closePallet(catalyst, ds, body) {
     }
   } catch (e) {
     // Compensate: delete lines + batch. Best-effort; events left as audit.
+    for (const id of insertedLines) {
+      try { await ds.table("PalletisedBatchLine").deleteRow(id); } catch (_) {}
+    }
+    try { await ds.table("PalletisedBatch").deleteRow(batchId); } catch (_) {}
+    throw e;
+  }
+  await recountOrderItems(catalyst, ds, [...reqByOi.keys()]);
+  return { rowid: batchId, data: { ROWID: batchId, boxes_packed: totalBoxes, lines: lines.length } };
+}
+
+/* Combine leftover (sub-pallet) boxes from MULTIPLE items into ONE real mixed
+   pallet (is_mixed=true, design=null). Each line keeps its own batch/shade so a
+   mixed pallet legitimately holds several. Mirrors closePallet's
+   validate → insert → compensate shape. body: { sales_order, pallet,
+   performed_by?, lines: [{ order_item, boxes, batch_number?, shade? }] } */
+app.post("/combine-leftovers", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletisedBatch", operation: "combine-leftovers", payload: body },
+      async () => combineLeftovers(catalyst, ds, body),
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+async function combineLeftovers(catalyst, ds, body) {
+  if (!body.sales_order) throw badRequest("sales_order is required");
+  if (!body.pallet) throw badRequest("pallet is required");
+  const rawLines = Array.isArray(body.lines) ? body.lines : [];
+  if (!rawLines.length) throw badRequest("At least one leftover line is required");
+  const lines = rawLines.map((l, i) => {
+    if (!l.order_item) throw badRequest(`Line ${i + 1}: order_item is required`);
+    const boxes = nonNeg(l.boxes, `Line ${i + 1} boxes`);
+    if (boxes <= 0) throw badRequest(`Line ${i + 1}: boxes must be > 0`);
+    return {
+      order_item: String(l.order_item),
+      boxes,
+      batch_number: String(l.batch_number || "").trim(),
+      shade: String(l.shade || "").trim(),
+    };
+  });
+  const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+
+  const reqByOi = new Map();
+  for (const l of lines) reqByOi.set(l.order_item, (reqByOi.get(l.order_item) || 0) + l.boxes);
+  const oiMap = await loadOrderItems(catalyst, [...reqByOi.keys()], "ROWID");
+  for (const oiId of reqByOi.keys()) {
+    if (!oiMap.get(oiId)) throw badRequest(`OrderItem not found: ${oiId}`, 404);
+  }
+
+  const batchRow = await ds.table("PalletisedBatch").insertRow({
+    sales_order: body.sales_order,
+    pallet: body.pallet,
+    design: null, // mixed pallet spans designs
+    is_mixed: true,
+    boxes_packed: totalBoxes,
+    status: "closed",
+    remarks: body.remarks || "Mixed pallet (combined leftovers)",
+  });
+  const batchId = batchRow.ROWID;
+  const insertedLines = [];
+  try {
+    for (const l of lines) {
+      const lr = await ds.table("PalletisedBatchLine").insertRow({
+        batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number, shade: l.shade,
+      });
+      insertedLines.push(lr.ROWID);
+    }
+    for (const [oiId, reqBoxes] of reqByOi) {
+      await ds.table("OrderItemEvent").insertRow({
+        order_item: oiId,
+        event_type: "packed",
+        qty_delta: reqBoxes,
+        performed_by: String(body.performed_by || ""),
+        note: `Mixed pallet #${batchId}`,
+      });
+    }
+  } catch (e) {
     for (const id of insertedLines) {
       try { await ds.table("PalletisedBatchLine").deleteRow(id); } catch (_) {}
     }
@@ -1616,6 +1748,22 @@ async function nextPalNumber(catalyst) {
   let max = 0;
   for (const r of rows) {
     const n = String(r.pal_number || "");
+    if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
+  }
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
+/* Server-assigned production batch number: B/FY/NNN. Minted only when the
+   client didn't supply one (operators may type an existing batch to append
+   output to it). MAX-scan mirrors nextPalNumber; assertUnique is the backstop. */
+async function nextBatchNumber(catalyst) {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
+  const prefix = `B/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
+  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT batch_number FROM ProductionLog"));
+  let max = 0;
+  for (const r of rows) {
+    const n = String(r.batch_number || "");
     if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
   }
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
@@ -1913,6 +2061,18 @@ async function boxLines(catalyst, boxId) {
   );
 }
 
+/* Loading-capture fields entered at the box (container no + seals + supervisor).
+   Copies any present field from the request body onto a LoadBox patch. Shared by
+   /load-box-update (advance entry) and /load-box-dispatch (last-minute) so data
+   entered at either point is persisted. */
+const LOAD_BOX_FIELDS = ["container_number", "line_seal", "electronic_seal", "loading_supervisor"];
+function applyLoadBoxFields(patch, body) {
+  for (const f of LOAD_BOX_FIELDS) {
+    if (body[f] !== undefined) patch[f] = String(body[f] || "").trim();
+  }
+  return patch;
+}
+
 /** Flip a plan's status directly (box flow owns the lifecycle) + audit. */
 async function setPlanStatus(catalyst, ds, planId, from, to, extra) {
   await ds.table("PalletizationPlan").updateRow({ ROWID: planId, status: to, ...(extra || {}) });
@@ -1965,6 +2125,7 @@ app.post("/load-box-update/:rowid", async (req, res) => {
           if (cap <= 0) throw badRequest("Capacity must be > 0", 400);
           patch.capacity = cap;
         }
+        applyLoadBoxFields(patch, body);
         await ds.table("LoadBox").updateRow(patch);
         return { rowid: boxId, data: { ROWID: boxId } };
       },
@@ -2038,7 +2199,9 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
         const lines = await boxLines(catalyst, boxId);
         if (!lines.length) throw badRequest("An empty box cannot be dispatched", 400);
         const dispatchDate = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10); // IST
-        await ds.table("LoadBox").updateRow({ ROWID: boxId, status: "Dispatched", dispatch_date: dispatchDate });
+        // Persist any last-minute loading-capture fields entered at dispatch.
+        const dispatchPatch = applyLoadBoxFields({ ROWID: boxId, status: "Dispatched", dispatch_date: dispatchDate }, req.body || {});
+        await ds.table("LoadBox").updateRow(dispatchPatch);
         await logTransition(catalyst, {
           entity_type: "LoadBox", entity_rowid: boxId, from_status: "Open", to_status: "Dispatched",
         });
@@ -2478,6 +2641,11 @@ app.post("/production-record/:rowid", async (req, res) => {
             });
         }
 
+        // Batch/shade: one batch = one shade. Blank batch → auto-mint B/FY/NNN;
+        // an operator may type an existing batch to append this output to it.
+        const batchNumber = String(body.batch_number || "").trim() || (await nextBatchNumber(catalyst));
+        const shade = String(body.shade || "").trim();
+
         const rec = await ds.table("ProductionLog").insertRow({
           parent_log: rowid,
           entry_type: "record",
@@ -2489,6 +2657,8 @@ app.post("/production-record/:rowid", async (req, res) => {
           qty_boxes: qty,
           status: "Produced",
           stage: String(pl.stage || "New"),
+          batch_number: batchNumber,
+          shade,
           production_date: body.production_date != null ? String(body.production_date) : "",
           shift: body.shift != null ? String(body.shift) : "",
           performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -2497,7 +2667,7 @@ app.post("/production-record/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${qty}`,
         });
-        return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty } };
+        return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty, batch_number: batchNumber } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2604,11 +2774,16 @@ app.post("/production-complete", async (req, res) => {
                   await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: orderItemId, from_status: oiStage, to_status: patch.stage });
               }
             }
+            // Batch/shade per line (each completed line is one design's run);
+            // blank batch → auto-mint. One batch = one shade.
+            const batchNumber = String((l && l.batch_number) || "").trim() || (await nextBatchNumber(catalyst));
+            const shade = String((l && l.shade) || "").trim();
             await ds.table("ProductionLog").insertRow({
               parent_log: id, entry_type: "record",
               design: pl.design || null, sales_order: pl.sales_order || null,
               order_item: pl.order_item || null, request_group: pl.request_group || null,
               qty_requested: 0, qty_boxes: delta, status: "Produced", stage: "Completed",
+              batch_number: batchNumber, shade,
               production_date: productionDate, shift: "", performed_by: performedBy, note,
             });
           }
