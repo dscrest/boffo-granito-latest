@@ -366,6 +366,9 @@ export function ProductionTable() {
   };
   const commitStage = async (e: ProductionEntry, stage: ProductionStage) => {
     if (stage === e.stage) return;
+    // Completing a line with boxes still to make opens the record dialog to
+    // capture the final output + batch/shade (same as the board's onMove).
+    if (stage === "Completed" && e.qtyRequested - e.producedSoFar > 0) { setRecordEntry(e); return; }
     const res = await setProductionStage([e.id], stage);
     if (!res.ok) { toast.error(res.error || "Could not change stage"); return; }
     invalidateProductionLogs();
@@ -520,6 +523,7 @@ export function ProductionTable() {
                     <th style={{ width: 150 }}>Stage</th>
                     <th>Batch</th>
                     <th>Shade</th>
+                    {canEdit && <th style={{ width: 44 }} />}
                   </tr>
                 </thead>
                 <tbody>
@@ -534,7 +538,7 @@ export function ProductionTable() {
                           prevKey = key;
                           out.push(
                             <tr key={`h-${key}`}>
-                              <td colSpan={9} style={{ background: "var(--bg-2)", fontWeight: 600 }}>{key}</td>
+                              <td colSpan={canEdit ? 10 : 9} style={{ background: "var(--bg-2)", fontWeight: 600 }}>{key}</td>
                             </tr>,
                           );
                         }
@@ -578,13 +582,26 @@ export function ProductionTable() {
                           </td>
                           <td className="mono">{e.batchNumber || "—"}</td>
                           <td>{e.shade || "—"}</td>
+                          {canEdit && (
+                            <td>
+                              <button
+                                type="button"
+                                className="btn x"
+                                title={remaining > 0 ? `Record output (${fmt(remaining)} to make) — batch & shade` : "Record output — batch & shade"}
+                                aria-label="Record output"
+                                onClick={() => setRecordEntry(e)}
+                              >
+                                <Icon name="plus" size={13} />
+                              </button>
+                            </td>
+                          )}
                         </tr>,
                       );
                     }
                     if (!loading && sheetRows.length === 0) {
                       out.push(
                         <tr key="empty">
-                          <td colSpan={9}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                          <td colSpan={canEdit ? 10 : 9}><EmptyState title="No matching results" hint="Try a different filter" /></td>
                         </tr>,
                       );
                     }
