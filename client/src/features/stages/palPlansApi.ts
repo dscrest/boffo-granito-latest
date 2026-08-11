@@ -94,6 +94,8 @@ export interface PalPlan {
   dispatchDate: string;
   salespersonId: string;
   salespersonName: string;
+  salespersonPhone: string; // for the pallet QR "call back" contact
+  salespersonEmail: string;
   remarks: string;
   lines: PalPlanLine[];
   soNumbers: string[]; // distinct associated SO numbers (grid column)
@@ -169,7 +171,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size"] }),
     listAll("Pallet", { columns: ["name", "boxes_per_pallet", "pallets_per_container", "b_boxes_per_pallet", "b_pallets_per_container"] }),
-    listAll("SalesPerson", { columns: ["name"] }),
+    listAll("SalesPerson", { columns: ["name", "phone", "email"] }),
     listAll("Vehicle", { columns: ["vehicle_number", "driver_name", "mobile_number"] }),
     listAll("Customer", { columns: ["name", "country_code"] }),
     listAll("Size", { columns: ["code"] }),
@@ -210,8 +212,10 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       num(p.boxes_per_pallet) * num(p.pallets_per_container) + num(p.b_boxes_per_pallet) * num(p.b_pallets_per_container),
     );
   });
-  const repName = new Map<string, string>();
-  (reps.rows || []).forEach((r) => repName.set(String(r.ROWID), str(r.name)));
+  const repById = new Map<string, { name: string; phone: string; email: string }>();
+  (reps.rows || []).forEach((r) =>
+    repById.set(String(r.ROWID), { name: str(r.name), phone: str(r.phone), email: str(r.email) }),
+  );
 
   const boxes: LoadBox[] = (loadBoxes.rows || [])
     .filter((b) => !str(b.deleted_at))
@@ -294,7 +298,9 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         plannedDate: str(p.planned_date),
         dispatchDate: str(p.dispatch_date),
         salespersonId: repId,
-        salespersonName: repName.get(repId) || "",
+        salespersonName: repById.get(repId)?.name || "",
+        salespersonPhone: repById.get(repId)?.phone || "",
+        salespersonEmail: repById.get(repId)?.email || "",
         remarks: str(p.remarks),
         lines: planLines,
         soNumbers,
@@ -359,6 +365,14 @@ export function setPalLineStatus(lineId: string, status: PalLineStatus) {
 
 export function createLoadBox(capacity?: number) {
   return bust(op<{ ROWID: string; box_number: number }>("load-box", capacity ? { capacity } : {}));
+}
+
+/** Mint (or fetch) the box's public share token — keys its scannable QR label
+    page (#/share/box/<token> → GET /public/pallet/<token>). Idempotent. */
+export async function shareLoadBox(rowid: string): Promise<string> {
+  const r = await op<string>(`load-box-share/${rowid}`, {});
+  if (!r.ok || !r.data) throw new Error(r.error || "Could not create the QR link");
+  return r.data;
 }
 
 /** Loading-capture fields entered at the box or at dispatch. */

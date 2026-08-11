@@ -604,6 +604,15 @@ export function DispatchBoard({
           <button
             type="button"
             className="btn"
+            title="Print QR label"
+            style={{ padding: 0, height: 22, width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}
+            onClick={(ev) => { ev.stopPropagation(); void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, inBox)); }}
+          >
+            <Icon name="qr" size={12} />
+          </button>
+          <button
+            type="button"
+            className="btn"
             title="Print Dispatch Copy"
             style={{ padding: 0, height: 22, width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}
             onClick={(ev) => { ev.stopPropagation(); void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, inBox)); }}

@@ -50,6 +50,7 @@ const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
 const CustomerDetail = lazy(() => import("@/features/masters/CustomerDetail").then((m) => ({ default: m.CustomerDetail })));
 const ItemDetail = lazy(() => import("@/features/masters/ItemDetail").then((m) => ({ default: m.ItemDetail })));
+const StockDetails = lazy(() => import("@/features/masters/StockDetails").then((m) => ({ default: m.StockDetails })));
 const DesignEdit = lazy(() => import("@/features/masters/DesignEdit").then((m) => ({ default: m.DesignEdit })));
 const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
@@ -99,10 +100,13 @@ function navTree(): NavNode[] {
   const tree: NavNode[] = [
     { id: "dashboard", label: "Dashboard", icon: "dashboard" },
     {
-      label: "Items",
+      label: "Inventory",
       icon: "tile",
       children: [
         { id: "design", label: "Items", icon: "tile" },
+        // Stock Details — batch/shade-wise on-hand (produced − loaded), derived
+        // in batchStockApi; also surfaced as the item detail Stock tab.
+        { id: "stock", label: "Stock Details", icon: "tile" },
         // Size Master owns per-box packing data (dims, pcs/box, coverage,
         // box weight). Items and Pallet Master snapshot it — they never ask
         // the operator for it twice. Moved here from Settings ▸ Masters.
@@ -439,6 +443,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsHome />} />
             <Route path="/reports/:id" element={<ReportView />} />
             <Route path="/design" element={<DesignMaster />} />
+            <Route path="/stock" element={<StockDetails />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
             <Route path="/sizes" element={<Sizes />} />
