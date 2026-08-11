@@ -21,7 +21,8 @@ import { ProductionForm } from "@/features/stages/ProductionForm";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
-import { designStock } from "@/lib/stock";
+import { designStock, openingStockFor } from "@/lib/stock";
+import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 
 // Boxes produced on THIS order still waiting to be palletised — drives the
 // palletise selection/checkboxes only. NOT the sellable "Available" figure
@@ -269,6 +270,7 @@ export function OrderDetail() {
   const [prod, setProd] = useState(false);
   const [listQ, setListQ] = useState("");
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
   const { designRows } = useMasters();
 
   const load = async () => {
@@ -279,6 +281,7 @@ export function OrderDetail() {
   useEffect(() => {
     void load();
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
+    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
   }, []);
 
   // Per-design stock, same source of truth as the Item master. In-production is
@@ -286,7 +289,7 @@ export function OrderDetail() {
   // its per-order breakdown for the drill-down popup.
   const stockOf = (o: Order) => {
     const key = o.designName || o.design; // plain design_name is the stock key (o.design is the display label)
-    const opening = designRows.find((d) => d.designName === key)?.accountingStock ?? 0;
+    const opening = openingStockFor(designRows.find((d) => d.designName === key), openingByDesign);
     return designStock(key, { openingStock: opening, orders, prodLogs });
   };
   // Line whose "In production" drill-down popup is open (null = closed).

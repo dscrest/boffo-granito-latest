@@ -25,7 +25,7 @@ import type { CSSProperties } from "react";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { ProductionForm } from "./ProductionForm";
-import { RecordOutputForm } from "./RecordOutputForm";
+import { RecordOutputForm, type RecordOutputPayload } from "./RecordOutputForm";
 import { ProductionEditForm } from "./ProductionEditForm";
 import { ProductionCompleteForm, type ProductionCompleteResult } from "./ProductionCompleteForm";
 import {
@@ -36,6 +36,7 @@ import {
   invalidateProductionLogs,
   listProductionLogs,
   recordProduction,
+  recordProductionLines,
   requestProduction,
   setProductionStage,
   stageChip,
@@ -43,7 +44,6 @@ import {
   PRODUCTION_STAGE_META,
   type ProductionEntry,
   type ProductionStage,
-  type ProductionRecordInput,
   type ProductionRequestGroup,
   type ProductionRequestInput,
 } from "./productionApi";
@@ -127,12 +127,14 @@ export function ProductionDetail() {
     await load();
   };
 
-  const onRecordSave = async (input: ProductionRecordInput) => {
+  const onRecordSave = async (payload: RecordOutputPayload, total: number) => {
     const entry = recordEntry;
     setRecordEntry(null);
     if (!entry) return;
     setBusy("Recording…");
-    const res = await recordProduction(entry.id, input);
+    const res = "batches" in payload
+      ? await recordProductionLines(entry.id, payload.batches)
+      : await recordProduction(entry.id, payload.single);
     if (!res.ok) {
       setBusy(null);
       setRecordQueue([]);
@@ -141,7 +143,7 @@ export function ProductionDetail() {
       await load();
       return;
     }
-    toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
+    toast.success(`+${fmt(total)} boxes produced`);
     // "Record all" walks the queue — show the entry form for each remaining line
     // so the date / details can be set per line before recording.
     const [next, ...rest] = recordQueue;

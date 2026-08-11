@@ -13,6 +13,7 @@
 import { listAll, list, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
+import { invalidateBatchStock } from "@/features/stages/batchStockApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -101,16 +102,28 @@ export function subscribeProductionLogs(cb: () => void): () => void {
 export function cachedProductionLogs(): ProductionEntry[] | null {
   return cache.cached()?.entries ?? null;
 }
+/** Opening-stock rows (entry_type="opening") for batch-tracked items — surfaced
+    on the item Production tab alongside recorded output. Not plan lines. */
+export function cachedOpeningEntries(): ProductionRecordRow[] {
+  return cache.cached()?.openingEntries ?? [];
+}
 export function invalidateProductionLogs(): void {
   cache.invalidate();
 }
 
+export interface ProductionLogResult {
+  ok: boolean;
+  entries: ProductionEntry[];
+  openingEntries: ProductionRecordRow[];
+  error?: string;
+}
+
 /** All production-log entries, hydrated. Cached + deduped. */
-export function listProductionLogs(): Promise<{ ok: boolean; entries: ProductionEntry[]; error?: string }> {
+export function listProductionLogs(): Promise<ProductionLogResult> {
   return cache.load();
 }
 
-async function fetchProductionLogs(): Promise<{ ok: boolean; entries: ProductionEntry[]; error?: string }> {
+async function fetchProductionLogs(): Promise<ProductionLogResult> {
   const [logs, designs, sizes, finishes, sos, customers, items] = await Promise.all([
     listAll("ProductionLog", { order: "ROWID desc" }),
     listAll("Design", { columns: ["design_name", "size", "finish"] }),
@@ -120,7 +133,7 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
     listAll("Customer", { columns: ["name"] }),
     listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes"] }),
   ]);
-  if (!logs.ok) return { ok: false, entries: [], error: logs.error };
+  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], error: logs.error };
 
   const designName = mapBy(designs.rows, "design_name");
   const sizeName = mapBy(sizes.rows, "code");
@@ -165,9 +178,35 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
     (recordsByParent.get(parentId) ?? recordsByParent.set(parentId, []).get(parentId)!).push(rec);
   }
 
-  // Plan lines carry qty_requested; produced-so-far is derived from their records.
+  // Opening-stock rows (batch-tracked items) — on-hand, but neither a record
+  // child nor a plan line. Surfaced on the item Production tab.
+  const openingEntries: ProductionRecordRow[] = [];
+  for (const r of rows) {
+    if (str(r.entry_type) !== "opening") continue;
+    const designId = str(r.design);
+    const { size, finish } = hydrateSizeFinish(designId);
+    openingEntries.push({
+      id: String(r.ROWID),
+      parentId: "",
+      design: designName.get(designId) || designId || "—",
+      size,
+      finish,
+      qtyBoxes: num(r.qty_boxes),
+      productionDate: str(r.production_date),
+      shift: str(r.shift),
+      performedBy: str(r.performed_by),
+      note: str(r.note),
+      batchNumber: str(r.batch_number),
+      shade: str(r.shade),
+      orderItemId: "",
+      createdTime: str(r.CREATEDTIME),
+    });
+  }
+
+  // Plan lines carry qty_requested; produced-so-far is derived from their
+  // records. Record + opening rows are excluded (opening is not a plan line).
   const entries: ProductionEntry[] = rows
-    .filter((r) => str(r.entry_type) !== "record")
+    .filter((r) => str(r.entry_type) !== "record" && str(r.entry_type) !== "opening")
     .map((r) => {
       const designId = str(r.design);
       const { size, finish } = hydrateSizeFinish(designId);
@@ -211,7 +250,7 @@ async function fetchProductionLogs(): Promise<{ ok: boolean; entries: Production
       };
     });
 
-  return { ok: true, entries };
+  return { ok: true, entries, openingEntries };
 }
 
 /** One line of a production request. */
@@ -240,6 +279,27 @@ export interface ProductionRecordInput {
   batch_number?: string;
   shade?: string;
 }
+/** One batch row of a multi-batch record (batch-tracked items). */
+export interface ProductionRecordLine {
+  qty_boxes: number;
+  /** Blank → server auto-mints B/FY/NNN per row. */
+  batch_number?: string;
+  /** Batch mfg date. */
+  mfg_date?: string;
+  note?: string;
+}
+export interface ProductionRecordLinesInput {
+  rows: ProductionRecordLine[];
+  shift?: string;
+  performed_by?: string;
+}
+/** One batch row of opening stock (batch-tracked items). */
+export interface OpeningStockLine {
+  qty_boxes: number;
+  batch_number?: string;
+  mfg_date?: string;
+  note?: string;
+}
 
 /* Requests / approvals don't move counters — only production cache is stale.
    Recording output bumps OrderItem.produced, so it invalidates orders too. */
@@ -253,6 +313,13 @@ function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {
     cache.invalidate();
     invalidateOrders();
+    return r;
+  });
+}
+/** Recording output / opening also changes derived batch stock. */
+function bustStock<T>(p: Promise<T>): Promise<T> {
+  return bust(p).then((r) => {
+    invalidateBatchStock();
     return r;
   });
 }
@@ -270,6 +337,18 @@ export function setProductionStatus(group: string, status: "Approved" | "Rejecte
 /** Record actual output on a plan line → inserts a dated record child, bumps produced. */
 export function recordProduction(rowid: string, input: ProductionRecordInput) {
   return bust(op<{ produced_qty_boxes?: number; recorded?: number; batch_number?: string }>(`production-record/${encodeURIComponent(rowid)}`, input));
+}
+
+/** Record several batches at once on a plan line (batch-tracked items). Atomic:
+    validates Σ qty ≤ remaining, inserts one record child per batch, bumps produced. */
+export function recordProductionLines(rowid: string, input: ProductionRecordLinesInput) {
+  return bustStock(op<{ recorded: number; rows: number; batch_numbers: string[] }>(`production-record-lines/${encodeURIComponent(rowid)}`, input));
+}
+
+/** Set/append a batch-tracked item's opening stock as batch rows. First save is
+    open; later changes need admin + reason (enforced server-side). */
+export function saveOpeningBatches(designId: string, input: { rows: OpeningStockLine[]; _reason?: string }) {
+  return bustStock(op<{ inserted: number }>(`opening-stock/${encodeURIComponent(designId)}`, input));
 }
 
 /** Move a production to a Kanban stage (manual) — sets `stage` on its plan lines.

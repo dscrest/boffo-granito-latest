@@ -41,6 +41,7 @@ export interface DesignValues {
   rate_per_sqft: string;
   rate_per_sqmt: string;
   accounting_stock: string;
+  is_batched: string; // "Yes" | "No" — batch-tracked item
   image_url: string;
 }
 
@@ -99,6 +100,7 @@ const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
     fields: [
       { key: "rate_per_sqft", label: "Rate / ft²", kind: "number" },
       { key: "rate_per_sqmt", label: "Rate / m²", kind: "number" },
+      { key: "is_batched", label: "Batch-tracked item", kind: "select", options: ["No", "Yes"] },
       { key: "accounting_stock", label: "Opening Stock", kind: "number" },
     ],
   },
@@ -115,6 +117,7 @@ export function blankDesign(): DesignValues {
   v.pcs_per_box = "";
   v.box_weight_kg = "";
   v.status = "Active"; // #10: new designs default to Active
+  v.is_batched = "No"; // default singular; opt into batch tracking per item
   return v;
 }
 
@@ -148,6 +151,7 @@ export function rowToValues(r: DesignRow): DesignValues {
     rate_per_sqft: s(r.ratePerSqft),
     rate_per_sqmt: s(r.ratePerSqmt),
     accounting_stock: s(r.accountingStock ?? 0),
+    is_batched: r.isBatched ? "Yes" : "No",
     image_url: r.imageUrl,
   };
 }
@@ -228,6 +232,7 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: Design
     rate_per_sqft: numOr0(v.rate_per_sqft),
     rate_per_sqmt: numOr0(v.rate_per_sqmt),
     accounting_stock: numOr0(v.accounting_stock),
+    is_batched: v.is_batched === "Yes",
     image_url: images[0]?.id || v.image_url || "", // legacy single-image field = first image id
     image_urls: JSON.stringify(images),
   };

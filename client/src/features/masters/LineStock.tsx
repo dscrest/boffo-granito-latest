@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
 import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
-import { designStock, type DesignStock } from "@/lib/stock";
+import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
+import { designStock, openingStockFor, type DesignStock } from "@/lib/stock";
 import { fmt } from "@/lib/format";
 import { InProductionModal } from "@/features/stages/InProductionModal";
 
@@ -18,11 +19,14 @@ export function useStockLookup(): (designName: string) => DesignStock {
   const { orders } = useOrders();
   const { designRows } = useMasters();
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
   useEffect(() => {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
+    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
   }, []);
   return (designName: string) => {
-    const opening = designRows.find((d) => d.designName === designName)?.accountingStock ?? 0;
+    const d = designRows.find((dr) => dr.designName === designName);
+    const opening = openingStockFor(d, openingByDesign);
     return designStock(designName, { openingStock: opening, orders, prodLogs });
   };
 }

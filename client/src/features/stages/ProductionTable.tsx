@@ -20,7 +20,7 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
-import { RecordOutputForm } from "./RecordOutputForm";
+import { RecordOutputForm, type RecordOutputPayload } from "./RecordOutputForm";
 import { ProductionKanban, type ProductionGroupBy } from "./ProductionKanban";
 import {
   cachedProductionLogs,
@@ -30,13 +30,13 @@ import {
   listProductionLogs,
   productionDetailKey,
   recordProduction,
+  recordProductionLines,
   requestProduction,
   setProductionStage,
   stageChip,
   PRODUCTION_STAGE_ORDER,
   PRODUCTION_STAGE_META,
   type ProductionEntry,
-  type ProductionRecordInput,
   type ProductionRequestGroup,
   type ProductionRequestInput,
   type ProductionStage,
@@ -256,9 +256,9 @@ export function ProductionTable() {
     const q = query.trim().toLowerCase();
     const tabDef = TABS.find((t) => t.id === tab);
     const base = groups.filter((r) => {
-      // Grid defaults to Pending (hides Completed); the board shows all lanes so
-      // the Completed column carries the produced split.
-      if (view === "grid" && tabDef?.pending && r.stage === "Completed") return false;
+      // Pending = "not Completed" in every view (grid/sheet/board) — the status
+      // tab always filters by production status, never shows completed lines.
+      if (tabDef?.pending && r.stage === "Completed") return false;
       if (tabDef?.match && r.stage !== tabDef.match) return false;
       if (!q) return true;
       return `${r.code} ${r.designSummary} ${r.orderNumber} ${r.poNumber} ${r.customer} ${r.performedBy}`.toLowerCase().includes(q);
@@ -289,17 +289,31 @@ export function ProductionTable() {
   );
   const sheetRows = pager.slice(sheetSorted);
 
+  // Per-section Requested/Produced totals for the sheet group headers — summed
+  // over the WHOLE filtered set (not just the page) so a section split across
+  // pages still shows its true group total.
+  const groupTotals = useMemo(() => {
+    const m = new Map<string, { requested: number; produced: number }>();
+    if (!groupBy.length) return m;
+    for (const g of sheetSorted) {
+      const k = groupKeyOf(g);
+      const cur = m.get(k) || { requested: 0, produced: 0 };
+      cur.requested += g.totalRequested;
+      cur.produced += g.totalProduced;
+      m.set(k, cur);
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetSorted, groupBy]);
+
   const tabCount = (t: (typeof TABS)[number]) =>
     t.match
       ? groups.filter((g) => g.stage === t.match).length
-      : // Board shows every lane (incl. Completed), so the "Pending" tab is
-        // effectively "All" there — count and label follow suit below.
-        t.pending && view === "grid"
+      : t.pending
         ? groups.filter((g) => g.stage !== "Completed").length
         : groups.length;
 
-  // In board view the pending tab doesn't filter anything, so call it "All".
-  const tabLabel = (t: (typeof TABS)[number]) => (t.pending && view === "board" ? "All" : t.label);
+  const tabLabel = (t: (typeof TABS)[number]) => t.label;
 
   const canEdit = can("stages", "edit");
 
@@ -327,17 +341,19 @@ export function ProductionTable() {
   // Log output on a line. When it finishes the line, also flip its stage to
   // Completed so the grid tab / detail stay consistent.
   const onRecord = (g: ProductionRequestGroup) => setRecordEntry(g.entries[0]);
-  const onRecordSave = async (input: ProductionRecordInput) => {
+  const onRecordSave = async (payload: RecordOutputPayload, total: number) => {
     const e = recordEntry;
     setRecordEntry(null);
     if (!e) return;
-    const res = await recordProduction(e.id, input);
+    const res = "batches" in payload
+      ? await recordProductionLines(e.id, payload.batches)
+      : await recordProduction(e.id, payload.single);
     if (!res.ok) {
       toast.error(res.error || "Record output failed");
       return;
     }
-    if (e.producedSoFar + input.qty_boxes >= e.qtyRequested) await setProductionStage([e.id], "Completed");
-    toast.success(`+${fmt(input.qty_boxes)} boxes produced`);
+    if (e.producedSoFar + total >= e.qtyRequested) await setProductionStage([e.id], "Completed");
+    toast.success(`+${fmt(total)} boxes produced`);
     invalidateProductionLogs();
     await load();
   };
@@ -536,9 +552,13 @@ export function ProductionTable() {
                         const key = groupKeyOf(g);
                         if (key !== prevKey) {
                           prevKey = key;
+                          const tot = groupTotals.get(key) || { requested: 0, produced: 0 };
                           out.push(
-                            <tr key={`h-${key}`}>
-                              <td colSpan={canEdit ? 10 : 9} style={{ background: "var(--bg-2)", fontWeight: 600 }}>{key}</td>
+                            <tr key={`h-${key}`} style={{ background: "var(--bg-2)", fontWeight: 600 }}>
+                              <td colSpan={4}>{key}</td>
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.requested)}</td>
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.produced)}</td>
+                              <td colSpan={canEdit ? 4 : 3} />
                             </tr>,
                           );
                         }

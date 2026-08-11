@@ -88,6 +88,7 @@ export interface DesignRow {
   ratePerSqft: number;
   ratePerSqmt: number;
   accountingStock: number | null; // null = opening stock never set (edit unlocked)
+  isBatched: boolean; // true = record production & opening stock batch-wise
   booksItemId: string;
   imageUrl: string;
   images: DesignImage[]; // #12: File Store images (id + original filename)
@@ -271,6 +272,7 @@ async function fetchDesigns(): Promise<{
       ratePerSqft: num(d.rate_per_sqft),
       ratePerSqmt: num(d.rate_per_sqmt),
       accountingStock: d.accounting_stock == null || d.accounting_stock === "" ? null : num(d.accounting_stock),
+      isBatched: str(d.is_batched) === "true",
       booksItemId: str(d.books_item_id),
       imageUrl: str(d.image_url),
       images: parseImages(str(d.image_urls)),
@@ -315,6 +317,7 @@ export interface DesignInput {
   rate_per_sqft: number;
   rate_per_sqmt: number;
   accounting_stock: number;
+  is_batched?: boolean;
   image_url: string;
   image_urls: string; // #12: JSON array of File Store image ids
 }
@@ -360,6 +363,7 @@ function toPayload(input: DesignInput): Record<string, unknown> {
     rate_per_sqft: input.rate_per_sqft,
     rate_per_sqmt: input.rate_per_sqmt,
     accounting_stock: input.accounting_stock,
+    is_batched: input.is_batched ?? false,
     image_url: input.image_url.trim(),
     image_urls: input.image_urls || "[]",
   };

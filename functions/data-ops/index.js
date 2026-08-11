@@ -590,6 +590,102 @@ app.get("/cron/fx-refresh", async (req, res) => {
 });
 
 /* ----------------------------------------------------------------
+   PUBLIC: scannable pallet label. A QR sticker on a container encodes
+   #/share/box/<share_token>; the scanner (any phone, no login) opens
+   that page which reads this endpoint. Registered BEFORE the auth guard
+   so it needs no token. Read-only; keyed by the box's unguessable
+   share_token (minted by POST /load-box-share). Returns just the
+   shipping essentials — items, destinations, container, vehicle,
+   salesperson contact.
+   ---------------------------------------------------------------- */
+app.get("/public/pallet/:token", async (req, res) => {
+  try {
+    const token = String(req.params.token || "").replace(/[^A-Za-z0-9]/g, "");
+    if (!token) return res.status(404).json({ ok: false, error: "Not found" });
+    const catalyst = init(req);
+    const zcql = (sql) => catalyst.zcql().executeZCQLQuery(sql).then(rowList);
+    const inList = (ids) => (ids.length ? ids.join(",") : "0");
+
+    const box = (await zcql(
+      `SELECT ROWID, box_number, vehicle, container_number, status, dispatch_date FROM LoadBox WHERE share_token = '${token}' AND deleted_at is null`,
+    ))[0];
+    if (!box) return res.status(404).json({ ok: false, error: "This label is invalid or has been revoked." });
+
+    const lines = await zcql(
+      `SELECT ROWID, plan, sales_order, design, boxes, position FROM PalletizationPlanLine WHERE load_box = ${box.ROWID} AND deleted_at is null`,
+    );
+    const soIds = [...new Set(lines.map((l) => String(l.sales_order)).filter(Boolean))];
+    const designIds = [...new Set(lines.map((l) => String(l.design)).filter(Boolean))];
+    const planIds = [...new Set(lines.map((l) => String(l.plan)).filter(Boolean))];
+    const [sos, designs, plans, vehRows] = await Promise.all([
+      zcql(`SELECT ROWID, order_number, po_number, customer FROM SalesOrder WHERE ROWID IN (${inList(soIds)})`),
+      zcql(`SELECT ROWID, design_name, unique_name, size FROM Design WHERE ROWID IN (${inList(designIds)})`),
+      zcql(`SELECT ROWID, sales_person FROM PalletizationPlan WHERE ROWID IN (${inList(planIds)})`),
+      box.vehicle
+        ? zcql(`SELECT ROWID, vehicle_number, driver_name, mobile_number FROM Vehicle WHERE ROWID = ${box.vehicle}`)
+        : Promise.resolve([]),
+    ]);
+    const custIds = [...new Set(sos.map((s) => String(s.customer)).filter(Boolean))];
+    const sizeIds = [...new Set(designs.map((d) => String(d.size)).filter(Boolean))];
+    const repIds = [...new Set(plans.map((p) => String(p.sales_person)).filter(Boolean))];
+    const [customers, sizes, reps] = await Promise.all([
+      zcql(`SELECT ROWID, name, country_code FROM Customer WHERE ROWID IN (${inList(custIds)})`),
+      zcql(`SELECT ROWID, code FROM Size WHERE ROWID IN (${inList(sizeIds)})`),
+      zcql(`SELECT ROWID, name, phone, email FROM SalesPerson WHERE ROWID IN (${inList(repIds)})`),
+    ]);
+    const by = (rows) => new Map(rows.map((r) => [String(r.ROWID), r]));
+    const soBy = by(sos), designBy = by(designs), planBy = by(plans), custBy = by(customers), sizeBy = by(sizes), repBy = by(reps);
+
+    const items = lines
+      .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))
+      .map((l) => {
+        const so = soBy.get(String(l.sales_order));
+        const d = designBy.get(String(l.design));
+        const cust = so ? custBy.get(String(so.customer)) : null;
+        const rep = repBy.get(String((planBy.get(String(l.plan)) || {}).sales_person));
+        return {
+          item: d ? String(d.unique_name || d.design_name || "") : "",
+          size: d ? String((sizeBy.get(String(d.size)) || {}).code || "") : "",
+          boxes: Number(l.boxes) || 0,
+          order: so ? String(so.order_number || so.po_number || "") : "",
+          customer: cust ? String(cust.name || "") : "",
+          country: cust ? String(cust.country_code || "") : "",
+          salesperson: rep ? String(rep.name || "") : "",
+          salespersonPhone: rep ? String(rep.phone || "") : "",
+          salespersonEmail: rep ? String(rep.email || "") : "",
+        };
+      });
+    const vehicle = vehRows[0]
+      ? { number: String(vehRows[0].vehicle_number || ""), driver: String(vehRows[0].driver_name || ""), mobile: String(vehRows[0].mobile_number || "") }
+      : null;
+    const salespersons = [
+      ...new Map(
+        items.filter((i) => i.salesperson).map((i) => [i.salesperson, { name: i.salesperson, phone: i.salespersonPhone, email: i.salespersonEmail }]),
+      ).values(),
+    ];
+    const destinations = [...new Set(items.map((i) => (i.country ? `${i.customer} (${i.country})` : i.customer)).filter(Boolean))];
+
+    res.set("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      box: {
+        boxNumber: Number(box.box_number) || 0,
+        container: String(box.container_number || ""),
+        status: String(box.status || ""),
+        dispatchDate: String(box.dispatch_date || ""),
+        vehicle,
+        totalBoxes: items.reduce((s, i) => s + i.boxes, 0),
+        items,
+        destinations,
+        salespersons,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "Could not load label" });
+  }
+});
+
+/* ----------------------------------------------------------------
    App auth: login/sessions/users + role guard for every route below.
    Auth tables (AppUser/Role/AuthSession) are NOT in ALLOWED, so they
    are reachable only through the /auth/* endpoints.
@@ -2102,6 +2198,31 @@ app.post("/load-box", async (req, res) => {
   }
 });
 
+/* Mint (or return the existing) share token for a box's public QR label.
+   Idempotent, works for Open or Dispatched boxes. The token keys the
+   unauthenticated GET /public/pallet/:token read above. */
+app.post("/load-box-share/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const boxId = boxIdParam(req.params.rowid);
+    const box = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT ROWID, share_token FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
+      ),
+    )[0];
+    if (!box) throw badRequest(`Load box not found: ${boxId}`, 404);
+    let token = String(box.share_token || "");
+    if (!token) {
+      token = crypto.randomBytes(16).toString("hex");
+      await ds.table("LoadBox").updateRow({ ROWID: boxId, share_token: token });
+    }
+    res.json({ ok: true, data: token });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 /* Assign/reassign the vehicle or adjust capacity — only while the box is Open. */
 app.post("/load-box-update/:rowid", async (req, res) => {
   try {
@@ -2668,6 +2789,193 @@ app.post("/production-record/:rowid", async (req, res) => {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${qty}`,
         });
         return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty, batch_number: batchNumber } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Record several batches at once against a plan line (batch-tracked items).
+   Atomic: validates Σ qty ≤ remaining (and ≤ order remaining) ONCE, bumps
+   OrderItem.produced by the sum + steps po→prod, then inserts one dated `record`
+   child per batch (blank batch auto-minted per row; shade dropped, written "").
+   On any insert failure it deletes the rows it added and reverts the OrderItem
+   bump, so a partial record never sticks.
+   body: { rows: [{ qty_boxes, batch_number?, mfg_date?, note? }], shift?, performed_by? } */
+app.post("/production-record-lines/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rowid = rowidParam(req.params.rowid);
+    const body = req.body || {};
+    const rowsIn = Array.isArray(body.rows) ? body.rows : [];
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "production-record-lines", payload: { ROWID: rowid, rows: rowsIn.length } },
+      async () => {
+        if (!rowsIn.length) throw badRequest("At least one batch row is required");
+        const lines = rowsIn.map((r, i) => {
+          const qty = nonNeg(r.qty_boxes, `Row ${i + 1} qty_boxes`);
+          if (qty <= 0) throw badRequest(`Row ${i + 1}: qty_boxes must be > 0`);
+          return {
+            qty,
+            batch_number: String(r.batch_number || "").trim(),
+            mfg_date: r.mfg_date != null ? String(r.mfg_date) : "",
+            note: r.note != null ? String(r.note) : "",
+          };
+        });
+        const sum = lines.reduce((s, l) => s + l.qty, 0);
+
+        const pl = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, order_item, design, sales_order, request_group, qty_requested, qty_boxes, stage FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+
+        const recs = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT qty_boxes FROM ProductionLog WHERE parent_log = ${rowid} AND entry_type = 'record' AND deleted_at is null`,
+          ),
+        );
+        const requested = Number(pl.qty_requested) || 0;
+        const producedSoFar = (Number(pl.qty_boxes) || 0) + recs.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
+        const remaining = Math.max(0, requested - producedSoFar);
+        if (sum > remaining)
+          throw badRequest(`Recording ${sum} exceeds the ${remaining} still to produce on this line`, 409);
+
+        // Bump the order line once for the whole batch (capped at ordered).
+        const orderItemId = String(pl.order_item || "");
+        let oiRevert = null;
+        if (orderItemId) {
+          const oiMap = await loadOrderItems(
+            catalyst, [orderItemId], "ROWID, ordered_qty_boxes, produced_qty_boxes, stage",
+          );
+          const oi = oiMap.get(orderItemId);
+          if (!oi) throw badRequest(`OrderItem not found: ${orderItemId}`, 404);
+          const ordered = Number(oi.ordered_qty_boxes) || 0;
+          const produced = Number(oi.produced_qty_boxes) || 0;
+          if (produced + sum > ordered)
+            throw badRequest(`Producing ${sum} exceeds ordered (${produced}+${sum} > ${ordered})`, 409);
+          const patch = { ROWID: orderItemId, produced_qty_boxes: produced + sum };
+          const oiStage = String(oi.stage || "po");
+          if (oiStage === "po") patch.stage = "prod";
+          await ds.table("OrderItem").updateRow(patch);
+          oiRevert = { ROWID: orderItemId, produced_qty_boxes: produced, ...(patch.stage ? { stage: oiStage } : {}) };
+          if (patch.stage)
+            await logTransition(catalyst, {
+              entity_type: "OrderItem", entity_rowid: orderItemId, from_status: oiStage, to_status: patch.stage,
+            });
+        }
+
+        const inserted = [];
+        const batchNumbers = [];
+        try {
+          for (const l of lines) {
+            // Mint per row; the prior insert is committed so the next scan bumps.
+            const batchNumber = l.batch_number || (await nextBatchNumber(catalyst));
+            const rec = await ds.table("ProductionLog").insertRow({
+              parent_log: rowid,
+              entry_type: "record",
+              design: pl.design || null,
+              sales_order: pl.sales_order || null,
+              order_item: pl.order_item || null,
+              request_group: pl.request_group || null,
+              qty_requested: 0,
+              qty_boxes: l.qty,
+              status: "Produced",
+              stage: String(pl.stage || "New"),
+              batch_number: batchNumber,
+              shade: "",
+              production_date: l.mfg_date,
+              shift: body.shift != null ? String(body.shift) : "",
+              performed_by: body.performed_by != null ? String(body.performed_by) : "",
+              note: l.note,
+            });
+            inserted.push(String(rec.ROWID));
+            batchNumbers.push(batchNumber);
+          }
+        } catch (e) {
+          for (const id of inserted) { try { await ds.table("ProductionLog").deleteRow(id); } catch (_) {} }
+          if (oiRevert) { try { await ds.table("OrderItem").updateRow(oiRevert); } catch (_) {} }
+          throw e;
+        }
+        await logTransition(catalyst, {
+          entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${sum} (${lines.length} batches)`,
+        });
+        return { rowid: inserted[0], data: { recorded: sum, rows: lines.length, batch_numbers: batchNumbers } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Set a batch-tracked item's opening stock as batch rows — stored as
+   entry_type="opening" ProductionLog rows (no plan, no order link). Derived
+   stock counts these as on-hand (batchStockApi) but never as produced/plan.
+   Lock: the first submission is open to items.edit; once any opening row exists,
+   further additions require an Admin role + a _reason (audit-only, kept in the
+   OperationLog payload). Mirrors the single-number opening-stock lock.
+   body: { rows: [{ qty_boxes, batch_number?, mfg_date?, note? }], _reason? } */
+app.post("/opening-stock/:designId", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const designId = rowidParam(req.params.designId);
+    const body = req.body || {};
+    const reason = String(body._reason || "").trim();
+    const rowsIn = Array.isArray(body.rows) ? body.rows : [];
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "opening-stock", payload: { design: designId, rows: rowsIn.length, _reason: reason } },
+      async () => {
+        if (!rowsIn.length) throw badRequest("At least one opening batch row is required");
+        const lines = rowsIn.map((r, i) => {
+          const qty = nonNeg(r.qty_boxes, `Row ${i + 1} qty_boxes`);
+          if (qty <= 0) throw badRequest(`Row ${i + 1}: qty_boxes must be > 0`);
+          return {
+            qty,
+            batch_number: String(r.batch_number || "").trim(),
+            mfg_date: r.mfg_date != null ? String(r.mfg_date) : "",
+            note: r.note != null ? String(r.note) : "",
+          };
+        });
+
+        // Lock once any opening row exists for this design.
+        const existing = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM ProductionLog WHERE design = ${designId} AND entry_type = 'opening' AND deleted_at is null LIMIT 1`,
+          ),
+        );
+        if (existing.length) {
+          const u = req.appUser || {};
+          if (String(u.role || "").trim().toLowerCase() !== "admin")
+            throw badRequest("Opening stock is locked after the first entry — admin only", 403);
+          if (!reason) throw badRequest("A reason is required to change opening stock", 400);
+        }
+
+        const inserted = [];
+        for (const l of lines) {
+          const batchNumber = l.batch_number || (await nextBatchNumber(catalyst));
+          const rec = await ds.table("ProductionLog").insertRow({
+            entry_type: "opening",
+            design: designId,
+            qty_requested: 0,
+            qty_boxes: l.qty,
+            status: "",
+            stage: "",
+            batch_number: batchNumber,
+            shade: "",
+            production_date: l.mfg_date,
+            note: l.note,
+          });
+          inserted.push(String(rec.ROWID));
+        }
+        return { rowid: inserted[0], data: { inserted: inserted.length } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -3543,6 +3851,28 @@ app.patch("/:table/:rowid", async (req, res) => {
           throw badRequest("Line box allocation cannot be set directly — use /pal-line-box");
         if (table === "LoadBox")
           throw badRequest("Load boxes are managed via the /load-box routes");
+        // Batch-tracking can't flip once the item carries stock — opening would
+        // then have two sources (accounting_stock AND opening rows). Only guards
+        // an actual change of value (every Design save sends is_batched).
+        if (table === "Design" && patch.is_batched !== undefined) {
+          const prev = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT is_batched, accounting_stock FROM Design WHERE ROWID = ${rid}`,
+            ),
+          )[0];
+          const was = String(prev && prev.is_batched) === "true";
+          const now = patch.is_batched === true || String(patch.is_batched) === "true";
+          if (was !== now) {
+            const hasStock = (Number(prev && prev.accounting_stock) || 0) > 0;
+            const logs = rowList(
+              await catalyst.zcql().executeZCQLQuery(
+                `SELECT ROWID FROM ProductionLog WHERE design = ${rid} AND (entry_type = 'record' OR entry_type = 'opening') AND deleted_at is null LIMIT 1`,
+              ),
+            );
+            if (hasStock || logs.length)
+              throw badRequest("Can't change batch-tracking once this item has stock or production history", 409);
+          }
+        }
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         const nk = NATURAL_KEY[table];

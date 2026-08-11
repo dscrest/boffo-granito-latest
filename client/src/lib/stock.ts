@@ -2,8 +2,10 @@
    Live stock derivation for a design/item — one source of truth shared by the
    Item detail, Reports and the transaction line-item rows.
 
-   Everything is computed on the fly (only Opening stock is persisted, as
-   Design.accounting_stock):
+   Everything is computed on the fly. Opening stock is persisted two ways:
+   singular items keep a single Design.accounting_stock number; batch-tracked
+   items carry it as ProductionLog entry_type="opening" rows (summed per design
+   by batchStockApi). Use openingStockFor() to read the right one per item.
      available     = opening + produced − loaded
      inProduction  = boxes on an OPEN production order not yet produced
                      (New/InProduction ProductionLog lines, per line remaining).
@@ -13,6 +15,20 @@
    ============================================================ */
 import type { Order } from "@/data";
 import type { ProductionEntry } from "@/features/stages/productionApi";
+
+/** The opening-stock number to feed designStock() for one item. Batch-tracked
+    items sum their entry_type="opening" rows (openingByDesign, keyed on
+    design_name from batchStockApi); singular items use accounting_stock. Reading
+    only one source per item is the guard against double-counting opening. */
+export function openingStockFor(
+  design: { isBatched?: boolean; designName: string; accountingStock: number | null } | null | undefined,
+  openingByDesign?: Map<string, number>,
+): number {
+  if (!design) return 0;
+  return design.isBatched
+    ? openingByDesign?.get(design.designName) ?? 0
+    : design.accountingStock ?? 0;
+}
 
 /** Per-order slice of a design's in-production total (for the drill-down popup). */
 export interface InProductionOrder {

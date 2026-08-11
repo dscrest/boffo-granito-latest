@@ -9,8 +9,8 @@
    Renders instantly from the designs cache — no skeleton flash when
    navigating between items or returning to the tab.
    ============================================================ */
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { fmt } from "@/lib/format";
 import { can, isAdmin } from "@/lib/auth";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
@@ -21,8 +21,10 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
-import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
-import { designStock } from "@/lib/stock";
+import { cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
+import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
+import { designStock, openingStockFor } from "@/lib/stock";
+import { OpeningStockForm } from "./OpeningStockForm";
 import { InProductionModal } from "@/features/stages/InProductionModal";
 import type { Order } from "@/data";
 import { ActivityLog } from "@/features/common/RecordDetail";
@@ -33,6 +35,20 @@ import { NumberInput } from "../../ui/NumberInput";
 import { DesignEdit } from "./DesignEdit";
 
 const MAX_IMAGES = 5;
+
+/* Overview/Stock tab button style (mirrors RecordDetail.tabStyle). */
+function tabStyle(active: boolean) {
+  return {
+    background: "none",
+    border: 0,
+    borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+    color: active ? "var(--fg)" : "var(--muted)",
+    fontWeight: active ? 600 : 400,
+    padding: "8px 12px",
+    cursor: "pointer",
+    font: "inherit",
+  } as const;
+}
 
 /* Related-orders "Party" panel hidden per 2026-07 request — flip to true to
    restore the Party / Order Qty / Stage table + open-quantity line. */
@@ -215,11 +231,26 @@ export function ItemDetail() {
   // Make-to-stock (independent) production has no SO line, so it never reaches
   // `allOrders` — pull the production log to fold its output into available stock.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
+  const [openingEntries, setOpeningEntries] = useState<ProductionRecordRow[]>(() => cachedOpeningEntries());
+  const [openingOpen, setOpeningOpen] = useState(false); // batch-wise opening-stock editor
+  // Overview (default) | Stock — deep-linkable via ?tab=stock (from Stock Details grid).
+  const [sp, setSp] = useSearchParams();
+  const tab = sp.get("tab") === "stock" ? "stock" : "overview";
+  const setTab = (t: "overview" | "stock") => setSp(t === "stock" ? { tab: "stock" } : {}, { replace: true });
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
+  const reloadStock = () => {
+    void listProductionLogs().then((res) => {
+      if (res.ok) { setProdLogs(res.entries); setOpeningEntries(res.openingEntries); }
+    });
+    void listBatchStock().then((res) => {
+      if (res.ok) setOpeningByDesign(res.openingByDesign);
+    });
+  };
   useEffect(() => {
     void refresh();
-    void listProductionLogs().then((res) => res.ok && setProdLogs(res.entries));
+    reloadStock();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -235,12 +266,35 @@ export function ItemDetail() {
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
 
   // Live stock summary — single source of truth (lib/stock.ts), shared with the
-  // transaction line-item rows and Reports.
-  const openingStock = design?.accountingStock ?? 0;
+  // transaction line-item rows and Reports. Batch-tracked items read opening from
+  // their opening rows (openingByDesign); singular items from accounting_stock.
+  const openingStock = openingStockFor(design, openingByDesign);
   const stock = designStock(design?.designName ?? "", { openingStock, orders: allOrders, prodLogs });
   const inProduction = stock.inProduction;
   const inLoading = stock.inLoading;
   const availableStock = stock.available;
+
+  const isBatched = !!design?.isBatched;
+  // Production tab: every production record + opening row for this item, newest
+  // first — batch · qty · mfg date · remark. Shows batch-wise production.
+  const myProductionRows = useMemo(() => {
+    if (!design) return [] as (ProductionRecordRow & { kind: "production" | "opening" })[];
+    const recs = prodLogs
+      .filter((e) => e.design === design.designName)
+      .flatMap((e) => e.records)
+      .map((r) => ({ ...r, kind: "production" as const }));
+    const opens = openingEntries
+      .filter((e) => e.design === design.designName)
+      .map((r) => ({ ...r, kind: "opening" as const }));
+    return [...opens, ...recs].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
+  }, [design, prodLogs, openingEntries]);
+  const productionTotal = myProductionRows.reduce((s, r) => s + r.qtyBoxes, 0);
+  // Prior batch numbers on this design — for the opening-stock picker.
+  const batchOptions = useMemo(() => {
+    const seen = new Set(myProductionRows.map((r) => r.batchNumber).filter(Boolean));
+    return [...seen].sort().reverse().map((b) => ({ value: b, label: b }));
+  }, [myProductionRows]);
+  const myOpeningCount = design ? openingEntries.filter((e) => e.design === design.designName).length : 0;
 
   // Drill-downs: what adds up to each stock number (this item, all SOs).
   const orderCol = { head: "Order", val: (o: Order) => o.orderNumber || o.poNumber || "—" };
@@ -256,10 +310,10 @@ export function ItemDetail() {
       { head: "In loading", num: true, val: (o) => fmt(Math.max(0, o.palletizedQty - o.loadedQty)) }],
   };
 
-  // Opening stock locks once a POSITIVE value is saved (0 stays freely editable);
-  // only an admin can re-edit a locked value, with a reason
-  // (kept in the OperationLog payload via the generic update's _reason note).
-  const stockLocked = (design?.accountingStock ?? 0) > 0;
+  // Opening stock locks once set: singular = a POSITIVE accounting_stock (0 stays
+  // editable); batched = any opening batch row exists. Only an admin can then
+  // re-edit, with a reason (kept in the OperationLog payload).
+  const stockLocked = isBatched ? myOpeningCount > 0 : (design?.accountingStock ?? 0) > 0;
   const saveOpeningStock = async () => {
     if (!design) return;
     // Empty field = "leave unchanged" (the current value shows only as a placeholder).
@@ -407,6 +461,16 @@ export function ItemDetail() {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {breakdown && <StockBreakdownModal bd={breakdown} onClose={() => setBreakdown(null)} />}
+      {openingOpen && design && (
+        <OpeningStockForm
+          designId={design.id}
+          designName={design.designName}
+          batchOptions={batchOptions}
+          locked={stockLocked}
+          onSaved={() => { setOpeningOpen(false); reloadStock(); }}
+          onClose={() => setOpeningOpen(false)}
+        />
+      )}
       {ipOpen && design && (
         <InProductionModal label={design.designName} total={inProduction} orders={stock.inProductionOrders} onClose={() => setIpOpen(false)} />
       )}
@@ -533,6 +597,71 @@ export function ItemDetail() {
                 )}
               </div>
 
+              {/* Overview | Production tabs (batch-wise production lives under Production). */}
+              <div className="row" style={{ gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
+                <button onClick={() => setTab("overview")} style={tabStyle(tab === "overview")}>Overview</button>
+                <button onClick={() => setTab("stock")} style={tabStyle(tab === "stock")}>Production</button>
+              </div>
+
+              {tab === "stock" && (
+                <div style={{ marginTop: 14 }}>
+                  {/* Batch-tracked items carry opening stock as batches too. */}
+                  {isBatched && can("items", "edit") && (!stockLocked || isAdmin()) && (
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+                      <button className="btn" onClick={() => setOpeningOpen(true)} title={stockLocked ? "Add opening batch — admin (reason required)" : "Add opening stock batches"}>
+                        <Icon name="plus" size={12} /> Opening stock
+                      </button>
+                    </div>
+                  )}
+                  <div style={{ overflow: "auto" }}>
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Batch</th>
+                          <th className="num" style={{ textAlign: "right" }}>Qty</th>
+                          <th>Mfg date</th>
+                          <th>Remark</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {myProductionRows.map((r) => (
+                          <tr key={r.id}>
+                            <td className="mono">{r.batchNumber || <span className="dim">—</span>}</td>
+                            <td className="num mono">{fmt(r.qtyBoxes)}</td>
+                            <td>{r.productionDate || <span className="dim">—</span>}</td>
+                            <td>{r.note || <span className="dim">—</span>}</td>
+                            <td>{r.kind === "opening" ? <span className="chip">Opening</span> : ""}</td>
+                          </tr>
+                        ))}
+                        {myProductionRows.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                              No production yet — record production against a batch to see it here.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                      {myProductionRows.length > 0 && (
+                        <tfoot>
+                          <tr>
+                            <td style={{ fontWeight: 600 }}>Total production</td>
+                            <td className="num mono" style={{ fontWeight: 700 }}>{fmt(productionTotal)}</td>
+                            <td colSpan={3} />
+                          </tr>
+                          <tr>
+                            <td style={{ fontWeight: 600 }}>Total stock</td>
+                            <td className="num mono" style={{ fontWeight: 700, color: availableStock < 0 ? "var(--c-red)" : "var(--c-green)" }}>{fmt(availableStock)}</td>
+                            <td colSpan={3} />
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {tab === "overview" && (
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginTop: 14 }}>
               <div style={{ flex: "1 1 340px", minWidth: 280 }}>
                 <div className="form-section-title" style={{ marginBottom: 8 }}>Primary Details</div>
@@ -668,7 +797,21 @@ export function ItemDetail() {
                   <div className="form-section-title" style={{ marginBottom: 8 }}>Stock</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "3px 0" }}>
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Opening stock</span>
-                    {stockEdit ? (
+                    {isBatched ? (
+                      // Batch-tracked: opening is entered as batches (Production tab).
+                      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                        <span className="mono">{fmt(openingStock)}</span>
+                        {can("items", "edit") && (!stockLocked || isAdmin()) && (
+                          <button
+                            className="btn x"
+                            title={stockLocked ? "Locked after first entry — admin edit (reason required)" : "Add opening stock batches"}
+                            onClick={() => setOpeningOpen(true)}
+                          >
+                            <Icon name={stockLocked ? "lock" : "edit"} size={11} />
+                          </button>
+                        )}
+                      </span>
+                    ) : stockEdit ? (
                       <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                         {stockLocked && (
                           <input
@@ -719,8 +862,11 @@ export function ItemDetail() {
                 </div>
               </div>
               </div>
+              )}
             </div>
 
+            {tab === "overview" && (
+            <>
             {SHOW_PARTY_PANEL && (
               <>
                 <div className="card">
@@ -765,6 +911,8 @@ export function ItemDetail() {
             {/* Audit trail (#10.2): who created / changed this item, from OperationLog. */}
             <div className="form-section-title" style={{ margin: "16px 0 8px" }}>Activity</div>
             <ActivityLog table="Design" entityId={design.id} />
+            </>
+            )}
 
             {/* Image lightbox (2026-07 request): view + prev/next across all images. */}
             {viewer !== null && design.images[viewer] && (

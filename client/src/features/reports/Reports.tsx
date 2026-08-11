@@ -23,7 +23,8 @@ import { applyFilters, type FilterField, type FilterCriteria } from "@/ui/Advanc
 import { ReportShell, TotalsRow, inDateRange, type DateRangeState, type KpiSpec } from "./ReportShell";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
-import { designStock, type InProductionOrder } from "@/lib/stock";
+import { designStock, openingStockFor, type InProductionOrder } from "@/lib/stock";
+import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { listLoadableBatches, type LoadableBatch } from "@/features/stages/palletisationApi";
@@ -472,13 +473,15 @@ function StockReport() {
   // Production log folds into In production / Available (same lib/stock.ts basis
   // as the Item detail) — fetch once.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
+  const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
   useEffect(() => {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
+    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
   }, []);
 
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
-      const opening = d.accountingStock ?? 0;
+      const opening = openingStockFor(d, openingByDesign);
       const s = designStock(d.designName, { openingStock: opening, orders, prodLogs });
       return {
         key: d.id,
@@ -491,7 +494,7 @@ function StockReport() {
         available: s.available,
       };
     });
-  }, [designRows, orders, prodLogs]);
+  }, [designRows, orders, prodLogs, openingByDesign]);
 
   const fields = useMemo<FilterField<StockRow>[]>(
     () => [
