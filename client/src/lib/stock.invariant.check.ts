@@ -39,4 +39,17 @@ const s = designStock("TILE-A", { openingStock: openingStockFor(batched, opening
 assert.strictEqual(s.available, N + M, `available should be ${N + M} (opening once + produced once), got ${s.available}`);
 assert.strictEqual(s.inProduction, 0, "opening/completed output must not count as in-production");
 
+// SO-confirm auto-queued jobs (request_group "so-…") count only once TOUCHED —
+// an untouched New/0-produced auto row is demand, not production (bug 7.2).
+const line = (over: Record<string, unknown>) => ({
+  design: "TILE-A", independent: false, producedSoFar: 0, qtyRequested: 500,
+  stage: "New", status: "Approved", requestGroup: "so-123", salesOrderId: "123",
+  orderNumber: "", poNumber: "", customer: "", ...over,
+});
+const ip = (logs: unknown[]) => designStock("TILE-A", { orders: [], prodLogs: logs as any }).inProduction;
+assert.strictEqual(ip([line({})]), 0, "untouched auto-queued job must not count as in-production");
+assert.strictEqual(ip([line({ producedSoFar: 100 })]), 400, "auto job with output recorded counts its remaining");
+assert.strictEqual(ip([line({ stage: "InProduction" })]), 500, "auto job dragged out of New counts");
+assert.strictEqual(ip([line({ requestGroup: "PR-1-x" })]), 500, "manual PR- request counts from creation");
+
 console.log("stock invariant check: OK (available =", s.available, ", inProduction =", s.inProduction, ")");

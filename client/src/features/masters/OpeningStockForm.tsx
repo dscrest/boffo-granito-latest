@@ -1,69 +1,64 @@
 /* ============================================================
-   Opening Stock (batch-tracked items) — capture opening stock as batch rows
-   (batch · mfg date · qty · remark) via /opening-stock. Stored as
-   entry_type="opening" ProductionLog rows, counted as on-hand once. The first
-   entry is open; once opening rows exist, adding more needs admin + a reason
-   (enforced server-side; the reason field appears here when locked).
+   Opening Stock (batch-tracked items) — capture opening stock as ONE batch
+   per save (mandatory batch no. · mfg date · qty · remark) via /opening-stock.
+   Stored as entry_type="opening" ProductionLog rows, counted as on-hand once.
+   The first entry is open; once opening rows exist, adding more needs admin +
+   a reason (enforced server-side; the reason field appears here when locked).
    ============================================================ */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { DateInput } from "@/ui/DateInput";
-import { Combobox } from "@/ui/Combobox";
 import { NumberInput } from "@/ui/NumberInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
-import { saveOpeningBatches, type OpeningStockLine } from "@/features/stages/productionApi";
-
-interface OpeningLine {
-  batch: string;
-  date: string;
-  qty: string;
-  note: string;
-}
-const emptyLine = (): OpeningLine => ({ batch: "", date: todayISO(), qty: "", note: "" });
+import { saveOpeningBatches, batchNumberExists, type OpeningStockLine } from "@/features/stages/productionApi";
+import { cachedAllowDupBatches, loadAllowDupBatches } from "@/features/settings/settingsApi";
 
 export function OpeningStockForm({
   designId,
   designName,
-  batchOptions = [],
   locked,
   onSaved,
   onClose,
 }: {
   designId: string;
   designName: string;
-  /** Prior batch numbers on this design (append instead of minting a new one). */
-  batchOptions?: { value: string; label: string }[];
   /** True when opening rows already exist — a reason becomes mandatory. */
   locked: boolean;
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const [lines, setLines] = useState<OpeningLine[]>([emptyLine()]);
+  const [batch, setBatch] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [qty, setQty] = useState("");
+  const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const panelRef = useModalA11y(onClose);
 
-  const setLine = (i: number, k: keyof OpeningLine, v: string) =>
-    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
-  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  // Duplicate-batch pre-check (server 409 is the source of truth): same item +
+  // same batch is always blocked; cross-item reuse only when the setting is off.
+  const [allowDup, setAllowDup] = useState(cachedAllowDupBatches());
+  useEffect(() => {
+    void loadAllowDupBatches().then(setAllowDup);
+  }, []);
+  const dupItem = batchNumberExists(batch, designName);
+  const dup = dupItem || (!allowDup && batchNumberExists(batch));
 
-  const validLines = lines.filter((l) => (parseInt(l.qty, 10) || 0) > 0);
-  const total = validLines.reduce((s, l) => s + (parseInt(l.qty, 10) || 0), 0);
-  const missing = validLines.length === 0 || (locked && !reason.trim());
+  const total = parseInt(qty, 10) || 0;
+  const missing = total <= 0 || !batch.trim() || dup || (locked && !reason.trim());
 
   const submit = async () => {
     if (missing || saving) return;
     setSaving(true);
-    const rows: OpeningStockLine[] = validLines.map((l) => ({
-      qty_boxes: parseInt(l.qty, 10) || 0,
-      batch_number: l.batch.trim() || undefined,
-      mfg_date: l.date || undefined,
-      note: l.note.trim() || undefined,
-    }));
+    const rows: OpeningStockLine[] = [{
+      qty_boxes: total,
+      batch_number: batch.trim(),
+      mfg_date: date || undefined,
+      note: note.trim() || undefined,
+    }];
     const res = await saveOpeningBatches(designId, { rows, _reason: reason.trim() || undefined });
     setSaving(false);
     if (!res.ok) {
@@ -88,65 +83,37 @@ export function OpeningStockForm({
 
         <div className="df-body">
           <div className="form-section">
-            <div className="form-section-title">Opening batches</div>
-            <table className="tbl" style={{ marginBottom: 8 }}>
-              <thead>
-                <tr>
-                  <th>Batch No. <span className="dim" title="ƒx — blank auto-generates B/FY/NNN">ƒx</span></th>
-                  <th style={{ width: 150 }}>Mfg date</th>
-                  <th className="num" style={{ width: 120, textAlign: "right" }}>Qty<span className="req"> *</span></th>
-                  <th>Remark</th>
-                  <th style={{ width: 40 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => {
-                  const last = i === lines.length - 1;
-                  return (
-                    <tr key={i}>
-                      <td>
-                        <Combobox
-                          value={l.batch}
-                          options={batchOptions}
-                          onChange={(v) => setLine(i, "batch", v)}
-                          onCreate={(label) => setLine(i, "batch", label.trim())}
-                          placeholder="Blank = auto"
-                          ariaLabel="Batch number"
-                        />
-                      </td>
-                      <td><DateInput value={l.date} onChange={(e) => setLine(i, "date", e.target.value)} /></td>
-                      <td className="num">
-                        <NumberInput
-                          min={0}
-                          value={l.qty}
-                          onChange={(e) => setLine(i, "qty", e.target.value)}
-                          placeholder="0"
-                          style={{ width: 100, textAlign: "right" }}
-                          autoFocus={i === 0}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          value={l.note}
-                          onChange={(e) => setLine(i, "note", e.target.value)}
-                          placeholder="Optional"
-                          onKeyDown={(e) => {
-                            if (last && e.key === "Tab" && !e.shiftKey) {
-                              e.preventDefault();
-                              addLine();
-                            }
-                          }}
-                        />
-                      </td>
-                      <td>
-                        <button type="button" className="btn x" onClick={() => removeLine(i)} disabled={lines.length === 1} tabIndex={-1} title="Remove">✕</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <button className="btn" onClick={addLine}><Icon name="plus" size={12} /> Add batch</button>
+            <div className="form-section-title">Opening batch</div>
+            <div className="form-grid">
+              <label className="form-field">
+                <span className="lbl">Batch No.<span className="req"> *</span></span>
+                <input
+                  value={batch}
+                  onChange={(e) => setBatch(e.target.value)}
+                  placeholder="e.g. B/26-27/001"
+                  autoFocus
+                />
+                {dup && (
+                  <span className="field-err">
+                    {dupItem
+                      ? `Batch “${batch.trim()}” is already used for this item`
+                      : `Batch “${batch.trim()}” already exists — duplicate batch numbers are disabled in Settings`}
+                  </span>
+                )}
+              </label>
+              <label className="form-field">
+                <span className="lbl">Mfg date</span>
+                <DateInput value={date} onChange={(e) => setDate(e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Qty (boxes)<span className="req"> *</span></span>
+                <NumberInput min={0} value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0" />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Remark</span>
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+              </label>
+            </div>
 
             {locked && (
               <label className="form-field" style={{ marginTop: 10 }}>

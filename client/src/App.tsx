@@ -135,20 +135,22 @@ function navTree(): NavNode[] {
         { id: "packing", label: "Palletization and Loading", icon: "palette" },
       ],
     },
-    {
-      label: "Stages",
-      icon: "truck",
-      children: [
-        { id: "po", label: "Purchase Orders", icon: "docs" },
-        { id: "qc", label: "Quality Control", icon: "shield-check" },
-        { id: "containers", label: "Container Master", icon: "truck" },
-        { id: "fit", label: "Fit Suggester", icon: "kanban" },
-        { id: "loadplan", label: "Load Planner", icon: "truck" },
-        { id: "loading", label: "Loading", icon: "truck" },
-        { id: "final", label: "Final Loading", icon: "invoice" },
-        { id: "invoices", label: "Invoices", icon: "invoice" },
-      ],
-    },
+    // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
+    // Re-add this block to bring it back.
+    // {
+    //   label: "Stages",
+    //   icon: "truck",
+    //   children: [
+    //     { id: "po", label: "Purchase Orders", icon: "docs" },
+    //     { id: "qc", label: "Quality Control", icon: "shield-check" },
+    //     { id: "containers", label: "Container Master", icon: "truck" },
+    //     { id: "fit", label: "Fit Suggester", icon: "kanban" },
+    //     { id: "loadplan", label: "Load Planner", icon: "truck" },
+    //     { id: "loading", label: "Loading", icon: "truck" },
+    //     { id: "final", label: "Final Loading", icon: "invoice" },
+    //     { id: "invoices", label: "Invoices", icon: "invoice" },
+    //   ],
+    // },
     {
       label: "Reports",
       icon: "chart",

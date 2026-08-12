@@ -58,6 +58,7 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "calendar": return <svg {...common}><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>;
     case "pin": return <svg {...common}><path d="M12 21v-7M7 4h10l-1 7H8z"/></svg>;
     case "download": return <svg {...common}><path d="M12 4v12M6 12l6 6 6-6M4 20h16"/></svg>;
+    case "upload": return <svg {...common}><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>;
     case "invoice": return <svg {...common}><path d="M5 3h11l3 3v15H5z"/><path d="M8 8h7M8 12h8M8 16h5"/></svg>;
     case "tile": return <svg {...common}><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>;
     case "flag": return <svg {...common}><path d="M4 21V4h13l-2 4 2 4H4"/></svg>;

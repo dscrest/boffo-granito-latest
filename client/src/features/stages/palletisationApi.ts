@@ -28,6 +28,9 @@ export interface PalletizableItem {
   available: number; // produced − palletized (boxes free to palletize NOW)
   produced: number;
   palletized: number;
+  // ponytail: toProduce/inProduction below are UNUSED by UI (2026-08-12) and count
+  // SO-confirm auto-queued rows — if you resurrect them, exclude untouched "so-…" plans
+  // (see lib/stock.ts inProduction rule) or use designStock instead.
   toProduce: number; // ordered − produced − in-flight requests (boxes still to request → production)
   inProduction: number; // this design's boxes currently in production (PendingApproval/Approved) across ALL orders — display only
   inProductionOrders: { salesOrderId: string; soLabel: string; customer: string; qty: number }[]; // per-SO breakdown of inProduction

@@ -254,9 +254,25 @@ export function ItemDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const design = designs?.find((d) => d.id === id) ?? null;
+  const isBatched = !!design?.isBatched;
+  // Production tab: every production record + opening row for this item, newest
+  // first — batch · qty · mfg date · remark. Shows batch-wise production.
+  // These hooks MUST run before the `designs === null` early-return below,
+  // else the hook count changes between renders (React error #310).
+  const myProductionRows = useMemo(() => {
+    if (!design) return [] as (ProductionRecordRow & { kind: "production" | "opening" })[];
+    const recs = prodLogs
+      .filter((e) => e.design === design.designName)
+      .flatMap((e) => e.records)
+      .map((r) => ({ ...r, kind: "production" as const }));
+    const opens = openingEntries
+      .filter((e) => e.design === design.designName)
+      .map((r) => ({ ...r, kind: "opening" as const }));
+    return [...opens, ...recs].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
+  }, [design, prodLogs, openingEntries]);
   if (designs === null) return <SkeletonRows rows={6} />;
 
-  const design = designs.find((d) => d.id === id) ?? null;
   const needle = q.trim().toLowerCase();
   const listed = needle
     ? designs.filter((d) => `${d.uniqueName || d.designName} ${d.sku}`.toLowerCase().includes(needle))
@@ -274,26 +290,7 @@ export function ItemDetail() {
   const inLoading = stock.inLoading;
   const availableStock = stock.available;
 
-  const isBatched = !!design?.isBatched;
-  // Production tab: every production record + opening row for this item, newest
-  // first — batch · qty · mfg date · remark. Shows batch-wise production.
-  const myProductionRows = useMemo(() => {
-    if (!design) return [] as (ProductionRecordRow & { kind: "production" | "opening" })[];
-    const recs = prodLogs
-      .filter((e) => e.design === design.designName)
-      .flatMap((e) => e.records)
-      .map((r) => ({ ...r, kind: "production" as const }));
-    const opens = openingEntries
-      .filter((e) => e.design === design.designName)
-      .map((r) => ({ ...r, kind: "opening" as const }));
-    return [...opens, ...recs].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
-  }, [design, prodLogs, openingEntries]);
   const productionTotal = myProductionRows.reduce((s, r) => s + r.qtyBoxes, 0);
-  // Prior batch numbers on this design — for the opening-stock picker.
-  const batchOptions = useMemo(() => {
-    const seen = new Set(myProductionRows.map((r) => r.batchNumber).filter(Boolean));
-    return [...seen].sort().reverse().map((b) => ({ value: b, label: b }));
-  }, [myProductionRows]);
   const myOpeningCount = design ? openingEntries.filter((e) => e.design === design.designName).length : 0;
 
   // Drill-downs: what adds up to each stock number (this item, all SOs).
@@ -465,7 +462,6 @@ export function ItemDetail() {
         <OpeningStockForm
           designId={design.id}
           designName={design.designName}
-          batchOptions={batchOptions}
           locked={stockLocked}
           onSaved={() => { setOpeningOpen(false); reloadStock(); }}
           onClose={() => setOpeningOpen(false)}

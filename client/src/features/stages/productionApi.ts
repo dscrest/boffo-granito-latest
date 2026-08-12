@@ -110,6 +110,20 @@ export function cachedOpeningEntries(): ProductionRecordRow[] {
 export function invalidateProductionLogs(): void {
   cache.invalidate();
 }
+/** Duplicate pre-check. With `design` (design NAME) matches only that item's
+    batches — the always-blocked case; without it, matches any item (the
+    setting-controlled case). Cache-based, so best-effort — the server 409 is
+    the source of truth. */
+export function batchNumberExists(batch: string, design?: string): boolean {
+  const b = batch.trim();
+  if (!b) return false;
+  const c = cache.cached();
+  if (!c) return false;
+  return (
+    c.openingEntries.some((r) => r.batchNumber === b && (!design || r.design === design)) ||
+    c.entries.some((e) => e.records.some((r) => r.batchNumber === b && (!design || r.design === design)))
+  );
+}
 
 export interface ProductionLogResult {
   ok: boolean;

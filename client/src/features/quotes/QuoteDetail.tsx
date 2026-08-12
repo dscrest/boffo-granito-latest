@@ -28,6 +28,7 @@ import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
+import { ContainerPlanCard } from "./ContainerPlanCard";
 import { OrderForm, type OrderDraft } from "@/features/orders/OrderForm";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import {
@@ -84,7 +85,7 @@ export function QuoteDetail() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"details" | "orders" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "orders" | "containers" | "activity">("details");
   // Details | PDF segmented toggle (Books-style inline document preview).
   const [view, setView] = useState<"details" | "pdf">("details");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -552,6 +553,13 @@ export function QuoteDetail() {
           Orders{quote.sos && quote.sos.length > 0 ? ` (${quote.sos.length})` : ""}
         </button>
         <button
+          className={`tabish ${tab === "containers" ? "active" : ""}`}
+          onClick={() => setTab("containers")}
+          style={tabStyle(tab === "containers")}
+        >
+          Container Planning
+        </button>
+        <button
           className={`tabish ${tab === "activity" ? "active" : ""}`}
           onClick={() => setTab("activity")}
           style={tabStyle(tab === "activity")}
@@ -772,6 +780,8 @@ export function QuoteDetail() {
           </div>
         </div>
       )}
+
+      {tab === "containers" && <ContainerPlanCard quote={quote} />}
 
       {/* Activity tab — status timeline (with time-in-state) + OperationLog. */}
       {tab === "activity" && (

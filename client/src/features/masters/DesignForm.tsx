@@ -15,6 +15,7 @@ import { toast } from "@/ui/Toast";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { insert } from "@/lib/dataOps";
+import { isAdmin } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { cachedDesigns, invalidateDesigns, type DesignImage, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
@@ -328,6 +329,9 @@ export function DesignFields({
             {fields.map((f) => {
               const opts = f.lookup ? lookups[f.lookup] : null;
               const err = showErrors && f.required && !value[f.key].trim() ? `${f.label} is required` : null;
+              // Opening stock locks once set — only an admin may re-edit it
+              // (mirrors the item-detail lock; the batch-wise button is gated too).
+              const stockFieldLocked = f.key === "accounting_stock" && !isAdmin() && numOr0(value.accounting_stock) > 0;
               return (
                 <label key={f.key} className="form-field">
                   <span className="lbl">
@@ -378,6 +382,15 @@ export function DesignFields({
                         />
                       );
                     })()
+                  ) : stockFieldLocked ? (
+                    // Opening stock already set — non-admins see it read-only.
+                    <input
+                      value={value[f.key] || "0"}
+                      readOnly
+                      tabIndex={-1}
+                      style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }}
+                      title="Locked after first entry — only an admin can change opening stock"
+                    />
                   ) : f.fromSize ? (
                     // Size master owns this value; editing it here would let the
                     // item drift from the size it claims to be.

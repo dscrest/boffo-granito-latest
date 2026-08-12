@@ -105,6 +105,7 @@ const ALLOWED = new Set([
   "Currency",
   "StatusTransition",
   "Notification",
+  "AppSetting",
 ]);
 
 function assertTable(table) {
@@ -486,6 +487,7 @@ const NATURAL_KEY = {
   SalesPerson: "name",
   Currency: "code",
   PalletizationPlan: "pal_number",
+  AppSetting: "setting_key",
 };
 
 /**
@@ -1865,6 +1867,43 @@ async function nextBatchNumber(catalyst) {
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 
+/* Duplicate-batch guard. Two tiers:
+   1. Same design + same batch number: never allowed (unconditional).
+   2. Same batch on a DIFFERENT design: allowed unless AppSetting
+      allow_duplicate_batches = "false" (missing row = allow).
+   Blank entries (auto-minted) are exempt. */
+async function assertBatchesAllowed(catalyst, batchNumbers, designId) {
+  const supplied = (batchNumbers || []).map((b) => String(b || "").trim()).filter(Boolean);
+  if (!supplied.length) return;
+  if (new Set(supplied).size < supplied.length)
+    throw badRequest("Duplicate batch numbers within one submission", 409);
+  const s = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      "SELECT setting_value FROM AppSetting WHERE setting_key = 'allow_duplicate_batches' AND deleted_at is null",
+    ),
+  )[0];
+  const allowCrossItem = String((s && s.setting_value) || "") !== "false";
+  for (const b of supplied) {
+    const safe = b.replace(/'/g, "''");
+    if (designId) {
+      const mine = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID FROM ProductionLog WHERE batch_number = '${safe}' AND design = ${designId} AND deleted_at is null AND (entry_type = 'record' OR entry_type = 'opening') LIMIT 1`,
+        ),
+      );
+      if (mine.length) throw badRequest(`Batch "${b}" is already used for this item`, 409);
+    }
+    if (allowCrossItem) continue;
+    const hit = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT ROWID FROM ProductionLog WHERE batch_number = '${safe}' AND deleted_at is null AND (entry_type = 'record' OR entry_type = 'opening') LIMIT 1`,
+      ),
+    );
+    if (hit.length)
+      throw badRequest(`Batch "${b}" already exists — enable "Allow duplicate batch numbers" in Settings to reuse it`, 409);
+  }
+}
+
 /** Validate + normalize the plan lines (shared by create + update). */
 function normalizePlanLines(body) {
   const rawLines = Array.isArray(body.lines) ? body.lines : [];
@@ -2512,6 +2551,37 @@ app.post("/production-log", async (req, res) => {
         const oiMap = await loadOrderItems(
           catalyst, orderItemIds, "ROWID, design, sales_order, ordered_qty_boxes, produced_qty_boxes",
         );
+        // A manual request SUPERSEDES the SO-confirm auto-queued job for the same
+        // line, when that job is untouched (still New, nothing recorded): soft-delete
+        // it so the sheet shows one right-sized job and the cap below frees its budget.
+        // The auto group is exactly `so-{salesOrder}` (ZCQL LIKE doesn't match here,
+        // so build the exact values from the lines' own sales orders).
+        if (orderItemIds.length) {
+          const uniq = [...new Set(orderItemIds.map(String))];
+          const groups = [...new Set(
+            uniq.map((id) => String(oiMap.get(id)?.sales_order || "")).filter(Boolean).map((so) => `'so-${so}'`),
+          )];
+          const autos = groups.length
+            ? rowList(
+                await catalyst.zcql().executeZCQLQuery(
+                  `SELECT ROWID, qty_boxes FROM ProductionLog WHERE entry_type = 'plan' AND request_group IN (${groups.join(",")}) AND stage = 'New' AND deleted_at is null AND order_item IN (${uniq.join(",")})`,
+                ),
+              ).filter((r) => !(Number(r.qty_boxes) || 0))
+            : [];
+          if (autos.length) {
+            const ids = autos.map((r) => String(r.ROWID));
+            const touched = new Set(
+              rowList(
+                await catalyst.zcql().executeZCQLQuery(
+                  `SELECT parent_log FROM ProductionLog WHERE parent_log IN (${ids.join(",")}) AND deleted_at is null`,
+                ),
+              ).map((r) => String(r.parent_log)),
+            );
+            const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+            for (const id of ids.filter((i) => !touched.has(i)))
+              await ds.table("ProductionLog").updateRow({ ROWID: id, deleted_at: stamp });
+          }
+        }
         // Boxes already requested against each order_item (every live plan line —
         // requested always ⊇ produced), so we don't request more than ordered.
         const inFlight = new Map();
@@ -2763,8 +2833,10 @@ app.post("/production-record/:rowid", async (req, res) => {
         }
 
         // Batch/shade: one batch = one shade. Blank batch → auto-mint B/FY/NNN;
-        // an operator may type an existing batch to append this output to it.
-        const batchNumber = String(body.batch_number || "").trim() || (await nextBatchNumber(catalyst));
+        // a supplied batch must pass the duplicate guard (setting-controlled).
+        const suppliedBatch = String(body.batch_number || "").trim();
+        await assertBatchesAllowed(catalyst, [suppliedBatch], pl.design);
+        const batchNumber = suppliedBatch || (await nextBatchNumber(catalyst));
         const shade = String(body.shade || "").trim();
 
         const rec = await ds.table("ProductionLog").insertRow({
@@ -2834,6 +2906,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
           ),
         )[0];
         if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+        await assertBatchesAllowed(catalyst, lines.map((l) => l.batch_number), pl.design);
 
         const recs = rowList(
           await catalyst.zcql().executeZCQLQuery(
@@ -2944,6 +3017,7 @@ app.post("/opening-stock/:designId", async (req, res) => {
             note: r.note != null ? String(r.note) : "",
           };
         });
+        await assertBatchesAllowed(catalyst, lines.map((l) => l.batch_number), designId);
 
         // Lock once any opening row exists for this design.
         const existing = rowList(

@@ -1,9 +1,10 @@
 /* ============================================================
    Record Output — logs the ACTUAL boxes produced against an approved
-   production line. Batch-tracked items record several batches at once
-   (batch · mfg date · qty · remark) via /production-record-lines; singular
-   items record a single qty via /production-record. Bumps OrderItem.produced
-   (order-linked, capped at remaining). Reused by the Production grid + detail.
+   production line. Batch-tracked items record ONE batch per save
+   (mandatory batch no. · mfg date · qty · remark) via /production-record-lines;
+   singular items record a single qty via /production-record. Bumps
+   OrderItem.produced (order-linked, capped at remaining). Reused by the
+   Production grid + detail.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -14,9 +15,9 @@ import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
-import { Combobox } from "@/ui/Combobox";
 import type { ProductionEntry, ProductionRecordInput, ProductionRecordLine } from "./productionApi";
-import { cachedProductionLogs } from "./productionApi";
+import { batchNumberExists } from "./productionApi";
+import { cachedAllowDupBatches, loadAllowDupBatches } from "@/features/settings/settingsApi";
 import { NumberInput } from "../../ui/NumberInput";
 
 /** What the form emits — routed by the parent to the right endpoint. `total` is
@@ -24,14 +25,6 @@ import { NumberInput } from "../../ui/NumberInput";
 export type RecordOutputPayload =
   | { single: ProductionRecordInput }
   | { batches: { rows: ProductionRecordLine[]; performed_by?: string } };
-
-interface BatchLine {
-  batch: string;
-  date: string;
-  qty: string;
-  note: string;
-}
-const emptyLine = (): BatchLine => ({ batch: "", date: todayISO(), qty: "", note: "" });
 
 export function RecordOutputForm({
   entry,
@@ -64,53 +57,43 @@ export function RecordOutputForm({
   const remaining = Math.min(lineRemaining, orderRemaining);
   const cap = remaining;
 
-  // Seed the batch picker from this design's prior batches so operators can
-  // append output to an existing batch; typing a new value creates it; blank
-  // = server auto-mints B/FY/NNN.
-  const batchOptions = useMemo(() => {
-    const seen = new Set<string>();
-    (cachedProductionLogs() || []).forEach((e) =>
-      e.records.forEach((r) => {
-        if (r.design === entry.design && r.batchNumber) seen.add(r.batchNumber);
-      }),
-    );
-    return [...seen].sort().reverse().map((b) => ({ value: b, label: b }));
-  }, [entry.design]);
-
   const [saving, setSaving] = useState(false);
   const panelRef = useModalA11y(onClose);
 
-  // ---- Singular items: a single qty / date / remark ----
+  // One record per save for both kinds: qty / date / remark, plus a mandatory
+  // batch number for batch-tracked items.
   const [qty, setQty] = useState(String(remaining));
   const [date, setDate] = useState(entry.productionDate || todayISO());
   const [note, setNote] = useState("");
+  const [batch, setBatch] = useState("");
   const qtyNum = parseInt(qty, 10) || 0;
 
-  // ---- Batch-tracked items: N batch rows ----
-  const [lines, setLines] = useState<BatchLine[]>([{ ...emptyLine(), qty: String(remaining) }]);
-  const setLine = (i: number, k: keyof BatchLine, v: string) =>
-    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
-  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
-  const validLines = lines.filter((l) => (parseInt(l.qty, 10) || 0) > 0);
-  const batchSum = validLines.reduce((s, l) => s + (parseInt(l.qty, 10) || 0), 0);
+  // Duplicate-batch pre-check (server 409 is the source of truth): same item +
+  // same batch is always blocked; cross-item reuse only when the setting is off.
+  const [allowDup, setAllowDup] = useState(cachedAllowDupBatches());
+  useEffect(() => {
+    void loadAllowDupBatches().then(setAllowDup);
+  }, []);
+  const dupItem = isBatched && batchNumberExists(batch, entry.design);
+  const dupGlobal = isBatched && !dupItem && !allowDup && batchNumberExists(batch);
+  const dup = dupItem || dupGlobal;
 
-  const total = isBatched ? batchSum : qtyNum;
+  const total = qtyNum;
   const over = total > cap;
-  const missing = total <= 0 || over;
+  const missing = total <= 0 || over || (isBatched && (!batch.trim() || dup));
 
   const submit = async () => {
     if (missing || saving) return;
     setSaving(true);
     try {
       if (isBatched) {
-        const rows: ProductionRecordLine[] = validLines.map((l) => ({
-          qty_boxes: parseInt(l.qty, 10) || 0,
-          batch_number: l.batch.trim() || undefined,
-          mfg_date: l.date || undefined,
-          note: l.note.trim() || undefined,
-        }));
-        await onSave({ batches: { rows, performed_by: loggedBy } }, batchSum);
+        const rows: ProductionRecordLine[] = [{
+          qty_boxes: qtyNum,
+          batch_number: batch.trim(),
+          mfg_date: date || undefined,
+          note: note.trim() || undefined,
+        }];
+        await onSave({ batches: { rows, performed_by: loggedBy } }, qtyNum);
       } else {
         await onSave(
           {
@@ -150,81 +133,43 @@ export function RecordOutputForm({
             </div>
 
             {isBatched ? (
-              <>
-                <table className="tbl" style={{ marginBottom: 8 }}>
-                  <thead>
-                    <tr>
-                      <th>Batch No. <span className="dim" title="ƒx — blank auto-generates B/FY/NNN">ƒx</span></th>
-                      <th style={{ width: 150 }}>Mfg date</th>
-                      <th className="num" style={{ width: 120, textAlign: "right" }}>Qty<span className="req"> *</span></th>
-                      <th>Remark</th>
-                      <th style={{ width: 40 }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.map((l, i) => {
-                      const last = i === lines.length - 1;
-                      return (
-                        <tr key={i}>
-                          <td>
-                            <Combobox
-                              value={l.batch}
-                              options={batchOptions}
-                              onChange={(v) => setLine(i, "batch", v)}
-                              onCreate={(label) => setLine(i, "batch", label.trim())}
-                              placeholder="Blank = auto"
-                              ariaLabel="Batch number"
-                            />
-                          </td>
-                          <td>
-                            <DateInput value={l.date} onChange={(e) => setLine(i, "date", e.target.value)} />
-                          </td>
-                          <td className="num">
-                            <NumberInput
-                              min={0}
-                              value={l.qty}
-                              onChange={(e) => setLine(i, "qty", e.target.value)}
-                              placeholder="0"
-                              style={{ width: 100, textAlign: "right" }}
-                              autoFocus={i === 0}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              value={l.note}
-                              onChange={(e) => setLine(i, "note", e.target.value)}
-                              placeholder="Optional"
-                              // Tab on the last row's last field adds the next batch.
-                              onKeyDown={(e) => {
-                                if (last && e.key === "Tab" && !e.shiftKey) {
-                                  e.preventDefault();
-                                  addLine();
-                                }
-                              }}
-                            />
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn x"
-                              onClick={() => removeLine(i)}
-                              disabled={lines.length === 1}
-                              tabIndex={-1}
-                              title="Remove batch"
-                            >
-                              ✕
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                <button className="btn" onClick={addLine}>
-                  <Icon name="plus" size={12} /> Add batch
-                </button>
-                {over && <div className="field-err" style={{ marginTop: 6 }}>Total {fmt(batchSum)} exceeds the {fmt(cap)} boxes still to produce</div>}
-              </>
+              <div className="form-grid">
+                <label className="form-field">
+                  <span className="lbl">Batch No.<span className="req"> *</span></span>
+                  <input
+                    value={batch}
+                    onChange={(e) => setBatch(e.target.value)}
+                    placeholder="e.g. B/26-27/001"
+                    autoFocus
+                  />
+                  {dup && (
+                    <span className="field-err">
+                      {dupItem
+                        ? `Batch “${batch.trim()}” is already used for this item`
+                        : `Batch “${batch.trim()}” already exists — duplicate batch numbers are disabled in Settings`}
+                    </span>
+                  )}
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Mfg date</span>
+                  <DateInput value={date} onChange={(e) => setDate(e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Qty (boxes)<span className="req"> *</span></span>
+                  <NumberInput
+                    min={0}
+                    max={Number.isFinite(cap) ? cap : undefined}
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    placeholder="0"
+                  />
+                  {over && <span className="field-err">Exceeds the {fmt(cap)} boxes still to produce</span>}
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Remark</span>
+                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+                </label>
+              </div>
             ) : (
               <div className="form-grid">
                 <label className="form-field">

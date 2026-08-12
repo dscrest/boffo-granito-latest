@@ -56,6 +56,7 @@ const FIELDS: FieldDef[] = [
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
   { key: "requested", label: "Requested (boxes)", value: (g) => fmt(g.totalRequested) },
   { key: "produced", label: "Produced (boxes)", value: (g) => (g.totalProduced ? fmt(g.totalProduced) : "—") },
+  { key: "remaining", label: "Remaining (boxes)", value: (g) => fmt(Math.max(0, g.totalRequested - g.totalProduced)) },
   { key: "items", label: "Items", value: (g) => String(g.lineCount) },
   { key: "date", label: "Production Date", value: (g) => g.date || "—" },
   { key: "by", label: "Requested by", value: (g) => g.performedBy || "—" },
@@ -181,7 +182,7 @@ export function ProductionDetail() {
     const res = await setProductionStage(group.entries.map((e) => e.id), stage);
     setBusy(null);
     if (!res.ok) {
-      toast.error(res.error || "Could not change stage");
+      toast.error(res.error || "Could not change status");
       return;
     }
     toast.success(`Moved to ${PRODUCTION_STAGE_META[stage].label}`);
@@ -384,8 +385,8 @@ export function ProductionDetail() {
                 className="pg-size"
                 value={group.stage}
                 onChange={(e) => void onStageChange(e.target.value as ProductionStage)}
-                title="Move to a stage"
-                aria-label="Production stage"
+                title="Change status"
+                aria-label="Production status"
               >
                 {PRODUCTION_STAGE_ORDER.map((s) => (
                   <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
@@ -457,6 +458,7 @@ export function ProductionDetail() {
                       <th>Status</th>
                       <th className="num" style={{ textAlign: "right" }}>Requested</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
+                      <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                       {canRecord && <th style={{ width: 110 }}></th>}
                     </tr>
                   </thead>
@@ -475,6 +477,7 @@ export function ProductionDetail() {
                           <td><span className="chip" style={{ color: lineState.color }}>{lineState.label}</span></td>
                           <td className="num mono">{fmt(e.qtyRequested)}</td>
                           <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
+                          <td className="num mono">{done ? <span className="dim">—</span> : fmt(e.qtyRequested - e.producedSoFar)}</td>
                           {canRecord && (
                             <td style={{ textAlign: "right" }}>
                               {canRecordLine(e) && (

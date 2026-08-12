@@ -16,7 +16,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useMasters } from "@/features/masters/useMasters";
-import { LineStock, useStockLookup } from "@/features/masters/LineStock";
+import { LineStock, useStockLookup, signalColor } from "@/features/masters/LineStock";
 import { useOrders } from "@/features/orders/useOrders";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { DateInput } from "@/ui/DateInput";
@@ -83,41 +83,46 @@ export function ProductionForm({
     return () => { live = false; };
   }, [mode, orderId]);
 
-  // Available stock in hand per design = opening + produced − loaded (finished goods
-  // not yet shipped). Used to default Desired qty to only what stock can't cover.
-  const availByDesign = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const d of designRows) {
-      const forD = orders.filter((o) => o.design === d.designName);
-      const produced = forD.reduce((s, o) => s + o.producedQty, 0);
-      const loaded = forD.reduce((s, o) => s + o.loadedQty, 0);
-      m.set(d.id, (d.accountingStock ?? 0) + produced - loaded);
-    }
-    return m;
-  }, [designRows, orders]);
-  const inHandFor = (it: PalletizableItem) => Math.max(0, availByDesign.get(it.designId) ?? 0);
-  const recommendedQty = (it: PalletizableItem) => Math.max(0, it.toProduce - inHandFor(it));
-  // Available (on-hand: opening + produced − loaded) already covers the whole
-  // order → no production is needed for this line (user mandate 2026-07-20:
-  // compare ordered vs available; say so explicitly instead of showing a 0).
-  const stockCovers = (it: PalletizableItem) => inHandFor(it) >= it.ordered;
+  // Per-line stock via the ONE canonical source (lib/stock designStock), keyed on
+  // the plain design_name — same numbers as Item master / Reports / LineStock.
+  // shortfall = what still needs producing after stock in hand AND in-production
+  // already committed. produced is inside `available`, so it is counted exactly once.
+  const shortfallOf = (it: PalletizableItem) => {
+    const st = stockFor(it.designName);
+    return Math.max(0, it.ordered - st.available - st.inProduction);
+  };
 
-  // Sales Orders still owing production (ordered > produced). Collapsed to one
-  // option per SO from the per-line orders list.
+  // Sales Orders with something actually left to produce. A line is covered
+  // when fully produced (kept produced-based — dispatch drains st.available and
+  // must not resurrect a done line) OR its Remaining = ordered − stock − in-flight
+  // is 0 (same formula as shortfallOf / the Remaining column). Partially covered
+  // SOs get an "N of M items left" badge.
   const soOptions = useMemo<ComboOption[]>(() => {
-    const seen = new Map<string, ComboOption>();
+    type Agg = { label: string; hint?: string; total: number; open: number };
+    const bySo = new Map<string, Agg>();
     for (const o of orders) {
-      if (!o.salesOrderId || o.producedQty >= o.orderQty) continue;
+      if (!o.salesOrderId) continue;
       if (["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(o.status || "")) continue;
-      if (!seen.has(o.salesOrderId))
-        seen.set(o.salesOrderId, {
-          value: o.salesOrderId,
-          label: o.orderNumber || o.poNumber || o.salesOrderId,
-          hint: o.party || undefined,
-        });
+      const st = stockFor(o.designName);
+      const covered =
+        o.producedQty >= o.orderQty ||
+        Math.max(0, o.orderQty - st.available - st.inProduction) === 0;
+      const a =
+        bySo.get(o.salesOrderId) ??
+        { label: o.orderNumber || o.poNumber || o.salesOrderId, hint: o.party || undefined, total: 0, open: 0 };
+      a.total += 1;
+      if (!covered) a.open += 1;
+      bySo.set(o.salesOrderId, a);
     }
-    return [...seen.values()];
-  }, [orders]);
+    return [...bySo.entries()]
+      .filter(([, a]) => a.open > 0)
+      .map(([value, a]) => ({
+        value,
+        label: a.label,
+        hint: a.hint,
+        badge: a.open < a.total ? `${a.open} of ${a.total} items left` : undefined,
+      }));
+  }, [orders, stockFor]);
 
   // Load the chosen SO's line items (ordered / produced / remaining).
   useEffect(() => {
@@ -131,21 +136,13 @@ export function ProductionForm({
       if (!live) return;
       setLoadingItems(false);
       const order = res.ok ? res.orders.find((o) => o.salesOrderId === orderId) : null;
-      const its = order?.items ?? [];
-      setItems(its);
-      // Default Desired qty = remaining − stock in hand (produce only the shortfall).
-      setQtyByItem(
-        Object.fromEntries(
-          its
-            .filter((it) => it.toProduce > 0)
-            .map((it) => [it.orderItemId, Math.max(0, it.toProduce - Math.max(0, availByDesign.get(it.designId) ?? 0))]),
-        ),
-      );
+      setItems(order?.items ?? []);
+      setQtyByItem({}); // qtyByItem holds only user overrides; rows default to their shortfall inline.
     });
     return () => {
       live = false;
     };
-  }, [orderId, mode, availByDesign]);
+  }, [orderId, mode]);
 
   const setQty = (itemId: string, raw: string, max: number) =>
     setQtyByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
@@ -159,14 +156,18 @@ export function ProductionForm({
     [designRows],
   );
 
-  // Lines still owing production — the only ones worth showing/typing against.
-  const producible = useMemo(() => items.filter((it) => it.toProduce > 0), [items]);
+  // Only lines with a real shortfall are requestable; each defaults to its shortfall
+  // unless the user overrode it (qtyByItem holds overrides only).
   const orderLines = useMemo(
     () =>
       items
-        .map((it) => ({ order_item: it.orderItemId, qty_requested: qtyByItem[it.orderItemId] || 0 }))
+        .map((it) => {
+          const short = shortfallOf(it);
+          return { order_item: it.orderItemId, qty_requested: short > 0 ? qtyByItem[it.orderItemId] ?? short : 0 };
+        })
         .filter((l) => l.qty_requested > 0),
-    [items, qtyByItem],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, qtyByItem, stockFor],
   );
   const indepValid = useMemo(
     () =>
@@ -295,9 +296,10 @@ export function ProductionForm({
             </div>
           )}
 
-          {/* Order mode — item-wise desired qty table. Only lines still owing
-              production (Remaining > 0) are shown; fully-produced/exceeded lines
-              are noise here, so they're hidden with a one-line hint. */}
+          {/* Order mode — item-wise desired qty table. Every line shows, with a
+              3-state stock signal (designStock): green = covered by stock in hand,
+              amber = covered by in-production, red = shortfall. Covered lines are
+              read-only; only lines with a real shortfall take a Desired qty. */}
           {mode === "order" && orderId && (
             <div className="form-section">
               <div className="form-section-title">
@@ -307,18 +309,11 @@ export function ProductionForm({
                 <div className="muted" style={{ padding: 8 }}>Loading items…</div>
               ) : items.length === 0 ? (
                 <div className="muted" style={{ padding: 8 }}>No line items on this order.</div>
-              ) : producible.length === 0 ? (
-                <div className="muted" style={{ padding: 8 }}>All {items.length} item{items.length > 1 ? "s" : ""} on this order are fully produced — nothing left to request.</div>
-              ) : producible.every(stockCovers) ? (
-                <div style={{ padding: "10px 12px", color: "var(--c-green)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <Icon name="check" size={14} />
-                  No production required — sufficient stock available to cover this order.
-                </div>
               ) : (
-                <>
                 <table className="tbl">
                   <thead>
                     <tr>
+                      <th style={{ width: 20 }} aria-label="Status" />
                       <th>Design</th>
                       <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                       <th className="num" style={{ textAlign: "right" }}>In production</th>
@@ -328,46 +323,53 @@ export function ProductionForm({
                     </tr>
                   </thead>
                   <tbody>
-                    {producible.map((it) => (
+                    {items.map((it) => {
+                      // One canonical source, keyed on design_name (matches every other screen).
+                      const st = stockFor(it.designName);
+                      const short = Math.max(0, it.ordered - st.available - st.inProduction);
+                      const color = signalColor(it.ordered, st); // green covered / amber in-prod / red short
+                      const covered = short === 0; // green or amber → nothing to request
+                      const inProd = color === "var(--c-amber)"; // covered by in-production, not physical stock
+                      return (
                         <tr key={it.orderItemId}>
+                          <td>
+                            <span
+                              title={short > 0 ? `Needs production — ${fmt(short)} short` : inProd ? "Covered by in-production" : "In stock"}
+                              style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: color }}
+                            />
+                          </td>
                           <td><span className="design-name">{it.designLabel}</span></td>
                           <td className="num mono">{fmt(it.ordered)}</td>
-                          {/* In production = this design's boxes running across ALL orders
-                              (not just this line). Click → which orders, so priority can be shuffled.
-                              Sourced from designStock (lib/stock) so it matches every other screen. */}
+                          {/* In production = this design's remaining open-production boxes across ALL
+                              orders. Click → which orders, so priority can be shuffled. designStock source. */}
                           <td className="num">
-                            <InProductionCell total={stockFor(it.designLabel).inProduction} onOpen={() => setBreakdown(it)} />
+                            <InProductionCell total={st.inProduction} onOpen={() => setBreakdown(it)} />
                           </td>
-                          <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(inHandFor(it))}</td>
-                          {/* Remaining = shortfall AFTER stock in hand (produce only
-                              what stock can't cover): ordered 400, stock 50 → 350, not 400. */}
-                          <td className="num mono">{fmt(recommendedQty(it))}</td>
+                          <td className="num mono" title="Available stock in hand (opening + produced − loaded)">{fmt(st.available)}</td>
+                          {/* Remaining = shortfall after stock in hand AND in-production: what still
+                              needs producing. ordered 10000, stock 3300, in-prod 0 → 6700. */}
+                          <td className="num mono">{fmt(short)}</td>
                           <td className="num">
-                            {stockCovers(it) ? (
-                              <span className="dim" style={{ color: "var(--c-green)", whiteSpace: "normal", fontSize: "var(--t-sm)" }} title="Available stock (opening + produced − loaded) already covers the ordered qty">
-                                In stock — none needed
+                            {covered ? (
+                              <span className="dim" style={{ color, whiteSpace: "normal", fontSize: "var(--t-sm)" }} title={inProd ? "Covered by boxes already in production" : "Covered by available stock in hand"}>
+                                {inProd ? "In production — none needed" : "In stock — none needed"}
                               </span>
                             ) : (
                               <NumberInput
                                 min={0}
-                                max={recommendedQty(it)}
-                                value={qtyByItem[it.orderItemId] || ""}
-                                onChange={(e) => setQty(it.orderItemId, e.target.value, recommendedQty(it))}
+                                max={short}
+                                value={qtyByItem[it.orderItemId] ?? short}
+                                onChange={(e) => setQty(it.orderItemId, e.target.value, short)}
                                 placeholder="0"
                                 style={{ width: 100, textAlign: "right" }}
                               />
                             )}
                           </td>
                         </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
-                {items.length > producible.length && (
-                  <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 8px" }}>
-                    {items.length - producible.length} item{items.length - producible.length > 1 ? "s" : ""} already fully produced — hidden.
-                  </div>
-                )}
-                </>
               )}
             </div>
           )}
@@ -447,7 +449,7 @@ export function ProductionForm({
         </div>
       </div>
       {breakdown && (() => {
-        const s = stockFor(breakdown.designLabel);
+        const s = stockFor(breakdown.designName);
         return <InProductionModal label={breakdown.designLabel} total={s.inProduction} orders={s.inProductionOrders} onClose={() => setBreakdown(null)} />;
       })()}
     </div>

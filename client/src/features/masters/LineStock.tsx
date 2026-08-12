@@ -32,7 +32,7 @@ export function useStockLookup(): (designName: string) => DesignStock {
 }
 
 /** green = enough available; yellow = needs production; red = needs a lot. */
-function signalColor(qty: number, s: DesignStock): string {
+export function signalColor(qty: number, s: DesignStock): string {
   if (qty <= s.available) return "var(--c-green)";
   if (qty <= s.available + s.inProduction) return "var(--c-amber)";
   return "var(--c-red)";

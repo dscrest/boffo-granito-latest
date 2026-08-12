@@ -11,6 +11,10 @@
                      (New/InProduction ProductionLog lines, per line remaining).
                      Crucially NOT "ordered − produced" on SO lines — merely
                      raising a Sales Order must not inflate in-production (bug 7.2).
+                     SO-confirm auto-queued jobs (request_group "so-…") are that
+                     same demand in row form: they count only once TOUCHED
+                     (output recorded or dragged out of New). Manual "PR-…"
+                     requests count from creation.
      inLoading     = palletised boxes waiting to be loaded.
    ============================================================ */
 import type { Order } from "@/data";
@@ -73,6 +77,9 @@ export function designStock(
   const bySo = new Map<string, InProductionOrder>();
   for (const e of logs) {
     if (e.stage === "Completed" || e.status === "Rejected") continue;
+    // SO-confirm auto-queued job nobody has touched (still New, nothing recorded)
+    // is demand, not production — counting it lets an order cover itself (bug 7.2).
+    if (e.requestGroup?.startsWith("so-") && e.stage === "New" && e.producedSoFar === 0) continue;
     const qty = Math.max(0, e.qtyRequested - e.producedSoFar);
     if (qty <= 0) continue;
     const key = e.salesOrderId || "independent";

@@ -6,8 +6,11 @@
    MASTERS/LINKS style in Masters.tsx; markup reuses existing app
    classes (page-head, card, card-head, card-body).
    ============================================================ */
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { toast } from "@/ui/Toast";
+import { loadAllowDupBatches, setAllowDupBatches } from "./settingsApi";
 
 interface SettingItem {
   label: string;
@@ -60,6 +63,47 @@ const SECTIONS: SettingSection[] = [
   },
 ];
 
+function Preferences() {
+  const [allowDup, setAllowDup] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void loadAllowDupBatches().then(setAllowDup);
+  }, []);
+
+  const onToggle = async (v: boolean) => {
+    setBusy(true);
+    setAllowDup(v);
+    const res = await setAllowDupBatches(v);
+    setBusy(false);
+    if (!res.ok) {
+      setAllowDup(!v);
+      toast.error(res.error || "Could not save setting");
+      return;
+    }
+    toast.success(v ? "Duplicate batch numbers allowed" : "Duplicate batch numbers blocked");
+  };
+
+  return (
+    <div className="card">
+      <div className="card-head">
+        <Icon name="settings" size={13} className="ic" />
+        <div className="title">Preferences</div>
+      </div>
+      <div className="card-body settings-list">
+        <label className="settings-item" style={{ cursor: busy || allowDup === null ? "wait" : "pointer" }}>
+          <input
+            type="checkbox"
+            checked={allowDup === true}
+            disabled={busy || allowDup === null}
+            onChange={(e) => void onToggle(e.target.checked)}
+          />
+          <span>Allow duplicate batch numbers</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsHome() {
   const navigate = useNavigate();
 
@@ -95,6 +139,7 @@ export function SettingsHome() {
             </div>
           </div>
         ))}
+        <Preferences />
       </div>
     </div>
   );

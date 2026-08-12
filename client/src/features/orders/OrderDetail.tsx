@@ -8,8 +8,10 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, parseContainerPlan, type Order, type Quote } from "@/data";
+import { STAGES, type Order, type Quote } from "@/data";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
+import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
+import { EmptyState } from "@/ui/States";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
@@ -74,41 +76,14 @@ function SoContainerPlan({ salesOrderId }: { salesOrderId: string }) {
       alive = false;
     };
   }, [salesOrderId]);
-  const plan = parseContainerPlan(quote?.containerPlan);
-  if (!quote || !plan) return null;
-  const colors = ["var(--c-blue)", "var(--c-green)", "var(--c-amber)", "var(--c-violet)", "var(--c-cyan)"];
-  const colorOf = new Map<string, string>();
-  plan.containers.forEach((c) => c.lines.forEach((l) => {
-    if (!colorOf.has(l.design)) colorOf.set(l.design, colors[colorOf.size % colors.length]);
-  }));
-  return (
-    <div className="card" style={{ marginTop: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-        <span style={{ fontWeight: 600 }}>Container Plan</span>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {plan.containers.length} container{plan.containers.length === 1 ? "" : "s"} planned on{" "}
-          <Link className="linkish" to={`/quotes/${quote.id}/containerise`}>{quote.quoteNo}</Link>
-        </span>
+  if (!quote) {
+    return (
+      <div className="card" style={{ padding: 14 }}>
+        <EmptyState title="No container plan yet" hint="This order has no source estimate with a container plan" />
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: 14 }}>
-        {plan.containers.map((c) => (
-          <div key={c.no} style={{ minWidth: 240, border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-              <span className="mono" style={{ fontWeight: 600 }}>{quote.quoteNo} · C{c.no}</span>
-              <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{c.pallets} pallets · {fmt(c.boxes)} boxes · {c.fillPct}%</span>
-            </div>
-            {c.lines.map((l, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--t-sm)", padding: "2px 0" }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: colorOf.get(l.design), flexShrink: 0 }} />
-                <span style={{ flex: 1 }}>{l.design}</span>
-                <span className="mono dim">{l.pallets}P · {fmt(l.boxes)}B</span>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+    );
+  }
+  return <ContainerPlanCard quote={quote} />;
 }
 /** The quote whose conversion produced this SO (quotes carry their SO list). */
 function findPlanQuote(quotes: Quote[] | null, salesOrderId: string): Quote | null {
@@ -592,6 +567,7 @@ export function OrderDetail() {
           ? [
               { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
+              { id: "containers", label: "Container Planning", content: <SoContainerPlan salesOrderId={head.salesOrderId} /> },
             ]
           : undefined
       }
@@ -652,7 +628,6 @@ export function OrderDetail() {
         </div>
       </div>
 
-      {head.salesOrderId && <SoContainerPlan salesOrderId={head.salesOrderId} />}
 
       {ipBreak && (() => {
         const s = stockOf(ipBreak);

@@ -16,6 +16,8 @@ export interface ComboOption {
   label: string;
   /** Secondary text shown dimmed + included in the filter (e.g. party code). */
   hint?: string;
+  /** Small pill after the label (e.g. "2 of 5 items left"). Display-only, not filtered. */
+  badge?: string;
 }
 
 export function Combobox({
@@ -254,7 +256,10 @@ export function Combobox({
                 pick(o.value);
               }}
             >
-              <span>{o.label}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {o.label}
+                {o.badge && <span className="chip qstatus q-partial">{o.badge}</span>}
+              </span>
               {o.hint && <span className="combo-hint">{o.hint}</span>}
             </div>
           ))}

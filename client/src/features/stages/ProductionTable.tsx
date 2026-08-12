@@ -14,12 +14,12 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
-import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
+import { ProductionImport } from "./ProductionImport";
 import { RecordOutputForm, type RecordOutputPayload } from "./RecordOutputForm";
 import { ProductionKanban, type ProductionGroupBy } from "./ProductionKanban";
 import {
@@ -82,7 +82,7 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
     { key: "date", label: "Date", className: "mono muted", render: (g) => g.date || "—" },
     {
       key: "stage",
-      label: "Stage",
+      label: "Status",
       render: (g) => {
         const s = stageChip(g.stage);
         return <span className="chip" style={{ color: s.color }}>{s.label}</span>;
@@ -95,6 +95,13 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
       className: "num mono",
       style: { textAlign: "right" },
       render: (g) => (g.totalProduced ? <span style={{ color: "var(--c-green)" }}>{fmt(g.totalProduced)}</span> : <span className="dim">—</span>),
+    },
+    {
+      key: "remaining",
+      label: "Remaining",
+      className: "num mono",
+      style: { textAlign: "right" },
+      render: (g) => fmt(Math.max(0, g.totalRequested - g.totalProduced)),
     },
     {
       key: "progress",
@@ -127,6 +134,7 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
     case "stage": return PRODUCTION_STAGE_ORDER.indexOf(g.stage);
     case "requested": return g.totalRequested;
     case "produced": return g.totalProduced;
+    case "remaining": return Math.max(0, g.totalRequested - g.totalProduced);
     case "progress": return g.ordered ? g.produced / g.ordered : -1;
     case "by": return g.performedBy || "";
     case "items": return g.lineCount;
@@ -180,6 +188,7 @@ export function ProductionTable() {
   const [query, setQuery] = usePersistedState("production.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("production.criteria", {});
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -187,7 +196,6 @@ export function ProductionTable() {
   // opens the record dialog; all output flows through recordProduction.
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
   // Sheet view: in-flight inline qty edits, keyed by production-line id.
-  const [qtyEdits, setQtyEdits] = useState<Record<string, string>>({});
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
@@ -245,7 +253,7 @@ export function ProductionTable() {
     const opts = (get: (r: ProductionRequestGroup) => string) => [...new Set(groups.map(get).filter(Boolean))].sort();
     return [
       { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customer), get: (r) => r.customer },
-      { key: "stage", label: "Stage", type: "multiselect", options: [...PRODUCTION_STAGE_ORDER], get: (r) => r.stage },
+      { key: "stage", label: "Status", type: "multiselect", options: [...PRODUCTION_STAGE_ORDER], get: (r) => r.stage },
       { key: "by", label: "Requested By", type: "multiselect", options: opts((r) => r.performedBy), get: (r) => r.performedBy },
       { key: "requested", label: "Requested (boxes)", type: "numrange", get: (r) => r.totalRequested },
       { key: "date", label: "Date Between", type: "daterange", get: (r) => r.date || r.createdTime || "" },
@@ -358,35 +366,14 @@ export function ProductionTable() {
     await load();
   };
 
-  // ---- Sheet view: inline commit of produced qty + stage ----
-  // Editing the Produced cell records the DELTA over what's already logged (a
-  // batch auto-mints; use RecordOutputForm/detail to set batch+shade explicitly).
-  // Lowering produced isn't clawed back here — do that on the detail page.
-  const commitQty = async (e: ProductionEntry) => {
-    const raw = qtyEdits[e.id];
-    setQtyEdits((p) => { const n = { ...p }; delete n[e.id]; return n; });
-    if (raw == null) return;
-    const newTotal = Math.max(0, parseInt(raw, 10) || 0);
-    const delta = newTotal - e.producedSoFar;
-    if (delta === 0) return;
-    if (delta < 0) { toast.error("Lowering produced isn't supported here — use the detail page"); return; }
-    const orderCap = e.orderItemId ? Math.max(0, e.ordered - e.produced) : Infinity;
-    const capped = Math.min(delta, e.qtyRequested - e.producedSoFar, orderCap);
-    if (capped <= 0) { toast.error("Nothing left to produce on this line"); return; }
-    const res = await recordProduction(e.id, { qty_boxes: capped });
-    if (!res.ok) { toast.error(res.error || "Record failed"); return; }
-    if (e.producedSoFar + capped >= e.qtyRequested) await setProductionStage([e.id], "Completed");
-    toast.success(`+${fmt(capped)} boxes${res.data?.batch_number ? ` · ${res.data.batch_number}` : ""}`);
-    invalidateProductionLogs();
-    await load();
-  };
+  // ---- Sheet view: inline stage commit ----
   const commitStage = async (e: ProductionEntry, stage: ProductionStage) => {
     if (stage === e.stage) return;
     // Completing a line with boxes still to make opens the record dialog to
     // capture the final output + batch/shade (same as the board's onMove).
     if (stage === "Completed" && e.qtyRequested - e.producedSoFar > 0) { setRecordEntry(e); return; }
     const res = await setProductionStage([e.id], stage);
-    if (!res.ok) { toast.error(res.error || "Could not change stage"); return; }
+    if (!res.ok) { toast.error(res.error || "Could not change status"); return; }
     invalidateProductionLogs();
     await load();
   };
@@ -443,6 +430,8 @@ export function ProductionTable() {
   return (
     <div>
       {showForm && <ProductionForm onSave={onRequest} onClose={() => setShowForm(false)} />}
+
+      {showImport && <ProductionImport onDone={() => { invalidateProductionLogs(); void load(); }} onClose={() => setShowImport(false)} />}
 
       {recordEntry && <RecordOutputForm entry={recordEntry} onSave={onRecordSave} onClose={() => setRecordEntry(null)} />}
 
@@ -507,6 +496,12 @@ export function ProductionTable() {
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {canEdit && (
+          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowImport(true)}>
+            <Icon name="upload" size={13} />
+            Import
+          </button>
+        )}
+        {canEdit && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             {saving ? "Saving…" : "Record New Production"}
@@ -535,10 +530,9 @@ export function ProductionTable() {
                     <th>Order</th>
                     <th>Customer</th>
                     <th className="num" style={{ textAlign: "right" }}>Requested</th>
-                    <th className="num" style={{ textAlign: "right", width: 120 }}>Produced</th>
-                    <th style={{ width: 150 }}>Stage</th>
-                    <th>Batch</th>
-                    <th>Shade</th>
+                    {/* ponytail: Produced column hidden 2026-08-12 — recording goes through the + dialog; restore from git if inline entry returns */}
+                    <th className="num" style={{ textAlign: "right" }}>Remaining</th>
+                    <th style={{ width: 150 }}>Status</th>
                     {canEdit && <th style={{ width: 44 }} />}
                   </tr>
                 </thead>
@@ -554,11 +548,11 @@ export function ProductionTable() {
                           prevKey = key;
                           const tot = groupTotals.get(key) || { requested: 0, produced: 0 };
                           out.push(
-                            <tr key={`h-${key}`} style={{ background: "var(--bg-2)", fontWeight: 600 }}>
+                            <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
                               <td colSpan={4}>{key}</td>
                               <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.requested)}</td>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.produced)}</td>
-                              <td colSpan={canEdit ? 4 : 3} />
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, tot.requested - tot.produced))}</td>
+                              <td colSpan={canEdit ? 2 : 1} />
                             </tr>,
                           );
                         }
@@ -574,21 +568,7 @@ export function ProductionTable() {
                           <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
                           <td>{g.customer || (g.independent ? "—" : "")}</td>
                           <td className="num mono" style={{ textAlign: "right" }}>{fmt(e.qtyRequested)}</td>
-                          <td className="num">
-                            {canEdit ? (
-                              <NumberInput
-                                value={qtyEdits[e.id] ?? String(e.producedSoFar)}
-                                onChange={(ev) => setQtyEdits((p) => ({ ...p, [e.id]: ev.target.value }))}
-                                onBlur={() => void commitQty(e)}
-                                onKeyDown={(ev) => { if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); }}
-                                min={0}
-                                style={{ width: 90, textAlign: "right" }}
-                                title={`${fmt(remaining)} still to produce`}
-                              />
-                            ) : (
-                              fmt(e.producedSoFar)
-                            )}
-                          </td>
+                          <td className="num mono" style={{ textAlign: "right" }}>{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
                           <td>
                             {canEdit ? (
                               <select value={e.stage} onChange={(ev) => void commitStage(e, ev.target.value as ProductionStage)}>
@@ -600,14 +580,12 @@ export function ProductionTable() {
                               stageChip(e.stage).label
                             )}
                           </td>
-                          <td className="mono">{e.batchNumber || "—"}</td>
-                          <td>{e.shade || "—"}</td>
                           {canEdit && (
                             <td>
                               <button
                                 type="button"
                                 className="btn x"
-                                title={remaining > 0 ? `Record output (${fmt(remaining)} to make) — batch & shade` : "Record output — batch & shade"}
+                                title={remaining > 0 ? `Record output (${fmt(remaining)} to make)` : "Record output"}
                                 aria-label="Record output"
                                 onClick={() => setRecordEntry(e)}
                               >
@@ -621,7 +599,7 @@ export function ProductionTable() {
                     if (!loading && sheetRows.length === 0) {
                       out.push(
                         <tr key="empty">
-                          <td colSpan={canEdit ? 10 : 9}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                          <td colSpan={canEdit ? 8 : 7}><EmptyState title="No matching results" hint="Try a different filter" /></td>
                         </tr>,
                       );
                     }
