@@ -8,7 +8,7 @@ import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
-import { boxFill, lineFrac, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
+import { boxFill, lineFrac, mixedBatchOrderItems, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
 
 export function BoxDetailsModal({
   box,
@@ -84,12 +84,18 @@ export function BoxDetailsModal({
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: colorByDesign.get(l.designId), flex: "0 0 auto" }} />
                 <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
                 <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.designLabel}</span>
+                {l.batchNumber && <span className="dim mono" style={{ flex: "0 0 auto" }}>{l.batchNumber}</span>}
                 <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
                 <span className="dim mono" style={{ flex: "0 0 auto" }}>{l.soNumber}</span>
                 <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{fmt(l.boxes)}</span>
               </div>
             ))}
             {entries.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "8px 0" }}>Nothing loaded yet</div>}
+            {mixedBatchOrderItems(entries.map(({ l }) => l)) && (
+              <div style={{ fontSize: "var(--t-sm)", color: "var(--c-amber)", padding: "6px 0", borderTop: "1px solid var(--panel-2)" }}>
+                An item in this box spans more than one batch — tile texture may vary for that customer.
+              </div>
+            )}
           </div>
         </div>
 

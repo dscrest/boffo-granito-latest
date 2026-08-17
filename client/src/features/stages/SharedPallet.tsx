@@ -14,6 +14,7 @@ import { API_BASE } from "@/lib/api";
 interface Item {
   item: string;
   size: string;
+  batch: string;
   boxes: number;
   order: string;
   customer: string;
@@ -136,7 +137,11 @@ export function SharedPallet() {
                     <td>
                       {it.item}
                       {it.size && <span className="dim" style={{ fontSize: 12 }}> · {it.size}</span>}
-                      {it.order && <div className="dim" style={{ fontSize: 11 }}>{it.order}</div>}
+                      {(it.order || it.batch) && (
+                        <div className="dim" style={{ fontSize: 11 }}>
+                          {[it.order, it.batch && `Batch ${it.batch}`].filter(Boolean).join(" · ")}
+                        </div>
+                      )}
                     </td>
                     <td className="num mono">{it.boxes}</td>
                     <td>

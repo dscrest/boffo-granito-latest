@@ -85,6 +85,9 @@ export interface Order {
   customerNotes?: string;
   terms?: string;
   totalAmount?: number;
+  /** SalesOrder.container_plan — the SO's own plan JSON (snapshotted from the
+      quote at conversion; editable via /orders/:id/containerise). */
+  containerPlan?: string;
   /** Doc-level charges (SalesOrder header). */
   docDiscount?: number;
   adjustment?: number;

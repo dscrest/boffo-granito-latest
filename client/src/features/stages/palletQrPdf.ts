@@ -24,7 +24,7 @@ const uniq = (xs: string[]): string[] => [...new Set(xs.filter(Boolean))];
 function summaryLines(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLine }>): string[] {
   const items = entries.map(
     ({ l }) =>
-      `${l.designLabel}${l.sizeCode ? ` ${l.sizeCode}` : ""} ×${l.boxes} → ${l.customerName || "?"}${l.countryCode ? ` (${l.countryCode})` : ""}`,
+      `${l.designLabel}${l.sizeCode ? ` ${l.sizeCode}` : ""} ×${l.boxes}${l.batchNumber ? ` [${l.batchNumber}]` : ""} → ${l.customerName || "?"}${l.countryCode ? ` (${l.countryCode})` : ""}`,
   );
   const dests = uniq(entries.map(({ l }) => `${l.customerName}${l.countryCode ? ` (${l.countryCode})` : ""}`));
   const reps = uniq(entries.map(({ p }) => `${p.salespersonName}${p.salespersonPhone ? ` ${p.salespersonPhone}` : ""}`));

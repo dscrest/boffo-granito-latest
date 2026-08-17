@@ -1,5 +1,79 @@
 # Changes
 
+## 2026-08-12 — Production polish: designStock unification, SO picker filter, Excel import placement, container tab
+
+- **designStock unification** — Item detail, Reports and transaction line rows all
+  derive live stock through the one `designStock()` path in `client/src/lib/stock.ts`
+  (`openingStockFor()` picks `accounting_stock` vs summed opening-batch rows per item —
+  the guard against double-counting opening).
+- **SO picker filter** — Production's Sales Order picker hides fully-produced orders.
+- **Excel import** — `/prod` Import button placement finalized (`ProductionImport.tsx`);
+  no re-upload dedupe yet.
+- **Container planning** — quote-level container planning surfaced as a tab
+  (`ContainerPlanCard` on QuoteDetail).
+- Deployed LIVE 2026-08-12 (commit `a242dbc`).
+
+## 2026-08-11 — Batch-wise production & opening stock + batch/shade UI revamp
+
+- **`Design.is_batched`** — batch-tracked items. Server rejects flipping the flag
+  once the item carries stock.
+- **Batch-wise opening stock** — `POST /opening-stock/:designId` stores opening as
+  `ProductionLog entry_type="opening"` rows (one per batch); locked after the first
+  submission (admin-only re-edit with required `_reason` → OperationLog). Singular
+  items keep the `accounting_stock` single number + same lock.
+- **Multi-batch recording** — `POST /production-record-lines/:rowid` records several
+  batches (qty + batch + mfg_date) against one plan line in one shot; OrderItem
+  bumped once, inserts compensated on failure.
+- **Duplicate-batch guard** — same item + same batch always 409; cross-item reuse
+  controlled by the new **AppSetting** table (`allow_duplicate_batches`, Settings page).
+- **Stock Details grid** (`/stock`, `StockDetails.tsx`) — batch-level stock view;
+  `batchStockApi` derives per-batch on-hand.
+- **Shared pallet page + pallet QR PDF** — `SharedPallet.tsx` public scanner page
+  (`#/share/box/<token>`, tokenless `GET /public/pallet/:token`, token minted by
+  `POST /load-box-share/:rowid`); printable pallet QR labels (`palletQrPdf.ts`).
+- Commits `1342599` (deployed LIVE 2026-08-11) + `96db631`.
+
+## 2026-08-07 — Production batches, mixed pallets, loading capture, auto-enqueue
+
+- **Batch/shade columns** — `ProductionLog.batch_number` (`B/FY/NNN`, auto-minted) +
+  `shade`; `PalletisedBatch`/`PalletisedBatchLine` carry batch/shade (header for
+  single-batch pallets, per-line truth on mixed).
+- **Mixed pallets** — `/combine-leftovers` combines sub-pallet leftovers across items
+  into one `is_mixed` pallet (design null, batch/shade per line).
+- **Loading capture** — LoadBox gains `container_number` / `line_seal` /
+  `electronic_seal` / `loading_supervisor`, set via `/load-box-update` or at dispatch.
+- **SO-confirm auto-enqueue** — confirming a Sales Order inserts one production plan
+  row per order item (`request_group="so-{soId}"`, deduped on order_item). Auto-queued
+  jobs count toward in-production only once *touched* (recorded or dragged out of New);
+  a manual request supersedes an untouched auto job.
+- **Production Sheet view** — per-row Record button + record prompt on Complete.
+- Commits `7609790`, `d1e8509`/`df8abbb` (TDZ fixes), `a8e30f7`.
+
+## 2026-07-31/08-03 — Plan Containerisation
+
+- Quote-level container planning page: split plan boxes into containers, move boxes
+  between containers, Remaining column driven by order quantities.
+- **Box Fitting / Weight Fitting mode toggle** — Box Fitting (default; capacity fixed
+  from the Pallet master) vs Weight Fitting; a saved plan reopens in its mode.
+- Commits `2abed9b`, `be87adc`, `73d273f`, `21c39a6`, `27924f8`.
+
+## 2026-07-28/29 — LoadBox vehicle slots + Dispatch Control Board
+
+- **LoadBox** (new table) — cross-plan "boxes" on the Loading columns; dragging any
+  Ready line onto In Loading auto-creates/reuses an open box (no +Box/kebab); vehicle
+  attaches while Open or is asked at dispatch; a box dispatches as one unit and plan
+  status auto-follows (`Loading` → `Completed`). Partial loads split the plan line.
+- **Dispatch Control Board** — `/packing` board becomes the two-panel `DispatchBoard`
+  (order kanban + Loading bay); `PalKanban` + groupBy swimlanes deleted.
+- Commits `9cbdb78`, `c650e72`.
+
+## 2026-07-24 — Security hardening + palletization form polish
+
+- ZCQL injection sweep, read-authz on list routes, httpOnly session cookie (`e3b8946`).
+- Palletization form: vehicle picker, PAL links, date rename; instructional modal
+  subtitles dropped app-wide (`73113ec`). Vehicle master: auto-hyphen registration
+  formatting + Save button (`b8bc2c0`).
+
 ## 2026-07-23 — Palletization: per-item stages, produced gate, detail tabs
 
 - **Per-item kanban movement** — palletising is now tracked **per line**, not per

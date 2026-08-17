@@ -353,11 +353,12 @@ export function ProductionTable() {
     const e = recordEntry;
     setRecordEntry(null);
     if (!e) return;
-    const res = "batches" in payload
-      ? await recordProductionLines(e.id, payload.batches)
-      : await recordProduction(e.id, payload.single);
-    if (!res.ok) {
-      toast.error(res.error || "Record output failed");
+    // ponytail: singles loop is sequential + non-atomic; form caps Σ ≤ remaining
+    let res;
+    if ("batches" in payload) res = await recordProductionLines(e.id, payload.batches);
+    else for (const s of payload.singles) { res = await recordProduction(e.id, s); if (!res.ok) break; }
+    if (!res?.ok) {
+      toast.error(res?.error || "Record output failed");
       return;
     }
     if (e.producedSoFar + total >= e.qtyRequested) await setProductionStage([e.id], "Completed");

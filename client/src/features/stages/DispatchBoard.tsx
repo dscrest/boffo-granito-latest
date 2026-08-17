@@ -1,7 +1,7 @@
 /* ============================================================
    Dispatch Control Board — the /packing board view (replaces PalKanban).
    Two panels: LEFT is a 4-column order board of PalletizationPlanLines
-   (In Palletization → Ready for Loading → In Dispatch → Dispatched) with
+   (Ready for Palletization → Ready for Loading → In Dispatch → Dispatched) with
    filters, FIFO/fits chips and multi-select; RIGHT is the Dispatch panel — one
    card per LoadBox (vehicle slot) with a design-coloured fill bar, gap label,
    swap, and the dispatch flow (vehicle asked at dispatch).
@@ -19,8 +19,9 @@ import { toast } from "@/ui/Toast";
 import { KPI } from "@/ui/primitives";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { fmt } from "@/lib/format";
-import { parseContainerPlan, type ContainerPlan, type Quote } from "@/data";
+import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
+import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { isoInfo } from "@/features/masters/customersApi";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { BoxPickerModal } from "./BoxPickerModal";
@@ -32,6 +33,7 @@ import {
   dispatchLoadBox,
   invalidatePalPlans,
   lineFrac,
+  mixedBatchOrderItems,
   setLineBox,
   setPalLineStatus,
   sharedCapacity,
@@ -46,7 +48,7 @@ import {
 // Board columns — all four hold ITEM cards (a PalPlanLine each); the last two
 // are derived from the line's box (Open = In Dispatch, Dispatched = done).
 const COLUMNS = [
-  { key: "Planning", label: "In Palletization", chip: "p-planning" },
+  { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
   { key: "Loading", label: "In Dispatch", chip: "p-loading" },
   { key: "Done", label: "Dispatched", chip: "p-completed" },
@@ -98,26 +100,37 @@ export function DispatchBoard({
   const [detailBoxId, setDetailBoxId] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ lineId: string; presetBoxId?: string } | null>(null);
 
-  // Container plans promised at quote time (Plan Containerisation snapshot),
-  // keyed by SalesOrder ROWID — the loading team packs load-boxes to plan.
+  // Container plans keyed by SalesOrder ROWID — the loading team packs
+  // load-boxes to plan. The SO's OWN plan (editable copy, snapshotted at
+  // conversion) wins; the source quote's snapshot is the fallback for SOs
+  // converted before SOs owned plans.
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   useEffect(() => {
     let alive = true;
     void listQuotes().then((r) => {
       if (alive && r.ok) setQuotes(r.quotes);
     });
+    void listOrders().then((r) => {
+      if (alive && r.ok) setOrders(r.orders);
+    });
     return () => {
       alive = false;
     };
   }, []);
-  const planBySo = new Map<string, { quoteNo: string; quoteId: string; plan: ContainerPlan }>();
+  const planBySo = new Map<string, { docNo: string; plan: ContainerPlan }>();
   quotes.forEach((qt) => {
     const plan = parseContainerPlan(qt.containerPlan);
-    if (plan) qt.sos?.forEach((so) => planBySo.set(so.id, { quoteNo: qt.quoteNo, quoteId: qt.id, plan }));
+    if (plan) qt.sos?.forEach((so) => planBySo.set(so.id, { docNo: qt.quoteNo, plan }));
   });
-  const planTitle = (quoteNo: string, plan: ContainerPlan) =>
+  orders.forEach((o) => {
+    if (!o.salesOrderId) return;
+    const plan = parseContainerPlan(o.containerPlan);
+    if (plan) planBySo.set(o.salesOrderId, { docNo: o.orderNumber || o.poNumber, plan });
+  });
+  const planTitle = (docNo: string, plan: ContainerPlan) =>
     plan.containers
-      .map((c) => `${quoteNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
+      .map((c) => `${docNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
       .join("\n");
 
   // ---- derived ------------------------------------------------
@@ -188,7 +201,7 @@ export function DispatchBoard({
     }
     setBusy(false);
     // Batch failure mid-way: report + refresh anyway so the board resyncs.
-    after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${to === "ReadyToLoad" ? "Ready for Loading" : "In Palletization"}`);
+    after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${to === "ReadyToLoad" ? "Ready for Loading" : "Ready for Palletization"}`);
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
@@ -387,7 +400,7 @@ export function DispatchBoard({
     if (fDesign && l.designLabel !== fDesign) return false;
     if (fSize && l.sizeCode !== fSize) return false;
     if (fifo && ageDays(p) < 8) return false;
-    if (qLower && !`${l.itemCode} ${l.soNumber} ${l.customerName} ${l.designLabel} ${l.sizeCode} ${p.palNumber}`.toLowerCase().includes(qLower)) return false;
+    if (qLower && !`${l.itemCode} ${l.soNumber} ${l.customerName} ${l.designLabel} ${l.sizeCode} ${p.palNumber} ${l.batchNumber}`.toLowerCase().includes(qLower)) return false;
     return true;
   };
   const anyFilter = !!(q || fCustomer || fCountry || fDesign || fSize || fifo || fitsFocused);
@@ -513,6 +526,13 @@ export function DispatchBoard({
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {[l.customerName, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
         </div>
+        {l.batchNumber && (
+          <div style={{ marginTop: 4 }}>
+            <span className="chip mono" style={{ fontSize: 11 }} title="Production batch — load one batch per customer for uniform texture">
+              Batch {l.batchNumber}
+            </span>
+          </div>
+        )}
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {[l.soNumber, l.palletName].filter((s) => s && s !== "—").join("  ·  ") || "—"}
         </div>
@@ -522,9 +542,9 @@ export function DispatchBoard({
             <div
               className="dim mono"
               style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-              title={planTitle(cp.quoteNo, cp.plan)}
+              title={planTitle(cp.docNo, cp.plan)}
             >
-              Plan: {cp.plan.containers.length} container{cp.plan.containers.length === 1 ? "" : "s"} · {cp.quoteNo}
+              Plan: {cp.plan.containers.length} container{cp.plan.containers.length === 1 ? "" : "s"} · {cp.docNo}
             </div>
           ) : null;
         })()}
@@ -598,6 +618,15 @@ export function DispatchBoard({
             {boxLabel(box)}
           </span>
           <span className={`chip palstatus ${open ? "p-loading" : "p-completed"}`}>{open ? "Loading" : "Dispatched"}</span>
+          {mixedBatchOrderItems(inBox.map(({ l }) => l)) && (
+            <span
+              className="chip"
+              style={{ fontSize: 11, color: "var(--c-amber)", borderColor: "var(--c-amber)" }}
+              title="An item in this box spans more than one batch — tile texture may vary for that customer"
+            >
+              Mixed batches
+            </span>
+          )}
           <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>
             {cap ? `${fmt(loaded)} / ${fmt(cap)} box` : `${fmt(loaded)} box`}
           </span>
@@ -660,6 +689,7 @@ export function DispatchBoard({
                   title={`Open ${p.palNumber}`}
                 >
                   <span className="mono">{l.itemCode}</span> · {l.designLabel}
+                  {l.batchNumber ? <span className="dim mono"> · {l.batchNumber}</span> : null}
                 </button>
                 <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
                 <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{fmt(l.boxes)}</span>
@@ -861,7 +891,32 @@ export function DispatchBoard({
                     </span>
                   </div>
                   <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, padding: 8 }}>
-                    {entries.map(({ p, l }) => itemCard(p, l, col.key))}
+                    {col.key === "Ready"
+                      ? (() => {
+                          // Palletised items group by their SO so a load is easy to find.
+                          const bySo = [...entries].sort((a, b) => (a.l.soNumber || "").localeCompare(b.l.soNumber || ""));
+                          const countOf = new Map<string, number>();
+                          bySo.forEach(({ l }) => countOf.set(l.soNumber || "", (countOf.get(l.soNumber || "") || 0) + 1));
+                          let prevSo: string | null = null;
+                          return bySo.map(({ p, l }) => {
+                            const so = l.soNumber || "";
+                            const divider = so !== prevSo;
+                            prevSo = so;
+                            return (
+                              <div key={l.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {divider && (
+                                  <div className="mono dim" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-xs)", padding: "2px 2px 0" }}>
+                                    <span style={{ fontWeight: 600 }}>{so || "No SO"}</span>
+                                    <span>· {countOf.get(so)}</span>
+                                    <span style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
+                                  </div>
+                                )}
+                                {itemCard(p, l, col.key)}
+                              </div>
+                            );
+                          });
+                        })()
+                      : entries.map(({ p, l }) => itemCard(p, l, col.key))}
                     {entries.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 2px", textAlign: "center" }}>—</div>}
                   </div>
                 </div>

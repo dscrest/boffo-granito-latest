@@ -45,6 +45,7 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
       stack: [
         { text: l.itemCode, fontSize: 8.5, bold: true, color: QP.ink },
         { text: l.designLabel, fontSize: 7, color: QP.dim },
+        ...(l.batchNumber ? [{ text: `Batch ${l.batchNumber}`, fontSize: 7, color: QP.dim }] : []),
       ],
       margin: [0, 4, 0, 4],
     } as Content,

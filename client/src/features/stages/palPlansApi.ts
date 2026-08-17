@@ -4,7 +4,7 @@
    A PalletizationPlan is a first-class, human-numbered (PAL/FY/NNN)
    record that groups OrderItems from MULTIPLE Sales Orders onto a
    vehicle. Palletising is PER LINE (PalletizationPlanLine.status:
-   In Palletization → Ready for Loading); loading/dispatch is PER PLAN
+   Ready for Palletization → Ready for Loading); loading/dispatch is PER PLAN
    (status: Planning → Loading → Completed). Header (PalletizationPlan)
    + lines (PalletizationPlanLine) mirror SalesOrder + OrderItem. All writes go
    through the data-ops business routes and are logged in OperationLog.
@@ -37,7 +37,7 @@ export const PAL_LINE_TRANSITIONS: Record<PalLineStatus, PalLineStatus[]> = {
   ReadyToLoad: ["Planning"],
 };
 export const PAL_LINE_STATUS_LABEL: Record<PalLineStatus, string> = {
-  Planning: "In Palletization",
+  Planning: "Ready for Palletization",
   ReadyToLoad: "Ready for Loading",
 };
 
@@ -53,13 +53,27 @@ export interface PalPlanLine {
   palletCapacity: number; // container capacity: A + B arrangements, as in palletsApi.totalBoxesPerContainer (0 = unknown)
   boxes: number;
   position: number;
-  status: PalLineStatus; // In Palletization → Ready for Loading (per-item kanban move)
+  status: PalLineStatus; // Ready for Palletization → Ready for Loading (per-item kanban move)
   itemCode: string; // display-only sequential PAL-NNN (mirrors Production's PROD-NNN)
   customerId: string; // via SalesOrder.customer
   customerName: string;
   countryCode: string; // Customer.country_code (ISO-2) → export country
   sizeCode: string; // via Design.size → Size.code
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
+  batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
+}
+
+/** True when one order item's boxes span more than one batch across these
+    lines — the "mixed batches" warning (uniform tile texture per customer). */
+export function mixedBatchOrderItems(lines: PalPlanLine[]): boolean {
+  const byOi = new Map<string, Set<string>>();
+  for (const l of lines) {
+    if (!l.batchNumber) continue;
+    const set = byOi.get(l.orderItemId) || new Set<string>();
+    set.add(l.batchNumber);
+    byOi.set(l.orderItemId, set);
+  }
+  return [...byOi.values()].some((s) => s.size > 1);
 }
 
 /** A vehicle slot ("box") that Ready-for-Loading lines are dragged into. */
@@ -120,6 +134,7 @@ export interface PalPlanInput {
     pallet: string;
     boxes: number;
     position: number;
+    batch_number: string; // carried opaquely — server replaces lines on update
   }[];
 }
 
@@ -269,6 +284,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       countryCode: customer?.countryCode || "",
       sizeCode: sizeCodeById.get(designSize.get(designId) || "") || "",
       loadBoxId: str(l.load_box),
+      batchNumber: str(l.batch_number),
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
   });
@@ -356,7 +372,7 @@ export function setPalVehicle(rowid: string, vehicle: string) {
   return bust(op<{ ROWID: string; vehicle: string }>(`pal-vehicle/${rowid}`, { vehicle }));
 }
 
-/** Palletise one item (In Palletization ↔ Ready for Loading) without touching its plan. */
+/** Palletise one item (Ready for Palletization ↔ Ready for Loading) without touching its plan. */
 export function setPalLineStatus(lineId: string, status: PalLineStatus) {
   return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status }));
 }
@@ -425,13 +441,14 @@ export function planToInput(p: PalPlan): PalPlanInput {
       pallet: l.palletId,
       boxes: l.boxes,
       position: l.position,
+      batch_number: l.batchNumber,
     })),
   };
 }
 
 /** Human label for a PLAN status (spaced). */
 export const PAL_STATUS_LABEL: Record<PalStatus, string> = {
-  Planning: "In Palletization",
+  Planning: "Ready for Palletization",
   Loading: "In Dispatch",
   Completed: "Dispatched",
 };

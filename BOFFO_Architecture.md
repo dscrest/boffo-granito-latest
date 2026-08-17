@@ -5,7 +5,7 @@
 > the product owner. Next step after this: the **technical plan** (ZCQL column types, function
 > contracts, Zod schemas, phase task breakdown), then development.
 
-## Status vs. reality (2026-07-11)
+## Status vs. reality (2026-08-13)
 
 The decisions below are the locked historical record; where the build diverged, reality wins:
 
@@ -14,14 +14,33 @@ The decisions below are the locked historical record; where the build diverged, 
 - **Functions layout** — shipped as a **single router function** `functions/data-ops`
   (plus `functions/api-health`), not the per-resource `api-*` functions sketched below.
 - **Auth** — Catalyst Embedded Auth was **not** used. App-level auth instead: `Role` /
-  `AppUser` / `AuthSession` tables managed via data-ops `/auth/*` (bearer tokens).
-  Shipped roles: **Admin / Editor / Viewer** (feature-list + can_update/can_delete flags),
-  not the five-role list below.
+  `AppUser` / `AuthSession` tables managed via data-ops `/auth/*` (bearer tokens,
+  httpOnly session cookie since 2026-07-24). Roles use a **per-module permission
+  matrix** (`Role.matrix`, 2026-07-13: view/create/edit/delete/export per module +
+  approve list); Admin bypasses. The legacy Editor/Viewer feature-flag roles are
+  derived/deprecated.
 - **Schema source of truth** — `DATASTORE-SCHEMA.md` (live snapshot), not the plan docs.
 - **Open questions (§ below) — all answered** in `BOFFO_Technical_Plan.md` §0: no
   multi-row transactions (→ compensating-action sagas), no compound unique indexes
   (→ app-layer enforcement), Advanced I/O timeout 30s.
 - `BoffoExport_Tracker.md` is no longer in the repo; `PRODUCT.md` is the product reference.
+
+Major subsystems built after this record was locked (see `docs/CHANGES.md` for detail,
+`DATASTORE-SCHEMA.md` for tables):
+
+- **Approval workflows** (2026-07-13) — Quote/SO status state machines (`/quote-status`,
+  `/so-status`), StatusTransition audit, in-app Notifications, Currency master + daily FX cron.
+- **Production lifecycle** (2026-07-15→08-12) — ProductionLog request→approve→record sagas;
+  SO-confirm auto-enqueue; **batch-wise production** (`Design.is_batched`, batch numbers
+  `B/FY/NNN`, shades, batch-wise opening stock with lock, duplicate-batch guard via
+  AppSetting); Production Sheet view + Excel import; live stock derived in one place
+  (`client/src/lib/stock.ts`).
+- **Palletization & Loading** (2026-07-21→07-29) — PalletizationPlan/Line (`PAL/FY/NNN`,
+  multi-SO vehicle plans), Vehicle master, LoadBox cross-plan vehicle slots with
+  loading capture (container/seals/supervisor) and dispatch, `/packing` = two-panel
+  Dispatch Control Board; mixed pallets + pallet QR labels with a public scanner page.
+- **Plan Containerisation** (2026-07-31→08-03) — quote-level container planning with
+  Box Fitting / Weight Fitting modes.
 
 ## What BOFFO is
 Order-tracking system for a ceramic/porcelain **tile exporter** (Plant Morbi). Tracks the physical

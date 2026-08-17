@@ -170,6 +170,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       customerNotes: so ? str(so.customer_notes) : "",
       terms: so ? str(so.terms) : "",
       totalAmount: so ? num(so.total_amount) : 0,
+      containerPlan: so ? str(so.container_plan) : "",
       docDiscount: so ? num(so.discount) : 0,
       adjustment: so ? num(so.adjustment) : 0,
       taxType: so ? toTaxType(so.tax_type) : "None",

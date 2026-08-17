@@ -105,7 +105,8 @@ export function PalPlanForm({
         const b: Record<string, number> = {};
         const p: Record<string, string> = { ...defPallet };
         for (const l of initial.lines) {
-          b[l.orderItemId] = l.boxes;
+          // A plan may hold several lines per item (one per batch) — sum them.
+          b[l.orderItemId] = (b[l.orderItemId] || 0) + l.boxes;
           if (l.palletId) p[l.orderItemId] = l.palletId;
         }
         setBoxesByItem(b);
@@ -153,19 +154,44 @@ export function PalPlanForm({
     [visibleOrders],
   );
 
-  // Save lines = every item with boxes > 0.
+  // The form edits each item's TOTAL; an edited plan may hold one line per
+  // batch, so the total is re-distributed FIFO over the item's original batch
+  // lines — batch identity survives an edit (server replaces all lines).
+  const origByItem = useMemo(() => {
+    const m = new Map<string, { batch: string; boxes: number }[]>();
+    for (const l of initial?.lines || []) {
+      const arr = m.get(l.orderItemId) || [];
+      arr.push({ batch: l.batchNumber, boxes: l.boxes });
+      m.set(l.orderItemId, arr);
+    }
+    return m;
+  }, [initial]);
+
+  // Save lines = every item with boxes > 0, expanded per original batch line.
   const saveLines = useMemo(
     () =>
-      allItems
-        .map((it) => ({
+      allItems.flatMap((it) => {
+        const total = boxesByItem[it.orderItemId] || 0;
+        if (total <= 0) return [];
+        const base = {
           sales_order: it.salesOrderId,
           order_item: it.orderItemId,
           design: it.designId,
           pallet: palletByItem[it.orderItemId] || "",
-          boxes: boxesByItem[it.orderItemId] || 0,
-        }))
-        .filter((l) => l.boxes > 0),
-    [allItems, boxesByItem, palletByItem],
+        };
+        const orig = origByItem.get(it.orderItemId) || [];
+        if (!orig.length) return [{ ...base, boxes: total, batch_number: "" }];
+        let remaining = total;
+        const out: (typeof base & { boxes: number; batch_number: string })[] = [];
+        for (const o of orig) {
+          const alloc = Math.min(o.boxes, remaining);
+          if (alloc > 0) out.push({ ...base, boxes: alloc, batch_number: o.batch });
+          remaining -= alloc;
+        }
+        if (remaining > 0) out[out.length - 1].boxes += remaining;
+        return out;
+      }),
+    [allItems, boxesByItem, palletByItem, origByItem],
   );
   const totalBoxes = saveLines.reduce((s, l) => s + l.boxes, 0);
   const linesNeedingPallet = saveLines.filter((l) => !l.pallet).length;

@@ -14,6 +14,7 @@ import { listAll, list, op, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import { invalidateBatchStock } from "@/features/stages/batchStockApi";
+import { invalidatePalPlans } from "@/features/stages/palPlansApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -123,6 +124,14 @@ export function batchNumberExists(batch: string, design?: string): boolean {
     c.openingEntries.some((r) => r.batchNumber === b && (!design || r.design === design)) ||
     c.entries.some((e) => e.records.some((r) => r.batchNumber === b && (!design || r.design === design)))
   );
+}
+
+/** Mint (or fetch) a batch record's public share token — keys its scannable QR
+    slip page (#/share/batch/<token> → GET /public/batch/<token>). Idempotent. */
+export async function shareProductionRecord(rowid: string): Promise<string> {
+  const r = await op<string>(`production-record-share/${rowid}`, {});
+  if (!r.ok || !r.data) throw new Error(r.error || "Could not create the QR link");
+  return r.data;
 }
 
 export interface ProductionLogResult {
@@ -316,7 +325,8 @@ export interface OpeningStockLine {
 }
 
 /* Requests / approvals don't move counters — only production cache is stale.
-   Recording output bumps OrderItem.produced, so it invalidates orders too. */
+   Recording output bumps OrderItem.produced (and auto-enqueues the boxes into
+   palletization server-side), so it invalidates orders + pal plans too. */
 function bustProd<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {
     cache.invalidate();
@@ -327,6 +337,7 @@ function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {
     cache.invalidate();
     invalidateOrders();
+    invalidatePalPlans();
     return r;
   });
 }
@@ -385,7 +396,8 @@ export function completeProduction(input: {
   performed_by?: string;
   note?: string;
 }) {
-  return bustProd(op<{ lines: number }>("production-complete", input));
+  // bust (not bustProd): completion bumps OrderItem.produced + auto-enqueues.
+  return bust(op<{ lines: number }>("production-complete", input));
 }
 
 /** Edit a plan line's requested qty / note. */

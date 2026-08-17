@@ -8,10 +8,8 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, type Order, type Quote } from "@/data";
-import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
+import { STAGES, type Order } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
-import { EmptyState } from "@/ui/States";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
@@ -60,34 +58,6 @@ function soDisplayStatus(
   if (!workStarted) return base;
   const stage = STAGES[Math.min(...items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))))];
   return { label: stage.label, cls: "q-sent" };
-}
-
-/** Production orders (ProductionLog entries) recorded against this Sales Order. */
-/* Container plan snapshot from the source quote (Plan Containerisation) —
-   read-only; tells ops how sales promised the containers would pack. */
-function SoContainerPlan({ salesOrderId }: { salesOrderId: string }) {
-  const [quote, setQuote] = useState<Quote | null>(() => findPlanQuote(cachedQuotes(), salesOrderId));
-  useEffect(() => {
-    let alive = true;
-    void listQuotes().then((r) => {
-      if (alive && r.ok) setQuote(findPlanQuote(r.quotes, salesOrderId));
-    });
-    return () => {
-      alive = false;
-    };
-  }, [salesOrderId]);
-  if (!quote) {
-    return (
-      <div className="card" style={{ padding: 14 }}>
-        <EmptyState title="No container plan yet" hint="This order has no source estimate with a container plan" />
-      </div>
-    );
-  }
-  return <ContainerPlanCard quote={quote} />;
-}
-/** The quote whose conversion produced this SO (quotes carry their SO list). */
-function findPlanQuote(quotes: Quote[] | null, salesOrderId: string): Quote | null {
-  return quotes?.find((q) => q.sos?.some((so) => so.id === salesOrderId)) ?? null;
 }
 
 function SoProduction({ salesOrderId }: { salesOrderId: string }) {
@@ -540,6 +510,9 @@ export function OrderDetail() {
               ...(prodJobs.length > 0 && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
                 ? [{ label: "Record New Production", onClick: () => setProd(true) }]
                 : []),
+              ...(head.salesOrderId && can("orders", "edit")
+                ? [{ label: "Plan Containerisation", onClick: () => navigate(`/orders/${head.salesOrderId}/containerise`) }]
+                : []),
               ...((status === "Confirmed" || status === "InProgress") && can("orders", "edit")
                 ? [{ label: "Cancel Order", danger: true, onClick: () => void changeStatus("Cancelled", "Order cancelled") }]
                 : []),
@@ -567,7 +540,17 @@ export function OrderDetail() {
           ? [
               { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
-              { id: "containers", label: "Container Planning", content: <SoContainerPlan salesOrderId={head.salesOrderId} /> },
+              {
+                id: "containers",
+                label: "Container Planning",
+                content: (
+                  <ContainerPlanCard
+                    containerPlan={head.containerPlan}
+                    docNo={head.orderNumber || head.poNumber}
+                    plannerPath={`/orders/${head.salesOrderId}/containerise`}
+                  />
+                ),
+              },
             ]
           : undefined
       }

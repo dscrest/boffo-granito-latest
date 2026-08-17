@@ -26,6 +26,7 @@ const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) =
 const Quotes = lazy(() => import("@/features/quotes/QuotesTable").then((m) => ({ default: m.QuotesTable })));
 const QuoteDetail = lazy(() => import("@/features/quotes/QuoteDetail").then((m) => ({ default: m.QuoteDetail })));
 const PlanContainerisation = lazy(() => import("@/features/quotes/PlanContainerisation").then((m) => ({ default: m.PlanContainerisation })));
+const PlanSoContainerisation = lazy(() => import("@/features/quotes/PlanContainerisation").then((m) => ({ default: m.PlanSoContainerisation })));
 const Approvals = lazy(() => import("@/features/quotes/Approvals").then((m) => ({ default: m.Approvals })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
@@ -423,6 +424,7 @@ export default function App() {
             <Route path="/byorder" element={<ByOrderView />} />
             <Route path="/orders" element={<OrdersTable />} />
 
+            <Route path="/orders/:id/containerise" element={<PlanSoContainerisation />} />
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
             <Route path="/design/:id/edit" element={<DesignEdit />} />

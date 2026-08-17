@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (35 tables)
+## Table Index (40 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -59,7 +59,12 @@
 | Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
 | StatusTransition | 69851000000066173 (live) | Status/stage flip audit (Quote/SO/OrderItem) — added 2026-07-13 |
 | Notification | 69851000000062554 (live) | Per-user in-app notifications — added 2026-07-13 |
-| ProductionLog | 69851000000068024 (live) | Production entries (order jobs + independent stock) — added 2026-07-15 |
+| ProductionLog | 69851000000068024 (live) | Production entries (order jobs + independent stock + batch opening rows) — added 2026-07-15 |
+| Vehicle | (live) | Truck master (number + driver + mobile) — added 2026-07-23 |
+| PalletizationPlan | (live) | Vehicle-load plan header `PAL/FY/NNN` — added 2026-07-21 |
+| PalletizationPlanLine | (live) | Order items pulled onto a plan — added 2026-07-21 |
+| LoadBox | 69851000000089442 (live) | Cross-plan vehicle slots on the Loading board — added 2026-07-27 |
+| AppSetting | (live) | Key/value app settings store — added 2026-08-11 |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
@@ -334,7 +339,8 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | brand | FK → Brand | SET-NULL |
 | grade | FK → Grade | SET-NULL |
 | product_owner | varchar(255) | |
-| accounting_stock | double | |
+| accounting_stock | double | opening stock for **singular** (non-batched) items; locked after first save (null = unlocked; admin re-edit needs `_reason` → OperationLog) |
+| is_batched | boolean | batch-tracked item (added 2026-08-11). Batched items keep opening stock as ProductionLog `entry_type="opening"` rows, not `accounting_stock`. Server rejects flipping once the item carries stock (opening rows or accounting_stock). |
 
 ### Pallet (76673000000049723)
 | Column | Type | Notes |
@@ -495,7 +501,12 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
 | shade | varchar(60) | shade of the batch (one batch = one shade) — added 2026-08-07 |
 
-Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`. **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
+Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
+
+**Batch-wise routes (added 2026-08-11):**
+- `POST /production-record-lines/:rowid` — record several batches at once against a plan line (batch-tracked items): one `record` child row per batch (blank batch auto-minted), OrderItem bumped once for the sum, inserts compensated on failure.
+- `POST /opening-stock/:designId` — batch-wise opening stock for `is_batched` items, stored as `entry_type="opening"` rows (no plan, no order link; counted as on-hand by stock derivation, never as produced). Locked once any opening row exists — then admin-only with required `_reason` (mirrors the `accounting_stock` lock).
+- **Duplicate-batch guard** (`assertBatchesAllowed`): same design + same batch number always 409; same batch on a *different* design allowed unless AppSetting `allow_duplicate_batches` = `"false"`.
 
 ### Invoice (76673000000047747)
 | Column | Type | Notes |
@@ -607,11 +618,35 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | line_seal | varchar(50) | loading capture — added 2026-08-07 |
 | electronic_seal | varchar(50) | loading capture — added 2026-08-07 |
 | loading_supervisor | varchar(120) | loading capture — added 2026-08-07 |
+| share_token | varchar(64) | public pallet-label QR — minted by `POST /load-box-share/:rowid`; tokenless `GET /public/pallet/:token` feeds the scanner page (`#/share/box/<token>`, no login) — added 2026-08-11 |
+| deleted_at | datetime | soft delete |
+
+### Vehicle — added 2026-07-23
+Truck master feeding the Assign Vehicle / dispatch pickers (LoadBox.vehicle,
+PalletizationPlan legacy flow). In the generic-CRUD ALLOWED set; registration
+auto-formatted client-side (`formatVehicleNumber` → `SS-DD-L(L)-NNNN`).
+| Column | Type | Notes |
+|---|---|---|
+| vehicle_number | varchar(50) | truck registration (natural key) |
+| driver_name | varchar(100) | |
+| mobile_number | varchar(30) | |
 | deleted_at | datetime | soft delete |
 
 ---
 
 ## System / Audit
+
+### AppSetting — added 2026-08-11
+Tiny key/value app-settings store (Settings page). In the generic-CRUD ALLOWED
+set; natural key = `setting_key`. Client wrapper: `client/src/features/settings/settingsApi.ts`.
+| Column | Type | Notes |
+|---|---|---|
+| setting_key | varchar | unique key (natural key) |
+| setting_value | varchar | stored as string |
+| deleted_at | datetime | soft delete |
+
+Keys in use: `allow_duplicate_batches` — `"false"` blocks reusing a batch number
+across different designs (same-design reuse is always a 409); missing row = allow.
 
 ### Activity (76673000000054380)
 | Column | Type | Notes |

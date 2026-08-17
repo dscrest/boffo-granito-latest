@@ -781,7 +781,9 @@ export function QuoteDetail() {
         </div>
       )}
 
-      {tab === "containers" && <ContainerPlanCard quote={quote} />}
+      {tab === "containers" && (
+        <ContainerPlanCard containerPlan={quote.containerPlan} docNo={quote.quoteNo} plannerPath={`/quotes/${quote.id}/containerise`} />
+      )}
 
       {/* Activity tab — status timeline (with time-in-state) + OperationLog. */}
       {tab === "activity" && (

@@ -614,7 +614,7 @@ app.get("/public/pallet/:token", async (req, res) => {
     if (!box) return res.status(404).json({ ok: false, error: "This label is invalid or has been revoked." });
 
     const lines = await zcql(
-      `SELECT ROWID, plan, sales_order, design, boxes, position FROM PalletizationPlanLine WHERE load_box = ${box.ROWID} AND deleted_at is null`,
+      `SELECT ROWID, plan, sales_order, design, boxes, position, batch_number FROM PalletizationPlanLine WHERE load_box = ${box.ROWID} AND deleted_at is null`,
     );
     const soIds = [...new Set(lines.map((l) => String(l.sales_order)).filter(Boolean))];
     const designIds = [...new Set(lines.map((l) => String(l.design)).filter(Boolean))];
@@ -648,6 +648,7 @@ app.get("/public/pallet/:token", async (req, res) => {
         return {
           item: d ? String(d.unique_name || d.design_name || "") : "",
           size: d ? String((sizeBy.get(String(d.size)) || {}).code || "") : "",
+          batch: String(l.batch_number || ""),
           boxes: Number(l.boxes) || 0,
           order: so ? String(so.order_number || so.po_number || "") : "",
           customer: cust ? String(cust.name || "") : "",
@@ -684,6 +685,46 @@ app.get("/public/pallet/:token", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ ok: false, error: "Could not load label" });
+  }
+});
+
+/* PUBLIC: the page behind a production-batch QR slip. Same pattern as
+   /public/pallet — keyed by the record row's unguessable share_token
+   (minted by POST /production-record-share). Read-only essentials. */
+app.get("/public/batch/:token", async (req, res) => {
+  try {
+    const token = String(req.params.token || "").replace(/[^A-Za-z0-9]/g, "");
+    if (!token) return res.status(404).json({ ok: false, error: "Not found" });
+    const catalyst = init(req);
+    const zcql = (sql) => catalyst.zcql().executeZCQLQuery(sql).then(rowList);
+
+    const rec = (await zcql(
+      `SELECT ROWID, batch_number, qty_boxes, production_date, performed_by, note, design, CREATEDTIME FROM ProductionLog WHERE share_token = '${token}' AND entry_type = 'record' AND deleted_at is null`,
+    ))[0];
+    if (!rec) return res.status(404).json({ ok: false, error: "This slip is invalid or has been revoked." });
+
+    const design = rec.design
+      ? (await zcql(`SELECT ROWID, design_name, unique_name, size FROM Design WHERE ROWID = ${String(rec.design)}`))[0]
+      : null;
+    const size = design && design.size
+      ? (await zcql(`SELECT ROWID, code FROM Size WHERE ROWID = ${String(design.size)}`))[0]
+      : null;
+
+    res.set("Cache-Control", "no-store");
+    res.json({
+      ok: true,
+      batch: {
+        batchNumber: String(rec.batch_number || ""),
+        item: design ? String(design.unique_name || design.design_name || "") : "",
+        size: size ? String(size.code || "") : "",
+        qtyBoxes: Number(rec.qty_boxes) || 0,
+        mfgDate: String(rec.production_date || "") || String(rec.CREATEDTIME || "").slice(0, 10),
+        loggedBy: String(rec.performed_by || ""),
+        note: String(rec.note || ""),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "Could not load slip" });
   }
 });
 
@@ -1353,6 +1394,9 @@ async function createSalesOrder(ds, body, maps) {
     tax_pct: doc.tax_pct,
     tax_amount: doc.tax_amount,
     total_amount: doc.total_amount,
+    ...(typeof body.container_plan === "string" && body.container_plan
+      ? { container_plan: body.container_plan.slice(0, 10000) }
+      : {}),
   });
   const soId = soRow.ROWID;
   for (let i = 0; i < items.length; i++) {
@@ -1479,6 +1523,8 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             tax_type: body.tax_type || q.tax_type || "None",
             tax_pct: body.tax_pct != null ? body.tax_pct : q.tax_pct,
             quote_rowid: quoteId,
+            // Snapshot the quote's container plan — the SO owns its copy from here.
+            container_plan: q.container_plan || "",
             lines: Array.isArray(body.lines) ? body.lines : [],
           },
           { dMap, cMap, pMap, sMap, catalyst },
@@ -1919,7 +1965,10 @@ function normalizePlanLines(body) {
       pallet: l.pallet ? String(l.pallet) : null,
       boxes,
       position: Number(l.position) || i,
-      status: "Planning", // every line born In Palletization; advances via /pal-line-status
+      status: "Planning", // every line born Ready for Palletization; advances via /pal-line-status
+      // Carried opaquely: /update-pal-plan replaces all lines from client
+      // input, so dropping this here would wipe batches on every plan edit.
+      batch_number: l.batch_number ? String(l.batch_number) : "",
     };
   });
 }
@@ -1978,6 +2027,141 @@ app.post("/pal-plan", async (req, res) => {
   }
 });
 
+/* Auto-enqueue production output into palletization. Called after every
+   OrderItem.produced_qty_boxes bump: tops the item's queued Planning boxes
+   up to produced − palletized on ONE reused open plan per SO (created on
+   first need). Idempotent from ground truth — never "add the delta blindly" —
+   so re-records, complete-after-record and manual Planning lines all
+   converge. New lines are born "Planning" = the board's "Ready for
+   Palletization" column. Callers wrap in try/catch: a queue failure must
+   never fail an already-committed production record. */
+async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
+  const oiId = String(orderItemId || "");
+  if (!/^\d+$/.test(oiId)) return;
+  const zcql = catalyst.zcql();
+  const oi = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT ROWID, sales_order, design, pallet, produced_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE ROWID = ${oiId}`,
+    ),
+  )[0];
+  const soId = oi ? String(oi.sales_order || "") : "";
+  if (!soId) return;
+  const available = (Number(oi.produced_qty_boxes) || 0) - (Number(oi.palletized_qty_boxes) || 0);
+  if (available <= 0) return;
+
+  // All live lines of the SO, restricted to live plans (soft-deleted plans
+  // drop out — mirror of recountOrderItems).
+  const soLines = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT ROWID, plan, order_item, boxes, status, batch_number FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`,
+    ),
+  );
+  const planIds = [...new Set(soLines.map((l) => String(l.plan)))].filter(Boolean);
+  const planStatus = new Map();
+  if (planIds.length) {
+    rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID, status FROM PalletizationPlan WHERE ROWID IN (${planIds.join(",")}) AND deleted_at is null`,
+      ),
+    ).forEach((p) => planStatus.set(String(p.ROWID), String(p.status || "")));
+  }
+  const liveLines = soLines.filter((l) => planStatus.has(String(l.plan)));
+
+  // Queued = the item's boxes still waiting in any Planning line (manual or
+  // auto). Top up only the shortfall vs what production has made available.
+  const queued = liveLines
+    .filter((l) => String(l.order_item) === oiId && String(l.status) === "Planning")
+    .reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+  const topUp = available - queued;
+  if (topUp <= 0) return;
+
+  // Reuse the SO's open plan; mint one when the SO has none in Planning.
+  let planId = planIds.find((id) => planStatus.get(id) === "Planning") || "";
+  if (!planId) {
+    const planRow = await ds.table("PalletizationPlan").insertRow({
+      pal_number: await nextPalNumber(catalyst),
+      status: "Planning",
+      vehicle_number: "",
+      remarks: "Auto — production",
+    });
+    planId = String(planRow.ROWID);
+    await logTransition(catalyst, {
+      entity_type: "PalletizationPlan", entity_rowid: planId, from_status: "", to_status: "Planning",
+      note: "auto-created from production",
+    });
+  }
+
+  // Distribute the top-up per batch so each queue card is ONE batch of the
+  // item (uniform tile texture per customer). Ground truth both sides:
+  // produced per batch (record children) minus already-enqueued per batch
+  // (ANY status — boxes palletized/dispatched for a batch never re-enqueue).
+  // Residue with no batch attribution (legacy qty_boxes, /production-complete)
+  // lands on the "" line — exactly the old aggregate behavior.
+  const recs = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
+    ),
+  );
+  const producedByBatch = new Map(); // batch → { qty, first }
+  for (const r of recs) {
+    const b = String(r.batch_number || "");
+    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
+    cur.qty += Number(r.qty_boxes) || 0;
+    if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
+    producedByBatch.set(b, cur);
+  }
+  const enqueuedByBatch = new Map();
+  for (const l of liveLines) {
+    if (String(l.order_item) !== oiId) continue;
+    const b = String(l.batch_number || "");
+    enqueuedByBatch.set(b, (enqueuedByBatch.get(b) || 0) + (Number(l.boxes) || 0));
+  }
+
+  const upsert = async (batch, alloc) => {
+    const mine = liveLines.find(
+      (l) =>
+        String(l.plan) === planId &&
+        String(l.order_item) === oiId &&
+        String(l.status) === "Planning" &&
+        String(l.batch_number || "") === batch,
+    );
+    if (mine) {
+      await ds.table("PalletizationPlanLine").updateRow({
+        ROWID: mine.ROWID, boxes: (Number(mine.boxes) || 0) + alloc,
+      });
+      mine.boxes = (Number(mine.boxes) || 0) + alloc;
+    } else {
+      const lr = await ds.table("PalletizationPlanLine").insertRow({
+        plan: planId,
+        sales_order: soId,
+        order_item: oiId,
+        design: oi.design ? String(oi.design) : null,
+        pallet: oi.pallet ? String(oi.pallet) : null,
+        boxes: alloc,
+        position: liveLines.filter((l) => String(l.plan) === planId).length,
+        status: "Planning",
+        batch_number: batch,
+      });
+      liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: "Planning", batch_number: batch });
+    }
+  };
+
+  let remaining = topUp;
+  const batches = [...producedByBatch.entries()]
+    .filter(([b]) => b !== "")
+    .sort((a, c) => (a[1].first < c[1].first ? -1 : 1)); // FIFO by first record
+  for (const [b, p] of batches) {
+    if (remaining <= 0) break;
+    const want = p.qty - (enqueuedByBatch.get(b) || 0);
+    const alloc = Math.min(Math.max(want, 0), remaining);
+    if (alloc <= 0) continue;
+    await upsert(b, alloc);
+    remaining -= alloc;
+  }
+  if (remaining > 0) await upsert("", remaining);
+  await recountOrderItems(catalyst, ds, [oiId]);
+}
+
 /* Update a plan header + REPLACE its lines (mirror of /update-so-with-items).
    pal_number and status are never editable here (status → /pal-status). */
 app.post("/update-pal-plan/:rowid", async (req, res) => {
@@ -2032,7 +2216,7 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
 /* Palletization plan status machine — mirror of /quote-status. All status
    changes route here (generic PATCH rejects PalletizationPlan.status). */
 // Two-level lifecycle. Palletising is PER LINE (PalletizationPlanLine.status:
-// Planning=In Palletization → ReadyToLoad=Ready for Loading). Loading/dispatch is
+// Planning=Ready for Palletization → ReadyToLoad=Ready for Loading). Loading/dispatch is
 // PER VEHICLE (PalletizationPlan.status): Planning → Loading (In Loading) →
 // Completed (Dispatched). The retired "Palletized"/plan-level "ReadyToLoad" states
 // are folded into Planning by the one-off migration.
@@ -2090,7 +2274,7 @@ app.post("/pal-status/:rowid", async (req, res) => {
   }
 });
 
-/* Per-line palletising toggle (In Palletization ↔ Ready for Loading). This is the
+/* Per-line palletising toggle (Ready for Palletization ↔ Ready for Loading). This is the
    item-wise move on the kanban — advancing one line never touches its plan or siblings. */
 app.post("/pal-line-status/:rowid", async (req, res) => {
   try {
@@ -2255,6 +2439,31 @@ app.post("/load-box-share/:rowid", async (req, res) => {
     if (!token) {
       token = crypto.randomBytes(16).toString("hex");
       await ds.table("LoadBox").updateRow({ ROWID: boxId, share_token: token });
+    }
+    res.json({ ok: true, data: token });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Mint (or return the existing) share token for a production batch record's
+   public QR slip. Idempotent; record rows only. Keys GET /public/batch/:token. */
+app.post("/production-record-share/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const recId = rowidParam(req.params.rowid);
+    const rec = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT ROWID, share_token, entry_type FROM ProductionLog WHERE ROWID = ${recId} AND deleted_at is null`,
+      ),
+    )[0];
+    if (!rec) throw badRequest(`Production record not found: ${recId}`, 404);
+    if (String(rec.entry_type) !== "record") throw badRequest("Only a batch record can have a QR slip", 409);
+    let token = String(rec.share_token || "");
+    if (!token) {
+      token = crypto.randomBytes(16).toString("hex");
+      await ds.table("ProductionLog").updateRow({ ROWID: recId, share_token: token });
     }
     res.json({ ok: true, data: token });
   } catch (err) {
@@ -2434,7 +2643,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
       async () => {
         const line = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         )[0];
         if (!line) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -2466,6 +2675,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
                 boxes: lineBoxes - n,
                 position: Number(line.position) || 0,
                 status: "ReadyToLoad",
+                batch_number: line.batch_number ? String(line.batch_number) : "",
               });
               try {
                 await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: n, load_box: String(box.ROWID) });
@@ -2860,6 +3070,12 @@ app.post("/production-record/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${qty}`,
         });
+        // Produced boxes flow straight to the palletization queue; a queue
+        // failure never fails the already-committed record.
+        if (orderItemId) {
+          try { await autoEnqueuePalletization(catalyst, ds, orderItemId); }
+          catch (e) { console.error("auto-enqueue palletization failed", e); }
+        }
         return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty, batch_number: batchNumber } };
       },
     );
@@ -2978,6 +3194,12 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${sum} (${lines.length} batches)`,
         });
+        // After the insert loop committed (not before — the compensation path
+        // above would otherwise leave a stray queue line).
+        if (orderItemId) {
+          try { await autoEnqueuePalletization(catalyst, ds, orderItemId); }
+          catch (e) { console.error("auto-enqueue palletization failed", e); }
+        }
         return { rowid: inserted[0], data: { recorded: sum, rows: lines.length, batch_numbers: batchNumbers } };
       },
     );
@@ -3121,6 +3343,7 @@ app.post("/production-complete", async (req, res) => {
         const ids = lines.map((l) => String((l && l.id) || "")).filter((x) => /^\d+$/.test(x));
         if (!ids.length) throw badRequest("At least one production line is required");
         let completed = 0;
+        const touchedOrderItems = new Set();
         for (const l of lines) {
           const id = String((l && l.id) || "");
           if (!/^\d+$/.test(id)) continue;
@@ -3154,6 +3377,7 @@ app.post("/production-complete", async (req, res) => {
                 await ds.table("OrderItem").updateRow(patch);
                 if (patch.stage)
                   await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: orderItemId, from_status: oiStage, to_status: patch.stage });
+                touchedOrderItems.add(orderItemId);
               }
             }
             // Batch/shade per line (each completed line is one design's run);
@@ -3175,6 +3399,12 @@ app.post("/production-complete", async (req, res) => {
             entity_type: "ProductionLog", entity_rowid: id, from_status: "", to_status: "Stage: Completed", note,
           });
           completed += 1;
+        }
+        // Completed output flows to the palletization queue; a queue failure
+        // never fails the completion itself.
+        for (const oiId of touchedOrderItems) {
+          try { await autoEnqueuePalletization(catalyst, ds, oiId); }
+          catch (e) { console.error("auto-enqueue palletization failed", e); }
         }
         return { rowid: ids[0], data: { lines: completed } };
       },

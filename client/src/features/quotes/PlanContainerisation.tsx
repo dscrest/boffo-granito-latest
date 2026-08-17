@@ -1,5 +1,10 @@
 /* ============================================================
-   Plan Containerisation — /quotes/:id/containerise (More menu).
+   Plan Containerisation — /quotes/:id/containerise (More menu) and
+   /orders/:id/containerise (SO owns an editable copy of the plan,
+   snapshotted from the quote at conversion). ContainerisePlanner is
+   the shared body; the two thin wrappers below differ only in where
+   lines seed from and what Save persists (quote: full line set +
+   plan · SO: the plan JSON only — SO lines are never rewritten here).
 
    Item-wise container planning for a quote, in one of two modes
    (same view, same details):
@@ -34,10 +39,12 @@ import { Combobox } from "@/ui/Combobox";
 import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
-import { parseContainerPlan, type ContainerPlan, type Quote } from "@/data";
+import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
+import { update } from "@/lib/dataOps";
 import { useMasters } from "@/features/masters/useMasters";
 import { listPallets, cachedPallets, type PalletRow } from "@/features/masters/palletsApi";
 import type { DesignRow } from "@/features/masters/designsApi";
+import { cachedOrders, invalidateOrders, listOrders, soStatusLabel, SO_STATUS_CHIP } from "@/features/orders/ordersApi";
 import { STATUS_CHIP, STATUS_LABEL, quoteToInput } from "./QuotesTable";
 import {
   cachedQuotes,
@@ -111,15 +118,36 @@ interface PackedContainer {
   capBoxes: number; // owner (first) line's capacity in this container — per-item fits come from fitBoxesIn
 }
 
-export function PlanContainerisation() {
-  const { id = "" } = useParams();
+/** What the shared planner needs from its document (quote or SO). */
+interface PlannerProps {
+  docNo: string;
+  statusChip: { cls: string; label: string };
+  customer: string;
+  partyCode: string;
+  /** Extra " · "-joined subtitle segments after the customer link (date, port). */
+  subtitleExtras: string[];
+  /** Where the ✕ close button navigates. */
+  closeTo: string;
+  /** Seed lines (keys assigned internally); re-seeded when seedKey changes. */
+  seedLines: Omit<DraftLine, "key">[];
+  seedKey: string;
+  /** The persisted container-plan JSON ("" when none) — drives mode restore + dirty. */
+  savedPlan: string;
+  pallets: PalletRow[];
+  canSave: boolean;
+  saving: boolean;
+  saveTitle: string;
+  /** Extra dirty signal beyond the plan JSON (quote wrapper: line diffs). */
+  linesDirty?: (lines: DraftLine[]) => boolean;
+  onSave: (planJson: string, valid: DraftLine[]) => Promise<void>;
+}
+
+function ContainerisePlanner({
+  docNo, statusChip, customer, partyCode, subtitleExtras, closeTo,
+  seedLines, seedKey, savedPlan, pallets, canSave, saving, saveTitle, linesDirty, onSave,
+}: PlannerProps) {
   const navigate = useNavigate();
   const { designRows, designs } = useMasters();
-
-  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
-  const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
-  const [loading, setLoading] = useState(() => cachedQuotes() == null);
-  const [saving, setSaving] = useState(false);
 
   const [selected, setSelected] = useState<number | null>(null); // container index; null = tail
   const [mode, setMode] = useState<"boxes" | "weight">("boxes"); // fitting basis
@@ -138,35 +166,10 @@ export function PlanContainerisation() {
   const keySeq = useRef(0);
   const nextKey = () => `L${keySeq.current++}`;
 
-  const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
-
-  const load = async () => {
-    const [q, p] = await Promise.all([listQuotes(), listPallets()]);
-    setLoading(false);
-    if (q.ok) setQuotes(q.quotes);
-    if (p.ok) setPallets(p.pallets);
-  };
+  // Re-seed editable lines + ton capacity whenever the underlying document changes.
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Re-seed editable lines + ton capacity whenever the underlying quote changes.
-  useEffect(() => {
-    if (!quote) return;
-    setDraftLines(
-      quote.lines.map((l) => ({
-        key: nextKey(),
-        item: l.item,
-        qty: l.qty,
-        rate: l.rate,
-        discount: l.discount,
-        description: l.description || "",
-        palletId: "",
-        ordered: l.qty,
-      })),
-    );
-    const saved = parseContainerPlan(quote.containerPlan);
+    setDraftLines(seedLines.map((l) => ({ ...l, key: nextKey() })));
+    const saved = parseContainerPlan(savedPlan);
     // Saved plans reopen in their own mode; pre-mode plans were weight-packed.
     setMode(saved ? (saved.mode ?? "weight") : "boxes");
     setMoves([]);
@@ -177,7 +180,7 @@ export function PlanContainerisation() {
       if (c.tonCapacity && c.tonCapacity > 0 && c.tonCapacity !== g) caps[i] = c.tonCapacity;
     });
     setCapByIdx(caps);
-  }, [quote?.id, quote?.modifiedTime]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [seedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- resolve each draft line: design → size-matched pallet → weight capacity ---- */
   const rows = useMemo<ResolvedLine[]>(() => {
@@ -520,64 +523,23 @@ export function PlanContainerisation() {
     }
   }
 
-  // Dirty when the ton capacity/plan or any line differs from the saved quote.
-  const dirty =
-    !!quote &&
-    (planJson !== (quote.containerPlan || "") ||
-      draftLines.length !== quote.lines.length ||
-      draftLines.some((l, i) => {
-        const o = quote.lines[i];
-        return !o || o.item !== l.item || o.qty !== l.qty || o.rate !== l.rate || (o.discount || 0) !== (l.discount || 0);
-      }));
-  const canSave = can("quotes", "edit");
+  // Dirty when the ton capacity/plan (or, for quotes, any line) differs from the saved doc.
+  const dirty = planJson !== (savedPlan || "") || (linesDirty?.(draftLines) ?? false);
 
-  const onSave = async () => {
-    if (!quote || !dirty || saving) return;
+  const handleSave = async () => {
+    if (!dirty || saving) return;
     const valid = draftLines.filter((l) => l.item && l.qty > 0);
     if (!valid.length) {
       toast.error("Add at least one item");
       return;
     }
-    setSaving(true);
-    const input = quoteToInput(quote);
-    input.lines = valid.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount || 0, description: l.description || "" }));
-    input.container_plan = planJson; // publish the plan for SO detail + dispatch board
-    const res = await updateQuoteWithItems(quote.id, input);
-    setSaving(false);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    toast.success(`Quote ${quote.quoteNo} updated`);
-    invalidateQuotes();
-    await load();
+    await onSave(planJson, valid);
   };
 
   const itemOptions = useMemo(
     () => designs.map((x) => ({ value: x.name, label: x.uniqueName || x.name, hint: [x.size, x.finish].filter(Boolean).join(" · ") })),
     [designs],
   );
-
-  if (loading && !quote) {
-    return <div className="muted mono" style={{ padding: 24 }}>Loading quote…</div>;
-  }
-  if (!quote) {
-    return (
-      <div>
-        <div className="page-head">
-          <div>
-            <div className="title">Quote not found</div>
-            <div className="sub">No quote matches this link.</div>
-          </div>
-          <div className="right">
-            <button className="hbtn" onClick={() => navigate("/quotes")}>
-              <Icon name="chev-l" size={13} /> Back to Quotes
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="qcplan">
@@ -588,24 +550,25 @@ export function PlanContainerisation() {
             <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               Plan Containerisation
             </span>
-            <span className="mono dim" style={{ fontSize: "var(--t-lg)", fontWeight: 500 }}>{quote.quoteNo}</span>
-            <span className={`chip qstatus ${STATUS_CHIP[quote.status]}`}>{STATUS_LABEL[quote.status]}</span>
+            <span className="mono dim" style={{ fontSize: "var(--t-lg)", fontWeight: 500 }}>{docNo}</span>
+            <span className={`chip qstatus ${statusChip.cls}`}>{statusChip.label}</span>
           </div>
           {canSave && (
-            <button className="hbtn primary" disabled={!dirty || saving} onClick={() => void onSave()} title="Save the items and plan to the quote">
+            <button className="hbtn primary" disabled={!dirty || saving} onClick={() => void handleSave()} title={saveTitle}>
               <Icon name="check" size={13} /> {saving ? "Saving…" : dirty ? "Save" : "Saved"}
             </button>
           )}
-          <button className="btn x" onClick={() => navigate(`/quotes/${quote.id}`)} title="Close">
+          <button className="btn x" onClick={() => navigate(closeTo)} title="Close">
             <Icon name="x" size={13} />
           </button>
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
-          <Link className="linkish" to={`/parties/${encodeURIComponent(quote.partyCode)}`} title="Open customer">
-            {quote.customer}
+          <Link className="linkish" to={`/parties/${encodeURIComponent(partyCode)}`} title="Open customer">
+            {customer}
           </Link>
-          {quote.quoteDate && <> · {quote.quoteDate}</>}
-          {quote.portOfDischarge && <> · {quote.portOfDischarge}</>}
+          {subtitleExtras.filter(Boolean).map((s, i) => (
+            <span key={i}> · {s}</span>
+          ))}
         </div>
       </div>
 
@@ -797,7 +760,7 @@ export function PlanContainerisation() {
                 style={{ display: "flex", flexDirection: "column", gap: 6, cursor: canSave ? "grab" : "pointer", opacity: dragFrom === i ? 0.5 : 1 }}
               >
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "0 2px" }}>
-                  <span className="mono dim" style={{ fontSize: "var(--t-xs)" }}>{quote.quoteNo} · C{i + 1}</span>
+                  <span className="mono dim" style={{ fontSize: "var(--t-xs)" }}>{docNo} · C{i + 1}</span>
                   <span className="mono" style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: full ? "var(--c-green)" : "var(--c-amber)" }}>{pct}%</span>
                 </div>
                 <div
@@ -1030,5 +993,185 @@ export function PlanContainerisation() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ---- Quote wrapper — /quotes/:id/containerise. Save persists the full
+   line set + plan to the quote (update-quote-with-items, wholesale). ---- */
+export function PlanContainerisation() {
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
+  const [loading, setLoading] = useState(() => cachedQuotes() == null);
+  const [saving, setSaving] = useState(false);
+
+  const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
+
+  const load = async () => {
+    const [q, p] = await Promise.all([listQuotes(), listPallets()]);
+    setLoading(false);
+    if (q.ok) setQuotes(q.quotes);
+    if (p.ok) setPallets(p.pallets);
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading && !quote) {
+    return <div className="muted mono" style={{ padding: 24 }}>Loading quote…</div>;
+  }
+  if (!quote) {
+    return (
+      <div>
+        <div className="page-head">
+          <div>
+            <div className="title">Quote not found</div>
+            <div className="sub">No quote matches this link.</div>
+          </div>
+          <div className="right">
+            <button className="hbtn" onClick={() => navigate("/quotes")}>
+              <Icon name="chev-l" size={13} /> Back to Quotes
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ContainerisePlanner
+      docNo={quote.quoteNo}
+      statusChip={{ cls: STATUS_CHIP[quote.status], label: STATUS_LABEL[quote.status] }}
+      customer={quote.customer}
+      partyCode={quote.partyCode}
+      subtitleExtras={[quote.quoteDate || "", quote.portOfDischarge || ""]}
+      closeTo={`/quotes/${quote.id}`}
+      seedLines={quote.lines.map((l) => ({
+        item: l.item,
+        qty: l.qty,
+        rate: l.rate,
+        discount: l.discount,
+        description: l.description || "",
+        palletId: "",
+        ordered: l.qty,
+      }))}
+      seedKey={`${quote.id}:${quote.modifiedTime}`}
+      savedPlan={quote.containerPlan || ""}
+      pallets={pallets}
+      canSave={can("quotes", "edit")}
+      saving={saving}
+      saveTitle="Save the items and plan to the quote"
+      linesDirty={(draft) =>
+        draft.length !== quote.lines.length ||
+        draft.some((l, i) => {
+          const o = quote.lines[i];
+          return !o || o.item !== l.item || o.qty !== l.qty || o.rate !== l.rate || (o.discount || 0) !== (l.discount || 0);
+        })
+      }
+      onSave={async (planJson, valid) => {
+        setSaving(true);
+        const input = quoteToInput(quote);
+        input.lines = valid.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount || 0, description: l.description || "" }));
+        input.container_plan = planJson; // publish the plan for SO detail + dispatch board
+        const res = await updateQuoteWithItems(quote.id, input);
+        setSaving(false);
+        if (!res.ok) {
+          toast.error(res.error || "Save failed");
+          return;
+        }
+        toast.success(`Quote ${quote.quoteNo} updated`);
+        invalidateQuotes();
+        await load();
+      }}
+    />
+  );
+}
+
+/* ---- SO wrapper — /orders/:id/containerise (id = SalesOrder ROWID). Lines
+   seed from the SO's OrderItems (edits are session-local packing inputs; the
+   Ordered/Remaining columns keep them honest) and Save persists ONLY the
+   plan JSON onto the SalesOrder — lines and status are never rewritten. ---- */
+export function PlanSoContainerisation() {
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
+  const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
+  const [loading, setLoading] = useState(() => cachedOrders() == null);
+  const [saving, setSaving] = useState(false);
+
+  const items = useMemo(() => orders.filter((o) => o.salesOrderId === id), [orders, id]);
+  const head = items[0] ?? null;
+
+  const load = async () => {
+    const [o, p] = await Promise.all([listOrders(), listPallets()]);
+    setLoading(false);
+    if (o.ok) setOrders(o.orders);
+    if (p.ok) setPallets(p.pallets);
+  };
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading && !head) {
+    return <div className="muted mono" style={{ padding: 24 }}>Loading order…</div>;
+  }
+  if (!head) {
+    return (
+      <div>
+        <div className="page-head">
+          <div>
+            <div className="title">Sales order not found</div>
+            <div className="sub">No sales order matches this link.</div>
+          </div>
+          <div className="right">
+            <button className="hbtn" onClick={() => navigate("/orders")}>
+              <Icon name="chev-l" size={13} /> Back to Sales Orders
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const soStatus = head.status || "Confirmed";
+  return (
+    <ContainerisePlanner
+      docNo={head.orderNumber || head.poNumber}
+      statusChip={{ cls: SO_STATUS_CHIP[soStatus] || "q-draft", label: soStatusLabel(soStatus) }}
+      customer={head.party}
+      partyCode={head.partyCode}
+      subtitleExtras={[head.orderDate || "", head.portOfDischarge || ""]}
+      closeTo={`/orders/${id}`}
+      seedLines={items.map((o) => ({
+        item: o.designName,
+        qty: o.orderQty,
+        rate: o.rate || 0,
+        discount: o.discount || 0,
+        description: o.description || "",
+        palletId: o.palletId || "",
+        ordered: o.orderQty,
+      }))}
+      seedKey={`${id}:${head.modifiedTime}`}
+      savedPlan={head.containerPlan || ""}
+      pallets={pallets}
+      canSave={can("orders", "edit")}
+      saving={saving}
+      saveTitle="Save the container plan to the sales order"
+      onSave={async (planJson) => {
+        setSaving(true);
+        const res = await update("SalesOrder", id, { container_plan: planJson.slice(0, 10000) });
+        setSaving(false);
+        if (!res.ok) {
+          toast.error(res.error || "Save failed");
+          return;
+        }
+        toast.success(`Order ${head.orderNumber || head.poNumber} plan saved`);
+        invalidateOrders();
+        await load();
+      }}
+    />
   );
 }

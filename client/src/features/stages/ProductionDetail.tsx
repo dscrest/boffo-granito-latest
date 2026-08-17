@@ -133,14 +133,15 @@ export function ProductionDetail() {
     setRecordEntry(null);
     if (!entry) return;
     setBusy("Recording…");
-    const res = "batches" in payload
-      ? await recordProductionLines(entry.id, payload.batches)
-      : await recordProduction(entry.id, payload.single);
-    if (!res.ok) {
+    // ponytail: singles loop is sequential + non-atomic; form caps Σ ≤ remaining
+    let res;
+    if ("batches" in payload) res = await recordProductionLines(entry.id, payload.batches);
+    else for (const s of payload.singles) { res = await recordProduction(entry.id, s); if (!res.ok) break; }
+    if (!res || !res.ok) {
       setBusy(null);
       setRecordQueue([]);
       setRecordTotal(0);
-      toast.error(res.error || "Record output failed");
+      toast.error(res?.error || "Record output failed");
       await load();
       return;
     }
@@ -540,10 +541,12 @@ export function ProductionDetail() {
                   <tr>
                     <th>Date</th>
                     <th>Design</th>
+                    <th>Batch</th>
                     <th>Size / Finish</th>
                     <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                     <th>By</th>
                     <th>Note</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -553,14 +556,26 @@ export function ProductionDetail() {
                       <tr key={r.id}>
                         <td className="mono">{fmtLocalDate(r.productionDate || r.createdTime)}</td>
                         <td><span className="design-name">{r.design}</span></td>
+                        <td className="mono">{r.batchNumber || "—"}</td>
                         <td className="dim">{[r.size, r.finish].filter(Boolean).join(" · ") || "—"}</td>
                         <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.qtyBoxes)}</td>
                         <td className="dim">{r.performedBy || "—"}</td>
                         <td className="dim">{r.note || "—"}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn"
+                            title="Print batch QR slip"
+                            style={{ padding: 0, height: 22, width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                            onClick={() => void import("./batchQrPdf").then((m) => m.downloadBatchQrPdf(r))}
+                          >
+                            <Icon name="qr" size={12} />
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   {group.records.length === 0 && (
-                    <tr><td colSpan={6}><span className="dim" style={{ padding: 8, display: "inline-block" }}>No output recorded yet.</span></td></tr>
+                    <tr><td colSpan={8}><span className="dim" style={{ padding: 8, display: "inline-block" }}>No output recorded yet.</span></td></tr>
                   )}
                 </tbody>
               </table>

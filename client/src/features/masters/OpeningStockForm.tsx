@@ -1,9 +1,10 @@
 /* ============================================================
-   Opening Stock (batch-tracked items) — capture opening stock as ONE batch
-   per save (mandatory batch no. · mfg date · qty · remark) via /opening-stock.
-   Stored as entry_type="opening" ProductionLog rows, counted as on-hand once.
-   The first entry is open; once opening rows exist, adding more needs admin +
-   a reason (enforced server-side; the reason field appears here when locked).
+   Opening Stock (batch-tracked items) — capture opening stock as one or more
+   batch lines per save (mandatory batch no. · mfg date · qty · remark,
+   + Add line) via /opening-stock. Stored as entry_type="opening"
+   ProductionLog rows, counted as on-hand once. The first entry is open; once
+   opening rows exist, adding more needs admin + a reason (enforced
+   server-side; the reason field appears here when locked).
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -30,36 +31,49 @@ export function OpeningStockForm({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const [batch, setBatch] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [qty, setQty] = useState("");
-  const [note, setNote] = useState("");
+  type BatchRow = { batch: string; date: string; qty: string; note: string };
+  const emptyRow = (): BatchRow => ({ batch: "", date: todayISO(), qty: "", note: "" });
+  const [rows, setRows] = useState<BatchRow[]>(() => [emptyRow()]);
+  const setRow = (i: number, k: keyof BatchRow, val: string) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: val } : r)));
+  const addLine = () => setRows((rs) => [...rs, emptyRow()]);
+  const removeLine = (i: number) => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const panelRef = useModalA11y(onClose);
 
-  // Duplicate-batch pre-check (server 409 is the source of truth): same item +
-  // same batch is always blocked; cross-item reuse only when the setting is off.
+  // Duplicate-batch pre-check (server 409 is the source of truth): same batch
+  // twice in this form, same item + same batch always blocked; cross-item reuse
+  // only when the setting is off.
   const [allowDup, setAllowDup] = useState(cachedAllowDupBatches());
   useEffect(() => {
     void loadAllowDupBatches().then(setAllowDup);
   }, []);
-  const dupItem = batchNumberExists(batch, designName);
-  const dup = dupItem || (!allowDup && batchNumberExists(batch));
+  const dupKind = (r: BatchRow, i: number): "form" | "item" | "global" | null => {
+    const b = r.batch.trim().toLowerCase();
+    if (!b) return null;
+    if (rows.some((o, j) => j !== i && o.batch.trim().toLowerCase() === b)) return "form";
+    if (batchNumberExists(r.batch, designName)) return "item";
+    if (!allowDup && batchNumberExists(r.batch)) return "global";
+    return null;
+  };
 
-  const total = parseInt(qty, 10) || 0;
-  const missing = total <= 0 || !batch.trim() || dup || (locked && !reason.trim());
+  const total = rows.reduce((s, r) => s + (parseInt(r.qty, 10) || 0), 0);
+  const missing =
+    total <= 0 ||
+    rows.some((r, i) => (parseInt(r.qty, 10) || 0) <= 0 || !r.batch.trim() || dupKind(r, i) !== null) ||
+    (locked && !reason.trim());
 
   const submit = async () => {
     if (missing || saving) return;
     setSaving(true);
-    const rows: OpeningStockLine[] = [{
-      qty_boxes: total,
-      batch_number: batch.trim(),
-      mfg_date: date || undefined,
-      note: note.trim() || undefined,
-    }];
-    const res = await saveOpeningBatches(designId, { rows, _reason: reason.trim() || undefined });
+    const lines: OpeningStockLine[] = rows.map((r) => ({
+      qty_boxes: parseInt(r.qty, 10) || 0,
+      batch_number: r.batch.trim(),
+      mfg_date: r.date || undefined,
+      note: r.note.trim() || undefined,
+    }));
+    const res = await saveOpeningBatches(designId, { rows: lines, _reason: reason.trim() || undefined });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error || "Could not save opening stock");
@@ -83,37 +97,61 @@ export function OpeningStockForm({
 
         <div className="df-body">
           <div className="form-section">
-            <div className="form-section-title">Opening batch</div>
-            <div className="form-grid">
-              <label className="form-field">
-                <span className="lbl">Batch No.<span className="req"> *</span></span>
-                <input
-                  value={batch}
-                  onChange={(e) => setBatch(e.target.value)}
-                  placeholder="e.g. B/26-27/001"
-                  autoFocus
-                />
-                {dup && (
-                  <span className="field-err">
-                    {dupItem
-                      ? `Batch “${batch.trim()}” is already used for this item`
-                      : `Batch “${batch.trim()}” already exists — duplicate batch numbers are disabled in Settings`}
-                  </span>
-                )}
-              </label>
-              <label className="form-field">
-                <span className="lbl">Mfg date</span>
-                <DateInput value={date} onChange={(e) => setDate(e.target.value)} />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Qty (boxes)<span className="req"> *</span></span>
-                <NumberInput min={0} value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0" />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Remark</span>
-                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
-              </label>
-            </div>
+            <div className="form-section-title">Opening batches</div>
+            {rows.map((r, i) => {
+              const dup = dupKind(r, i);
+              return (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: i ? 10 : 0 }}>
+                  {/* One line per batch: wide batch/remark, narrow date/qty. */}
+                  <div className="form-grid" style={{ flex: 1, gridTemplateColumns: "1.5fr 0.8fr 0.6fr 1.1fr" }}>
+                    <label className="form-field">
+                      <span className="lbl">Batch No.<span className="req"> *</span></span>
+                      <input
+                        value={r.batch}
+                        onChange={(e) => setRow(i, "batch", e.target.value)}
+                        placeholder="e.g. B/26-27/001"
+                        autoFocus={i === 0}
+                      />
+                      {dup && (
+                        <span className="field-err">
+                          {dup === "form"
+                            ? `Batch “${r.batch.trim()}” is entered twice`
+                            : dup === "item"
+                              ? `Batch “${r.batch.trim()}” is already used for this item`
+                              : `Batch “${r.batch.trim()}” already exists — duplicate batch numbers are disabled in Settings`}
+                        </span>
+                      )}
+                    </label>
+                    <label className="form-field">
+                      <span className="lbl">Mfg date</span>
+                      <DateInput value={r.date} onChange={(e) => setRow(i, "date", e.target.value)} />
+                    </label>
+                    <label className="form-field">
+                      <span className="lbl">Qty (boxes)<span className="req"> *</span></span>
+                      <NumberInput min={0} value={r.qty} onChange={(e) => setRow(i, "qty", e.target.value)} placeholder="0" />
+                    </label>
+                    <label className="form-field">
+                      <span className="lbl">Remark</span>
+                      <input value={r.note} onChange={(e) => setRow(i, "note", e.target.value)} placeholder="Optional" />
+                    </label>
+                  </div>
+                  {rows.length > 1 && (
+                    <button
+                      className="btn ord-rm"
+                      style={{ marginTop: 24 }}
+                      onClick={() => removeLine(i)}
+                      title="Remove line"
+                      tabIndex={-1}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
+              <Icon name="plus" size={12} /> Add line
+            </button>
 
             {locked && (
               <label className="form-field" style={{ marginTop: 10 }}>
