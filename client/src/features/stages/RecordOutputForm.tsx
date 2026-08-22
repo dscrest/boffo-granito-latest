@@ -63,16 +63,19 @@ export function RecordOutputForm({
 
   // One rows array for both modes (mfg date · qty · remark each, + Add line,
   // like OrderForm); batch-tracked items add a mandatory batch no. per line.
-  type BatchRow = { batch: string; date: string; qty: string; note: string };
+  type BatchRow = { batch: string; date: string; qty: string; note: string; second: boolean };
   const emptyRow = (rowQty = ""): BatchRow => ({
     batch: "",
     date: entry.productionDate || todayISO(),
     qty: rowQty,
     note: "",
+    second: false,
   });
   const [rows, setRows] = useState<BatchRow[]>(() => [emptyRow(String(remaining))]);
-  const setRow = (i: number, k: keyof BatchRow, val: string) =>
+  const setRow = (i: number, k: "batch" | "date" | "qty" | "note", val: string) =>
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: val } : r)));
+  const toggleSecond = (i: number) =>
+    setRows((rs) => rs.map((r, j) => (j === i ? { ...r, second: !r.second } : r)));
   const addLine = () => setRows((rs) => [...rs, emptyRow()]);
   const removeLine = (i: number) => setRows((rs) => (rs.length > 1 ? rs.filter((_, j) => j !== i) : rs));
 
@@ -109,6 +112,7 @@ export function RecordOutputForm({
           batch_number: r.batch.trim(),
           mfg_date: r.date || undefined,
           note: r.note.trim() || undefined,
+          second_stage: r.second || undefined,
         }));
         await onSave({ batches: { rows: lines, performed_by: loggedBy } }, total);
       } else {
@@ -117,6 +121,7 @@ export function RecordOutputForm({
           production_date: r.date,
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
+          second_stage: r.second || undefined,
         }));
         await onSave({ singles }, total);
       }
@@ -193,6 +198,10 @@ export function RecordOutputForm({
                     <label className="form-field">
                       <span className="lbl">Remark</span>
                       <input value={r.note} onChange={(e) => setRow(i, "note", e.target.value)} placeholder="Optional" />
+                    </label>
+                    <label className="form-field" style={{ gridColumn: "1 / -1", flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <input type="checkbox" checked={r.second} onChange={() => toggleSecond(i)} style={{ width: "auto" }} />
+                      <span className="lbl" style={{ margin: 0 }}>2nd stage of palletization</span>
                     </label>
                   </div>
                   {rows.length > 1 && (

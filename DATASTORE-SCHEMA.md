@@ -500,6 +500,7 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
 | batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
 | shade | varchar(60) | shade of the batch (one batch = one shade) — added 2026-08-07 |
+| second_stage | boolean | on `record` rows: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` (board's Palletization column) instead of `Planning` — added 2026-08-17 |
 
 Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
 
@@ -594,6 +595,7 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | pallet | FK → Pallet | SET-NULL (drives vehicle-fill capacity) |
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
+| status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call); `Palletizing` added 2026-08-17 |
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
 | load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box). Optional `boxes` in the body = partial load: the line SPLITS (loaded part + a Ready remainder line) |
 | deleted_at | datetime | soft delete |

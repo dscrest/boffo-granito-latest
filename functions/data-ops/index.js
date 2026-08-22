@@ -2067,10 +2067,12 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
   }
   const liveLines = soLines.filter((l) => planStatus.has(String(l.plan)));
 
-  // Queued = the item's boxes still waiting in any Planning line (manual or
-  // auto). Top up only the shortfall vs what production has made available.
+  // Queued = the item's boxes still waiting in any pre-loading line (manual or
+  // auto). Palletizing MUST count: recountOrderItems only counts palletized at
+  // ReadyToLoad/in-box, so dropping Palletizing here would re-enqueue (duplicate)
+  // boxes for lines dragged into the Palletization column.
   const queued = liveLines
-    .filter((l) => String(l.order_item) === oiId && String(l.status) === "Planning")
+    .filter((l) => String(l.order_item) === oiId && ["Planning", "Palletizing"].includes(String(l.status)))
     .reduce((s, l) => s + (Number(l.boxes) || 0), 0);
   const topUp = available - queued;
   if (topUp <= 0) return;
@@ -2099,15 +2101,16 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
   // lands on the "" line — exactly the old aggregate behavior.
   const recs = rowList(
     await zcql.executeZCQLQuery(
-      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
+      `SELECT batch_number, qty_boxes, second_stage, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
     ),
   );
-  const producedByBatch = new Map(); // batch → { qty, first }
+  const producedByBatch = new Map(); // batch → { qty, first, second }
   for (const r of recs) {
     const b = String(r.batch_number || "");
-    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
+    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || ""), second: false };
     cur.qty += Number(r.qty_boxes) || 0;
     if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
+    cur.second = cur.second || String(r.second_stage) === "true";
     producedByBatch.set(b, cur);
   }
   const enqueuedByBatch = new Map();
@@ -2117,12 +2120,14 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
     enqueuedByBatch.set(b, (enqueuedByBatch.get(b) || 0) + (Number(l.boxes) || 0));
   }
 
-  const upsert = async (batch, alloc) => {
+  // st: "Planning" | "Palletizing" — 2nd-stage records land straight in the
+  // Palletization column, everything else in Ready for Palletization.
+  const upsert = async (batch, alloc, st = "Planning") => {
     const mine = liveLines.find(
       (l) =>
         String(l.plan) === planId &&
         String(l.order_item) === oiId &&
-        String(l.status) === "Planning" &&
+        String(l.status) === st &&
         String(l.batch_number || "") === batch,
     );
     if (mine) {
@@ -2139,10 +2144,10 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
         pallet: oi.pallet ? String(oi.pallet) : null,
         boxes: alloc,
         position: liveLines.filter((l) => String(l.plan) === planId).length,
-        status: "Planning",
+        status: st,
         batch_number: batch,
       });
-      liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: "Planning", batch_number: batch });
+      liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: st, batch_number: batch });
     }
   };
 
@@ -2155,7 +2160,7 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
     const want = p.qty - (enqueuedByBatch.get(b) || 0);
     const alloc = Math.min(Math.max(want, 0), remaining);
     if (alloc <= 0) continue;
-    await upsert(b, alloc);
+    await upsert(b, alloc, p.second ? "Palletizing" : "Planning");
     remaining -= alloc;
   }
   if (remaining > 0) await upsert("", remaining);
@@ -2225,10 +2230,11 @@ const PAL_TRANSITIONS = {
   Loading: ["Completed", "Planning"], // Completed = dispatched; back = unload
   Completed: [], // terminal (dispatched)
 };
-// Per-line palletising toggle.
+// Per-line palletising stage — full mesh over the pre-loading statuses.
 const PAL_LINE_TRANSITIONS = {
-  Planning: ["ReadyToLoad"],
-  ReadyToLoad: ["Planning"],
+  Planning: ["Palletizing", "ReadyToLoad"],
+  Palletizing: ["ReadyToLoad", "Planning"],
+  ReadyToLoad: ["Planning", "Palletizing"],
 };
 
 app.post("/pal-status/:rowid", async (req, res) => {
@@ -2282,10 +2288,11 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
     const ds = catalyst.datastore();
     const lineId = req.params.rowid;
     const to = String((req.body || {}).status || "");
+    const pallet = String((req.body || {}).pallet || "");
 
     const result = await withOpLog(
       catalyst,
-      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to } },
+      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to, ...(pallet ? { pallet } : {}) } },
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
@@ -2296,7 +2303,9 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
         const from = String(rows[0].status || "Planning");
         if (!(PAL_LINE_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move palletization line from ${from} to ${to}`, 409);
-        await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, status: to });
+        await ds.table("PalletizationPlanLine").updateRow({
+          ROWID: lineId, status: to, ...(/^\d+$/.test(pallet) ? { pallet } : {}),
+        });
         await logTransition(catalyst, {
           entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: to,
         });
@@ -3062,6 +3071,7 @@ app.post("/production-record/:rowid", async (req, res) => {
           stage: String(pl.stage || "New"),
           batch_number: batchNumber,
           shade,
+          second_stage: body.second_stage === true,
           production_date: body.production_date != null ? String(body.production_date) : "",
           shift: body.shift != null ? String(body.shift) : "",
           performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -3112,6 +3122,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
             batch_number: String(r.batch_number || "").trim(),
             mfg_date: r.mfg_date != null ? String(r.mfg_date) : "",
             note: r.note != null ? String(r.note) : "",
+            second_stage: r.second_stage === true,
           };
         });
         const sum = lines.reduce((s, l) => s + l.qty, 0);
@@ -3178,6 +3189,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
               stage: String(pl.stage || "New"),
               batch_number: batchNumber,
               shade: "",
+              second_stage: l.second_stage,
               production_date: l.mfg_date,
               shift: body.shift != null ? String(body.shift) : "",
               performed_by: body.performed_by != null ? String(body.performed_by) : "",

@@ -301,6 +301,8 @@ export interface ProductionRecordInput {
   /** Batch number; blank → server auto-mints B/FY/NNN. One batch = one shade. */
   batch_number?: string;
   shade?: string;
+  /** Output is in the 2nd stage of palletization → queue card lands in the Palletization column. */
+  second_stage?: boolean;
 }
 /** One batch row of a multi-batch record (batch-tracked items). */
 export interface ProductionRecordLine {
@@ -310,6 +312,8 @@ export interface ProductionRecordLine {
   /** Batch mfg date. */
   mfg_date?: string;
   note?: string;
+  /** Output is in the 2nd stage of palletization → queue card lands in the Palletization column. */
+  second_stage?: boolean;
 }
 export interface ProductionRecordLinesInput {
   rows: ProductionRecordLine[];

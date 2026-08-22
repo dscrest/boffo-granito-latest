@@ -30,14 +30,16 @@ export const PAL_TRANSITIONS: Record<PalStatus, PalStatus[]> = {
 };
 
 // LINE status (per palletised item). The item-wise move on the kanban.
-export const PAL_LINE_STATUSES = ["Planning", "ReadyToLoad"] as const;
+export const PAL_LINE_STATUSES = ["Planning", "Palletizing", "ReadyToLoad"] as const;
 export type PalLineStatus = (typeof PAL_LINE_STATUSES)[number];
 export const PAL_LINE_TRANSITIONS: Record<PalLineStatus, PalLineStatus[]> = {
-  Planning: ["ReadyToLoad"],
-  ReadyToLoad: ["Planning"],
+  Planning: ["Palletizing", "ReadyToLoad"],
+  Palletizing: ["ReadyToLoad", "Planning"],
+  ReadyToLoad: ["Planning", "Palletizing"],
 };
 export const PAL_LINE_STATUS_LABEL: Record<PalLineStatus, string> = {
   Planning: "Ready for Palletization",
+  Palletizing: "Palletization",
   ReadyToLoad: "Ready for Loading",
 };
 
@@ -372,9 +374,10 @@ export function setPalVehicle(rowid: string, vehicle: string) {
   return bust(op<{ ROWID: string; vehicle: string }>(`pal-vehicle/${rowid}`, { vehicle }));
 }
 
-/** Palletise one item (Ready for Palletization ↔ Ready for Loading) without touching its plan. */
-export function setPalLineStatus(lineId: string, status: PalLineStatus) {
-  return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status }));
+/** Move one item between pre-loading stages without touching its plan;
+    optionally sets the line's pallet in the same call (Palletization drop). */
+export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?: string) {
+  return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status, ...(pallet ? { pallet } : {}) }));
 }
 
 /* ---- Load boxes (vehicle slots on the board) ---- */

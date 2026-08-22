@@ -1,24 +1,25 @@
 /* ============================================================
    Dispatch Control Board — the /packing board view (replaces PalKanban).
-   Two panels: LEFT is a 4-column order board of PalletizationPlanLines
-   (Ready for Palletization → Ready for Loading → In Dispatch → Dispatched) with
-   filters, FIFO/fits chips and multi-select; RIGHT is the Dispatch panel — one
-   card per LoadBox (vehicle slot) with a design-coloured fill bar, gap label,
-   swap, and the dispatch flow (vehicle asked at dispatch).
-   Click a bay card to open its details (+ Dispatch Copy print); an Open card
-   also becomes the FOCUS: the target of the Assign button and multi-drops.
-   Hand-rolled HTML5 drag-and-drop
-   like Production; loading still routes through BoxPickerModal for single
-   lines so partial (split) loads keep working. KPI strip + Board/Split/Bay (hidden/locked)
-   width toggle on top.
+   Layout from the claude.ai/design "Dispatch Board" (2026-08-17), house theme.
+   LEFT is the order board with a stage-pill summary header and a Kanban/Sheet
+   toggle: Kanban = 5 columns of PalletizationPlanLines (Ready for
+   Palletization → Palletization → Ready for Loading → In Dispatch →
+   Dispatched); Sheet = the
+   same lines as a flat stage-sorted table. RIGHT is "Containers at dock" —
+   one card per LoadBox (vehicle slot) with a design-coloured fill bar,
+   "Load selected here" and "Dispatch & print" (vehicle asked at dispatch;
+   a printable Dispatch Entry overlay opens after).
+   Hand-rolled HTML5 drag-and-drop like Production; loading still routes
+   through BoxPickerModal for single lines so partial (split) loads keep
+   working. Swap + KPI extras removed 2026-08-17 — git history holds them.
    ============================================================ */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { KPI } from "@/ui/primitives";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { fmt } from "@/lib/format";
+import { usePersistedState } from "@/lib/usePersistedState";
 import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
@@ -26,6 +27,7 @@ import { isoInfo } from "@/features/masters/customersApi";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { BoxPickerModal } from "./BoxPickerModal";
 import { BoxDetailsModal } from "./BoxDetailsModal";
+import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import {
   boxFill,
@@ -34,6 +36,7 @@ import {
   invalidatePalPlans,
   lineFrac,
   mixedBatchOrderItems,
+  PAL_LINE_STATUS_LABEL,
   setLineBox,
   setPalLineStatus,
   sharedCapacity,
@@ -44,24 +47,21 @@ import {
   type PalPlanLine,
   type PalLineStatus,
 } from "./palPlansApi";
+import { PalletPickerModal } from "./PalletPickerModal";
 
-// Board columns — all four hold ITEM cards (a PalPlanLine each); the last two
+// Board columns — all hold ITEM cards (a PalPlanLine each); the last two
 // are derived from the line's box (Open = In Dispatch, Dispatched = done).
 const COLUMNS = [
   { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
+  { key: "Palletizing", label: "Palletization", chip: "p-palletized" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
   { key: "Loading", label: "In Dispatch", chip: "p-loading" },
   { key: "Done", label: "Dispatched", chip: "p-completed" },
 ] as const;
 type ColKey = (typeof COLUMNS)[number]["key"];
 
-// ponytail: KPI strip + FIFO/Fits chips hidden for now — flip to restore.
-const SHOW_EXTRAS: boolean = false;
-// ponytail: swap hidden for now (swapped-out items dropped back mid-flow) — flip to restore.
-const SHOW_SWAP: boolean = false;
-
 type Entry = { p: PalPlan; l: PalPlanLine };
-type Drag = { lineIds: string[]; from: "Planning" | "Ready" } | null;
+type Drag = { lineIds: string[]; from: "Planning" | "Palletizing" | "Ready" } | null;
 
 export function DispatchBoard({
   plans,
@@ -75,23 +75,19 @@ export function DispatchBoard({
   onChanged: () => void;
 }) {
   const navigate = useNavigate();
-  // Layout locked to Board (wide order board); Split/Bay toggle removed 2026-07-29.
-  const leftWidth = "68%";
   // Board filters (session-scoped is overkill — the outer PalPlans search persists already).
   const [q, setQ] = useState("");
   const [fCustomer, setFCustomer] = useState("");
   const [fCountry, setFCountry] = useState("");
   const [fDesign, setFDesign] = useState("");
   const [fSize, setFSize] = useState("");
-  const [fifo, setFifo] = useState(false);
-  const [fitsFocused, setFitsFocused] = useState(false);
+  // Kanban/Sheet — survives the route round-trip to a plan detail.
+  const [boardView, setBoardView] = usePersistedState<"kanban" | "sheet">("dispatch.boardView", "kanban");
   // Bay filters.
   const [bayCountry, setBayCountry] = useState("");
   const [bayStatus, setBayStatus] = useState<"open" | "all" | "dispatched" | "short">("open");
   // Interaction state.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [focusBoxId, setFocusBoxId] = useState<string | null>(null);
-  const [swapLineId, setSwapLineId] = useState<string | null>(null);
   const [drag, setDrag] = useState<Drag>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [overBox, setOverBox] = useState<string | null>(null);
@@ -99,6 +95,10 @@ export function DispatchBoard({
   const [vehModal, setVehModal] = useState<{ box: LoadBox; dispatch?: boolean } | null>(null);
   const [detailBoxId, setDetailBoxId] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ lineId: string; presetBoxId?: string } | null>(null);
+  // Pallet choice for a pallet-less line dropped on the Palletization column.
+  const [palletPick, setPalletPick] = useState<PalPlanLine | null>(null);
+  // Post-dispatch printable Dispatch Entry — entries snapshotted pre-refresh.
+  const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
 
   // Container plans keyed by SalesOrder ROWID — the loading team packs
   // load-boxes to plan. The SO's OWN plan (editable copy, snapshotted at
@@ -155,31 +155,19 @@ export function DispatchBoard({
   const stageOf = (p: PalPlan, l: PalPlanLine): ColKey => {
     if (l.loadBoxId) return boxById.get(l.loadBoxId)?.status === "Dispatched" ? "Done" : "Loading";
     if (p.status === "Completed") return "Done"; // legacy pre-box dispatched plans
-    return l.status === "ReadyToLoad" ? "Ready" : "Planning";
+    if (l.status === "ReadyToLoad") return "Ready";
+    return l.status === "Palletizing" ? "Palletizing" : "Planning";
   };
 
   const openBoxes = boxes.filter((b) => b.status === "Open");
-  const focusBox = (focusBoxId && openBoxes.find((b) => b.id === focusBoxId)) || null;
-  const focusFree = focusBox ? Math.max(0, 1 - fillOf(focusBox)) : 0; // free FRACTION of the focused box
-  const swapEntry = swapLineId ? allLines.find(({ l }) => l.id === swapLineId) ?? null : null;
 
-  // Default / self-heal focus: first Open box once loaded, or after the
-  // focused box is dispatched/deleted. Prefer a non-empty box (empties are
-  // hidden from the lane); an empty fallback still works — it appears on load.
-  useEffect(() => {
-    if (!focusBoxId || !openBoxes.some((b) => b.id === focusBoxId))
-      setFocusBoxId((openBoxes.find((b) => !isEmptyBox(b)) ?? openBoxes[0])?.id ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boxes]);
-
-  // Prune stale selection / swap target after a refresh moves lines on.
+  // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
     setSelected((prev) => {
       const ready = new Set(allLines.filter(({ p, l }) => stageOf(p, l) === "Ready").map(({ l }) => l.id));
       const next = new Set([...prev].filter((id) => ready.has(id)));
       return next.size === prev.size ? prev : next;
     });
-    setSwapLineId((id) => (id && allLines.some(({ l }) => l.id === id && l.loadBoxId) ? id : null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plans, boxes]);
 
@@ -201,7 +189,7 @@ export function DispatchBoard({
     }
     setBusy(false);
     // Batch failure mid-way: report + refresh anyway so the board resyncs.
-    after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${to === "ReadyToLoad" ? "Ready for Loading" : "Ready for Palletization"}`);
+    after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${PAL_LINE_STATUS_LABEL[to]}`);
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
@@ -289,10 +277,13 @@ export function DispatchBoard({
   };
 
   const dispatchBox = async (box: LoadBox, capture?: LoadingCapture) => {
+    // Snapshot the loaded lines BEFORE the refetch moves them to Dispatched.
+    const entries = linesOfBox(box.id);
     setBusy(true);
     const res = await dispatchLoadBox(box.id, capture);
     setBusy(false);
     after(res.ok, res.error || "Could not dispatch", `${boxLabel(box)} dispatched`);
+    if (res.ok) setEntryOverlay({ box, entries });
   };
 
   const assignVehicle = async (vehicleId: string, capture: LoadingCapture) => {
@@ -332,18 +323,6 @@ export function DispatchBoard({
     if (err) { invalidatePalPlans(); onChanged(); }
   };
 
-  // Swap-mode "Swap in": unload the swapped line first.
-  const addSuggestion = async (line: PalPlanLine, box: LoadBox, swapOut: PalPlanLine) => {
-    if (busy) return;
-    setBusy(true);
-    const out = await setLineBox(swapOut.id, "");
-    if (!out.ok) { setBusy(false); after(false, out.error || "Could not swap out", ""); return; }
-    const res = await setLineBox(line.id, box.id);
-    setBusy(false);
-    setSwapLineId(null);
-    after(res.ok, res.error || "Could not load the item", `${swapOut.itemCode} ⇄ ${line.itemCode} in ${boxLabel(box)}`);
-  };
-
   // ---- drag & drop --------------------------------------------
   const clearDnd = () => { setDrag(null); setOverCol(null); setOverBox(null); };
   const draggedReady = (d: Exclude<Drag, null>) =>
@@ -355,21 +334,28 @@ export function DispatchBoard({
     const d = drag;
     clearDnd();
     if (!d) return;
-    if (colKey === "Planning" || colKey === "Ready") {
-      const to: PalLineStatus = colKey === "Ready" ? "ReadyToLoad" : "Planning";
-      const ids = d.lineIds
+    if (colKey === "Planning" || colKey === "Palletizing" || colKey === "Ready") {
+      const to: PalLineStatus = colKey === "Ready" ? "ReadyToLoad" : colKey;
+      const lines = d.lineIds
         .map((id) => allLines.find(({ l }) => l.id === id)?.l)
-        .filter((l): l is PalPlanLine => !!l && !l.loadBoxId && l.status !== to)
-        .map((l) => l.id);
-      void moveLines(ids, to);
+        .filter((l): l is PalPlanLine => !!l && !l.loadBoxId && l.status !== to);
+      // Entering Palletization needs a pallet on the line — pick one for a lone
+      // pallet-less card; in a multi-drag the palleted ones move, the rest wait.
+      if (to === "Palletizing") {
+        const missing = lines.filter((l) => !l.palletId);
+        if (missing.length === 1 && lines.length === 1) { setPalletPick(missing[0]); return; }
+        if (missing.length > 0) toast.error(`${missing.length} item${missing.length === 1 ? " has" : "s have"} no pallet — drag them one at a time to choose`);
+        void moveLines(lines.filter((l) => l.palletId).map((l) => l.id), to);
+        return;
+      }
+      void moveLines(lines.map((l) => l.id), to);
       return;
     }
     if (colKey === "Loading") {
       const ready = draggedReady(d);
       if (ready.length === 0) return;
       if (ready.length === 1) { setPicker({ lineId: ready[0].l.id }); return; }
-      if (focusBox) void assignLines(ready.map(({ l }) => l.id), focusBox);
-      else toast.error("Click a box in Dispatch to focus it first");
+      toast.error("Drop the selection onto a container card in the dock");
     }
   };
 
@@ -399,19 +385,18 @@ export function DispatchBoard({
     if (fCountry && l.countryCode !== fCountry) return false;
     if (fDesign && l.designLabel !== fDesign) return false;
     if (fSize && l.sizeCode !== fSize) return false;
-    if (fifo && ageDays(p) < 8) return false;
     if (qLower && !`${l.itemCode} ${l.soNumber} ${l.customerName} ${l.designLabel} ${l.sizeCode} ${p.palNumber} ${l.batchNumber}`.toLowerCase().includes(qLower)) return false;
     return true;
   };
-  const anyFilter = !!(q || fCustomer || fCountry || fDesign || fSize || fifo || fitsFocused);
+  const anyFilter = !!(q || fCustomer || fCountry || fDesign || fSize);
   const visible = allLines.filter(matches);
-  const colEntries = (key: ColKey) => {
-    let list = visible.filter((e) => stageOf(e.p, e.l) === key);
-    // "Fits" narrows the pickable columns to lines the focused box can absorb whole.
-    if (fitsFocused && focusBox && (key === "Planning" || key === "Ready")) list = list.filter(({ l }) => lineFrac(l) <= focusFree);
-    if (fifo) list = [...list].sort((a, b) => ageDays(b.p) - ageDays(a.p));
-    return list;
-  };
+  const colEntries = (key: ColKey) => visible.filter((e) => stageOf(e.p, e.l) === key);
+  // Sheet rows: stage order, then pallet code.
+  const stageIdx = new Map(COLUMNS.map((c, i) => [c.key, i]));
+  const sheetRows = [...visible].sort((a, b) => {
+    const d = (stageIdx.get(stageOf(a.p, a.l)) ?? 0) - (stageIdx.get(stageOf(b.p, b.l)) ?? 0);
+    return d !== 0 ? d : a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
+  });
 
   // ---- bay filtering ------------------------------------------
   const bayBoxes = boxes
@@ -431,20 +416,9 @@ export function DispatchBoard({
           ? a.boxNumber - b.boxNumber
           : (b.dispatchDate || b.createdTime).localeCompare(a.dispatchDate || a.createdTime));
 
-  // ---- KPIs ---------------------------------------------------
-  const pending = allLines.filter(({ p, l }) => { const s = stageOf(p, l); return s === "Planning" || s === "Ready"; });
-  const aged = pending.filter(({ p }) => ageDays(p) > 7);
-  const avgFill = openBoxes.length
-    ? Math.round(openBoxes.reduce((s, b) => s + fillOf(b) * 100, 0) / openBoxes.length)
-    : 0;
-  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
-  const dispatchedToday = boxes.filter((b) => b.status === "Dispatched" && b.dispatchDate.slice(0, 10) === todayISO);
-
   // ---- selection ----------------------------------------------
   const selEntries = allLines.filter(({ l }) => selected.has(l.id));
   const selBoxes = selEntries.reduce((s, { l }) => s + l.boxes, 0);
-  const selFrac = selEntries.reduce((s, { l }) => s + lineFrac(l), 0);
-  const selOverPct = focusBox ? Math.round((selFrac - focusFree) * 100) : 0;
   const toggleSelect = (l: PalPlanLine) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -452,49 +426,44 @@ export function DispatchBoard({
       return next;
     });
 
-  const chipBtn = (on: boolean, onClick: () => void, label: string, title?: string) => (
-    <button
-      type="button"
-      className="btn"
-      title={title}
-      onClick={onClick}
-      style={{
-        flex: "0 0 auto", whiteSpace: "nowrap",
-        background: on ? "var(--accent-soft)" : undefined,
-        borderColor: on ? "var(--accent)" : undefined,
-        color: on ? "var(--fg)" : undefined,
-      }}
-    >
-      {label}
-    </button>
-  );
-
   // ---- left panel: item card ----------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
     const isSel = selected.has(l.id);
-    const canDrag = canEdit && (stage === "Planning" || stage === "Ready");
+    const canDrag = canEdit && (stage === "Planning" || stage === "Palletizing" || stage === "Ready");
     const age = ageDays(p);
     const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
-    const fitsHint = !!swapEntry && stage === "Ready" && focusBox && lineFrac(l) <= focusFree + lineFrac(swapEntry.l);
     return (
       <div
         key={l.id}
         draggable={canDrag}
         onDragStart={() => {
           if (!canDrag) return;
-          setDrag({ lineIds: isSel ? [...selected] : [l.id], from: stage as "Planning" | "Ready" });
+          setDrag({ lineIds: isSel ? [...selected] : [l.id], from: stage as "Planning" | "Palletizing" | "Ready" });
         }}
         onDragEnd={clearDnd}
         onClick={() => (canEdit && stage === "Ready" ? toggleSelect(l) : navigate(`/packing/${p.id}`))}
-        title={stage === "Ready" && canEdit ? "Click to select · drag to a box" : `Open ${p.palNumber}`}
+        title={stage === "Ready" && canEdit ? "Click to select · drag to a container" : `Open ${p.palNumber}`}
         style={{
-          border: `1px solid ${isSel ? "var(--accent)" : fitsHint ? "var(--c-amber)" : "var(--border)"}`,
+          position: "relative",
+          border: `1px solid ${isSel ? "var(--accent)" : "var(--border)"}`,
           borderRadius: 8, padding: 10,
           background: isSel ? "var(--accent-soft)" : "var(--bg)",
           cursor: canDrag ? "grab" : "pointer",
           opacity: drag?.lineIds.includes(l.id) ? 0.5 : 1,
         }}
       >
+        {isSel && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute", top: -7, right: -7, width: 18, height: 18, borderRadius: "50%",
+              background: "var(--accent)", color: "var(--accent-fg, #fff)",
+              fontSize: 11, lineHeight: "18px", textAlign: "center", fontWeight: 700,
+            }}
+          >
+            ✓
+          </span>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button
             type="button"
@@ -551,13 +520,24 @@ export function DispatchBoard({
         {box && (
           <div className="dim mono" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>→ {boxLabel(box)}</div>
         )}
+        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+          <button
+            type="button"
+            className="btn"
+            style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
+            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); void moveLines([l.id], "ReadyToLoad"); }}
+            title="Move to Ready for Loading"
+          >
+            Mark ready for loading →
+          </button>
+        )}
         {canEdit && stage === "Ready" && (
           <button
             type="button"
             className="btn"
             style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
             onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); setPicker({ lineId: l.id }); }}
-            title="Load into a box"
+            title="Load into a container"
           >
             <Icon name="truck" size={13} /> Load
           </button>
@@ -566,7 +546,7 @@ export function DispatchBoard({
     );
   };
 
-  // ---- right panel: box card ----------------------------------
+  // ---- right panel: container card ----------------------------
   const boxCard = (box: LoadBox) => {
     const inBox = linesOfBox(box.id);
     const loaded = loadedOf(box);
@@ -575,7 +555,6 @@ export function DispatchBoard({
     const cap = sharedCapacity(inBox.map(({ l }) => l)); // one pallet type → absolute box numbers are meaningful
     const rem = cap ? cap - loaded : 0;
     const open = box.status === "Open";
-    const isFocus = open && focusBox?.id === box.id;
     const pctColor = pct > 100 ? "var(--c-red)" : pct === 100 ? "var(--c-green)" : pct >= 85 ? "var(--c-amber)" : "var(--c-blue)";
     // Stable colour per design (first-seen), same rule as VehicleFillBar.
     const colorByDesign = new Map<string, string>();
@@ -584,30 +563,17 @@ export function DispatchBoard({
     });
     const isTarget = open && canEdit && !!drag;
 
-    // Swap candidates — while swapping a line out of this box: Ready lines
-    // that fit the freed space (free fraction + the swapped-out line's share).
-    const swapping = SHOW_SWAP && !!swapEntry && swapEntry.l.loadBoxId === box.id;
-    const avail = 1 - fill + (swapping ? lineFrac(swapEntry!.l) : 0);
-    const showSug = open && canEdit && swapping && avail > 0;
-    const sugs = showSug
-      ? allLines
-          .filter(({ p, l }) => stageOf(p, l) === "Ready" && lineFrac(l) <= avail)
-          .map((e) => ({ ...e, left: avail - lineFrac(e.l) }))
-          .sort((a, b) => a.left - b.left)
-          .slice(0, 4)
-      : [];
-
     return (
       <div
         key={box.id}
-        onClick={() => { setDetailBoxId(box.id); if (open) setFocusBoxId(box.id); }}
+        onClick={() => setDetailBoxId(box.id)}
         onDragOver={(e) => { if (!isTarget) return; e.preventDefault(); e.stopPropagation(); setOverBox(box.id); }}
         onDragLeave={() => setOverBox((s) => (s === box.id ? null : s))}
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDropBox(box); }}
         style={{
-          border: `2px ${isTarget && overBox === box.id ? "dashed" : "solid"} ${isFocus ? "var(--accent)" : "var(--border)"}`,
+          border: `2px ${isTarget && overBox === box.id ? "dashed" : "solid"} var(--border)`,
           borderRadius: 10, padding: 12,
-          background: overBox === box.id ? "var(--accent-soft)" : isFocus ? "var(--accent-soft)" : "var(--bg)",
+          background: overBox === box.id ? "var(--accent-soft)" : "var(--bg)",
           cursor: "pointer",
           transition: "background .12s",
         }}
@@ -676,155 +642,139 @@ export function DispatchBoard({
 
         {/* Loaded items. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: inBox.length ? 8 : 0 }}>
-          {inBox.map(({ p, l }) => {
-            const isSwap = swapLineId === l.id;
-            return (
-              <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)", padding: "3px 0", borderTop: "1px solid var(--panel-2)" }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: colorByDesign.get(l.designId), flex: "0 0 auto" }} />
+          {inBox.map(({ p, l }) => (
+            <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)", padding: "3px 0", borderTop: "1px solid var(--panel-2)" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: colorByDesign.get(l.designId), flex: "0 0 auto" }} />
+              <button
+                type="button"
+                className="linkish"
+                style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                onClick={(ev) => { ev.stopPropagation(); navigate(`/packing/${p.id}`); }}
+                title={`Open ${p.palNumber}`}
+              >
+                <span className="mono">{l.itemCode}</span> · {l.designLabel}
+                {l.batchNumber ? <span className="dim mono"> · {l.batchNumber}</span> : null}
+              </button>
+              <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
+              <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{fmt(l.boxes)}</span>
+              {canEdit && open && (
                 <button
                   type="button"
-                  className="linkish"
-                  style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                  onClick={(ev) => { ev.stopPropagation(); navigate(`/packing/${p.id}`); }}
-                  title={`Open ${p.palNumber}`}
+                  className="btn x"
+                  title="Back to Ready for Loading"
+                  style={{ padding: 1, height: 16, width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                  onClick={(ev) => { ev.stopPropagation(); void unload(l, box); }}
                 >
-                  <span className="mono">{l.itemCode}</span> · {l.designLabel}
-                  {l.batchNumber ? <span className="dim mono"> · {l.batchNumber}</span> : null}
+                  <Icon name="x" size={10} />
                 </button>
-                <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
-                <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }}>{fmt(l.boxes)}</span>
-                {canEdit && open && (
-                  <>
-                    {SHOW_SWAP && (
-                      <button
-                        type="button"
-                        className="btn"
-                        title={isSwap ? "Cancel swap" : "Swap this item for another"}
-                        style={{
-                          height: 20, padding: "0 6px", fontSize: 11, flex: "0 0 auto",
-                          background: isSwap ? "var(--c-amber)" : undefined,
-                          color: isSwap ? "#fff" : "var(--c-amber)",
-                          borderColor: "var(--c-amber)",
-                        }}
-                        onClick={(ev) => { ev.stopPropagation(); setSwapLineId((s) => (s === l.id ? null : l.id)); setFocusBoxId(box.id); }}
-                      >
-                        {isSwap ? "Cancel" : "Swap"}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn x"
-                      title="Back to Ready for Loading"
-                      style={{ padding: 1, height: 16, width: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                      onClick={(ev) => { ev.stopPropagation(); void unload(l, box); }}
-                    >
-                      <Icon name="x" size={10} />
-                    </button>
-                  </>
-                )}
-              </div>
-            );
-          })}
+              )}
+            </div>
+          ))}
           {open && inBox.length === 0 && (
             <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "10px 0", textAlign: "center", border: "1px dashed var(--border)", borderRadius: 6, marginTop: 8 }}>
-              Drag Ready items here, or select on the board and press Assign
+              Empty — select Ready items and load them here
             </div>
           )}
         </div>
 
-        {/* Swap candidates. */}
-        {showSug && (
-          <div style={{ borderTop: "1px dashed var(--border)", marginTop: 8, paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-            <div className="dim" style={{ fontSize: "var(--t-sm)", fontWeight: 600 }}>
-              Swap {swapEntry!.l.itemCode} for
-            </div>
-            {sugs.map(({ p, l, left }) => (
-              <div
-                key={l.id}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)", padding: "4px 6px",
-                  borderRadius: 6, border: `1px dashed ${left === 0 ? "var(--c-green)" : "var(--border)"}`,
-                  background: left === 0 ? "color-mix(in oklab, var(--c-green) 10%, transparent)" : undefined,
-                }}
-              >
-                <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
-                <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.designLabel}</span>
-                <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.customerName}</span>
-                <span className="dim mono" style={{ marginLeft: "auto", flex: "0 0 auto" }} title={`${p.palNumber} · leaves ${Math.round(left * 100)}% free`}>
-                  {Math.round(left * 100) === 0 ? "exact fit" : `${fmt(l.boxes)} bx · ${Math.round(left * 100)}% left`}
-                </span>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ height: 20, padding: "0 8px", fontSize: 11, flex: "0 0 auto" }}
-                  disabled={busy}
-                  onClick={(ev) => { ev.stopPropagation(); void addSuggestion(l, box, swapEntry!.l); }}
-                >
-                  Swap in
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Vehicle / dispatch footer. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
-          {open ? (
-            <>
+        {open ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
               <span className="dim" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {box.vehicleNumber ? [box.vehicleNumber, box.driverName].filter(Boolean).join("  ·  ") : "No vehicle yet"}
               </span>
               {canEdit && (
-                <>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy || inBox.length === 0}
-                    title={inBox.length === 0 ? "Load at least one item" : "Dispatch this vehicle"}
-                    style={{ marginLeft: "auto", height: 24, padding: "0 10px", fontSize: "var(--t-sm)", display: "inline-flex", alignItems: "center", gap: 4, flex: "0 0 auto" }}
-                    onClick={(ev) => { ev.stopPropagation(); setVehModal({ box, dispatch: true }); }}
-                  >
-                    <Icon name="check" size={11} /> {pct >= 100 ? "Seal & dispatch" : `Dispatch at ${pct}%`}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={busy || inBox.length === 0}
-                    title="Return all items to Ready for Loading"
-                    style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)", flex: "0 0 auto" }}
-                    onClick={(ev) => { ev.stopPropagation(); void emptyBox(box); }}
-                  >
-                    Empty
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || inBox.length === 0}
+                  title="Return all items to Ready for Loading"
+                  style={{ marginLeft: "auto", height: 24, padding: "0 10px", fontSize: "var(--t-sm)", flex: "0 0 auto" }}
+                  onClick={(ev) => { ev.stopPropagation(); void emptyBox(box); }}
+                >
+                  Empty
+                </button>
               )}
-            </>
-          ) : (
+            </div>
+            {canEdit && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy || selected.size === 0}
+                  title={selected.size === 0 ? "Select Ready items on the board first" : `Load the ${selected.size} selected item${selected.size === 1 ? "" : "s"} into ${boxLabel(box)}`}
+                  style={{ flex: 1, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
+                  onClick={(ev) => { ev.stopPropagation(); void assignLines([...selected], box); }}
+                >
+                  <Icon name="truck" size={11} /> Load selected{selected.size ? ` (${selected.size})` : ""}
+                </button>
+                <button
+                  type="button"
+                  className="hbtn primary"
+                  disabled={busy || inBox.length === 0}
+                  title={inBox.length === 0 ? "Load at least one item" : pct >= 100 ? "Seal & dispatch this vehicle" : `Dispatch at ${pct}%`}
+                  style={{ flex: 1, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
+                  onClick={(ev) => { ev.stopPropagation(); setVehModal({ box, dispatch: true }); }}
+                >
+                  <Icon name="check" size={11} /> Dispatch &amp; print
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
             <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
               {[box.driverName, box.mobileNumber, box.dispatchDate].filter(Boolean).join("  ·  ")}
             </span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     );
   };
 
   // ---- render -------------------------------------------------
   const selectStyle: React.CSSProperties = { flex: "0 1 auto", minWidth: 0, maxWidth: 150 };
+  const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
+    <button
+      onClick={() => setBoardView(v)}
+      title={label}
+      aria-label={`${label} view`}
+      style={{
+        background: boardView === v ? "var(--accent-soft)" : "transparent",
+        color: boardView === v ? "var(--fg)" : "var(--muted)",
+        border: 0, padding: "5px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center",
+      }}
+    >
+      <Icon name={icon} size={14} />
+    </button>
+  );
 
   return (
     <div>
-      {/* KPI strip (hidden for now). */}
-      {SHOW_EXTRAS && <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 12 }}>
-          <KPI label="Pending to Load" value={fmt(pending.length)} unit="items" delta={`${fmt(pending.reduce((s, { l }) => s + l.boxes, 0))} boxes`} />
-          <KPI label="Boxes Open" value={fmt(openBoxes.length)} delta={`avg ${avgFill}% full`} />
-          <KPI label="Ageing > 7 Days" value={fmt(aged.length)} unit="items" delta={aged.length ? `${fmt(aged.reduce((s, { l }) => s + l.boxes, 0))} boxes waiting` : "all fresh"} />
-          <KPI label="Dispatched Today" value={fmt(dispatchedToday.length)} unit={dispatchedToday.length === 1 ? "vehicle" : "vehicles"} delta={`${fmt(dispatchedToday.reduce((s, b) => s + loadedOf(b), 0))} boxes`} />
-        </div>}
-
       <div className="dispatch-fill" style={{ display: "flex", gap: 12, alignItems: "stretch", height: "calc(100vh - 172px)", minHeight: 480 }}>
         {/* ============ LEFT · ORDER BOARD ============ */}
-        <section className="card" style={{ width: leftWidth, minWidth: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
+        <section className="card" style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
+          {/* Stage summary + view toggle. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+            {COLUMNS.map((col, i) => {
+              const n = allLines.filter((e) => stageOf(e.p, e.l) === col.key).length;
+              return (
+                <span key={col.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span className={`chip palstatus ${col.chip}`} title={`${n} item${n === 1 ? "" : "s"}`}>
+                    {col.label} <span className="mono">{n}</span>
+                  </span>
+                  {i < COLUMNS.length - 1 && <span className="dim" aria-hidden="true">→</span>}
+                </span>
+              );
+            })}
+            <span style={{ flex: 1 }} />
+            <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden", flex: "0 0 auto" }} role="group" aria-label="Board view" title="Switch view">
+              {viewBtn("kanban", "kanban", "Kanban")}
+              {viewBtn("sheet", "orders", "Sheet")}
+            </span>
+          </div>
+
           <div className="fbar" style={{ margin: 0, padding: "8px 10px", borderBottom: "1px solid var(--border)", flexWrap: "nowrap" }}>
             <span className="gsearch" style={{ minWidth: 0 }}>
               <Icon name="search" size={13} />
@@ -846,91 +796,162 @@ export function DispatchBoard({
               <option value="">All sizes</option>
               {opts.sizes.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
-            {SHOW_EXTRAS && chipBtn(fifo, () => setFifo((v) => !v), "FIFO · ageing first", "Show only items ageing 8+ days, oldest first")}
-            {SHOW_EXTRAS && focusBox && chipBtn(
-              fitsFocused,
-              () => setFitsFocused((v) => !v),
-              `Fits ${boxLabel(focusBox)} (${Math.round(focusFree * 100)}% left)`,
-              "Only items that still fit whole in the focused box",
-            )}
             {anyFilter && (
               <button
                 type="button"
                 className="btn"
                 style={{ marginLeft: "auto", flex: "0 0 auto" }}
-                onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); setFifo(false); setFitsFocused(false); }}
+                onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); }}
               >
                 Clear filters
               </button>
             )}
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: `repeat(${COLUMNS.length}, minmax(190px, 1fr))`, gap: 10, padding: 10, overflowX: "auto" }}>
-            {COLUMNS.map((col) => {
-              const entries = colEntries(col.key);
-              const totalBoxes = entries.reduce((s, { l }) => s + l.boxes, 0);
-              const accepts = canEdit && !!drag && (col.key === "Planning" || col.key === "Ready" || col.key === "Loading");
-              const isOver = overCol === col.key && !overBox;
-              return (
-                <div
-                  key={col.key}
-                  onDragOver={(e) => { if (!accepts) return; e.preventDefault(); setOverCol(col.key); }}
-                  onDragLeave={() => setOverCol((s) => (s === col.key ? null : s))}
-                  onDrop={(e) => { e.preventDefault(); onDropColumn(col.key); }}
-                  style={{
-                    display: "flex", flexDirection: "column", minHeight: 0, minWidth: 190,
-                    border: "1px solid var(--border)", borderRadius: 8,
-                    background: isOver ? "var(--accent-soft)" : "var(--panel-2)",
-                    transition: "background .12s",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                    <span className={`chip palstatus ${col.chip}`}>{col.label}</span>
-                    <span className="muted mono" style={{ fontSize: 12, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
-                      {entries.length} · {fmt(totalBoxes)} bx
-                    </span>
+          {boardView === "kanban" ? (
+            <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: `repeat(${COLUMNS.length}, minmax(190px, 1fr))`, gap: 10, padding: 10, overflowX: "auto" }}>
+              {COLUMNS.map((col) => {
+                const entries = colEntries(col.key);
+                const totalBoxes = entries.reduce((s, { l }) => s + l.boxes, 0);
+                const accepts = canEdit && !!drag && col.key !== "Done";
+                const isOver = overCol === col.key && !overBox;
+                return (
+                  <div
+                    key={col.key}
+                    onDragOver={(e) => { if (!accepts) return; e.preventDefault(); setOverCol(col.key); }}
+                    onDragLeave={() => setOverCol((s) => (s === col.key ? null : s))}
+                    onDrop={(e) => { e.preventDefault(); onDropColumn(col.key); }}
+                    style={{
+                      display: "flex", flexDirection: "column", minHeight: 0, minWidth: 190,
+                      border: "1px solid var(--border)", borderRadius: 8,
+                      background: isOver ? "var(--accent-soft)" : "var(--panel-2)",
+                      transition: "background .12s",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <span className={`chip palstatus ${col.chip}`}>{col.label}</span>
+                      <span className="muted mono" style={{ fontSize: 12, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
+                        {entries.length} · {fmt(totalBoxes)} bx
+                      </span>
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, padding: 8 }}>
+                      {col.key === "Ready"
+                        ? (() => {
+                            // Palletised items group by their SO so a load is easy to find.
+                            const bySo = [...entries].sort((a, b) => (a.l.soNumber || "").localeCompare(b.l.soNumber || ""));
+                            const countOf = new Map<string, number>();
+                            bySo.forEach(({ l }) => countOf.set(l.soNumber || "", (countOf.get(l.soNumber || "") || 0) + 1));
+                            let prevSo: string | null = null;
+                            return bySo.map(({ p, l }) => {
+                              const so = l.soNumber || "";
+                              const divider = so !== prevSo;
+                              prevSo = so;
+                              return (
+                                <div key={l.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                  {divider && (
+                                    <div className="mono dim" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-xs)", padding: "2px 2px 0" }}>
+                                      <span style={{ fontWeight: 600 }}>{so || "No SO"}</span>
+                                      <span>· {countOf.get(so)}</span>
+                                      <span style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
+                                    </div>
+                                  )}
+                                  {itemCard(p, l, col.key)}
+                                </div>
+                              );
+                            });
+                          })()
+                        : entries.map(({ p, l }) => itemCard(p, l, col.key))}
+                      {entries.length === 0 && (
+                        <div className="dim" style={{ fontSize: "var(--t-sm)", padding: 14, textAlign: "center", border: "1px dashed var(--border)", borderRadius: 8 }}>
+                          Nothing here
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ flex: 1, minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, padding: 8 }}>
-                    {col.key === "Ready"
-                      ? (() => {
-                          // Palletised items group by their SO so a load is easy to find.
-                          const bySo = [...entries].sort((a, b) => (a.l.soNumber || "").localeCompare(b.l.soNumber || ""));
-                          const countOf = new Map<string, number>();
-                          bySo.forEach(({ l }) => countOf.set(l.soNumber || "", (countOf.get(l.soNumber || "") || 0) + 1));
-                          let prevSo: string | null = null;
-                          return bySo.map(({ p, l }) => {
-                            const so = l.soNumber || "";
-                            const divider = so !== prevSo;
-                            prevSo = so;
-                            return (
-                              <div key={l.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                {divider && (
-                                  <div className="mono dim" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--t-xs)", padding: "2px 2px 0" }}>
-                                    <span style={{ fontWeight: 600 }}>{so || "No SO"}</span>
-                                    <span>· {countOf.get(so)}</span>
-                                    <span style={{ flex: 1, borderTop: "1px solid var(--border)" }} />
-                                  </div>
-                                )}
-                                {itemCard(p, l, col.key)}
-                              </div>
-                            );
-                          });
-                        })()
-                      : entries.map(({ p, l }) => itemCard(p, l, col.key))}
-                    {entries.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "6px 2px", textAlign: "center" }}>—</div>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+              <table className="tbl" style={{ width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th>Pallet</th>
+                    <th>Item</th>
+                    <th>Customer · SO</th>
+                    <th>Batch</th>
+                    <th>Stage</th>
+                    <th>Container</th>
+                    <th>Age</th>
+                    <th aria-label="Action" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sheetRows.map(({ p, l }) => {
+                    const stage = stageOf(p, l);
+                    const col = COLUMNS.find((c) => c.key === stage)!;
+                    const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
+                    const isSel = selected.has(l.id);
+                    const selectable = canEdit && stage === "Ready";
+                    return (
+                      <tr
+                        key={l.id}
+                        onClick={() => (selectable ? toggleSelect(l) : navigate(`/packing/${p.id}`))}
+                        title={selectable ? "Click to select" : `Open ${p.palNumber}`}
+                        style={{ cursor: "pointer", background: isSel ? "var(--accent-soft)" : undefined }}
+                      >
+                        <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{l.itemCode}{isSel ? " ✓" : ""}</td>
+                        <td>{l.designLabel}</td>
+                        <td>
+                          {l.customerName || "—"}
+                          <div className="dim mono" style={{ fontSize: "var(--t-xs)" }}>{l.soNumber || "—"}</div>
+                        </td>
+                        <td className="mono" style={{ fontSize: "var(--t-sm)" }}>{l.batchNumber || "—"}</td>
+                        <td><span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap" }}>{col.label}</span></td>
+                        <td style={{ whiteSpace: "nowrap" }}>{box ? boxLabel(box) : "—"}</td>
+                        <td className="dim">{ageDays(p)}d</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
+                              disabled={busy}
+                              onClick={(ev) => { ev.stopPropagation(); void moveLines([l.id], "ReadyToLoad"); }}
+                            >
+                              Mark ready →
+                            </button>
+                          )}
+                          {canEdit && stage === "Ready" && (
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)", display: "inline-flex", alignItems: "center", gap: 5 }}
+                              disabled={busy}
+                              onClick={(ev) => { ev.stopPropagation(); setPicker({ lineId: l.id }); }}
+                            >
+                              <Icon name="truck" size={11} /> Load
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {sheetRows.length === 0 && (
+                    <tr><td colSpan={8} className="dim" style={{ textAlign: "center", padding: 24 }}>Nothing here</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {/* Selection bar. */}
           {canEdit && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? (selOverPct > 0 ? "color-mix(in oklab, var(--c-red) 8%, transparent)" : "var(--accent-soft)") : "var(--panel-2)" }}>
-              <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? (selOverPct > 0 ? "var(--c-red)" : "var(--fg)") : "var(--muted)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? "var(--accent-soft)" : "var(--panel-2)" }}>
+              <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? "var(--fg)" : "var(--muted)" }}>
                 {selected.size
-                  ? `${selected.size} selected · ${fmt(selBoxes)} boxes${focusBox ? (selOverPct > 0 ? ` · exceeds ${boxLabel(focusBox)} by ${selOverPct}%` : ` · leaves ${Math.round((focusFree - selFrac) * 100)}% in ${boxLabel(focusBox)}`) : ""}`
-                  : "Click Ready items to multi-select, or drag straight onto a box"}
+                  ? `${selected.size} selected · ${fmt(selBoxes)} boxes — press “Load selected” on a container, or drag onto one`
+                  : "Click Ready for Loading items to multi-select, or drag straight onto a container"}
               </span>
               <span style={{ flex: 1 }} />
               {selected.size > 0 && (
@@ -938,30 +959,26 @@ export function DispatchBoard({
                   Clear
                 </button>
               )}
-              <button
-                type="button"
-                className="hbtn primary"
-                style={{ height: 26, padding: "0 10px", borderRadius: 5, flex: "0 0 auto" }}
-                disabled={busy || selected.size === 0 || !focusBox}
-                title={!focusBox ? "Click a box in Dispatch to focus it" : selOverPct > 0 ? "Exceeds the pallet capacity — the load is advisory" : "Assign the selection to the focused box"}
-                onClick={() => focusBox && void assignLines([...selected], focusBox)}
-              >
-                {focusBox ? `Assign ${selected.size || ""} → ${boxLabel(focusBox)}`.replace("  ", " ") : "Assign to box"}
-              </button>
             </div>
           )}
         </section>
 
-        {/* ============ RIGHT · DISPATCH ============ */}
+        {/* ============ RIGHT · CONTAINERS AT DOCK ============ */}
         <section
           className="card"
-          style={{ flex: 1, minWidth: 340, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}
+          style={{ width: 340, minWidth: 300, flexShrink: 0, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}
           onDragOver={(e) => { if (!canEdit || !drag) return; e.preventDefault(); }}
           onDrop={(e) => { e.preventDefault(); if (!overBox) onDropBay(); }}
         >
-          <div className="fbar" style={{ margin: 0, padding: "8px 10px", borderBottom: "1px solid var(--border)", flexWrap: "nowrap" }}>
+          <div className="fbar" style={{ margin: 0, padding: "8px 10px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
             <Icon name="truck" size={13} />
-            <span style={{ fontWeight: 600, fontSize: "var(--t-md)", whiteSpace: "nowrap" }}>Dispatch</span>
+            <span style={{ fontWeight: 600, fontSize: "var(--t-md)", whiteSpace: "nowrap" }}>Containers at dock</span>
+            {selected.size > 0 && (
+              <span className="chip" style={{ fontSize: 11, color: "var(--accent)", borderColor: "var(--accent)" }}>
+                {selected.size} selected
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
             <select value={bayCountry} onChange={(e) => setBayCountry(e.target.value)} title="Destination" style={selectStyle}>
               <option value="">All destinations</option>
               {opts.countries.map((o) => <option key={o} value={o}>{isoInfo(o).country}</option>)}
@@ -977,7 +994,7 @@ export function DispatchBoard({
             {bayBoxes.map((b) => boxCard(b))}
             {bayBoxes.length === 0 && (
               <div className="dim" style={{ fontSize: "var(--t-sm)", padding: 24, textAlign: "center", border: "1px dashed var(--border)", borderRadius: 8 }}>
-                No boxes here — drag a Ready item onto this panel to start one
+                No containers here — drag a Ready item onto this panel to start one
               </div>
             )}
           </div>
@@ -999,6 +1016,21 @@ export function DispatchBoard({
         ) : null;
       })()}
 
+      {palletPick && (
+        <PalletPickerModal
+          line={palletPick}
+          busy={busy}
+          onConfirm={async (palletId) => {
+            setBusy(true);
+            const res = await setPalLineStatus(palletPick.id, "Palletizing", palletId);
+            setBusy(false);
+            setPalletPick(null);
+            after(res.ok, res.ok ? "" : res.error || "Move failed", `${palletPick.itemCode} → Palletization`);
+          }}
+          onClose={() => setPalletPick(null)}
+        />
+      )}
+
       {detailBoxId && (() => {
         const box = boxById.get(detailBoxId);
         return box ? (
@@ -1019,6 +1051,15 @@ export function DispatchBoard({
           }}
           onConfirm={(vehicleId, capture) => void assignVehicle(vehicleId, capture)}
           onClose={() => setVehModal(null)}
+        />
+      )}
+
+      {entryOverlay && (
+        <DispatchEntryOverlay
+          // Prefer the refetched box — it carries the just-assigned vehicle + dispatch date.
+          box={boxById.get(entryOverlay.box.id) ?? entryOverlay.box}
+          entries={entryOverlay.entries}
+          onClose={() => setEntryOverlay(null)}
         />
       )}
     </div>
