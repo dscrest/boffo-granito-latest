@@ -221,8 +221,8 @@ export function RecordOutputForm({
                   {!entry.orderItemId && <span className="chip">Make-to-stock</span>}
                   <span style={{ display: "flex", gap: 14, marginLeft: "auto" }}>
                     <Count label="Requested" value={entry.qtyRequested} />
-                    {/* Already-recorded output plus what's typed in the rows below. */}
-                    <Count label="Produced" value={entry.producedSoFar + totalFor(entry.id)} />
+                    {/* Committed output only — the typed rows below show up in "Left to add". */}
+                    <Count label="Produced" value={entry.producedSoFar} />
                     {over ? (
                       <Count label="Over by" value={-left} color="var(--c-red)" />
                     ) : (

@@ -346,8 +346,8 @@ export function ProductionTable() {
     await applyStage(g, stage);
   };
 
-  // Log output on a line. When it finishes the line, also flip its stage to
-  // Completed so the grid tab / detail stay consistent.
+  // Log output on a line. The server auto-steps the Kanban stage
+  // (New → InProduction, full coverage → Completed).
   const onRecord = (g: ProductionRequestGroup) => setRecordEntry(g.entries[0]);
   const onRecordSave = async (results: RecordOutputResult[]) => {
     setRecordEntry(null);
@@ -360,7 +360,6 @@ export function ProductionTable() {
         toast.error(res?.error || "Record output failed");
         break;
       }
-      if (e.producedSoFar + total >= e.qtyRequested) await setProductionStage([e.id], "Completed");
       toast.success(`+${fmt(total)} boxes produced`);
     }
     invalidateProductionLogs();
