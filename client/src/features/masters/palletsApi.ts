@@ -54,6 +54,21 @@ export interface PalletRow {
   modifiedTime: string; // Catalyst MODIFIEDTIME
 }
 
+/** Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300"). */
+export const widthOf = (s: string): string => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
+
+/** Pallet specs offered for an item = those whose size WIDTH matches the
+    item's size code (size-less pallets always match). Shared by the plan form
+    and the Palletise dialog. */
+export function palletsForSize(pallets: PalletRow[], sizeCode: string): PalletRow[] {
+  const w = widthOf(sizeCode);
+  return pallets.filter((p) => {
+    if (!p.sizeId) return true;
+    const pw = widthOf(p.sizeLabel);
+    return !w || !pw || pw === w;
+  });
+}
+
 function sizeLabelOf(r: DSRow): string {
   return (
     sizeDisplayName({

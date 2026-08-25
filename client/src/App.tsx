@@ -39,12 +39,15 @@ const OperationsLog = lazy(() => import("@/features/ops/OperationsLog").then((m)
 const Invoices = lazy(() => import("@/features/invoices/Invoices").then((m) => ({ default: m.Invoices })));
 const ReportsHome = lazy(() => import("@/features/reports/ReportsHome").then((m) => ({ default: m.ReportsHome })));
 const ReportView = lazy(() => import("@/features/reports/Reports").then((m) => ({ default: m.ReportView })));
-// "Palletization and Loading" = the PAL/FY/NNN plan feature (grid + kanban +
+// "Palletization" = the PAL/FY/NNN plan feature (grid + kanban +
 // per-record detail). The flat PalletisedBatch grid (Palletizations.tsx) is now
 // parked — unrouted, not deleted; the SO-detail Palletization tab still uses it.
 const PalPlans = lazy(() => import("@/features/stages/PalPlans").then((m) => ({ default: m.PalPlans })));
 const PalPlanDetail = lazy(() => import("@/features/stages/PalPlanDetail").then((m) => ({ default: m.PalPlanDetail })));
-const Loading = lazy(() => import("@/features/stages/Loading").then((m) => ({ default: m.Loading })));
+// /loading = the dedicated batch-wise loading & dispatch page (LoadBox dock),
+// split out of the Dispatch Control Board in the 2026-08-22 declutter.
+const LoadingBay = lazy(() => import("@/features/stages/LoadingBay").then((m) => ({ default: m.LoadingBay })));
+const LoadingDetail = lazy(() => import("@/features/stages/LoadingDetail").then((m) => ({ default: m.LoadingDetail })));
 const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
 const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
@@ -133,7 +136,8 @@ function navTree(): NavNode[] {
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
-        { id: "packing", label: "Palletization and Loading", icon: "palette" },
+        { id: "packing", label: "Palletization", icon: "palette" },
+        { id: "loading", label: "Loading", icon: "truck" },
       ],
     },
     // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
@@ -147,7 +151,6 @@ function navTree(): NavNode[] {
     //     { id: "containers", label: "Container Master", icon: "truck" },
     //     { id: "fit", label: "Fit Suggester", icon: "kanban" },
     //     { id: "loadplan", label: "Load Planner", icon: "truck" },
-    //     { id: "loading", label: "Loading", icon: "truck" },
     //     { id: "final", label: "Final Loading", icon: "invoice" },
     //     { id: "invoices", label: "Invoices", icon: "invoice" },
     //   ],
@@ -441,7 +444,8 @@ export default function App() {
             <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalPlans />} />
             <Route path="/packing/:id" element={<PalPlanDetail />} />
-            <Route path="/loading" element={<Loading />} />
+            <Route path="/loading" element={<LoadingBay />} />
+            <Route path="/loading/:id" element={<LoadingDetail />} />
             <Route path="/final" element={<FinalLoading />} />
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/reports" element={<ReportsHome />} />

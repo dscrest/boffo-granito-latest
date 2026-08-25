@@ -10,7 +10,7 @@ import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
-import { boxFill, lineFrac, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
+import { boxFill, lineFrac, mixedBatchOrderItems, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
 
 export function BoxPickerModal({
   line,
@@ -42,6 +42,9 @@ export function BoxPickerModal({
   // Hard 100% cap — the most that can go into the selected box (New box = whole line).
   const maxLoad = selBox && line.palletCapacity > 0 ? Math.min(line.boxes, freeOf(selBox)) : line.boxes;
   const effCount = Math.min(count, maxLoad);
+  // Warn-only batch rule: loading follows batches — flag when this load would
+  // make the same order item span batches inside the selected box.
+  const wouldMixBatches = !!selBox && mixedBatchOrderItems([...linesOfBox(selBox.id).map(({ l }) => l), line]);
 
   const boxRow = (b: LoadBox | null) => {
     const id = b?.id ?? "";
@@ -149,6 +152,11 @@ export function BoxPickerModal({
           {effCount < line.boxes && maxLoad >= line.boxes && (
             <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
               The other {fmt(line.boxes - effCount)} stay in Ready for Loading
+            </div>
+          )}
+          {wouldMixBatches && (
+            <div style={{ fontSize: "var(--t-sm)", marginTop: 4, color: "var(--c-amber)", fontWeight: 600 }}>
+              This order item already rides in {selBox!.vehicleNumber || `Box ${selBox!.boxNumber}`} from another batch — tile texture may vary
             </div>
           )}
         </div>

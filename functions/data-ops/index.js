@@ -2301,7 +2301,9 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
         );
         if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
         const from = String(rows[0].status || "Planning");
-        if (!(PAL_LINE_TRANSITIONS[from] || []).includes(to))
+        // Same-status call = pallet (re)assignment only — e.g. a 2nd-stage line
+        // that landed in Palletizing without one; logTransition no-ops on it.
+        if (from !== to && !(PAL_LINE_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move palletization line from ${from} to ${to}`, 409);
         await ds.table("PalletizationPlanLine").updateRow({
           ROWID: lineId, status: to, ...(/^\d+$/.test(pallet) ? { pallet } : {}),
@@ -2311,6 +2313,88 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
         });
         await recountOrderItems(catalyst, ds, [rows[0].order_item]);
         return { rowid: lineId, data: { ROWID: lineId, status: to } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Top up a partially-filled physical pallet: move body.boxes from a Planning
+   donor line onto the target line's pallet. The moved slice enters Palletizing
+   on the target's pallet and BOTH lines get pallet_group = target ROWID — the
+   board's "Mix Batch" marker (any same-size item/batch may share the pallet). */
+app.post("/pal-topup/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const targetId = String(req.params.rowid).replace(/[^0-9]/g, "");
+    const donorId = String((req.body || {}).donor_line || "").replace(/[^0-9]/g, "");
+    const n = Number((req.body || {}).boxes);
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "topup", payload: { ROWID: targetId, donor_line: donorId, boxes: n } },
+      async () => {
+        if (!donorId) throw badRequest("donor_line is required", 400);
+        if (donorId === targetId) throw badRequest("A line cannot top up itself", 400);
+        if (!Number.isInteger(n) || n <= 0) throw badRequest("boxes must be a positive integer");
+        const pick = async (id) =>
+          rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
+            ),
+          )[0];
+        const target = await pick(targetId);
+        if (!target) throw badRequest(`Palletization line not found: ${targetId}`, 404);
+        if (String(target.status) !== "Palletizing")
+          throw badRequest("The top-up target must be in Palletization", 409);
+        if (!String(target.pallet || "")) throw badRequest("The top-up target has no pallet", 409);
+        const donor = await pick(donorId);
+        if (!donor) throw badRequest(`Palletization line not found: ${donorId}`, 404);
+        if (String(donor.status) !== "Planning")
+          throw badRequest("Only a Ready-for-Palletization item can top up a pallet", 409);
+        const donorBoxes = Number(donor.boxes) || 0;
+        if (n > donorBoxes) throw badRequest("Cannot move more boxes than the donor line has");
+
+        const group = String(target.ROWID);
+        if (n === donorBoxes) {
+          // Whole line rides along — no split needed.
+          await ds.table("PalletizationPlanLine").updateRow({
+            ROWID: donorId, status: "Palletizing", pallet: String(target.pallet), pallet_group: group,
+          });
+          await logTransition(catalyst, {
+            entity_type: "PalletizationPlanLine", entity_rowid: donorId, from_status: "Planning", to_status: "Palletizing",
+          });
+        } else {
+          // Split: insert the moved slice first, then shrink the donor — a
+          // mid-write failure deletes the slice (same pattern as /pal-line-box).
+          const slice = await ds.table("PalletizationPlanLine").insertRow({
+            plan: donor.plan ? String(donor.plan) : undefined,
+            sales_order: donor.sales_order ? String(donor.sales_order) : undefined,
+            order_item: donor.order_item ? String(donor.order_item) : undefined,
+            design: donor.design ? String(donor.design) : undefined,
+            pallet: String(target.pallet),
+            boxes: n,
+            position: Number(donor.position) || 0,
+            status: "Palletizing",
+            batch_number: donor.batch_number ? String(donor.batch_number) : "",
+            pallet_group: group,
+          });
+          try {
+            await ds.table("PalletizationPlanLine").updateRow({ ROWID: donorId, boxes: donorBoxes - n });
+          } catch (e) {
+            try { await ds.table("PalletizationPlanLine").deleteRow(slice.ROWID); } catch (_) {}
+            throw e;
+          }
+          await logTransition(catalyst, {
+            entity_type: "PalletizationPlanLine", entity_rowid: String(slice.ROWID), from_status: "Planning", to_status: "Palletizing",
+          });
+        }
+        // The target carries the marker too, so both ends of the shared pallet show it.
+        await ds.table("PalletizationPlanLine").updateRow({ ROWID: targetId, pallet_group: group });
+        await recountOrderItems(catalyst, ds, [donor.order_item]);
+        return { rowid: targetId, data: { ROWID: targetId, pallet_group: group } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2715,6 +2799,136 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
         }
         await recountOrderItems(catalyst, ds, [line.order_item]);
         return { rowid: lineId, data: { ROWID: lineId, load_box: toBox || null } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/** The SO's open (Planning) plan, minted on first need — mirror of the
+    autoEnqueuePalletization block, self-contained for direct-loading. */
+async function ensureOpenPlan(catalyst, ds, soId, remark) {
+  const zcql = catalyst.zcql();
+  const soLines = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT plan FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`,
+    ),
+  );
+  const planIds = [...new Set(soLines.map((l) => String(l.plan)))].filter(Boolean);
+  if (planIds.length) {
+    const open = rowList(
+      await zcql.executeZCQLQuery(
+        `SELECT ROWID FROM PalletizationPlan WHERE ROWID IN (${planIds.join(",")}) AND status = 'Planning' AND deleted_at is null`,
+      ),
+    );
+    if (open.length) return String(open[0].ROWID);
+  }
+  const planRow = await ds.table("PalletizationPlan").insertRow({
+    pal_number: await nextPalNumber(catalyst),
+    status: "Planning",
+    vehicle_number: "",
+    remarks: remark,
+  });
+  const planId = String(planRow.ROWID);
+  await logTransition(catalyst, {
+    entity_type: "PalletizationPlan", entity_rowid: planId, from_status: "", to_status: "Planning",
+    note: remark,
+  });
+  return planId;
+}
+
+/* Send order items straight to loading, skipping palletization: mints lines
+   born ReadyToLoad on the SO's open plan (created on first need) so the
+   /loading board, recount and dispatch machinery work unchanged. Optional
+   body.box allocates the new lines into an Open load box immediately (the
+   "Add Items" flow on a loading). Per item, sends are capped at
+   ordered − palletized: recount counts ReadyToLoad as palletized, so
+   re-sending the same items cannot double-queue. */
+app.post("/send-to-loading", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const soId = String(body.sales_order || "").replace(/[^0-9]/g, "");
+    const reqLines = Array.isArray(body.lines) ? body.lines : [];
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "send-to-loading", payload: body },
+      async () => {
+        if (!soId) throw badRequest("sales_order is required", 400);
+        if (!reqLines.length) throw badRequest("At least one item is required", 400);
+        const zcql = catalyst.zcql();
+        const so = rowList(
+          await zcql.executeZCQLQuery(
+            `SELECT ROWID FROM SalesOrder WHERE ROWID = ${soId} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!so) throw badRequest(`Sales order not found: ${soId}`, 404);
+        const box = body.box ? await getBox(catalyst, boxIdParam(body.box)) : null;
+        if (box && String(box.status) !== "Open")
+          throw badRequest("Items can only be added to an open loading", 409);
+        const items = rowList(
+          await zcql.executeZCQLQuery(
+            `SELECT ROWID, design, pallet, ordered_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+          ),
+        );
+        const byId = new Map(items.map((i) => [String(i.ROWID), i]));
+
+        // Validate every line before inserting any (no partial sends).
+        const wanted = new Map(); // oiId → boxes requested this call
+        for (const l of reqLines) {
+          const oiId = String(l.order_item || "").replace(/[^0-9]/g, "");
+          const oi = byId.get(oiId);
+          if (!oi) throw badRequest(`Order item does not belong to this sales order: ${l.order_item}`, 400);
+          const n = Number(l.boxes);
+          if (!Number.isInteger(n) || n <= 0) throw badRequest("boxes must be a positive integer");
+          wanted.set(oiId, (wanted.get(oiId) || 0) + n);
+        }
+        for (const [oiId, n] of wanted) {
+          const oi = byId.get(oiId);
+          const cap = (Number(oi.ordered_qty_boxes) || 0) - (Number(oi.palletized_qty_boxes) || 0);
+          if (n > cap) throw badRequest(`Only ${Math.max(cap, 0)} boxes remain to send for an item`, 409);
+        }
+
+        const planId = await ensureOpenPlan(catalyst, ds, soId, "Auto — direct loading");
+        let pos = rowList(
+          await zcql.executeZCQLQuery(
+            `SELECT ROWID FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
+          ),
+        ).length;
+        for (const [oiId, n] of wanted) {
+          const oi = byId.get(oiId);
+          const lr = await ds.table("PalletizationPlanLine").insertRow({
+            plan: planId,
+            sales_order: soId,
+            order_item: oiId,
+            design: oi.design ? String(oi.design) : null,
+            pallet: oi.pallet ? String(oi.pallet) : null,
+            boxes: n,
+            position: pos++,
+            status: "ReadyToLoad",
+            batch_number: "",
+            ...(box ? { load_box: String(box.ROWID) } : {}),
+          });
+          await logTransition(catalyst, {
+            entity_type: "PalletizationPlanLine", entity_rowid: String(lr.ROWID),
+            from_status: "", to_status: "ReadyToLoad", note: "sent to loading",
+          });
+        }
+        // Allocated straight into a box → plan follows, same as /pal-line-box.
+        if (box) {
+          const plan = rowList(
+            await zcql.executeZCQLQuery(
+              `SELECT ROWID, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
+            ),
+          )[0];
+          if (plan && String(plan.status) === "Planning")
+            await setPlanStatus(catalyst, ds, planId, "Planning", "Loading");
+        }
+        await recountOrderItems(catalyst, ds, [...wanted.keys()]);
+        return { rowid: planId, data: { ROWID: planId, lines: wanted.size } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });

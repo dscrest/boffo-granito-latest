@@ -25,6 +25,7 @@ import {
   deleteSalesOrder,
   listOrders,
   setOrderStatus,
+  shippingStage,
   soStatusLabel,
   SO_STATUS_CHIP,
   type NewSalesOrderInput,
@@ -102,28 +103,21 @@ function soColumns(): ColumnDef<SORow>[] {
       label: "Status",
       render: (r) => {
         const s = r.head.status || "Confirmed";
-        // Produced boxes still waiting to be palletised (come-back-later signal).
-        const remaining = r.items.reduce((sum, o) => sum + Math.max(0, o.producedQty - o.palletizedQty), 0);
-        const partial = remaining > 0 && r.items.some((o) => o.palletizedQty > 0);
-        // Dispatch wins over palletisation: once boxes ship, show the shipping state.
-        const ordered = r.items.reduce((sum, o) => sum + o.orderQty, 0);
-        const dispatched = r.items.reduce((sum, o) => sum + o.dispatchedQty, 0);
         return (
-          <span className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
-              {soStatusLabel(s)}
-            </span>
-            {dispatched > 0 ? (
-              <span className="chip qstatus q-accepted" title="Boxes dispatched vs ordered">
-                {dispatched >= ordered ? "Dispatched" : `Partially Dispatched — ${fmt(ordered - dispatched)} left`}
-              </span>
-            ) : remaining > 0 && (
-              <span className="chip qstatus q-accepted" title="Produced boxes still to palletise — come back to finish">
-                {partial ? `Partially palletised — ${fmt(remaining)} left` : `Ready for Palletisation — ${fmt(remaining)}`}
-              </span>
-            )}
+          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
+            {soStatusLabel(s)}
           </span>
         );
+      },
+    },
+    {
+      // Derived from the items' recounted counters — the process-truth chip
+      // ("where is this order's stock right now"), next to the approval status.
+      key: "shipStage",
+      label: "Shipping Stage",
+      render: (r) => {
+        const st = shippingStage(r.items);
+        return st ? <span className={`chip qstatus ${st.cls}`}>{st.label}</span> : "—";
       },
     },
     { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },
@@ -143,6 +137,7 @@ function soSortVal(r: SORow, k: string): string | number {
     case "qty": return r.items.reduce((s, o) => s + o.orderQty, 0);
     case "total": return r.head.totalAmount || 0;
     case "status": return r.head.status || "Confirmed";
+    case "shipStage": return shippingStage(r.items)?.rank ?? 0;
     case "salesperson": return r.head.salesperson || "";
     case "created": return r.head.createdTime || "";
     case "modified": return r.head.modifiedTime || "";

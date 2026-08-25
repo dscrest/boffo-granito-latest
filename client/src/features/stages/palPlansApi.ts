@@ -63,6 +63,8 @@ export interface PalPlanLine {
   sizeCode: string; // via Design.size → Size.code
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
   batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
+  palletGroup: string; // shared physical pallet group ("" = none) — set by /pal-topup, shows the Mix Batch marker
+  createdTime: string; // line CREATEDTIME — age anchor (auto-enqueue creates the line right after production)
 }
 
 /** True when one order item's boxes span more than one batch across these
@@ -97,6 +99,11 @@ export interface LoadBox {
   loadingSupervisor: string;
   createdTime: string;
 }
+
+/** Display label for a loading: its vehicle once assigned, else "Box N". */
+export const boxLabel = (b: LoadBox) => b.vehicleNumber || `Box ${b.boxNumber}`;
+/** Sealed = container no or line seal captured → derives Ready for Dispatch. */
+export const sealed = (b: LoadBox) => !!(b.containerNumber || b.lineSeal);
 
 export interface PalPlan {
   id: string; // ROWID
@@ -287,6 +294,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       sizeCode: sizeCodeById.get(designSize.get(designId) || "") || "",
       loadBoxId: str(l.load_box),
       batchNumber: str(l.batch_number),
+      palletGroup: str(l.pallet_group),
+      createdTime: str(l.CREATEDTIME),
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
   });
@@ -380,6 +389,13 @@ export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?:
   return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status, ...(pallet ? { pallet } : {}) }));
 }
 
+/** Top up a Palletizing line's partial pallet with `boxes` from a Planning donor
+    line (any same-size item/batch). Splits the donor server-side; both lines get
+    the shared pallet_group — the Mix Batch marker. */
+export function palTopup(targetLineId: string, donorLineId: string, boxes: number) {
+  return bust(op<{ ROWID: string; pallet_group: string }>(`pal-topup/${targetLineId}`, { donor_line: donorLineId, boxes }));
+}
+
 /* ---- Load boxes (vehicle slots on the board) ---- */
 
 export function createLoadBox(capacity?: number) {
@@ -422,6 +438,17 @@ export function dispatchLoadBox(rowid: string, capture?: LoadingCapture) {
     count below the line's total loads that many and splits off a Ready remainder. */
 export function setLineBox(lineId: string, box: string, boxes?: number) {
   return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, boxes ? { box, boxes } : { box }));
+}
+
+/** Send order items straight to loading (skips palletization): mints
+    ReadyToLoad lines on the SO's open plan. `box` allocates them into an
+    Open loading immediately (the detail page's Add Items flow). */
+export function sendToLoading(input: {
+  sales_order: string;
+  box?: string;
+  lines: { order_item: string; boxes: number }[];
+}) {
+  return bust(op<{ ROWID: string; lines: number }>("send-to-loading", input));
 }
 
 export function deletePalPlan(rowid: string) {

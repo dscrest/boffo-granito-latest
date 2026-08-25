@@ -227,6 +227,31 @@ export const SO_STATUS_LABEL: Record<string, string> = {
 };
 export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
 
+/** Derived shipping stage of an SO from its items' recounted counters
+    (palletized/loaded/dispatched — see server recountOrderItems). The most
+    advanced state wins; null = no shipping activity yet. `rank` orders the
+    stages for sorting and for "shipping state wins the header chip" checks
+    (rank ≥ 4 = in loading or beyond). Shared by the Orders grid and detail. */
+export function shippingStage(items: Order[]): { label: string; cls: string; rank: number } | null {
+  const sum = (f: (o: Order) => number) => items.reduce((s, o) => s + f(o), 0);
+  const ordered = sum((o) => o.orderQty);
+  const dispatched = sum((o) => o.dispatchedQty);
+  if (dispatched > 0)
+    return dispatched >= ordered
+      ? { label: "Dispatched", cls: "q-accepted", rank: 6 }
+      : { label: `Partially Dispatched — ${ordered - dispatched} left`, cls: "q-sent", rank: 5 };
+  if (sum((o) => o.loadedQty) > 0) return { label: "In Loading", cls: "q-accepted", rank: 4 };
+  const palletized = sum((o) => o.palletizedQty);
+  // Produced boxes still waiting to be palletised (come-back-later signal).
+  const waiting = sum((o) => Math.max(0, o.producedQty - o.palletizedQty));
+  if (palletized > 0)
+    return waiting > 0
+      ? { label: `Partially palletised — ${waiting} left`, cls: "q-accepted", rank: 2 }
+      : { label: "Ready for Loading", cls: "q-accepted", rank: 3 };
+  if (waiting > 0) return { label: `Ready for Palletisation — ${waiting}`, cls: "q-accepted", rank: 1 };
+  return null;
+}
+
 /* Mutations invalidate the cache so the next listOrders() refetches. */
 function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {

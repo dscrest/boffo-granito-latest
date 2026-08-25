@@ -6,10 +6,13 @@
    the quote by its share_token and re-uses the docTotals math +
    quotePdf download. Token = unguessable 32-hex capability.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { docTotals, lineTotals, type Quote, type QuoteLine } from "@/data";
 import { fmt } from "@/lib/format";
 import { list } from "@/lib/dataOps";
+import { groupQuoteLines, itemSuffix } from "./quoteTemplate";
+
+type SharedDesign = { name: string; uniqueName: string };
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -20,7 +23,7 @@ export function shareTokenFromHash(hash: string): string {
   return m ? m[1] : "";
 }
 
-async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; error?: string }> {
+async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; designs?: SharedDesign[]; error?: string }> {
   const q = await list("Quote", { where: `share_token = '${token.replace(/[^A-Za-z0-9]/g, "")}'`, limit: 1 });
   if (!q.ok) return { quote: null, error: q.error };
   const r = (q.rows || [])[0];
@@ -31,19 +34,26 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; e
     list("QuoteItem", { where: `quote = ${id}`, limit: 300 }),
     list("Customer", { where: `ROWID = ${str(r.customer) || "0"}`, columns: ["name", "code"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
-    list("Design", { limit: 300, columns: ["design_name"] }),
+    list("Design", { limit: 300, columns: ["design_name", "unique_name"] }),
     list("SalesPerson", { where: `ROWID = ${str(r.sales_person) || "0"}`, columns: ["name"] }),
   ]);
-  const designName = new Map((designs.rows || []).map((d) => [str(d.ROWID), str(d.design_name)]));
+  const designRows = (designs.rows || []).map((d) => ({
+    id: str(d.ROWID),
+    name: str(d.design_name),
+    uniqueName: str(d.unique_name) || str(d.design_name),
+  }));
+  const designByRow = new Map(designRows.map((d) => [d.id, d]));
   const termName = new Map((terms.rows || []).map((t) => [str(t.ROWID), str(t.name)]));
   const cust = (customers.rows || [])[0];
   const salesPerson = (salesPersons.rows || [])[0];
 
+  // unique_name first: lines identify the exact size variant of a design.
   const lines: QuoteLine[] = (items.rows || []).map((it) => ({
-    item: designName.get(str(it.design)) || str(it.design),
+    item: designByRow.get(str(it.design))?.uniqueName || str(it.design),
     qty: num(it.quantity_boxes),
     rate: num(it.rate),
     discount: num(it.discount_pct),
+    description: str(it.description),
   }));
 
   return {
@@ -72,12 +82,14 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; e
       soNumber: null,
       shareToken: token,
     },
+    designs: designRows.map(({ name, uniqueName }) => ({ name, uniqueName })),
   };
 }
 
 export function SharedQuote() {
   const token = shareTokenFromHash(window.location.hash);
   const [quote, setQuote] = useState<Quote | null>(null);
+  const [designs, setDesigns] = useState<SharedDesign[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -91,8 +103,10 @@ export function SharedQuote() {
     void fetchSharedQuote(token).then((res) => {
       if (!alive) return;
       setLoading(false);
-      if (res.quote) setQuote(res.quote);
-      else setError(res.error || "Quote not found.");
+      if (res.quote) {
+        setQuote(res.quote);
+        setDesigns(res.designs || []);
+      } else setError(res.error || "Quote not found.");
     });
     return () => {
       alive = false;
@@ -155,7 +169,7 @@ export function SharedQuote() {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Design / Item</th>
+                  <th>Size / Item</th>
                   <th className="num">Qty</th>
                   <th className="num">Rate/Box</th>
                   <th className="num">Disc</th>
@@ -163,19 +177,35 @@ export function SharedQuote() {
                 </tr>
               </thead>
               <tbody>
-                {quote.lines.map((l, i) => (
-                  <tr key={i}>
-                    <td className="mono muted">{i + 1}</td>
-                    <td>
-                      {l.item}
-                      {l.description && <div className="dim" style={{ fontSize: 12 }}>{l.description}</div>}
-                    </td>
-                    <td className="num mono">{l.qty}</td>
-                    <td className="num mono">{fmt(l.rate)}</td>
-                    <td className="num mono">{l.discount ? `${l.discount}%` : "—"}</td>
-                    <td className="num mono">{fmt(lineTotals(l).subTotal)}</td>
-                  </tr>
-                ))}
+                {(() => {
+                  let n = 0;
+                  const groups = groupQuoteLines(quote.lines, (i) => designs.find((x) => x.uniqueName === i || x.name === i)?.name);
+                  return groups.map((g) => (
+                    <Fragment key={g.design}>
+                      <tr>
+                        <td colSpan={6} style={{ background: "#f1efea", color: "#17181b", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
+                          Design: {g.design}
+                        </td>
+                      </tr>
+                      {g.lines.map((l) => {
+                        n += 1;
+                        return (
+                          <tr key={n}>
+                            <td className="mono muted">{n}</td>
+                            <td>
+                              {itemSuffix(l.item, g.design) || l.item}
+                              {l.description && <div className="dim" style={{ fontSize: 12 }}>{l.description}</div>}
+                            </td>
+                            <td className="num mono">{l.qty}</td>
+                            <td className="num mono">{fmt(l.rate)}</td>
+                            <td className="num mono">{l.discount ? `${l.discount}%` : "—"}</td>
+                            <td className="num mono">{fmt(lineTotals(l).subTotal)}</td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  ));
+                })()}
               </tbody>
             </table>
 

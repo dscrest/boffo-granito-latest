@@ -644,7 +644,7 @@ export function QuoteDetail() {
                 </thead>
                 <tbody>
                   {quote.lines.map((l, i) => {
-                    const d = designs.find((x) => x.name === l.item);
+                    const d = designs.find((x) => x.uniqueName === l.item || x.name === l.item);
                     const t = lineTotals(l);
                     return (
                       <tr key={i}>

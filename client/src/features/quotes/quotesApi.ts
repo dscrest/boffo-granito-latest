@@ -69,7 +69,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
     listAll("QuoteItem"),
     listAll("Customer", { columns: ["name", "code"] }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
-    listAll("Design", { columns: ["design_name"] }),
+    listAll("Design", { columns: ["design_name", "unique_name"] }),
     listAll("SalesOrder", { columns: ["quote", "order_number", "order_date", "total_amount", "status"] }),
     list("SalesPerson", { limit: 300, columns: ["name"] }),
   ]);
@@ -79,6 +79,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
   const custCode = buildMap(customers.rows, "code");
   const termName = buildMap(terms.rows, "name");
   const designName = buildMap(designs.rows, "design_name");
+  const designUnique = buildMap(designs.rows, "unique_name");
   const salesPersonName = buildMap(salesPersons.rows, "name");
 
   // QuoteItem rows grouped by parent quote ROWID → UI QuoteLine[].
@@ -86,7 +87,8 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
   (items.rows || []).forEach((it) => {
     const qid = str(it.quote);
     const line: QuoteLine = {
-      item: designName.get(str(it.design)) || str(it.design),
+      // unique_name first: lines identify the exact size variant of a design.
+      item: designUnique.get(str(it.design)) || designName.get(str(it.design)) || str(it.design),
       qty: num(it.quantity_boxes),
       rate: num(it.rate),
       discount: num(it.discount_pct),

@@ -14,6 +14,7 @@ import type { LoadingCapture } from "./palPlansApi";
 
 export function VehicleLoadModal({
   palNumber,
+  title = "Assign Vehicle",
   busy,
   initialVehicleId,
   initialCapture,
@@ -21,6 +22,7 @@ export function VehicleLoadModal({
   onClose,
 }: {
   palNumber: string;
+  title?: string;
   busy?: boolean;
   initialVehicleId?: string;
   initialCapture?: LoadingCapture;
@@ -74,7 +76,7 @@ export function VehicleLoadModal({
         <div className="df-head">
           <div className="ico"><Icon name="truck" size={18} /></div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>Assign Vehicle</div>
+            <div style={{ fontWeight: 600 }}>{title}</div>
             <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{palNumber}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
@@ -174,7 +176,7 @@ export function VehicleLoadModal({
             <>
               <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
               <button className="hbtn primary" onClick={() => onConfirm(selected, capture)} disabled={busy || !selected}>
-                <Icon name="check" size={13} /> {busy ? "Saving…" : "Assign vehicle"}
+                <Icon name="check" size={13} /> {busy ? "Saving…" : title}
               </button>
             </>
           )}

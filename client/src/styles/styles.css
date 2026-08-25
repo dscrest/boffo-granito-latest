@@ -1967,6 +1967,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qp-table .strong { font-size: 11px; font-weight: 600; color: #17181b; }
 .qp-item-name { font-size: 11.5px; font-weight: 600; color: #17181b; line-height: 1.3; }
 .qp-item-sub { font-size: 9.5px; color: #8a8b8e; line-height: 1.4; }
+.qp-band td {
+  background: #f1efea;
+  color: #17181b;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 6px 4px;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
 .qp-totals { display: grid; grid-template-columns: 1fr 300px; gap: 32px; padding-top: 14px; break-inside: avoid; }
 .qp-words { font-size: 10.5px; color: #8a8b8e; line-height: 1.6; padding-top: 4px; }
 .qp-words b, .qp-notes b { font-weight: 700; color: #4a4b4e; }

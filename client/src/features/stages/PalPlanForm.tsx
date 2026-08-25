@@ -17,14 +17,11 @@ import { NumberInput } from "@/ui/NumberInput";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
-
-// Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
-const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
 
 export function PalPlanForm({
   onSave,
@@ -121,14 +118,7 @@ export function PalPlanForm({
   }, []);
 
   // Pallet specs offered for a line = those whose size WIDTH matches the item's.
-  const palletsForItem = (it: PalletizableItem) => {
-    const w = widthOf(it.sizeCode);
-    return pallets.filter((p) => {
-      if (!p.sizeId) return true;
-      const pw = widthOf(p.sizeLabel);
-      return !w || !pw || pw === w;
-    });
-  };
+  const palletsForItem = (it: PalletizableItem) => palletsForSize(pallets, it.sizeCode);
 
   // Clamp to the produced-available qty — you can't palletise more than is produced.
   const setBoxes = (itemId: string, raw: string, max: number) =>

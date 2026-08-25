@@ -7,15 +7,18 @@
    Rendered through a body portal so the @media print rules can hide
    the app chrome and emit only the sheet. Frontend-only.
    ============================================================ */
+import { Fragment } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
 import { docTotals, lineTotals, type Quote } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import boffoLogo from "@/assets/boffo-logo.png";
-import { BANK, COMPANY, amountInWords, moneyFor, prettyDate, termsList } from "./quoteTemplate";
+import { BANK, COMPANY, amountInWords, groupQuoteLines, itemSuffix, moneyFor, prettyDate, termsList } from "./quoteTemplate";
 
 export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => void }) {
   const { designs } = useMasters();
+  const findDesign = (item: string) => designs.find((x) => x.uniqueName === item || x.name === item);
+  const groups = groupQuoteLines(quote.lines, (i) => findDesign(i)?.name);
   const totals = docTotals(quote.lines, {
     docDiscount: quote.docDiscount,
     adjustment: quote.adjustment,
@@ -75,8 +78,8 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
             <thead>
               <tr>
                 <th style={{ width: 24 }}>#</th>
-                <th>Product / Design</th>
                 <th style={{ width: 82 }}>Size (mm)</th>
+                <th>Product</th>
                 <th style={{ width: 70 }}>Finish</th>
                 <th className="num" style={{ width: 52 }}>Boxes</th>
                 <th className="num" style={{ width: 74 }}>Rate /Box</th>
@@ -85,26 +88,37 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
               </tr>
             </thead>
             <tbody>
-              {quote.lines.map((l, i) => {
-                const d = designs.find((x) => x.name === l.item);
-                const t = lineTotals(l);
-                return (
-                  <tr key={i}>
-                    <td className="sub">{String(i + 1).padStart(2, "0")}</td>
-                    <td>
-                      <div className="qp-item-name">{l.item}</div>
-                      {d?.brand && <div className="qp-item-sub">{d.brand}</div>}
-                      {l.description && <div className="qp-item-sub">{l.description}</div>}
-                    </td>
-                    <td>{d?.size || "—"}</td>
-                    <td>{d?.finish || "—"}</td>
-                    <td className="num">{fmtInt(l.qty)}</td>
-                    <td className="num">{money(l.rate)}</td>
-                    <td className="num">{l.discount || 0}</td>
-                    <td className="num strong">{money(t.subTotal)}</td>
-                  </tr>
-                );
-              })}
+              {(() => {
+                let n = 0;
+                return groups.map((g) => (
+                  <Fragment key={g.design}>
+                    <tr className="qp-band">
+                      <td colSpan={8}>Design: {g.design}</td>
+                    </tr>
+                    {g.lines.map((l) => {
+                      n += 1;
+                      const d = findDesign(l.item);
+                      const t = lineTotals(l);
+                      return (
+                        <tr key={n}>
+                          <td className="sub">{String(n).padStart(2, "0")}</td>
+                          <td className="qp-item-name">{d?.size || itemSuffix(l.item, g.design) || "—"}</td>
+                          <td>
+                            {d?.brand && <div className="qp-item-sub">{d.brand}</div>}
+                            {l.description && <div className="qp-item-sub">{l.description}</div>}
+                            {!d?.brand && !l.description && <span className="qp-item-sub">—</span>}
+                          </td>
+                          <td>{d?.finish || "—"}</td>
+                          <td className="num">{fmtInt(l.qty)}</td>
+                          <td className="num">{money(l.rate)}</td>
+                          <td className="num">{l.discount || 0}</td>
+                          <td className="num strong">{money(t.subTotal)}</td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                ));
+              })()}
             </tbody>
           </table>
 

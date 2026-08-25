@@ -8,12 +8,14 @@
 import { docTotals, lineTotals, type Quote, type QuoteLine } from "@/data";
 import { downloadPdf } from "@/lib/pdf";
 import { listDesigns } from "@/features/masters/designsApi";
-import type { Content, ContentText, TDocumentDefinitions } from "pdfmake/interfaces";
+import type { Content, ContentText, TDocumentDefinitions, TableCell } from "pdfmake/interfaces";
 import {
   BANK,
   COMPANY,
   QP,
   amountInWords,
+  groupQuoteLines,
+  itemSuffix,
   logoDataUrl,
   moneyFor,
   prettyDate,
@@ -75,20 +77,37 @@ export async function buildQuoteDoc(quote: Quote): Promise<TDocumentDefinitions>
   const money = moneyFor(quote.currency);
   const totalBoxes = quote.lines.reduce((s, l) => s + (l.qty || 0), 0);
 
-  const lineRow = (l: QuoteLine, i: number): Content[] => {
-    const d = designs.find((x) => x.designName === l.item);
+  const findDesign = (item: string) => designs.find((x) => x.uniqueName === item || x.designName === item);
+  const groups = groupQuoteLines(quote.lines, (i) => findDesign(i)?.designName);
+
+  const bandRow = (name: string): TableCell[] => [
+    {
+      text: `DESIGN: ${name}`.toUpperCase(),
+      colSpan: 8,
+      bold: true,
+      fontSize: 7.5,
+      color: QP.ink,
+      fillColor: QP.band,
+      characterSpacing: 1.2,
+      margin: [0, 4, 0, 4],
+    },
+    {}, {}, {}, {}, {}, {}, {},
+  ];
+
+  const lineRow = (l: QuoteLine, n: number, base: string): Content[] => {
+    const d = findDesign(l.item);
     const t = lineTotals(l);
     return [
-      { ...td(String(i + 1).padStart(2, "0")), color: QP.dim },
+      { ...td(String(n).padStart(2, "0")), color: QP.dim },
+      { ...td(d?.sizeLabel || itemSuffix(l.item, base) || "—"), fontSize: 8.5, bold: true, color: QP.ink },
       {
         stack: [
-          { text: l.item, fontSize: 8.5, bold: true, color: QP.ink },
           ...(d?.brandLabel ? [{ text: d.brandLabel, fontSize: 7, color: QP.dim }] : []),
           ...(l.description ? [{ text: l.description, fontSize: 7, color: QP.dim }] : []),
+          ...(!d?.brandLabel && !l.description ? [{ text: "—", fontSize: 7, color: QP.dim }] : []),
         ],
         margin: [0, 4, 0, 4],
       } as Content,
-      td(d?.sizeLabel || "—"),
       td(d?.finishLabel || "—"),
       td(String(l.qty), true),
       td(money(l.rate), true),
@@ -201,11 +220,14 @@ export async function buildQuoteDoc(quote: Quote): Promise<TDocumentDefinitions>
       {
         table: {
           headerRows: 1,
-          widths: [18, "*", 58, 46, 34, 52, 34, 62],
-          body: [
-            [th("#"), th("Product / Design"), th("Size (mm)"), th("Finish"), th("Boxes", true), th("Rate /Box", true), th("Disc %", true), th("Amount", true)],
-            ...quote.lines.map(lineRow),
-          ],
+          widths: [18, 58, "*", 46, 34, 52, 34, 62],
+          body: (() => {
+            let n = 0;
+            return [
+              [th("#"), th("Size (mm)"), th("Product"), th("Finish"), th("Boxes", true), th("Rate /Box", true), th("Disc %", true), th("Amount", true)],
+              ...groups.flatMap((g) => [bandRow(g.design), ...g.lines.map((l) => lineRow(l, ++n, g.design))]),
+            ];
+          })(),
         },
         layout: {
           hLineWidth: (i: number) => (i > 1 ? 0.75 : 0),

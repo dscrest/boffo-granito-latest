@@ -207,7 +207,8 @@ function ContainerisePlanner({
       });
 
       if (!dl.item) return fail("choose an item");
-      const d: DesignRow | undefined = designRows.find((x) => x.designName === dl.item);
+      // uniqueName first; design_name fallback keeps old saved plan drafts packable.
+      const d: DesignRow | undefined = designRows.find((x) => x.uniqueName === dl.item || x.designName === dl.item);
       if (!d) return fail("item not found in Item master");
 
       // Pallet specs offered = exact size match, else same size WIDTH (PalPlanForm rule).
@@ -537,7 +538,7 @@ function ContainerisePlanner({
   };
 
   const itemOptions = useMemo(
-    () => designs.map((x) => ({ value: x.name, label: x.uniqueName || x.name, hint: [x.size, x.finish].filter(Boolean).join(" · ") })),
+    () => designs.map((x) => ({ value: x.uniqueName, label: x.uniqueName || x.name, hint: [x.size, x.finish].filter(Boolean).join(" · ") })),
     [designs],
   );
 

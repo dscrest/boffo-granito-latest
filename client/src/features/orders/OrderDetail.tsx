@@ -12,12 +12,13 @@ import { STAGES, type Order } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
+import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, shippingStage, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
 import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
 import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansApi";
 import { ProductionForm } from "@/features/stages/ProductionForm";
+import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
@@ -42,14 +43,10 @@ function soDisplayStatus(
 ): { label: string; cls: string } {
   const base = { label: soStatusLabel(status), cls: SO_STATUS_CHIP[status] || "q-draft" };
   if (status !== "Confirmed" && status !== "InProgress") return base;
-  // Dispatch wins over everything: once boxes ship, the order reads by its shipping state.
-  const orderedT = items.reduce((s, o) => s + o.orderQty, 0);
-  const dispatchedT = items.reduce((s, o) => s + o.dispatchedQty, 0);
-  if (dispatchedT > 0) {
-    return dispatchedT >= orderedT
-      ? { label: "Dispatched", cls: "q-accepted" }
-      : { label: `Partially Dispatched — ${fmt(orderedT - dispatchedT)} left`, cls: "q-sent" };
-  }
+  // Loading/dispatch wins over everything: once boxes are on a vehicle, the
+  // order reads by its shipping state (shared shippingStage derivation).
+  const ship = shippingStage(items);
+  if (ship && ship.rank >= 4) return ship;
   const remaining = items.reduce((s, o) => s + toPalletise(o), 0);
   if (readyForPalletisation) return { label: `Ready for Palletisation — ${remaining} left`, cls: "q-accepted" };
   // Partial: some boxes already palletised but produced stock still waits — come back to finish.
@@ -213,6 +210,7 @@ export function OrderDetail() {
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [prod, setProd] = useState(false);
+  const [sendLoad, setSendLoad] = useState(false);
   const [listQ, setListQ] = useState("");
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
@@ -575,6 +573,18 @@ export function OrderDetail() {
             >
               Send to Palletization
             </button>
+            {/* Direct loading — skips palletization (items land in /loading Ready).
+               Same gate as Palletization: past approval + stages edit. */}
+            {can("stages", "edit") && !["Draft", "PendingApproval"].includes(status) && (
+              <button
+                className="btn"
+                disabled={!head.salesOrderId || items.every((o) => o.orderQty - o.palletizedQty <= 0)}
+                onClick={() => setSendLoad(true)}
+                title="Send items straight to the loading board — no palletization step"
+              >
+                Send to Loading
+              </button>
+            )}
           </div>
         </div>
         <div style={{ overflow: "auto" }}>
@@ -623,6 +633,16 @@ export function OrderDetail() {
           presetSalesOrderId={head.salesOrderId}
           onSave={onProdSave}
           onClose={() => setProd(false)}
+        />
+      )}
+      {sendLoad && head.salesOrderId && (
+        <SendToLoadingModal
+          presetSalesOrderId={head.salesOrderId}
+          onDone={() => {
+            setSendLoad(false);
+            void load();
+          }}
+          onClose={() => setSendLoad(false)}
         />
       )}
     </RecordDetail>

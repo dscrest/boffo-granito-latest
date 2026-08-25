@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { list } from "@/lib/dataOps";
-import { actorName, describeChange } from "@/lib/format";
+import { actorName, describeChange, parseDbTime } from "@/lib/format";
 import { signOut, storedAuth, type SessionUser } from "@/lib/auth";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -45,11 +45,12 @@ const SEEN_KEY = "boffo_notif_seen";
 
 const OP_VERB: Record<string, string> = { INSERT: "created", UPDATE: "updated", DELETE: "deleted" };
 
-/** "yyyy-MM-dd HH:mm:ss" → short relative label. */
+/** "yyyy-MM-dd HH:mm:ss" (stored UTC) → short relative label. parseDbTime
+    applies the UTC assumption — parsing as local read ~5.5h old on IST. */
 function rel(occurredAt: string): string {
-  const d = new Date(occurredAt.replace(" ", "T"));
-  if (isNaN(d.getTime())) return "—";
-  const mins = Math.floor((Date.now() - d.getTime()) / 60_000);
+  const t = parseDbTime(occurredAt);
+  if (isNaN(t)) return "—";
+  const mins = Math.floor((Date.now() - t) / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);

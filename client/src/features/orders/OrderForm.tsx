@@ -176,6 +176,8 @@ export function OrderForm({
   });
   const { customers, parties, designs, salesPersons, paymentTerms, currencies } = useMasters();
   const stockFor = useStockLookup();
+  // Quote lines converted here now carry uniqueName; design_name fallback for the SO picker's own values.
+  const findDesign = (s: string) => designs.find((x) => x.uniqueName === s || x.name === s);
   const brandOptions = useMemo(
     () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
     [designs],
@@ -188,7 +190,7 @@ export function OrderForm({
   }, []);
   // Pallets offered for a line = those whose size WIDTH matches the design's size.
   const palletsForLine = (designName: string) => {
-    const w = widthOf(designs.find((d) => d.name === designName)?.size || "");
+    const w = widthOf(findDesign(designName)?.size || "");
     return pallets.filter((p) => {
       if (!p.sizeId) return true;
       const pw = widthOf(p.sizeLabel);
@@ -403,13 +405,13 @@ export function OrderForm({
                 <span />
               </div>
               {lines.map((l, i) => {
-                const d = designs.find((x) => x.name === l.design);
+                const d = findDesign(l.design);
                 return (
                   <div className="ord-line qt-line so-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {d ? (
-                          <LineStockChip stock={stockFor(l.design)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} label={l.design} />
+                          <LineStockChip stock={stockFor(d.name)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} label={l.design} />
                         ) : (
                           <span style={{ width: 18, flexShrink: 0 }} />
                         )}
@@ -418,6 +420,9 @@ export function OrderForm({
                             value={l.design}
                             onChange={(v) => setLine(i, "design", v)}
                             placeholder="Search design…"
+                            // ponytail: picker still emits design_name — full uniqueName
+                            // migration belongs to the master-order-forms sweep; server
+                            // resolves either, and the convert over-cap guard is server-side.
                             options={designs.map((x) => ({
                               value: x.name,
                               label: x.uniqueName || x.name,
