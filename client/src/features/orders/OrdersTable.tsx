@@ -52,7 +52,8 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     currency: dr.currency,
     exchange_rate: dr.exchange_rate,
     remarks: dr.remarks,
-    address: "",
+    // address omitted, not "" — the form doesn't edit it, and data-ops leaves
+    // an unsent address alone (a converted SO inherits its quote's).
     salesperson: dr.salesperson,
     box_branding: dr.box_branding,
     customer_notes: dr.customer_notes,

@@ -17,6 +17,7 @@ import { OrderForm, type OrderDraft } from "./OrderForm";
 import { draftToInput } from "./OrdersTable";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
 import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansApi";
+import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
@@ -197,6 +198,40 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/** Container Planning tab — the plan card, with each container marked Sent /
+    Partially sent / Planned from what has actually left the loading board. */
+function SoContainerPlan({ salesOrderId, containerPlan, docNo }: { salesOrderId: string; containerPlan?: string; docNo: string }) {
+  const { designRows } = useMasters();
+  const [dispatched, setDispatched] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void listPalPlans().then((r) => {
+      if (alive && r.ok) setDispatched(dispatchedByDesign(dispatchRows(r.plans, r.boxes, { kind: "so", salesOrderIds: [salesOrderId] })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [salesOrderId]);
+  // Plan lines store a design NAME; dispatch counts are keyed by Design ROWID.
+  const designKey = useMemo(() => {
+    const byName = new Map<string, string>();
+    designRows.forEach((d) => {
+      if (d.designName) byName.set(d.designName, d.id);
+      if (d.uniqueName) byName.set(d.uniqueName, d.id);
+    });
+    return (name: string) => byName.get(name) || name;
+  }, [designRows]);
+  return (
+    <ContainerPlanCard
+      containerPlan={containerPlan}
+      docNo={docNo}
+      plannerPath={`/orders/${salesOrderId}/containerise`}
+      dispatchedByDesign={dispatched ?? undefined}
+      designKey={designKey}
+    />
   );
 }
 
@@ -542,10 +577,20 @@ export function OrderDetail() {
                 id: "containers",
                 label: "Container Planning",
                 content: (
-                  <ContainerPlanCard
+                  <SoContainerPlan
+                    salesOrderId={head.salesOrderId}
                     containerPlan={head.containerPlan}
                     docNo={head.orderNumber || head.poNumber}
-                    plannerPath={`/orders/${head.salesOrderId}/containerise`}
+                  />
+                ),
+              },
+              {
+                id: "dispatch",
+                label: "Dispatch",
+                content: (
+                  <DispatchTab
+                    scope={{ kind: "so", salesOrderIds: [head.salesOrderId] }}
+                    orderedBoxes={items.reduce((s, o) => s + o.orderQty, 0)}
                   />
                 ),
               },

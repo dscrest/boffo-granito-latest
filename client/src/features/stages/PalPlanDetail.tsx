@@ -18,6 +18,7 @@ import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
 import { PalPlanForm } from "./PalPlanForm";
+import { DispatchTab } from "./DispatchTab";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { STATUS_CHIP } from "./PalPlans";
 import {
@@ -45,7 +46,7 @@ const ADVANCE: Partial<Record<PalStatus, { to: PalStatus; label: string }>> = {
   Loading: { to: "Completed", label: "Mark Dispatched" },
 };
 
-type DetailTab = "items" | "timeline" | "activity";
+type DetailTab = "items" | "dispatch" | "timeline" | "activity";
 const tabStyle = (active: boolean): CSSProperties => ({
   padding: "8px 14px", border: "none", background: "none", cursor: "pointer",
   font: "inherit", color: active ? "var(--text)" : "var(--muted)",
@@ -291,9 +292,10 @@ export function PalPlanDetail() {
             {[plan.vehicleNumber && `Vehicle ${plan.vehicleNumber}`, `${fmt(plan.totalBoxes)} boxes`, plan.salespersonName].filter(Boolean).join("  ·  ")}
           </div>
 
-          {/* Tabs: palletise items · timeline · activity */}
+          {/* Tabs: palletise items · dispatch · timeline · activity */}
           <div className="row" style={{ display: "flex", gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
             <button style={tabStyle(tab === "items")} onClick={() => setTab("items")}>Palletise items</button>
+            <button style={tabStyle(tab === "dispatch")} onClick={() => setTab("dispatch")}>Dispatch</button>
             <button style={tabStyle(tab === "timeline")} onClick={() => setTab("timeline")}>Timeline</button>
             <button style={tabStyle(tab === "activity")} onClick={() => setTab("activity")}>Activity</button>
           </div>
@@ -373,6 +375,11 @@ export function PalPlanDetail() {
           </div>
           </>)}
 
+          {tab === "dispatch" && (
+            <div style={{ marginTop: 14 }}>
+              <DispatchTab scope={{ kind: "plan", planId: plan.id }} orderedBoxes={plan.totalBoxes} />
+            </div>
+          )}
           {tab === "timeline" && (
             <div style={{ marginTop: 14 }}>
               <StatusTimeline entityType="PalletizationPlan" entityId={plan.id} />

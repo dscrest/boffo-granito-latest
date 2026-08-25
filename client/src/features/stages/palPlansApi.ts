@@ -63,7 +63,7 @@ export interface PalPlanLine {
   sizeCode: string; // via Design.size → Size.code
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
   batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
-  palletGroup: string; // shared physical pallet group ("" = none) — set by /pal-topup, shows the Mix Batch marker
+  palletGroup: string; // shared physical pallet group ("" = none) — legacy mixed pallets, shows the Mix Batch marker
   createdTime: string; // line CREATEDTIME — age anchor (auto-enqueue creates the line right after production)
 }
 
@@ -92,11 +92,15 @@ export interface LoadBox {
   capacity: number; // advisory boxes capacity
   status: LoadBoxStatus;
   dispatchDate: string;
-  // Loading capture (entered at the box / at dispatch).
+  // Loading capture (entered on the load form, at the box, or at dispatch).
   containerNumber: string;
   lineSeal: string;
   electronicSeal: string;
   loadingSupervisor: string;
+  containerSize: string; // 20 / 40 / 40HQ
+  transporter: string;
+  lrNumber: string; // LR / docket no.
+  destination: string; // port / city
   createdTime: string;
 }
 
@@ -259,6 +263,10 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         lineSeal: str(b.line_seal),
         electronicSeal: str(b.electronic_seal),
         loadingSupervisor: str(b.loading_supervisor),
+        containerSize: str(b.container_size),
+        transporter: str(b.transporter),
+        lrNumber: str(b.lr_number),
+        destination: str(b.destination),
         createdTime: str(b.CREATEDTIME),
       };
     });
@@ -389,17 +397,13 @@ export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?:
   return bust(op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, { status, ...(pallet ? { pallet } : {}) }));
 }
 
-/** Top up a Palletizing line's partial pallet with `boxes` from a Planning donor
-    line (any same-size item/batch). Splits the donor server-side; both lines get
-    the shared pallet_group — the Mix Batch marker. */
-export function palTopup(targetLineId: string, donorLineId: string, boxes: number) {
-  return bust(op<{ ROWID: string; pallet_group: string }>(`pal-topup/${targetLineId}`, { donor_line: donorLineId, boxes }));
-}
-
 /* ---- Load boxes (vehicle slots on the board) ---- */
 
-export function createLoadBox(capacity?: number) {
-  return bust(op<{ ROWID: string; box_number: number }>("load-box", capacity ? { capacity } : {}));
+/** Mint a loading. Container-first: the load form passes the vehicle and the
+    container's identity/paperwork here, so the box lands complete in one call
+    (a bare call still mints the old empty "Box N"). */
+export function createLoadBox(details?: { vehicle?: string; capacity?: number; dispatch_date?: string } & LoadingCapture) {
+  return bust(op<{ ROWID: string; box_number: number }>("load-box", details || {}));
 }
 
 /** Mint (or fetch) the box's public share token — keys its scannable QR label
@@ -410,17 +414,21 @@ export async function shareLoadBox(rowid: string): Promise<string> {
   return r.data;
 }
 
-/** Loading-capture fields entered at the box or at dispatch. */
+/** Loading-capture fields entered on the load form, at the box, or at dispatch. */
 export interface LoadingCapture {
   container_number?: string;
   line_seal?: string;
   electronic_seal?: string;
   loading_supervisor?: string;
+  container_size?: string;
+  transporter?: string;
+  lr_number?: string;
+  destination?: string;
 }
 
-/** Assign/reassign the box's vehicle, adjust capacity, or set loading-capture
-    fields (Open boxes only). */
-export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity?: number } & LoadingCapture) {
+/** Assign/reassign the box's vehicle, adjust capacity, set the planned dispatch
+    date, or set loading-capture fields (Open boxes only). */
+export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity?: number; dispatch_date?: string } & LoadingCapture) {
   return bust(op<{ ROWID: string }>(`load-box-update/${rowid}`, patch));
 }
 

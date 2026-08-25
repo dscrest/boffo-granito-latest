@@ -19,6 +19,8 @@ import { type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
+import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
+import { useMasters } from "@/features/masters/useMasters";
 import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import { VehicleLoadModal } from "./VehicleLoadModal";
@@ -59,6 +61,17 @@ export function LoadingDetail() {
   const [vehModal, setVehModal] = useState(false);
   const [addItems, setAddItems] = useState(false);
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
+  const { designRows } = useMasters();
+
+  // Plan lines store a design NAME; dispatch counts are keyed by Design ROWID.
+  const designKey = useMemo(() => {
+    const byName = new Map<string, string>();
+    designRows.forEach((d) => {
+      if (d.designName) byName.set(d.designName, d.id);
+      if (d.uniqueName) byName.set(d.uniqueName, d.id);
+    });
+    return (name: string) => byName.get(name) || name;
+  }, [designRows]);
 
   const load = async () => {
     const res = await listPalPlans();
@@ -176,8 +189,12 @@ export function LoadingDetail() {
     { key: "driver", label: "Driver", value: box.driverName || "—" },
     { key: "mobile", label: "Mobile", value: box.mobileNumber || "—" },
     { key: "containerNo", label: "Container No.", value: box.containerNumber || "—" },
+    { key: "containerSize", label: "Size", value: box.containerSize || "—" },
     { key: "lineSeal", label: "Line Seal", value: box.lineSeal || "—" },
     { key: "electronicSeal", label: "Electronic Seal", value: box.electronicSeal || "—" },
+    { key: "transporter", label: "Transporter", value: box.transporter || "—" },
+    { key: "lrNumber", label: "LR / Docket No.", value: box.lrNumber || "—" },
+    { key: "destination", label: "Destination / Port", value: box.destination || "—" },
     { key: "supervisor", label: "Loading Supervisor", value: box.loadingSupervisor || "—" },
     { key: "dispatchDate", label: "Dispatch Date", value: box.dispatchDate ? box.dispatchDate.slice(0, 10) : "—" },
   ];
@@ -241,6 +258,8 @@ export function LoadingDetail() {
                           containerPlan={head.containerPlan}
                           docNo={head.orderNumber || head.poNumber}
                           plannerPath={`/orders/${soId}/containerise`}
+                          dispatchedByDesign={dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] }))}
+                          designKey={designKey}
                         />
                       </div>
                     );
@@ -331,6 +350,10 @@ export function LoadingDetail() {
             line_seal: box.lineSeal,
             electronic_seal: box.electronicSeal,
             loading_supervisor: box.loadingSupervisor,
+            container_size: box.containerSize,
+            transporter: box.transporter,
+            lr_number: box.lrNumber,
+            destination: box.destination,
           }}
           onConfirm={(vehicleId, capture) => void confirmLoadDetails(vehicleId, capture)}
           onClose={() => setVehModal(false)}

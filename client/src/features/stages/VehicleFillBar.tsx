@@ -13,7 +13,7 @@
 
    2026-07-28: PalPlanDetail dropped its advisory card ("remove the vehicle
    part for now") — the component currently has no callers; DESIGN_PALETTE
-   below is still shared by the board's box cards and BoxPickerModal.
+   below is still shared by the board's box cards and LoadContainerModal.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";

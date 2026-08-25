@@ -1837,6 +1837,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.qt-line.so-line {
   grid-template-columns: 2fr 1.3fr 0.8fr 0.9fr 0.7fr 1fr 26px;
 }
+/* Batch capture rows (Record Output / Add Batches) — headers once, bare inputs.
+   Non-batched items drop the Batch No. column. */
+.ord-line.batch-line { grid-template-columns: 1.4fr 1fr 0.8fr 1.4fr 26px; }
+.ord-line.batch-line.no-batch { grid-template-columns: 1fr 0.8fr 1.6fr 26px; }
+.batch-line .ord-rm {
+  width: 26px; height: 26px; font-size: 11px; padding: 0;
+  align-self: start; margin-top: 4px; border-radius: 50%;
+}
+
 /* Compact remove ✕ on quote lines (order lines keep the 35px button).
    Circular, pinned to the first input line (35px tall) rather than
    centered in the whole row — the description textarea makes rows tall. */

@@ -1,0 +1,11 @@
+1. Palletization after record production. The same quantity to be palletised.
+2. Ordered , need 
+3. Pallets Choose karvanu option at the SO creation. 
+4. Kanban for palletization 
+5. Post complete production -> trasnfer to palletise.
+5.1 All completed production items. 
+6, palletization and loading  
+6.1 Palletisation stages. 
+7. complete palletisation show vehicle loadin screen. 
+8. Loading vehicle detail Driver details, Number, and vehicle number. 
+

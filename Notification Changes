@@ -1,0 +1,56 @@
+0. Notifications to be moved to left. 
+
+1. Hide QC stage from the produciton for now. 
+2. Partial completin stage. Unless the order is 100 percent completed, then only mark it as completed, till then show it in the Kanban. 
+say 100 was request. 
+I produce 50. 
+the card disappears as per current design due to filter. 
+But it should appear as pending, and still stay in the In production lane. 
+
+3. Groupd buttons for view and grouping. Groupd : Customer, order, size and item. 
+
+4. Item wise production request. 
+5. + button on the card. 
+6. Default pending at Grid view only. but when it is kanban Filter to all.
+7. Move card -> partial recording of production moves to QC - complete. 
+
+7.1 The in production indicates the Stock in produciton for in the item details. 
+7.2 BUG: Raising the SO increases the in production stock, the above item will fix it. 
+7.3 The Post QC completed stock increases the Stoc available in the item details.
+
+
+scenario. 
+
+I have SO of 3 items. 
+I send this to production. 
+in the kanban. I have 3 seperate production orders, per line item. 
+PROD-001 QTY 100
+PROD-002 QTY 100
+PROD-003 QTY 100
+
+I move the card to in produciton per item. 
+I log partial produciton by clicking the + button presene at the card to log the Produciton. And them move to next for the stage. 
+The production here logs partial status. The status and progress remains same as per card.
+
+
+
+
+8. Line item display structure same across all transactoin. 
+Use the Unique name in the lin item drop down. 
+Show Stock count: This is for me to get idea of Stock in a way that I get the gist of either Production or plan for delivery. 
+
+Instead of others details: show below Details: 
+Show qty 
+In production 
+Available 
+In loading. 
+
+Color code : if green available, if yello means need production red means need highly productions. 
+
+
+Uday: 
+
+153487401
+153322940
+
+

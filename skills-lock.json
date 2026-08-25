@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "adhd": {
+      "source": "UditAkhourii/adhd",
+      "sourceType": "github",
+      "skillPath": "skills/adhd/SKILL.md",
+      "computedHash": "c9dd844eb830e59e60398765600e5504d06c6092323cfe6509de73520018deaf"
+    },
+    "deslop": {
+      "source": "every-app/open-seo",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/deslop/SKILL.md",
+      "computedHash": "b778b7add702c48ea4537258da7a59f8499f2bd0aa05bfcff5e8fb6120455aac"
+    },
+    "merge-ready": {
+      "source": "every-app/open-seo",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/merge-ready/SKILL.md",
+      "computedHash": "40aa76464fc9e59283b4ee735320bb6b201cf2f233ba0abc98c99b0556c05036"
+    },
+    "papercuts": {
+      "source": "every-app/open-seo",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/papercuts/SKILL.md",
+      "computedHash": "be6eaddfebdf0935c2ad43aed5bfe739e1b31ba01671c295f911e9c358419ec2"
+    },
+    "simple-issue-description": {
+      "source": "every-app/open-seo",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/simple-issue-description/SKILL.md",
+      "computedHash": "33df6fd770cd2438507b221db8de53cb57f19ba5ace34a569fe7799e62a64fc0"
+    }
+  }
+}

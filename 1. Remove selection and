@@ -1,0 +1,14 @@
+1. Remove selection and 
+2. Design name : as per unique design name during palletization.
+3. Vehicle loading section
+3.1 vehicle 1, 2, 3 sequence instead of truck.
+4. Before pallet selection the Truck load should be empty. Only after pallet selection. 
+4.1 Based on the current box, if 1 truck is full automatically push the load to next truck. 
+4.2 In simple do not fit all items in 1 truck. 
+4.3 this gives me idea which item to move to which truck. User can add truck only when needed. 
+4.4 else automatically add necessary truck count. 
+4.4. Palletization Date - Camel Font. 
+4.5 Clear drop down none option in all paces. 
+4.6 In short we are working on 100 percent load capacity only. And hence anything beyong will be moved to next vehicle. 
+and for that remove the current overload scenario. 
+4.7. Add X mark in front of the vehicle to indicate remove truck entry and 3 dots that might clear the item allocated. 

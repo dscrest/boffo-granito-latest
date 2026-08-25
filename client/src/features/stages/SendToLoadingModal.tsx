@@ -4,6 +4,9 @@
    /send-to-loading). Two entry points share this modal:
    - Order detail "Send to Loading" (presetSalesOrderId, SO picker hidden)
    - Loading detail "Add Items" (presetBoxId → lines land in that loading)
+   Container-first like the load modal: the shared ContainerPicker chooses an
+   open container (or mints a new one with its details) so the items land in a
+   real container, not a nameless box. With presetBoxId the target is fixed.
    Per item the send is capped at ordered − palletized, mirroring the server.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
@@ -13,8 +16,25 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
+import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { cachedOrders, listOrders, soStatusLabel } from "@/features/orders/ordersApi";
-import { sendToLoading } from "./palPlansApi";
+import {
+  ContainerPicker,
+  NO_CONTAINER,
+  draftMissing,
+  draftToCreateInput,
+  newContainerDraft,
+  type ContainerDraft,
+} from "./LoadContainerModal";
+import {
+  cachedLoadBoxes,
+  cachedPalPlans,
+  createLoadBox,
+  listPalPlans,
+  sendToLoading,
+  type LoadBox,
+  type PalPlan,
+} from "./palPlansApi";
 
 const remainingOf = (o: Order) => Math.max(0, o.orderQty - o.palletizedQty);
 
@@ -39,10 +59,33 @@ export function SendToLoadingModal({
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [qty, setQty] = useState<Map<string, number>>(new Map());
   const [busy, setBusy] = useState(false);
+  // Container target. With presetBoxId the loading is fixed; otherwise the
+  // shared picker chooses an open container or mints a new one.
+  const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
+  const [loadBoxes, setLoadBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
+  const [sel, setSel] = useState<string>(presetBoxId || NO_CONTAINER);
+  const [draft, setDraft] = useState<ContainerDraft>(newContainerDraft);
+  const [showErrors, setShowErrors] = useState(false);
+  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
 
   useEffect(() => {
     void listOrders().then((r) => r.ok && setOrders(r.orders));
+    void listPalPlans().then((r) => {
+      if (!r.ok) return;
+      setPlans(r.plans);
+      setLoadBoxes(r.boxes);
+    });
+    void listVehicles().then((r) => r.ok && setVehicles(r.vehicles));
   }, []);
+
+  const openBoxes = loadBoxes.filter((b) => b.status === "Open");
+  const lockedBox = presetBoxId ? loadBoxes.find((b) => b.id === presetBoxId) : undefined;
+  const linesOfBox = (boxId: string) =>
+    plans.flatMap((p) => p.lines.filter((l) => l.loadBoxId === boxId).map((l) => ({ p, l })));
+  // Without a preset the container is OPTIONAL: "Ready for Loading" is the
+  // default and behaves exactly as before (items wait, no container).
+  const newContainer = sel !== NO_CONTAINER && !presetBoxId && !openBoxes.some((b) => b.id === sel);
+  const invalidContainer = newContainer && draftMissing(draft);
 
   // Pickable SOs: past approval, not terminal, with boxes left to send.
   const soOptions = useMemo(() => {
@@ -81,10 +124,32 @@ export function SendToLoadingModal({
 
   const onConfirm = async () => {
     if (busy || !soId || totalSend === 0) return;
+    if (invalidContainer) {
+      setShowErrors(true);
+      return;
+    }
     setBusy(true);
+    // Resolve the container first: an existing one, a new one minted from the
+    // details form, or none at all (items just wait in Ready for Loading).
+    let box = presetBoxId || (sel === NO_CONTAINER ? "" : sel);
+    let label = boxName || "";
+    if (newContainer) {
+      const details = await draftToCreateInput(draft, vehicles);
+      const created = details ? await createLoadBox(details) : null;
+      if (!created?.ok || !created.data?.ROWID) {
+        setBusy(false);
+        toast.error(created?.error || "Could not create the container");
+        return;
+      }
+      box = String(created.data.ROWID);
+      label = draft.container_number.trim() || `Box ${created.data.box_number ?? ""}`.trim();
+    } else if (box && !label) {
+      const b = loadBoxes.find((x) => x.id === box);
+      label = b ? b.containerNumber || `Box ${b.boxNumber}` : "the loading";
+    }
     const res = await sendToLoading({
       sales_order: soId,
-      ...(presetBoxId ? { box: presetBoxId } : {}),
+      ...(box ? { box } : {}),
       lines: items
         .filter((o) => checked.has(o.id))
         .map((o) => ({ order_item: o.id, boxes: qtyOf(o) })),
@@ -95,8 +160,8 @@ export function SendToLoadingModal({
       return;
     }
     toast.success(
-      presetBoxId
-        ? `${fmt(totalSend)} boxes added to ${boxName || "the loading"}`
+      box
+        ? `${fmt(totalSend)} boxes added to ${label || "the loading"}`
         : `${fmt(totalSend)} boxes sent to Ready for Loading`,
     );
     onDone();
@@ -126,6 +191,19 @@ export function SendToLoadingModal({
               />
             </label>
           )}
+
+          <ContainerPicker
+            boxes={openBoxes}
+            linesOfBox={linesOfBox}
+            selected={sel}
+            onSelect={setSel}
+            draft={draft}
+            onDraft={setDraft}
+            showErrors={showErrors}
+            adding={totalSend}
+            lockedTo={lockedBox}
+            allowNone={!presetBoxId}
+          />
 
           {soId && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 320, overflowY: "auto" }}>
@@ -171,10 +249,13 @@ export function SendToLoadingModal({
         </div>
 
         <div className="df-foot">
-          {totalSend > 0 && <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{fmt(totalSend)} boxes</span>}
-          <div style={{ flex: 1 }} />
+          <span style={{ flex: 1, fontSize: "var(--t-sm)", color: invalidContainer ? "var(--c-amber)" : "var(--dim)" }} className={invalidContainer ? undefined : "mono"}>
+            {invalidContainer
+              ? "Fill container no., vehicle no., driver, e-seal"
+              : totalSend > 0 ? `${fmt(totalSend)} boxes` : ""}
+          </span>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="hbtn primary" disabled={busy || !soId || totalSend === 0} onClick={() => void onConfirm()}>
+          <button className="hbtn primary" disabled={busy || !soId || totalSend === 0 || invalidContainer} onClick={() => void onConfirm()}>
             <Icon name="check" size={13} />
             {busy ? "Sending…" : presetBoxId ? `Add to ${boxName || "loading"}` : "Send to Loading"}
           </button>

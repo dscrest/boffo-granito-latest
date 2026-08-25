@@ -152,9 +152,9 @@ export function OrderForm({
   const [lines, setLines] = useState<OrderLine[]>(() => {
     if (initial?.length)
       return initial.map((o) => ({
-        // Picker options are keyed by plain design_name, so hydrate from
-        // designName (o.design is the full unique display label — won't match).
-        design: o.designName || o.design,
+        // Picker options are keyed by unique_name (design_name only for legacy
+        // items), and o.design already hydrates as unique_name || design_name.
+        design: o.design || o.designName,
         ordered_qty_boxes: String(o.orderQty || ""),
         rate: o.rate ? String(o.rate) : "",
         pallet: o.palletId || "",
@@ -318,7 +318,7 @@ export function OrderForm({
           <div className="form-section">
             <div className="form-section-title">Order Details</div>
             <div className="form-grid">
-              {HEADER.filter((f) => !(q && f.key === "box_branding")).map((f) => {
+              {HEADER.map((f) => {
                 const err = fieldError(f);
                 const locked = !!q && (f.key === "customer" || f.key === "currency");
                 return (
@@ -420,11 +420,10 @@ export function OrderForm({
                             value={l.design}
                             onChange={(v) => setLine(i, "design", v)}
                             placeholder="Search design…"
-                            // ponytail: picker still emits design_name — full uniqueName
-                            // migration belongs to the master-order-forms sweep; server
-                            // resolves either, and the convert over-cap guard is server-side.
                             options={designs.map((x) => ({
-                              value: x.name,
+                              // Keyed by unique_name, same as quote lines and the
+                              // quote picker; design_name only for legacy items.
+                              value: x.uniqueName || x.name,
                               label: x.uniqueName || x.name,
                               hint: `${fmt(stockFor(x.name).available)} avail`,
                             }))}

@@ -6,9 +6,9 @@
    a per-card chip tells them apart). Kanban/Sheet is chosen by the page-header
    toggle in PalPlans and arrives as the `view` prop.
    Ready-for-Palletization cards carry a record-level checkbox — the selection
-   palletises together through PalletiseModal (pallet choice + distribution +
-   Mix Batch top-up). Dropping cards on the Palletization column opens the same
-   dialog. Loading/dispatch actions live on the dedicated Loading page
+   palletises together through PalletiseModal (pallet choice + distribution).
+   Dropping cards on the Palletization column opens the same dialog.
+   Loading/dispatch actions live on the dedicated Loading page
    (/loading, LoadingBay.tsx) — the Dispatch column here is read-only and
    links there.
    ============================================================ */
@@ -25,7 +25,6 @@ import {
   invalidatePalPlans,
   lineFrac,
   PAL_LINE_STATUS_LABEL,
-  palTopup,
   setPalLineStatus,
   type LoadBox,
   type PalPlan,
@@ -175,8 +174,7 @@ export function DispatchBoard({
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
-  // Palletise-dialog confirm: targets move first (with their pallet), then the
-  // top-ups — /pal-topup requires the target already in Palletizing. When the
+  // Palletise-dialog confirm: every target moves with its pallet. When the
   // dialog was opened by a Mark-ready action, a final hop lands the targets
   // in Ready for Loading (never without a pallet on record).
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
@@ -187,11 +185,6 @@ export function DispatchBoard({
     for (const e of entries) {
       const res = await setPalLineStatus(e.lineId, "Palletizing", e.palletId);
       if (res.ok) ok++; else err = res.error || "Move failed";
-    }
-    for (const e of entries) {
-      if (!e.topup) continue;
-      const res = await palTopup(e.lineId, e.topup.donorLineId, e.topup.boxes);
-      if (!res.ok) err = res.error || "Top-up failed";
     }
     if (to === "ReadyToLoad") {
       for (const e of entries) {
@@ -763,9 +756,6 @@ export function DispatchBoard({
       {palletise && (
         <PalletiseModal
           lines={palletise.lines}
-          donors={allLines
-            .filter(({ p, l }) => stageOf(p, l) === "Planning" && !palletise.lines.some((t) => t.id === l.id))
-            .map(({ l }) => l)}
           busy={busy}
           toLabel={PAL_LINE_STATUS_LABEL[palletise.to]}
           onConfirm={(entries) => void confirmPalletise(entries)}

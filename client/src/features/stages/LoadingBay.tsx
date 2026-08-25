@@ -8,9 +8,12 @@
    (VehicleLoadModal) captures vehicle + seals on the Open box; "Dispatch" then
    just sets the date — the old one-shot dispatch is split in two.
    Kanban/Sheet toggle, search, advanced filter, ColumnPicker, and the
-   Production-style group-by swimlanes/bands; "New Loading" mints an empty
-   LoadBox and opens its detail page (/loading/:id) — loadings can be filled
-   there directly (Add Items), independent of palletization.
+   Production-style group-by swimlanes/bands. Loading is CONTAINER-FIRST:
+   both "Load" and "New Loading" open LoadContainerModal, which either picks
+   an open container (with an after-loading fill preview) or captures a new
+   container's details up front — so a box is never nameless. "New Loading"
+   then opens its detail page (/loading/:id), where it can be filled directly
+   (Add Items), independent of palletization.
    ponytail: no drag-and-drop here — checkbox selection + Load batch covers
    it; restore b600df5's onDropBox/onDropBay wiring if the crew asks.
    ============================================================ */
@@ -29,7 +32,7 @@ import { fmt } from "@/lib/format";
 import { isoInfo } from "@/features/masters/customersApi";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { VehicleLoadModal } from "./VehicleLoadModal";
-import { BoxPickerModal } from "./BoxPickerModal";
+import { LoadContainerModal } from "./LoadContainerModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import {
   boxFill,
@@ -120,6 +123,10 @@ function loadColumns(): ColumnDef<Row>[] {
     { key: "vehicle", label: "Vehicle", render: (r) => (r.box ? [r.box.vehicleNumber, r.box.driverName].filter(Boolean).join("  ·  ") || "—" : "—") },
     { key: "containerNo", label: "Container No.", className: "mono", render: (r) => r.box?.containerNumber || "—" },
     { key: "seal", label: "Seals", className: "mono", render: (r) => (r.box ? [r.box.lineSeal, r.box.electronicSeal].filter(Boolean).join("  ·  ") || "—" : "—") },
+    { key: "containerSize", label: "Size", render: (r) => r.box?.containerSize || "—" },
+    { key: "transporter", label: "Transporter", render: (r) => r.box?.transporter || "—" },
+    { key: "lrNumber", label: "LR / Docket", className: "mono", render: (r) => r.box?.lrNumber || "—" },
+    { key: "destination", label: "Destination", render: (r) => r.box?.destination || "—" },
     { key: "supervisor", label: "Supervisor", render: (r) => r.box?.loadingSupervisor || "—" },
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted", render: (r) => r.box?.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted", render: (r) => `${ageDays(r.p, r.l)}d` },
@@ -140,6 +147,10 @@ function loadSortVal(r: Row, k: string): string | number {
     case "vehicle": return r.box?.vehicleNumber || "";
     case "containerNo": return r.box?.containerNumber || "";
     case "seal": return r.box?.lineSeal || "";
+    case "containerSize": return r.box?.containerSize || "";
+    case "transporter": return r.box?.transporter || "";
+    case "lrNumber": return r.box?.lrNumber || "";
+    case "destination": return r.box?.destination || "";
     case "supervisor": return r.box?.loadingSupervisor || "";
     case "dispatchDate": return r.box?.dispatchDate || "";
     case "age": return ageDays(r.p, r.l);
@@ -179,6 +190,7 @@ export function LoadingBay() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
+  // lineId "" = container-only mode ("New Loading" — create the container, then open it).
   const [picker, setPicker] = useState<{ lineId: string; presetBoxId?: string } | null>(null);
   // Post-dispatch printable Dispatch Entry — entries snapshotted pre-refresh.
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
@@ -207,7 +219,7 @@ export function LoadingBay() {
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as LoadGroupBy)) as LoadGroupBy[]);
 
   const COLS = useMemo(() => loadColumns(), []);
-  const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns", COLS, ["vehicle", "seal", "supervisor", "age"]);
+  const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
 
   // ---- derived ------------------------------------------------
   const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l })));
@@ -347,6 +359,7 @@ export function LoadingBay() {
         vehicleId: "", vehicleNumber: "", driverName: "", mobileNumber: "",
         capacity: 0, status: "Open", dispatchDate: "",
         containerNumber: "", lineSeal: "", electronicSeal: "", loadingSupervisor: "",
+        containerSize: "", transporter: "", lrNumber: "", destination: "",
         createdTime: "",
       };
     }
@@ -361,34 +374,44 @@ export function LoadingBay() {
     after(res.ok, res.error || "Could not unload the item", `${line.itemCode} back to Ready for Loading (${boxLabel(box)})`);
   };
 
-  // Confirm from the box picker: boxId null = create a new box now; a count
-  // below the line's total splits it server-side.
-  const confirmLoad = async (boxId: string | null, count: number) => {
-    const target = picker;
-    if (!target || busy) return; // in-flight guard: a double-confirm must not double-load
-    const line = allLines.find(({ l }) => l.id === target.lineId)?.l;
-    if (!line) return;
+  // Confirm from the load modal. `target` is either an existing container or
+  // the details of a new one to mint first (container-first: the box lands
+  // complete, no follow-up Confirm Load needed). A count below the line's
+  // total splits it server-side. With no line (New Loading) we just create the
+  // container and open it.
+  const confirmLoad = async (
+    target: { boxId: string } | { details: { vehicle?: string; dispatch_date?: string } & LoadingCapture },
+    count: number,
+  ) => {
+    const t = picker;
+    if (!t || busy) return; // in-flight guard: a double-confirm must not double-load
+    const line = t.lineId ? allLines.find(({ l }) => l.id === t.lineId)?.l : undefined;
+    if (t.lineId && !line) return;
     setBusy(true);
-    let toBox = boxId;
-    let label = boxId ? boxLabel(boxes.find((b) => b.id === boxId)!) : "";
-    if (!toBox) {
-      // "New box": reuse a lingering empty box before minting another.
-      const empty = openBoxes.find(isEmptyBox);
-      if (empty) {
-        toBox = empty.id;
-        label = boxLabel(empty);
-      } else {
-        const created = await createLoadBox();
-        if (!created.ok || !created.data?.ROWID) {
-          setBusy(false);
-          after(false, created.error || "Could not add a box", "");
-          return;
-        }
-        toBox = String(created.data.ROWID);
-        label = `Box ${created.data.box_number ?? ""}`.trim();
+    let toBox: string;
+    let label: string;
+    if ("boxId" in target) {
+      toBox = target.boxId;
+      label = boxLabel(boxes.find((b) => b.id === target.boxId)!);
+    } else {
+      const created = await createLoadBox(target.details);
+      if (!created.ok || !created.data?.ROWID) {
+        setBusy(false);
+        after(false, created.error || "Could not create the container", "");
+        return;
       }
+      toBox = String(created.data.ROWID);
+      label = target.details.container_number || `Box ${created.data.box_number ?? ""}`.trim();
     }
-    // Hard 100% cap — the picker clamps too; this is the last gate before the write.
+    // Container-only mode: nothing to allocate, open the new loading.
+    if (!line) {
+      setBusy(false);
+      setPicker(null);
+      after(true, "", `${label} created`);
+      navigate(`/loading/${encodeURIComponent(toBox)}`);
+      return;
+    }
+    // Hard 100% cap — the modal clamps too; this is the last gate before the write.
     const targetBox = boxes.find((b) => b.id === toBox);
     const fit = targetBox ? fitOf(line, targetBox) : line.boxes;
     if (fit <= 0) {
@@ -402,17 +425,6 @@ export function LoadingBay() {
     setBusy(false);
     setPicker(null);
     after(res.ok, res.error || "Could not load the item", `${line.itemCode} → ${label}`);
-  };
-
-  // "New Loading": an empty Open box, independent of palletization — lands on
-  // its detail page where items are added directly (Add Items) or from Ready.
-  const newContainer = async () => {
-    if (busy) return;
-    setBusy(true);
-    const res = await createLoadBox();
-    setBusy(false);
-    after(res.ok, res.error || "Could not add a loading", `Loading ${res.data?.box_number ?? ""} added`.trim());
-    if (res.ok && res.data?.ROWID) navigate(`/loading/${encodeURIComponent(String(res.data.ROWID))}`);
   };
 
   // "Confirm Load": capture vehicle + container/seal details on the Open box.
@@ -776,7 +788,7 @@ export function LoadingBay() {
         />
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={busy} onClick={() => void newContainer()}>
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={busy} onClick={() => setPicker({ lineId: "" })}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
@@ -900,18 +912,20 @@ export function LoadingBay() {
       )}
 
       {picker && (() => {
-        const line = allLines.find(({ l }) => l.id === picker.lineId)?.l;
-        return line ? (
-          <BoxPickerModal
+        const line = picker.lineId ? allLines.find(({ l }) => l.id === picker.lineId)?.l : undefined;
+        // No lineId = "New Loading": the same modal in container-only mode.
+        if (picker.lineId && !line) return null;
+        return (
+          <LoadContainerModal
             line={line}
             boxes={openBoxes}
             linesOfBox={linesOfBox}
             presetBoxId={picker.presetBoxId}
             busy={busy}
-            onConfirm={(boxId, count) => void confirmLoad(boxId, count)}
+            onConfirm={(target, count) => void confirmLoad(target, count)}
             onClose={() => setPicker(null)}
           />
-        ) : null;
+        );
       })()}
 
       {vehModal && (
@@ -925,6 +939,10 @@ export function LoadingBay() {
             line_seal: vehModal.box.lineSeal,
             electronic_seal: vehModal.box.electronicSeal,
             loading_supervisor: vehModal.box.loadingSupervisor,
+            container_size: vehModal.box.containerSize,
+            transporter: vehModal.box.transporter,
+            lr_number: vehModal.box.lrNumber,
+            destination: vehModal.box.destination,
           }}
           onConfirm={(vehicleId, capture) => void confirmLoadDetails(vehicleId, capture)}
           onClose={() => setVehModal(null)}

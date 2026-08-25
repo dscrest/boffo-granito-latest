@@ -29,6 +29,8 @@ import { useMasters } from "@/features/masters/useMasters";
 import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
 import { ContainerPlanCard } from "./ContainerPlanCard";
+import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
+import { listPalPlans } from "@/features/stages/palPlansApi";
 import { OrderForm, type OrderDraft } from "@/features/orders/OrderForm";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import {
@@ -80,12 +82,12 @@ const NOTE_KEYS = new Set(["remarks", "customerNotes", "terms"]);
 export function QuoteDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { designs } = useMasters();
+  const { designs, designRows } = useMasters();
 
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"details" | "orders" | "containers" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "orders" | "containers" | "dispatch" | "activity">("details");
   // Details | PDF segmented toggle (Books-style inline document preview).
   const [view, setView] = useState<"details" | "pdf">("details");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -103,6 +105,33 @@ export function QuoteDetail() {
   const fields = useColumns("quoteDetailFields", FIELDS);
 
   const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
+
+  /* Dispatch rolls up across every SO this quote was converted into — the
+     quote's own plan is the parent of all of them. */
+  const quoteSoIds = useMemo(() => (quote?.sos ?? []).map((so) => so.id), [quote]);
+  const [quoteDispatched, setQuoteDispatched] = useState<Map<string, number> | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (quoteSoIds.length === 0) {
+      setQuoteDispatched(null);
+      return;
+    }
+    void listPalPlans().then((r) => {
+      if (alive && r.ok) setQuoteDispatched(dispatchedByDesign(dispatchRows(r.plans, r.boxes, { kind: "so", salesOrderIds: quoteSoIds })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [quoteSoIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Plan lines store a design NAME; dispatch counts are keyed by Design ROWID.
+  const designKey = useMemo(() => {
+    const byName = new Map<string, string>();
+    designRows.forEach((d) => {
+      if (d.designName) byName.set(d.designName, d.id);
+      if (d.uniqueName) byName.set(d.uniqueName, d.id);
+    });
+    return (name: string) => byName.get(name) || name;
+  }, [designRows]);
 
   const onPdf = async () => {
     if (!quote) return;
@@ -257,6 +286,7 @@ export function QuoteDetail() {
       item: l.design,
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,
       rate: parseFloat(l.rate) || 0,
+      pallet: l.pallet || "",
       discount: parseFloat(l.discount) || 0,
       description: l.description || "",
     }));
@@ -269,6 +299,7 @@ export function QuoteDetail() {
     setBusy("Converting…");
     const res = await convertQuote(quote.id, isFull ? "Full" : "Partial", lines, {
       po_number: d.po_number,
+      box_branding: d.box_branding,
       order_date: d.order_date,
       shipment_date: d.shipment_date,
       payment_term: d.payment_term,
@@ -560,6 +591,13 @@ export function QuoteDetail() {
           Container Planning
         </button>
         <button
+          className={`tabish ${tab === "dispatch" ? "active" : ""}`}
+          onClick={() => setTab("dispatch")}
+          style={tabStyle(tab === "dispatch")}
+        >
+          Dispatch
+        </button>
+        <button
           className={`tabish ${tab === "activity" ? "active" : ""}`}
           onClick={() => setTab("activity")}
           style={tabStyle(tab === "activity")}
@@ -782,7 +820,18 @@ export function QuoteDetail() {
       )}
 
       {tab === "containers" && (
-        <ContainerPlanCard containerPlan={quote.containerPlan} docNo={quote.quoteNo} plannerPath={`/quotes/${quote.id}/containerise`} />
+        <ContainerPlanCard
+          containerPlan={quote.containerPlan}
+          docNo={quote.quoteNo}
+          plannerPath={`/quotes/${quote.id}/containerise`}
+          dispatchedByDesign={quoteDispatched ?? undefined}
+          designKey={designKey}
+        />
+      )}
+
+      {/* Dispatch tab — rolls up every SO converted from this quote. */}
+      {tab === "dispatch" && (
+        <DispatchTab scope={{ kind: "so", salesOrderIds: quoteSoIds }} orderedBoxes={undefined} />
       )}
 
       {/* Activity tab — status timeline (with time-in-state) + OperationLog. */}

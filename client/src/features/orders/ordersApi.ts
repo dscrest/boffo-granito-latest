@@ -196,7 +196,8 @@ export interface NewSalesOrderInput {
   currency: string;
   exchange_rate?: number;
   remarks: string;
-  address: string;
+  /** Omit to leave the stored address untouched (the SO form doesn't edit it). */
+  address?: string;
   salesperson: string;
   box_branding: string;
   customer_notes: string;

@@ -20,7 +20,7 @@ import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ProductionForm } from "./ProductionForm";
 import { ProductionImport } from "./ProductionImport";
-import { RecordOutputForm, type RecordOutputPayload } from "./RecordOutputForm";
+import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
 import { ProductionKanban, type ProductionGroupBy } from "./ProductionKanban";
 import {
   cachedProductionLogs,
@@ -349,20 +349,20 @@ export function ProductionTable() {
   // Log output on a line. When it finishes the line, also flip its stage to
   // Completed so the grid tab / detail stay consistent.
   const onRecord = (g: ProductionRequestGroup) => setRecordEntry(g.entries[0]);
-  const onRecordSave = async (payload: RecordOutputPayload, total: number) => {
-    const e = recordEntry;
+  const onRecordSave = async (results: RecordOutputResult[]) => {
     setRecordEntry(null);
-    if (!e) return;
     // ponytail: singles loop is sequential + non-atomic; form caps Σ ≤ remaining
-    let res;
-    if ("batches" in payload) res = await recordProductionLines(e.id, payload.batches);
-    else for (const s of payload.singles) { res = await recordProduction(e.id, s); if (!res.ok) break; }
-    if (!res?.ok) {
-      toast.error(res?.error || "Record output failed");
-      return;
+    for (const { entry: e, payload, total } of results) {
+      let res;
+      if ("batches" in payload) res = await recordProductionLines(e.id, payload.batches);
+      else for (const s of payload.singles) { res = await recordProduction(e.id, s); if (!res.ok) break; }
+      if (!res?.ok) {
+        toast.error(res?.error || "Record output failed");
+        break;
+      }
+      if (e.producedSoFar + total >= e.qtyRequested) await setProductionStage([e.id], "Completed");
+      toast.success(`+${fmt(total)} boxes produced`);
     }
-    if (e.producedSoFar + total >= e.qtyRequested) await setProductionStage([e.id], "Completed");
-    toast.success(`+${fmt(total)} boxes produced`);
     invalidateProductionLogs();
     await load();
   };
@@ -434,7 +434,7 @@ export function ProductionTable() {
 
       {showImport && <ProductionImport onDone={() => { invalidateProductionLogs(); void load(); }} onClose={() => setShowImport(false)} />}
 
-      {recordEntry && <RecordOutputForm entry={recordEntry} onSave={onRecordSave} onClose={() => setRecordEntry(null)} />}
+      {recordEntry && <RecordOutputForm entries={[recordEntry]} onSave={onRecordSave} onClose={() => setRecordEntry(null)} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 

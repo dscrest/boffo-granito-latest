@@ -538,7 +538,7 @@ function ContainerisePlanner({
   };
 
   const itemOptions = useMemo(
-    () => designs.map((x) => ({ value: x.uniqueName, label: x.uniqueName || x.name, hint: [x.size, x.finish].filter(Boolean).join(" · ") })),
+    () => designs.map((x) => ({ value: x.uniqueName || x.name, label: x.uniqueName || x.name, hint: [x.size, x.finish].filter(Boolean).join(" · ") })),
     [designs],
   );
 

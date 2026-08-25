@@ -10,6 +10,7 @@ import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listVehicles, createVehicle, formatVehicleNumber, type VehicleRow } from "@/features/masters/vehiclesApi";
+import { CONTAINER_TYPES } from "@/features/masters/containersApi";
 import type { LoadingCapture } from "./palPlansApi";
 
 export function VehicleLoadModal({
@@ -36,6 +37,10 @@ export function VehicleLoadModal({
     line_seal: initialCapture?.line_seal || "",
     electronic_seal: initialCapture?.electronic_seal || "",
     loading_supervisor: initialCapture?.loading_supervisor || "",
+    container_size: initialCapture?.container_size || "",
+    transporter: initialCapture?.transporter || "",
+    lr_number: initialCapture?.lr_number || "",
+    destination: initialCapture?.destination || "",
   });
   const setCap = (k: keyof LoadingCapture, v: string) => setCapture((c) => ({ ...c, [k]: v }));
   // Inline-create state ("" = picking; object = the new-vehicle form is open).
@@ -144,9 +149,14 @@ export function VehicleLoadModal({
                     onChange={(e) => setCap("container_number", e.target.value)} />
                 </label>
                 <label className="form-field">
-                  <span className="lbl">Loading Supervisor</span>
-                  <input value={capture.loading_supervisor} placeholder="Name"
-                    onChange={(e) => setCap("loading_supervisor", e.target.value)} />
+                  <span className="lbl">Size</span>
+                  <Combobox
+                    value={capture.container_size || ""}
+                    options={CONTAINER_TYPES.map((t) => ({ value: t, label: t }))}
+                    onChange={(v) => setCap("container_size", v)}
+                    placeholder="Container size…"
+                    ariaLabel="Container size"
+                  />
                 </label>
                 <label className="form-field">
                   <span className="lbl">Line Seal</span>
@@ -157,6 +167,26 @@ export function VehicleLoadModal({
                   <span className="lbl">Electronic Seal</span>
                   <input value={capture.electronic_seal} placeholder="E-seal no."
                     onChange={(e) => setCap("electronic_seal", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Transporter</span>
+                  <input value={capture.transporter} placeholder="Carrier company"
+                    onChange={(e) => setCap("transporter", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">LR / Docket No.</span>
+                  <input value={capture.lr_number} placeholder="LR number"
+                    onChange={(e) => setCap("lr_number", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Destination / Port</span>
+                  <input value={capture.destination} placeholder="Port / city"
+                    onChange={(e) => setCap("destination", e.target.value)} />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Loading Supervisor</span>
+                  <input value={capture.loading_supervisor} placeholder="Name"
+                    onChange={(e) => setCap("loading_supervisor", e.target.value)} />
                 </label>
               </div>
             </div>

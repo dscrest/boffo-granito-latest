@@ -21,6 +21,7 @@ import { STAGES } from "@/data";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
+import { DispatchTab } from "@/features/stages/DispatchTab";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS, PartyForm } from "./PartyForm";
 import {
@@ -629,6 +630,11 @@ export function CustomerDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Everything shipped to this customer, across all their orders.
+                This page is sections, not tabs — so Dispatch is a section. */}
+            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Dispatch</div>
+            <DispatchTab scope={{ kind: "customer", customerId: party.id }} />
 
             {/* Audit trail: who created / changed this customer, from OperationLog. */}
             <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Activity</div>

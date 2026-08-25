@@ -227,6 +227,29 @@ function summarize(payload) {
   }
 }
 
+/* Mirror one event onto RELATED records so their Activity tabs show it.
+   The client's ActivityLog filters OperationLog by table_name + entity_rowid,
+   so a loading event logged under PalletizationPlanLine is invisible on the
+   Sales Order that owns the item — these extra rows are what make it visible.
+   writeOpLog swallows its own errors, so this never fails the primary op. */
+async function logRelated(catalyst, refs, operation, payload) {
+  const seen = new Set();
+  const actor = await currentActor(catalyst);
+  for (const ref of refs) {
+    const rowid = String((ref && ref.rowid) || "");
+    if (!rowid || seen.has(`${ref.table}:${rowid}`)) continue;
+    seen.add(`${ref.table}:${rowid}`);
+    await writeOpLog(catalyst, {
+      table_name: ref.table,
+      operation,
+      entity_rowid: rowid,
+      status: "success",
+      actor,
+      payload_summary: summarize(payload),
+    });
+  }
+}
+
 /* ----------------------------------------------------------------
    StatusTransition — one row per status/stage flip on Quote /
    SalesOrder / OrderItem, so time-in-state can be reported (OperationLog
@@ -1272,7 +1295,9 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           currency: body.currency || "INR",
           exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
-          address: body.address || "",
+          // Address isn't on the SO form — omit it when unsent so editing an
+          // order can't blank the address carried over from its quote.
+          ...(typeof body.address === "string" ? { address: body.address } : {}),
           box_branding: body.box_branding || "",
           sales_person: salesPerson || undefined,
           customer_notes: body.customer_notes || "",
@@ -2032,10 +2057,12 @@ app.post("/pal-plan", async (req, res) => {
    up to produced − palletized on ONE reused open plan per SO (created on
    first need). Idempotent from ground truth — never "add the delta blindly" —
    so re-records, complete-after-record and manual Planning lines all
-   converge. New lines are born "Planning" = the board's "Ready for
-   Palletization" column. Callers wrap in try/catch: a queue failure must
-   never fail an already-committed production record. */
-async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
+   converge. Lines are always born "Planning" = the board's "Ready for
+   Palletization" column. `palletOverride` is the pallet picked on the Record
+   Output form — it wins over the SO line's own spec for the boxes this record
+   queues (and corrects the card it merges into). Callers wrap in try/catch: a
+   queue failure must never fail an already-committed production record. */
+async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverride) {
   const oiId = String(orderItemId || "");
   if (!/^\d+$/.test(oiId)) return;
   const zcql = catalyst.zcql();
@@ -2046,6 +2073,8 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
   )[0];
   const soId = oi ? String(oi.sales_order || "") : "";
   if (!soId) return;
+  const pickedPallet = String(palletOverride || "").replace(/[^0-9]/g, "");
+  const palletId = pickedPallet || (oi.pallet ? String(oi.pallet) : null);
   const available = (Number(oi.produced_qty_boxes) || 0) - (Number(oi.palletized_qty_boxes) || 0);
   if (available <= 0) return;
 
@@ -2101,16 +2130,15 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
   // lands on the "" line — exactly the old aggregate behavior.
   const recs = rowList(
     await zcql.executeZCQLQuery(
-      `SELECT batch_number, qty_boxes, second_stage, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
+      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
     ),
   );
-  const producedByBatch = new Map(); // batch → { qty, first, second }
+  const producedByBatch = new Map(); // batch → { qty, first }
   for (const r of recs) {
     const b = String(r.batch_number || "");
-    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || ""), second: false };
+    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
     cur.qty += Number(r.qty_boxes) || 0;
     if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
-    cur.second = cur.second || String(r.second_stage) === "true";
     producedByBatch.set(b, cur);
   }
   const enqueuedByBatch = new Map();
@@ -2120,19 +2148,22 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
     enqueuedByBatch.set(b, (enqueuedByBatch.get(b) || 0) + (Number(l.boxes) || 0));
   }
 
-  // st: "Planning" | "Palletizing" — 2nd-stage records land straight in the
-  // Palletization column, everything else in Ready for Palletization.
-  const upsert = async (batch, alloc, st = "Planning") => {
+  // Every new card is born "Planning" — the Ready for Palletization column.
+  const upsert = async (batch, alloc) => {
     const mine = liveLines.find(
       (l) =>
         String(l.plan) === planId &&
         String(l.order_item) === oiId &&
-        String(l.status) === st &&
+        String(l.status) === "Planning" &&
         String(l.batch_number || "") === batch,
     );
     if (mine) {
+      // An explicit pick also re-pallets the card it merges into; without one
+      // the existing pallet stands.
       await ds.table("PalletizationPlanLine").updateRow({
-        ROWID: mine.ROWID, boxes: (Number(mine.boxes) || 0) + alloc,
+        ROWID: mine.ROWID,
+        boxes: (Number(mine.boxes) || 0) + alloc,
+        ...(pickedPallet ? { pallet: pickedPallet } : {}),
       });
       mine.boxes = (Number(mine.boxes) || 0) + alloc;
     } else {
@@ -2141,13 +2172,13 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
         sales_order: soId,
         order_item: oiId,
         design: oi.design ? String(oi.design) : null,
-        pallet: oi.pallet ? String(oi.pallet) : null,
+        pallet: palletId,
         boxes: alloc,
         position: liveLines.filter((l) => String(l.plan) === planId).length,
-        status: st,
+        status: "Planning",
         batch_number: batch,
       });
-      liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: st, batch_number: batch });
+      liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: "Planning", batch_number: batch });
     }
   };
 
@@ -2160,7 +2191,7 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId) {
     const want = p.qty - (enqueuedByBatch.get(b) || 0);
     const alloc = Math.min(Math.max(want, 0), remaining);
     if (alloc <= 0) continue;
-    await upsert(b, alloc, p.second ? "Palletizing" : "Planning");
+    await upsert(b, alloc);
     remaining -= alloc;
   }
   if (remaining > 0) await upsert("", remaining);
@@ -2457,7 +2488,7 @@ async function nextBoxNumber(catalyst) {
 async function getBox(catalyst, boxId) {
   const rows = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, box_number, status, vehicle, capacity FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
+      `SELECT ROWID, box_number, status, vehicle, capacity, dispatch_date, container_number FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
     ),
   );
   if (!rows.length) throw badRequest(`Load box not found: ${boxId}`, 404);
@@ -2468,16 +2499,20 @@ async function getBox(catalyst, boxId) {
 async function boxLines(catalyst, boxId) {
   return rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, plan, order_item, boxes FROM PalletizationPlanLine WHERE load_box = ${boxId} AND deleted_at is null`,
+      `SELECT ROWID, plan, sales_order, order_item, boxes FROM PalletizationPlanLine WHERE load_box = ${boxId} AND deleted_at is null`,
     ),
   );
 }
 
-/* Loading-capture fields entered at the box (container no + seals + supervisor).
-   Copies any present field from the request body onto a LoadBox patch. Shared by
-   /load-box-update (advance entry) and /load-box-dispatch (last-minute) so data
-   entered at either point is persisted. */
-const LOAD_BOX_FIELDS = ["container_number", "line_seal", "electronic_seal", "loading_supervisor"];
+/* Loading-capture fields entered at the box (container identity + seals +
+   transport paperwork). Copies any present field from the request body onto a
+   LoadBox patch. Shared by /load-box (container-first create), /load-box-update
+   (advance entry) and /load-box-dispatch (last-minute) so data entered at any
+   point is persisted. */
+const LOAD_BOX_FIELDS = [
+  "container_number", "line_seal", "electronic_seal", "loading_supervisor",
+  "container_size", "transporter", "lr_number", "destination",
+];
 function applyLoadBoxFields(patch, body) {
   for (const f of LOAD_BOX_FIELDS) {
     if (body[f] !== undefined) patch[f] = String(body[f] || "").trim();
@@ -2497,15 +2532,22 @@ app.post("/load-box", async (req, res) => {
   try {
     const catalyst = init(req);
     const ds = catalyst.datastore();
+    const body = req.body || {};
     // Advisory only — fill % is measured against the lines' pallet capacity client-side.
-    const capacity = Number((req.body || {}).capacity) || 0;
+    const capacity = Number(body.capacity) || 0;
     const result = await withOpLog(
       catalyst,
-      { table_name: "LoadBox", operation: "insert", payload: req.body },
+      { table_name: "LoadBox", operation: "insert", payload: body },
       async () => {
         const boxNumber = await nextBoxNumber(catalyst);
-        const row = await ds.table("LoadBox").insertRow({ box_number: boxNumber, status: "Open", capacity });
-        return { rowid: row.ROWID, data: { ROWID: row.ROWID, box_number: boxNumber } };
+        // Container-first create: the load modal captures the vehicle, container
+        // identity and paperwork up front, so the box lands complete in one call.
+        const row = { box_number: boxNumber, status: "Open", capacity };
+        if (String(body.vehicle || "")) row.vehicle = String(body.vehicle);
+        if (String(body.dispatch_date || "")) row.dispatch_date = String(body.dispatch_date).slice(0, 10);
+        applyLoadBoxFields(row, body);
+        const inserted = await ds.table("LoadBox").insertRow(row);
+        return { rowid: inserted.ROWID, data: { ROWID: inserted.ROWID, box_number: boxNumber } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2587,6 +2629,9 @@ app.post("/load-box-update/:rowid", async (req, res) => {
           if (cap <= 0) throw badRequest("Capacity must be > 0", 400);
           patch.capacity = cap;
         }
+        // Planned dispatch date, editable while Open ("" clears it back to
+        // auto-stamp-on-dispatch).
+        if (body.dispatch_date !== undefined) patch.dispatch_date = String(body.dispatch_date || "").slice(0, 10) || null;
         applyLoadBoxFields(patch, body);
         await ds.table("LoadBox").updateRow(patch);
         return { rowid: boxId, data: { ROWID: boxId } };
@@ -2660,7 +2705,11 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
         if (!String(box.vehicle || "")) throw badRequest("Assign a vehicle before dispatch", 400);
         const lines = await boxLines(catalyst, boxId);
         if (!lines.length) throw badRequest("An empty box cannot be dispatched", 400);
-        const dispatchDate = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10); // IST
+        // A date entered on the container (load form / Confirm Load) wins; only
+        // an unset one falls back to today (IST).
+        const dispatchDate =
+          String(box.dispatch_date || "").slice(0, 10) ||
+          new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
         // Persist any last-minute loading-capture fields entered at dispatch.
         const dispatchPatch = applyLoadBoxFields({ ROWID: boxId, status: "Dispatched", dispatch_date: dispatchDate }, req.body || {});
         await ds.table("LoadBox").updateRow(dispatchPatch);
@@ -2710,6 +2759,20 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
           if (plan && String(plan.status) !== "Completed")
             await setPlanStatus(catalyst, ds, planId, String(plan.status || "Loading"), "Completed", { dispatch_date: dispatchDate });
         }
+        // Surface the dispatch on every order and plan that had boxes on it.
+        await logRelated(
+          catalyst,
+          [
+            ...lines.map((l) => ({ table: "SalesOrder", rowid: l.sales_order })),
+            ...lines.map((l) => ({ table: "PalletizationPlan", rowid: l.plan })),
+          ],
+          "dispatched",
+          {
+            boxes: lines.reduce((s, l) => s + (Number(l.boxes) || 0), 0),
+            container: String(dispatchPatch.container_number || box.container_number || "") || `Box ${box.box_number}`,
+            dispatch_date: dispatchDate,
+          },
+        );
         return { rowid: boxId, data: { ROWID: boxId, status: "Dispatched", dispatch_date: dispatchDate } };
       },
     );
@@ -2798,6 +2861,13 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
           if (planId) await demoteEmptyPlans(catalyst, ds, [planId]);
         }
         await recountOrderItems(catalyst, ds, [line.order_item]);
+        // Show the load/unload on the owning order and palletization plan.
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: line.sales_order }, { table: "PalletizationPlan", rowid: planId }],
+          toBox ? "loaded" : "unloaded",
+          { boxes: reqBoxes !== undefined ? Number(reqBoxes) : Number(line.boxes) || 0, box: toBox || "" },
+        );
         return { rowid: lineId, data: { ROWID: lineId, load_box: toBox || null } };
       },
     );
@@ -2928,6 +2998,17 @@ app.post("/send-to-loading", async (req, res) => {
             await setPlanStatus(catalyst, ds, planId, "Planning", "Loading");
         }
         await recountOrderItems(catalyst, ds, [...wanted.keys()]);
+        // Show the send on the order and the plan that received the lines.
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: soId }, { table: "PalletizationPlan", rowid: planId }],
+          "sent-to-loading",
+          {
+            boxes: [...wanted.values()].reduce((s, n) => s + n, 0),
+            items: wanted.size,
+            ...(box ? { container: String(box.container_number || "") || `Box ${box.box_number}` } : {}),
+          },
+        );
         return { rowid: planId, data: { ROWID: planId, lines: wanted.size } };
       },
     );
@@ -3285,7 +3366,6 @@ app.post("/production-record/:rowid", async (req, res) => {
           stage: String(pl.stage || "New"),
           batch_number: batchNumber,
           shade,
-          second_stage: body.second_stage === true,
           production_date: body.production_date != null ? String(body.production_date) : "",
           shift: body.shift != null ? String(body.shift) : "",
           performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -3297,7 +3377,7 @@ app.post("/production-record/:rowid", async (req, res) => {
         // Produced boxes flow straight to the palletization queue; a queue
         // failure never fails the already-committed record.
         if (orderItemId) {
-          try { await autoEnqueuePalletization(catalyst, ds, orderItemId); }
+          try { await autoEnqueuePalletization(catalyst, ds, orderItemId, body.pallet); }
           catch (e) { console.error("auto-enqueue palletization failed", e); }
         }
         return { rowid: String(rec.ROWID), data: { produced_qty_boxes: producedAfter, recorded: qty, batch_number: batchNumber } };
@@ -3315,7 +3395,7 @@ app.post("/production-record/:rowid", async (req, res) => {
    child per batch (blank batch auto-minted per row; shade dropped, written "").
    On any insert failure it deletes the rows it added and reverts the OrderItem
    bump, so a partial record never sticks.
-   body: { rows: [{ qty_boxes, batch_number?, mfg_date?, note? }], shift?, performed_by? } */
+   body: { rows: [{ qty_boxes, batch_number?, mfg_date?, note? }], shift?, performed_by?, pallet? } */
 app.post("/production-record-lines/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -3336,7 +3416,6 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
             batch_number: String(r.batch_number || "").trim(),
             mfg_date: r.mfg_date != null ? String(r.mfg_date) : "",
             note: r.note != null ? String(r.note) : "",
-            second_stage: r.second_stage === true,
           };
         });
         const sum = lines.reduce((s, l) => s + l.qty, 0);
@@ -3403,7 +3482,6 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
               stage: String(pl.stage || "New"),
               batch_number: batchNumber,
               shade: "",
-              second_stage: l.second_stage,
               production_date: l.mfg_date,
               shift: body.shift != null ? String(body.shift) : "",
               performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -3423,7 +3501,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
         // After the insert loop committed (not before — the compensation path
         // above would otherwise leave a stray queue line).
         if (orderItemId) {
-          try { await autoEnqueuePalletization(catalyst, ds, orderItemId); }
+          try { await autoEnqueuePalletization(catalyst, ds, orderItemId, body.pallet); }
           catch (e) { console.error("auto-enqueue palletization failed", e); }
         }
         return { rowid: inserted[0], data: { recorded: sum, rows: lines.length, batch_numbers: batchNumbers } };

@@ -3,37 +3,28 @@
    Palletization in one go (multi-item; replaces the one-at-a-time drag +
    pallet picker). Per line: identity + batch, a size-width-filtered pallet
    Combobox, and a pallet distribution readout (full pallets + partial).
-   A partial pallet can be topped up from ANY other Ready-for-Palletization
-   line of the same size width (any item/batch) — the pair then shares the
-   physical pallet and carries the Mix Batch marker (/pal-topup).
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
-import { NumberInput } from "@/ui/NumberInput";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { listPallets, palletsForSize, widthOf, type PalletRow } from "@/features/masters/palletsApi";
+import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import type { PalPlanLine } from "./palPlansApi";
 
 export interface PalletiseEntry {
   lineId: string;
   palletId: string;
-  /** Top-up for this line's partial pallet from a donor Planning line. */
-  topup?: { donorLineId: string; boxes: number };
 }
 
 export function PalletiseModal({
   lines,
-  donors,
   busy,
   toLabel = "Palletization",
   onConfirm,
   onClose,
 }: {
   lines: PalPlanLine[];
-  /** Other Ready-for-Palletization lines — top-up candidates. */
-  donors: PalPlanLine[];
   busy: boolean;
   /** Destination stage shown in the footer (Mark-ready routes here too). */
   toLabel?: string;
@@ -45,8 +36,6 @@ export function PalletiseModal({
   const [palletByLine, setPalletByLine] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((l) => [l.id, l.palletId])),
   );
-  const [donorByLine, setDonorByLine] = useState<Record<string, string>>({});
-  const [topupByLine, setTopupByLine] = useState<Record<string, number>>({});
   const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
@@ -62,58 +51,13 @@ export function PalletiseModal({
   const palletById = new Map(pallets.map((p) => [p.id, p]));
   // Distribution is per PHYSICAL pallet (boxes_per_pallet), not per container.
   const capOf = (lineId: string) => palletById.get(palletByLine[lineId] || "")?.boxesPerPallet || 0;
-  const donorById = new Map(donors.map((d) => [d.id, d]));
 
-  // ponytail: one donor per partial, and each donor tops up one pallet — keeps
-  // the clamps honest; multi-donor/multi-target splitting when someone asks.
-  const donorOptions = (l: PalPlanLine) => {
-    const w = widthOf(l.sizeCode);
-    const claimed = new Set(
-      Object.entries(donorByLine).filter(([lineId]) => lineId !== l.id).map(([, d]) => d),
-    );
-    return donors.filter((d) => !claimed.has(d.id) && (!w || widthOf(d.sizeCode) === w));
-  };
+  const setPallet = (lineId: string, pid: string) => setPalletByLine((p) => ({ ...p, [lineId]: pid }));
 
-  const setPallet = (lineId: string, pid: string) => {
-    setPalletByLine((p) => ({ ...p, [lineId]: pid }));
-    // Capacity changed → the old top-up clamp no longer holds; re-pick.
-    setDonorByLine(({ [lineId]: _, ...rest }) => rest);
-    setTopupByLine(({ [lineId]: _, ...rest }) => rest);
-  };
-  const setDonor = (l: PalPlanLine, donorId: string) => {
-    setDonorByLine((p) => {
-      const next = { ...p };
-      if (donorId) next[l.id] = donorId;
-      else delete next[l.id];
-      return next;
-    });
-    const cap = capOf(l.id);
-    const donor = donorById.get(donorId);
-    const room = cap > 0 ? cap - (l.boxes % cap) : 0;
-    setTopupByLine((p) => {
-      const next = { ...p };
-      if (donor && room > 0) next[l.id] = Math.min(donor.boxes, room);
-      else delete next[l.id];
-      return next;
-    });
-  };
-  const setTopup = (l: PalPlanLine, raw: string) => {
-    const donor = donorById.get(donorByLine[l.id] || "");
-    const cap = capOf(l.id);
-    const room = cap > 0 ? cap - (l.boxes % cap) : 0;
-    const max = donor ? Math.min(donor.boxes, room) : 0;
-    setTopupByLine((p) => ({ ...p, [l.id]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
-  };
-
-  const entries: PalletiseEntry[] = lines.map((l) => {
-    const donorId = donorByLine[l.id] || "";
-    const boxes = topupByLine[l.id] || 0;
-    return {
-      lineId: l.id,
-      palletId: palletByLine[l.id] || "",
-      ...(donorId && boxes > 0 ? { topup: { donorLineId: donorId, boxes } } : {}),
-    };
-  });
+  const entries: PalletiseEntry[] = lines.map((l) => ({
+    lineId: l.id,
+    palletId: palletByLine[l.id] || "",
+  }));
   const missingPallet = entries.filter((e) => !e.palletId).length;
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
 
@@ -151,7 +95,7 @@ export function PalletiseModal({
                 <th>Batch</th>
                 <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                 <th style={{ minWidth: 240 }}>Pallet</th>
-                <th style={{ minWidth: 300 }}>Pallets</th>
+                <th style={{ minWidth: 180 }}>Pallets</th>
               </tr>
             </thead>
             <tbody>
@@ -160,10 +104,6 @@ export function PalletiseModal({
                 const cap = capOf(l.id);
                 const full = cap > 0 ? Math.floor(l.boxes / cap) : 0;
                 const rem = cap > 0 ? l.boxes % cap : 0;
-                const donorId = donorByLine[l.id] || "";
-                const donor = donorById.get(donorId);
-                const dOpts = donorOptions(l);
-                const room = cap > 0 ? cap - rem : 0;
                 return (
                   <tr key={l.id}>
                     <td>
@@ -192,52 +132,16 @@ export function PalletiseModal({
                     </td>
                     <td>
                       {cap > 0 ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span style={{ fontSize: "var(--t-sm)" }}>
-                            {full > 0 && <strong>{full} full pallet{full === 1 ? "" : "s"}</strong>}
-                            {full > 0 && rem > 0 && " + "}
-                            {rem > 0 && (
-                              <span>
-                                partial <span className="mono">{fmt(rem)}/{fmt(cap)}</span>
-                              </span>
-                            )}
-                            {full > 0 && rem === 0 && " — exact fit"}
-                          </span>
+                        <span style={{ fontSize: "var(--t-sm)" }}>
+                          {full > 0 && <strong>{full} full pallet{full === 1 ? "" : "s"}</strong>}
+                          {full > 0 && rem > 0 && " + "}
                           {rem > 0 && (
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                              <span className="dim" style={{ fontSize: "var(--t-sm)", flex: "0 0 auto" }}>Top up</span>
-                              <span style={{ minWidth: 180, flex: 1 }}>
-                                <Combobox
-                                  value={donorId}
-                                  options={dOpts.map((d) => ({
-                                    value: d.id,
-                                    label: `${d.itemCode} · ${d.designLabel}${d.batchNumber ? ` · ${d.batchNumber}` : ""} · ${fmt(d.boxes)} bx`,
-                                  }))}
-                                  onChange={(v) => setDonor(l, v)}
-                                  placeholder={dOpts.length ? "Same-size item…" : "No same-size item waiting"}
-                                  ariaLabel="Top-up item"
-                                />
-                              </span>
-                              {donor && (
-                                <NumberInput
-                                  value={topupByLine[l.id] ?? ""}
-                                  onChange={(e) => setTopup(l, e.target.value)}
-                                  style={{ width: 80, textAlign: "right" }}
-                                  title={`Boxes to add — up to ${fmt(Math.min(donor.boxes, room))}`}
-                                />
-                              )}
-                              {donor && (topupByLine[l.id] || 0) > 0 && (
-                                <span
-                                  className="chip"
-                                  style={{ fontSize: 11, color: "var(--c-amber)", borderColor: "var(--c-amber)" }}
-                                  title={`${fmt(topupByLine[l.id] || 0)} boxes of ${donor.designLabel}${donor.batchNumber ? ` (batch ${donor.batchNumber})` : ""} share this pallet`}
-                                >
-                                  Mix Batch
-                                </span>
-                              )}
-                            </div>
+                            <span>
+                              partial <span className="mono">{fmt(rem)}/{fmt(cap)}</span>
+                            </span>
                           )}
-                        </div>
+                          {full > 0 && rem === 0 && " — exact fit"}
+                        </span>
                       ) : (
                         <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Choose a pallet to see the split</span>
                       )}

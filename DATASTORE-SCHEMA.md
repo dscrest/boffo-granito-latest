@@ -398,6 +398,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | tax_amount | double | stored positive; sign in total |
 | tax_type | varchar(10) | TDS subtracts / TCS adds |
 | share_token | varchar(64), UNIQUE | public read-only quote link |
+| container_plan | text(10000) | Plan Containerisation JSON snapshot (`{v:1, mode, tonCapacity, containers:[{no, fillPct, pallets, boxes, lines:[…]}]}`, `parseContainerPlan` in `client/src/data.ts`); truncated at 10000 chars; only written when sent, so plain edits never wipe it. Convert snapshots the quote's copy onto the SO. Shipping progress is DERIVED (`planProgress`) — no per-container id and no link to LoadBox — documented 2026-08-25 |
 | reject_reason | text(10000) | reason written on reject (status→Rejected); shown on the status hover |
 
 ### QuoteItem (76673000000050364)
@@ -424,6 +425,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | currency | varchar(10) | |
 | exchange_rate | double(4dp) | INR per 1 unit; copied from the source quote on convert (added 2026-07-13) |
 | remarks | text(10000) | |
+| container_plan | text(10000) | Plan Containerisation JSON snapshot (`{v:1, mode, tonCapacity, containers:[{no, fillPct, pallets, boxes, lines:[…]}]}`, `parseContainerPlan` in `client/src/data.ts`); truncated at 10000 chars; only written when sent, so plain edits never wipe it. Convert snapshots the quote's copy onto the SO. Shipping progress is DERIVED (`planProgress`) — no per-container id and no link to LoadBox — documented 2026-08-25 |
 | quote | FK → Quote | SET-NULL (source quote) |
 | customer | FK → Customer | SET-NULL |
 | payment_term | FK → PaymentTerm | SET-NULL |
@@ -456,6 +458,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | due_date | date | |
 | sales_order | FK → SalesOrder | **CASCADE** (col named `sales_order`, NOT `order`) |
 | design | FK → Design | SET-NULL |
+| pallet | FK → Pallet | pallet spec chosen on the SO line; the default for auto-enqueued PalletizationPlanLines and the Record Output pallet picker |
 | priority_level | varchar(20) | NOT `priority` (reserved) |
 | rate | double | |
 | discount_pct | double | |
@@ -500,7 +503,7 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
 | batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
 | shade | varchar(60) | shade of the batch (one batch = one shade) — added 2026-08-07 |
-| second_stage | boolean | on `record` rows: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` (board's Palletization column) instead of `Planning` — added 2026-08-17 |
+| second_stage | boolean | **RETIRED 2026-08-25** — no longer read or written. Was: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` instead of `Planning`. Removed because it silently kept production output out of "Ready for Palletization" (the flag was sticky per batch). Column left in place; old rows keep their value. |
 
 Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
 
@@ -615,11 +618,15 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | vehicle | FK → Vehicle | SET-NULL; required before dispatch |
 | capacity | int | advisory boxes-per-vehicle (default 1000) |
 | status | varchar(20) | Open / Dispatched |
-| dispatch_date | date | stamped on dispatch (IST) |
+| dispatch_date | date | planned date entered on the load form / Confirm Load; `/load-box-dispatch` only stamps today (IST) when it is still empty |
 | container_number | varchar(50) | loading capture; set via `/load-box-update` or `/load-box-dispatch` — added 2026-08-07 |
 | line_seal | varchar(50) | loading capture — added 2026-08-07 |
 | electronic_seal | varchar(50) | loading capture — added 2026-08-07 |
 | loading_supervisor | varchar(120) | loading capture — added 2026-08-07 |
+| container_size | varchar(10) | 20ft / 40ft / 40HQ — captured on the container-first load form — added 2026-08-25 |
+| transporter | varchar(120) | carrier company — added 2026-08-25 |
+| lr_number | varchar(60) | LR / docket number — added 2026-08-25 |
+| destination | varchar(120) | destination port / city — added 2026-08-25 |
 | share_token | varchar(64) | public pallet-label QR — minted by `POST /load-box-share/:rowid`; tokenless `GET /public/pallet/:token` feeds the scanner page (`#/share/box/<token>`, no login) — added 2026-08-11 |
 | deleted_at | datetime | soft delete |
 

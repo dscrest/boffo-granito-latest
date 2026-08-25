@@ -118,7 +118,7 @@ export function blankDesign(): DesignValues {
   v.pcs_per_box = "";
   v.box_weight_kg = "";
   v.status = "Active"; // #10: new designs default to Active
-  v.is_batched = "No"; // default singular; opt into batch tracking per item
+  v.is_batched = "Yes"; // default batch-tracked; opt out per item
   return v;
 }
 

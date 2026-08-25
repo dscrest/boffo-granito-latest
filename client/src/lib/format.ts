@@ -77,6 +77,12 @@ const OP_LABELS: Record<string, string> = {
   "close-pallet": "Pallet Closed",
   "load-container": "Container Loaded",
   dispatch: "Dispatched",
+  // Loading events mirrored onto the owning order / palletization plan
+  // (server logRelated) so they surface on those Activity tabs.
+  "sent-to-loading": "Sent to Loading",
+  loaded: "Loaded",
+  unloaded: "Unloaded",
+  dispatched: "Dispatched",
   "production-log": "Production Update",
 };
 export function opLabel(operation?: string): string {

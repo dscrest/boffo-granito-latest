@@ -23,9 +23,10 @@ import { fmt, fmtDateTime, fmtLocalDate, pct } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import type { CSSProperties } from "react";
 import { useMasters } from "@/features/masters/useMasters";
+import { useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { ProductionForm } from "./ProductionForm";
-import { RecordOutputForm, type RecordOutputPayload } from "./RecordOutputForm";
+import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
 import { ProductionEditForm } from "./ProductionEditForm";
 import { ProductionCompleteForm, type ProductionCompleteResult } from "./ProductionCompleteForm";
 import {
@@ -75,19 +76,20 @@ export function ProductionDetail() {
   const [listQ, setListQ] = useState("");
   const [cloning, setCloning] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
-  // Remaining lines queued behind recordEntry when "Record all output" is used.
-  const [recordQueue, setRecordQueue] = useState<ProductionEntry[]>([]);
-  // Total lines in the current Record-all walk (0 = single-line record, no step shown).
-  const [recordTotal, setRecordTotal] = useState(0);
+  // All lines shown in one Record Output modal ("Record all") or just one.
+  const [recordEntries, setRecordEntries] = useState<ProductionEntry[] | null>(null);
   const [logItemFilter, setLogItemFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   // Completion capture dialog (opened when moving into Completed).
   const [completeOpen, setCompleteOpen] = useState(false);
 
-  const { salesPersons } = useMasters();
+  const { salesPersons, designRows } = useMasters();
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
   const fields = useColumns("productionDetailFields", FIELDS);
+  // Per-line on-hand boxes + batch-tracking flag, off the shared derivation
+  // (same basis as the SO / production forms).
+  const stockFor = useStockLookup();
+  const isBatched = (designName: string) => designRows.find((d) => d.designName === designName)?.isBatched ?? false;
 
   const groups = useMemo(
     () => groupProductionByOrder(entries).sort((a, b) => (b.createdTime > a.createdTime ? 1 : -1)),
@@ -128,41 +130,29 @@ export function ProductionDetail() {
     await load();
   };
 
-  const onRecordSave = async (payload: RecordOutputPayload, total: number) => {
-    const entry = recordEntry;
-    setRecordEntry(null);
-    if (!entry) return;
+  const onRecordSave = async (results: RecordOutputResult[]) => {
+    setRecordEntries(null);
     setBusy("Recording…");
-    // ponytail: singles loop is sequential + non-atomic; form caps Σ ≤ remaining
-    let res;
-    if ("batches" in payload) res = await recordProductionLines(entry.id, payload.batches);
-    else for (const s of payload.singles) { res = await recordProduction(entry.id, s); if (!res.ok) break; }
-    if (!res || !res.ok) {
-      setBusy(null);
-      setRecordQueue([]);
-      setRecordTotal(0);
-      toast.error(res?.error || "Record output failed");
-      await load();
-      return;
-    }
-    toast.success(`+${fmt(total)} boxes produced`);
-    // "Record all" walks the queue — show the entry form for each remaining line
-    // so the date / details can be set per line before recording.
-    const [next, ...rest] = recordQueue;
-    if (next) {
-      setRecordQueue(rest);
-      setBusy(null);
-      setRecordEntry(next);
-      return;
+    // ponytail: per-entry loop is sequential + non-atomic; form caps Σ ≤ remaining
+    let failed: string | undefined;
+    for (const { entry, payload } of results) {
+      let res;
+      if ("batches" in payload) res = await recordProductionLines(entry.id, payload.batches);
+      else for (const s of payload.singles) { res = await recordProduction(entry.id, s); if (!res.ok) break; }
+      if (!res?.ok) { failed = res?.error || "Record output failed"; break; }
     }
     setBusy(null);
-    setRecordTotal(0);
+    if (failed) {
+      toast.error(failed);
+    } else {
+      const total = results.reduce((s, r) => s + r.total, 0);
+      toast.success(`+${fmt(total)} boxes produced`);
+    }
     invalidateProductionLogs();
     await load();
   };
 
-  // Record every line still owing output — one entry form per line (so each keeps
-  // its own date). Lines with nothing left to produce are skipped.
+  // Record every line still owing output — one form, one section per line.
   const onRecordAll = () => {
     if (!group) return;
     const queue = group.entries.filter((e) => e.qtyRequested - e.producedSoFar > 0);
@@ -170,9 +160,7 @@ export function ProductionDetail() {
       toast.error("No lines left to record");
       return;
     }
-    setRecordQueue(queue.slice(1));
-    setRecordTotal(queue.length);
-    setRecordEntry(queue[0]);
+    setRecordEntries(queue);
   };
 
   const onStageChange = async (stage: ProductionStage) => {
@@ -291,17 +279,8 @@ export function ProductionDetail() {
           onClose={() => setCloning(false)}
         />
       )}
-      {recordEntry && (
-        <RecordOutputForm
-          entry={recordEntry}
-          step={recordTotal > 0 ? { n: recordTotal - recordQueue.length, of: recordTotal } : undefined}
-          onSave={onRecordSave}
-          onClose={() => {
-            setRecordEntry(null);
-            setRecordQueue([]);
-            setRecordTotal(0);
-          }}
-        />
+      {recordEntries && (
+        <RecordOutputForm entries={recordEntries} onSave={onRecordSave} onClose={() => setRecordEntries(null)} />
       )}
       {editing && <ProductionEditForm group={group} onSaved={onEditSave} onClose={() => setEditing(false)} />}
       {completeOpen && group && <ProductionCompleteForm group={group} onSave={onCompleteSave} onClose={() => setCompleteOpen(false)} />}
@@ -460,7 +439,7 @@ export function ProductionDetail() {
                       <th className="num" style={{ textAlign: "right" }}>Requested</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>
-                      {canRecord && <th style={{ width: 110 }}></th>}
+                      {canRecord && <th style={{ width: 130 }}></th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -473,7 +452,12 @@ export function ProductionDetail() {
                           : { label: "To produce", color: "var(--c-amber)" };
                       return (
                         <tr key={e.id}>
-                          <td><span className="design-name">{e.design}</span></td>
+                          <td>
+                            <span className="design-name">{e.design}</span>
+                            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+                              On hand {fmt(stockFor(e.design).available)} boxes
+                            </div>
+                          </td>
                           <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
                           <td><span className="chip" style={{ color: lineState.color }}>{lineState.label}</span></td>
                           <td className="num mono">{fmt(e.qtyRequested)}</td>
@@ -483,12 +467,12 @@ export function ProductionDetail() {
                             <td style={{ textAlign: "right" }}>
                               {canRecordLine(e) && (
                                 <button
-                                  className="hbtn"
-                                  style={{ height: 24, padding: "0 8px", borderRadius: 5 }}
-                                  onClick={() => setRecordEntry(e)}
+                                  className="linkish"
+                                  style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit" }}
+                                  onClick={() => setRecordEntries([e])}
                                   title="Log the actual boxes produced"
                                 >
-                                  <Icon name="factory" size={12} /> Record
+                                  + {isBatched(e.design) ? "Add Batches" : "Record Output"}
                                 </button>
                               )}
                             </td>

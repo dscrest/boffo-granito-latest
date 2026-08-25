@@ -90,6 +90,8 @@ export interface ProductionEntry {
   produced: number;
   /** Boxes of this line already palletised — a palletised line can't be deleted. */
   palletized: number;
+  /** Pallet spec chosen on the SO line — the Record Output default ("" = none). */
+  palletId: string;
   createdTime: string;
   modifiedTime: string;
 }
@@ -154,7 +156,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     list("Finish", { limit: 300, columns: ["name"] }),
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
     listAll("Customer", { columns: ["name"] }),
-    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes"] }),
+    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
   ]);
   if (!logs.ok) return { ok: false, entries: [], openingEntries: [], error: logs.error };
 
@@ -268,6 +270,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
         ordered: oi ? num(oi.ordered_qty_boxes) : 0,
         produced: oi ? num(oi.produced_qty_boxes) : 0,
         palletized: oi ? num(oi.palletized_qty_boxes) : 0,
+        palletId: oi ? str(oi.pallet) : "",
         createdTime: str(r.CREATEDTIME),
         modifiedTime: str(r.MODIFIEDTIME),
       };
@@ -301,8 +304,8 @@ export interface ProductionRecordInput {
   /** Batch number; blank → server auto-mints B/FY/NNN. One batch = one shade. */
   batch_number?: string;
   shade?: string;
-  /** Output is in the 2nd stage of palletization → queue card lands in the Palletization column. */
-  second_stage?: boolean;
+  /** Pallet spec for the queue line this record creates; blank → the SO line's own. */
+  pallet?: string;
 }
 /** One batch row of a multi-batch record (batch-tracked items). */
 export interface ProductionRecordLine {
@@ -312,13 +315,13 @@ export interface ProductionRecordLine {
   /** Batch mfg date. */
   mfg_date?: string;
   note?: string;
-  /** Output is in the 2nd stage of palletization → queue card lands in the Palletization column. */
-  second_stage?: boolean;
 }
 export interface ProductionRecordLinesInput {
   rows: ProductionRecordLine[];
   shift?: string;
   performed_by?: string;
+  /** Pallet spec for the queue lines these records create; blank → the SO line's own. */
+  pallet?: string;
 }
 /** One batch row of opening stock (batch-tracked items). */
 export interface OpeningStockLine {

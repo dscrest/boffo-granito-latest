@@ -368,7 +368,7 @@ export function QuoteForm({
                         onChange={(v) => setLine(i, "item", v)}
                         placeholder="Search item…"
                         options={designs.map((x) => ({
-                          value: x.uniqueName,
+                          value: x.uniqueName || x.name,
                           label: x.uniqueName || x.name,
                           hint: [x.size, x.finish].filter(Boolean).join(" · "),
                         }))}
