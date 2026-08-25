@@ -27,7 +27,9 @@ function mapBy(rows: DSRow[] | undefined, field: string): Map<string, string> {
 
 export type ProductionStatus = "PendingApproval" | "Approved" | "Produced" | "Rejected";
 
-/** Manual Kanban stage (approval retired 2026-07). Moved by drag, not by recording. */
+/** Kanban stage (approval retired 2026-07). Auto-steps on recording (first
+    record → InProduction, full coverage → Completed); drag still works, QC is
+    manual-only. */
 export type ProductionStage = "New" | "InProduction" | "QC" | "Completed";
 
 /** One dated recorded-output row (entry_type=record), child of a plan line. */
@@ -58,7 +60,7 @@ export interface ProductionEntry {
   finish: string;
   /** Legacy approval status (retired UI). Kept for the commented approval path. */
   status: ProductionStatus;
-  /** Manual Kanban stage (denormalised across the group's lines). */
+  /** Kanban stage (denormalised across the group's lines). */
   stage: ProductionStage;
   /** Desired boxes from the request. */
   qtyRequested: number;
@@ -470,7 +472,7 @@ export interface ProductionRequestGroup {
   performedBy: string;
   date: string; // production_date or created
   status: ProductionStatus; // rolled-up legacy status (retired UI)
-  stage: ProductionStage; // manual Kanban stage across the group's lines
+  stage: ProductionStage; // Kanban stage across the group's lines
   records: ProductionRecordRow[]; // every dated output record in the group
   designs: string[]; // unique design names in the production
   designSummary: string; // "Design A" or "Design A +2"

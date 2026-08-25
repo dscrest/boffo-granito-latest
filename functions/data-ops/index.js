@@ -3024,8 +3024,9 @@ app.post("/send-to-loading", async (req, res) => {
    separate "record" child row (entry_type=record, parent_log=plan) carrying the
    actual `qty_boxes` + date/shift; that bumps OrderItem.produced (order-linked,
    capped at ordered) and steps stage po→prod. The plan line stays recordable
-   until its records cover qty_requested. Kanban stage is moved MANUALLY (drag),
-   independent of recording.
+   until its records cover qty_requested. Kanban stage auto-steps on recording
+   (first record: New → InProduction; records covering qty_requested: →
+   Completed); manual drag still works and QC is only ever entered/left by hand.
 
    POST /production-log          — create a request (one plan row per line, shared request_group)
    POST /production-record/:id   — record actual output → inserts a record child
@@ -3285,11 +3286,34 @@ app.post("/production-status/:group", async (req, res) => {
   }
 });
 
+/* Auto-step a plan line's Kanban stage on recorded output. First record moves
+   New → InProduction; when records cover qty_requested the line moves to
+   Completed (only from New/InProduction — QC sign-off and any manual stage stay
+   hand-driven, and nothing is ever demoted). Best-effort: a failure here never
+   fails the already-committed record. */
+async function autoStepProductionStage(catalyst, ds, pl, producedAfterLine) {
+  try {
+    const cur = String(pl.stage || "New");
+    const requested = Number(pl.qty_requested) || 0;
+    let next = "";
+    if (requested > 0 && producedAfterLine >= requested && (cur === "New" || cur === "InProduction")) next = "Completed";
+    else if (cur === "New") next = "InProduction";
+    if (!next || next === cur) return;
+    await ds.table("ProductionLog").updateRow({ ROWID: String(pl.ROWID), stage: next });
+    await logTransition(catalyst, {
+      entity_type: "ProductionLog", entity_rowid: String(pl.ROWID), from_status: "", to_status: `Stage: ${next}`,
+      note: "Auto on recorded output",
+    });
+  } catch (e) {
+    console.error("auto-step production stage failed", e);
+  }
+}
+
 /* Record actual output against a plan line. Inserts a SEPARATE dated "record"
    child row (entry_type=record, parent_log=plan) — the plan line is untouched, so
    partial records accumulate and the line stays recordable until its records
    cover qty_requested. Bumps OrderItem.produced (order-linked, capped at ordered)
-   and steps stage po→prod. Kanban stage is NOT changed here (moved manually).
+   and steps stage po→prod. Kanban stage auto-steps (autoStepProductionStage).
    body: { qty_boxes, production_date?, shift?, performed_by?, note? } */
 app.post("/production-record/:rowid", async (req, res) => {
   try {
@@ -3374,6 +3398,7 @@ app.post("/production-record/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${qty}`,
         });
+        await autoStepProductionStage(catalyst, ds, pl, producedSoFar + qty);
         // Produced boxes flow straight to the palletization queue; a queue
         // failure never fails the already-committed record.
         if (orderItemId) {
@@ -3498,6 +3523,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
         await logTransition(catalyst, {
           entity_type: "ProductionLog", entity_rowid: rowid, from_status: "", to_status: `Recorded +${sum} (${lines.length} batches)`,
         });
+        await autoStepProductionStage(catalyst, ds, pl, producedSoFar + sum);
         // After the insert loop committed (not before — the compensation path
         // above would otherwise leave a stray queue line).
         if (orderItemId) {
@@ -3584,8 +3610,9 @@ app.post("/opening-stock/:designId", async (req, res) => {
   }
 });
 
-/* Move a production to a Kanban stage — manual drag; recording output does NOT
-   change the stage. Sets `stage` on the given plan-line ROWIDs (the whole group).
+/* Move a production to a Kanban stage — manual drag (recording output ALSO
+   auto-steps, see autoStepProductionStage). Sets `stage` on the given plan-line
+   ROWIDs (the whole group).
    Optional per-line `notes` map (e.g. item-wise QC remarks) + an overall `note`
    ride along on the stage transition so they show in the Activity feed.
    body: { stage, ids: [plan-line ROWIDs], notes?: {id:remark}, note? } */
