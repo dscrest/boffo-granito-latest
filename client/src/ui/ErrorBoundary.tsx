@@ -28,7 +28,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="card" style={{ margin: 24, padding: 24 }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>This page hit an error.</div>
-          <div className="muted mono" style={{ fontSize: 12, marginBottom: 14 }}>
+          <div className="muted mono" style={{ fontSize: 14, marginBottom: 14 }}>
             {this.state.error.message}
           </div>
           <button className="btn" onClick={() => this.setState({ error: null })}>

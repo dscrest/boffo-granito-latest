@@ -22,6 +22,7 @@ import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DispatchTab } from "@/features/stages/DispatchTab";
+import { PanelsPanel } from "@/features/panels/PanelsPanel";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS, PartyForm } from "./PartyForm";
 import {
@@ -500,7 +501,7 @@ export function CustomerDetail() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div
                   className="title"
-                  style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   title={party.name}
                 >
                   {party.name}
@@ -630,6 +631,11 @@ export function CustomerDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Showcase panels this customer ordered (Panel Craft) — the panel
+                order's lifecycle says whether it was sent (Dispatched). */}
+            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Showcase Panels</div>
+            <PanelsPanel scope={{ kind: "customer", customerId: party.id }} />
 
             {/* Everything shipped to this customer, across all their orders.
                 This page is sections, not tabs — so Dispatch is a section. */}

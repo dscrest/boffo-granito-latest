@@ -307,6 +307,7 @@ export function LoadContainerModal({
   linesOfBox,
   presetBoxId,
   busy,
+  planHint,
   onConfirm,
   onClose,
 }: {
@@ -316,6 +317,8 @@ export function LoadContainerModal({
   linesOfBox: (boxId: string) => Array<{ p: PalPlan; l: PalPlanLine }>;
   presetBoxId?: string;
   busy: boolean;
+  /** The SO/quote container plan's next target for this design (guide + warn only). */
+  planHint?: { docNo: string; containerNo: number; boxes: number; palletName: string };
   /** boxId = load into that container; details = mint a new one first. */
   onConfirm: (
     target: { boxId: string } | { details: { vehicle?: string; dispatch_date?: string } & LoadingCapture },
@@ -463,6 +466,16 @@ export function LoadContainerModal({
               {wouldMixBatches && (
                 <div style={{ fontSize: "var(--t-sm)", marginTop: 8, color: "var(--c-amber)", fontWeight: 600 }}>
                   This order item already rides in {selBox!.containerNumber || boxLabel(selBox!)} from another batch — tile texture may vary
+                </div>
+              )}
+              {planHint && (
+                <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 8 }}>
+                  Plan {planHint.docNo}: C{planHint.containerNo} — {fmt(planHint.boxes)} boxes of this design on {planHint.palletName}
+                </div>
+              )}
+              {planHint && effCount > planHint.boxes && (
+                <div style={{ fontSize: "var(--t-sm)", marginTop: 4, color: "var(--c-amber)", fontWeight: 600 }}>
+                  The plan calls for {fmt(planHint.boxes)} boxes in C{planHint.containerNo} — loading {fmt(effCount)}
                 </div>
               )}
             </>

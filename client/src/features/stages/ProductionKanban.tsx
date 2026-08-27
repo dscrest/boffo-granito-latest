@@ -111,7 +111,7 @@ export function ProductionKanban({
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
               <span style={{ fontWeight: 600 }}>{meta.label}</span>
-              <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>{cards.length}</span>
+              <span className="muted" style={{ fontSize: 14, marginLeft: "auto" }}>{cards.length}</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, minHeight: 80 }}>
               {cards.map((c) => {
@@ -137,7 +137,7 @@ export function ProductionKanban({
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span className="mono" style={{ fontWeight: 600 }}>{c.g.code}</span>
-                      <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>{fmt(c.qty)} box</span>
+                      <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{fmt(c.qty)} box</span>
                       {c.kind === "remaining" && canEdit && (
                         <button
                           type="button"
@@ -216,12 +216,12 @@ export function ProductionKanban({
               {depth === 0 ? (
                 <div className="form-section-title">
                   <span style={{ flex: 1 }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
+                  <span className="muted" style={{ fontSize: 14, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: "var(--muted)" }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
+                  <span style={{ fontWeight: 600, fontSize: 15, color: "var(--muted)" }}>{k}</span>
+                  <span className="muted" style={{ fontSize: 14 }}>{sub.length}</span>
                 </div>
               )}
               {renderLevel(sub, dims.slice(1), depth + 1, `${keyPrefix}/${dims[0]}=${k}`)}

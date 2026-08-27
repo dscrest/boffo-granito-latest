@@ -155,7 +155,7 @@ export function VehicleFillBar({
     <div className="form-section">
       <div className="form-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span>Vehicle loading</span>
-        <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+        <span className="muted" style={{ fontSize: 14, fontWeight: 400 }}>
           {fmt(usedBoxes)} / {fmt(totalCap)} boxes · {vehicleCount} vehicle{vehicleCount === 1 ? "" : "s"}
           {unassignedBoxes > 0 && <span style={{ color: "var(--c-red)" }}> · {fmt(unassignedBoxes)} not loaded</span>}
         </span>
@@ -247,7 +247,7 @@ export function VehicleFillBar({
                             alignItems: "center",
                             justifyContent: "center",
                             color: "#fff",
-                            fontSize: 11,
+                            fontSize: 13,
                             fontWeight: 600,
                             textShadow: "0 1px 1px rgba(0,0,0,0.35)",
                             overflow: "hidden",
@@ -259,7 +259,7 @@ export function VehicleFillBar({
                       );
                     })}
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: fillColor, minWidth: 44, textAlign: "right" }} title="Vehicle fill vs capacity">
+                  <span style={{ fontSize: 15, fontWeight: 700, color: fillColor, minWidth: 44, textAlign: "right" }} title="Vehicle fill vs capacity">
                     {fillPct}%
                   </span>
                 </div>

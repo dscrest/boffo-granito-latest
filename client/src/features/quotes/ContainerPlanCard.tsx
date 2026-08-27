@@ -43,12 +43,12 @@ export function ContainerPlanCard({ containerPlan, docNo, plannerPath, dispatche
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
         <span style={{ fontWeight: 600 }}>Container Plan</span>
-        <span className="muted" style={{ fontSize: 12 }}>
+        <span className="muted" style={{ fontSize: 14 }}>
           {plan.containers.length} container{plan.containers.length === 1 ? "" : "s"} planned on{" "}
           <Link className="linkish" to={plannerPath}>{docNo}</Link>
         </span>
         {summary && (
-          <span className="mono" style={{ fontSize: 12, color: summary.sent > 0 ? "var(--c-green)" : "var(--dim)" }}>
+          <span className="mono" style={{ fontSize: 14, color: summary.sent > 0 ? "var(--c-green)" : "var(--dim)" }}>
             {summary.sent} of {summary.total} sent · {fmt(summary.boxes)} of {fmt(summary.planned)} boxes
           </span>
         )}

@@ -89,7 +89,7 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
               <Icon name="palette" size={13} />
               Send to Palletisation
             </button>
-            <button className="iconbtn" title="Close" onClick={onClose} style={{ fontSize: 16 }}>
+            <button className="iconbtn" title="Close" onClick={onClose} style={{ fontSize: 18 }}>
               ×
             </button>
           </div>
@@ -286,7 +286,7 @@ function PackingTab({
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 14, padding: "6px 14px 14px", fontSize: 11, color: "var(--muted)" }}>
+        <div style={{ display: "flex", gap: 14, padding: "6px 14px 14px", fontSize: 13, color: "var(--muted)" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span className="pallet-cell loaded" style={{ width: 12, height: 12 }} /> Loaded {loaded}
           </span>

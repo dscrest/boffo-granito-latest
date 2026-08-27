@@ -31,9 +31,12 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt } from "@/lib/format";
 import { isoInfo } from "@/features/masters/customersApi";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { planProgress } from "@/features/quotes/planProgress";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
+import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
+import { useContainerPlanBySo } from "./containerPlanPrefill";
 import {
   boxFill,
   boxLabel,
@@ -62,7 +65,7 @@ const STAGES = [
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
   { key: "InLoading", label: "In Loading", chip: "p-loading" },
   { key: "ReadyDispatch", label: "Ready for Dispatch", chip: "p-palletized" },
-  { key: "Dispatched", label: "Dispatch", chip: "p-completed" },
+  { key: "Dispatched", label: "Dispatched", chip: "p-completed" },
 ] as const;
 const stageMeta = (s: LoadStage) => STAGES.find((c) => c.key === s)!;
 const STAGE_IDX = new Map(STAGES.map((c, i) => [c.key, i]));
@@ -106,7 +109,7 @@ function loadColumns(): ColumnDef<Row>[] {
         <>
           {r.l.batchNumber || "—"}
           {r.l.palletGroup && (
-            <span className="chip" style={{ fontSize: 11, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
+            <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
               Mix Batch
             </span>
           )}
@@ -234,6 +237,25 @@ export function LoadingBay() {
   const isEmptyBox = (b: LoadBox) => linesOfBox(b.id).length === 0;
   const openBoxes = boxes.filter((b) => b.status === "Open");
 
+  // Guide-by-plan: the SO/quote container plan's next unfilled container that
+  // wants this design — shown as a hint (never enforced) in LoadContainerModal.
+  const { planBySo, designIdOf } = useContainerPlanBySo();
+  const planHintFor = (l: PalPlanLine) => {
+    const cp = planBySo.get(l.salesOrderId);
+    if (!cp) return undefined;
+    const prog = planProgress(
+      cp.plan,
+      dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [l.salesOrderId] })),
+      designIdOf,
+    );
+    for (let i = 0; i < cp.plan.containers.length; i++) {
+      if (prog[i].status === "Sent") continue;
+      const ln = cp.plan.containers[i].lines.find((x) => designIdOf(x.design) === l.designId);
+      if (ln) return { docNo: cp.docNo, containerNo: cp.plan.containers[i].no, boxes: ln.boxes, palletName: ln.palletName };
+    }
+    return undefined;
+  };
+
   const stageOf = (l: PalPlanLine): LoadStage | null => {
     const b = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
     if (b?.status === "Dispatched") return "Dispatched";
@@ -267,7 +289,14 @@ export function LoadingBay() {
         .toLowerCase()
         .includes(qLower),
   );
-  const filtered = applyFilters(searched, criteria, filterFields);
+  // A saved stage filter may still hold the old "Dispatch" label (renamed
+  // "Dispatched" 2026-08-27) — normalize at read time.
+  const effCriteria = useMemo(() => {
+    const stage = criteria.stage;
+    if (!Array.isArray(stage) || !stage.includes("Dispatch")) return criteria;
+    return { ...criteria, stage: stage.map((s) => (s === "Dispatch" ? "Dispatched" : s)) };
+  }, [criteria]);
+  const filtered = applyFilters(searched, effCriteria, filterFields);
 
   // ---- sort / pager / group bands (sheet) ---------------------
   const sort = useSortRows(filtered, loadSortVal, "stage");
@@ -569,7 +598,7 @@ export function LoadingBay() {
           </button>
           <span
             className="chip"
-            style={{ marginLeft: "auto", fontSize: 11 }}
+            style={{ marginLeft: "auto", fontSize: 13 }}
             title={l.palletCapacity > 0 ? `${fmt(l.boxes)} of ${fmt(l.palletCapacity)} boxes — a full ${l.palletName} container` : undefined}
           >
             {fmt(l.boxes)} box{l.palletCapacity > 0 ? ` · ${Math.round(lineFrac(l) * 100)}%` : ""}
@@ -589,27 +618,27 @@ export function LoadingBay() {
         {(l.batchNumber || l.palletGroup || box) && (
           <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
             {l.batchNumber && (
-              <span className="chip mono" style={{ fontSize: 11 }} title="Production batch — load one batch per customer for uniform texture">
+              <span className="chip mono" style={{ fontSize: 13 }} title="Production batch — load one batch per customer for uniform texture">
                 Batch {l.batchNumber}
               </span>
             )}
             {l.palletGroup && (
-              <span className="chip" style={{ fontSize: 11, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="This item shares a physical pallet with another batch/item">
+              <span className="chip" style={{ fontSize: 13, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="This item shares a physical pallet with another batch/item">
                 Mix Batch
               </span>
             )}
             {box && (
-              <span className="chip mono" style={{ fontSize: 11 }} title={`Container · ${Math.round(fillOf(box) * 100)}% full`}>
+              <span className="chip mono" style={{ fontSize: 13 }} title={`Container · ${Math.round(fillOf(box) * 100)}% full`}>
                 <Icon name="truck" size={10} /> {boxLabel(box)}
               </span>
             )}
             {box && sealed(box) && (
-              <span className="chip mono" style={{ fontSize: 11 }} title="Container no. / line seal captured">
+              <span className="chip mono" style={{ fontSize: 13 }} title="Container no. / line seal captured">
                 {box.containerNumber || box.lineSeal}
               </span>
             )}
             {stage === "Dispatched" && box?.dispatchDate && (
-              <span className="chip mono" style={{ fontSize: 11 }} title="Dispatch date">{box.dispatchDate}</span>
+              <span className="chip mono" style={{ fontSize: 13 }} title="Dispatch date">{box.dispatchDate}</span>
             )}
           </div>
         )}
@@ -665,7 +694,7 @@ export function LoadingBay() {
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <Icon name="truck" size={12} />
         <span className="mono" style={{ fontWeight: 600 }}>{boxLabel(b)}</span>
-        <span className="chip" style={{ marginLeft: "auto", fontSize: 11 }}>Empty</span>
+        <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>Empty</span>
       </div>
       <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>No items yet — open to add items</div>
     </div>
@@ -684,7 +713,7 @@ export function LoadingBay() {
           <div key={col.key} className="card" style={{ padding: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
               <span className={`chip palstatus ${col.chip}`}>{col.label}</span>
-              <span className="muted mono" style={{ fontSize: 12, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
+              <span className="muted mono" style={{ fontSize: 14, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
                 {cards.length} · {fmt(totalBoxes)} bx
               </span>
             </div>
@@ -719,12 +748,12 @@ export function LoadingBay() {
               {depth === 0 ? (
                 <div className="form-section-title">
                   <span style={{ flex: 1 }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
+                  <span className="muted" style={{ fontSize: 14, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: "var(--muted)" }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
+                  <span style={{ fontWeight: 600, fontSize: 15, color: "var(--muted)" }}>{k}</span>
+                  <span className="muted" style={{ fontSize: 14 }}>{sub.length}</span>
                 </div>
               )}
               {renderLevel(sub, dims.slice(1), depth + 1)}
@@ -922,6 +951,7 @@ export function LoadingBay() {
             linesOfBox={linesOfBox}
             presetBoxId={picker.presetBoxId}
             busy={busy}
+            planHint={line ? planHintFor(line) : undefined}
             onConfirm={(target, count) => void confirmLoad(target, count)}
             onClose={() => setPicker(null)}
           />

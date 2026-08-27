@@ -1,45 +1,39 @@
 /* ============================================================
    Dispatch Control Board — the /packing board view (replaces PalKanban).
-   Full-width stage board (2026-08-22 declutter): a stage-pill summary header
-   and 4 columns of PalletizationPlanLines — Ready for Palletization →
-   Palletization → Ready for Loading → Dispatch (In Dispatch/Dispatched merged;
-   a per-card chip tells them apart). Kanban/Sheet is chosen by the page-header
-   toggle in PalPlans and arrives as the `view` prop.
+   Full-width stage board: 3 columns of PalletizationPlanLines — Ready for
+   Palletization → Palletization → Ready for Loading. Palletise moves a line
+   STRAIGHT to Ready for Loading (pallet confirmed in PalletiseModal);
+   Palletization is a transient stage reachable by drag. Kanban/Sheet is
+   chosen by the page-header toggle in PalPlans and arrives as the `view` prop.
    Ready-for-Palletization cards carry a record-level checkbox — the selection
    palletises together through PalletiseModal (pallet choice + distribution).
-   Dropping cards on the Palletization column opens the same dialog.
-   Loading/dispatch actions live on the dedicated Loading page
-   (/loading, LoadingBay.tsx) — the Dispatch column here is read-only and
-   links there.
+   Lines allocated to a load box (and legacy Completed plans) leave this board
+   entirely — loading/dispatch lives on the Loading page (/loading).
    ============================================================ */
 import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
-import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
-import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
-import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
+import { type ContainerPlan } from "@/data";
 import { isoInfo } from "@/features/masters/customersApi";
 import {
   invalidatePalPlans,
   lineFrac,
   PAL_LINE_STATUS_LABEL,
   setPalLineStatus,
-  type LoadBox,
   type PalPlan,
   type PalPlanLine,
   type PalLineStatus,
 } from "./palPlansApi";
+import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { PalletiseModal, type PalletiseEntry } from "./PalletiseModal";
 
-// Board columns — all hold ITEM cards (a PalPlanLine each); Dispatch is derived
-// from the line's box (Open box = In Dispatch, Dispatched box = done).
+// Board columns — all hold ITEM cards (a PalPlanLine each).
 const COLUMNS = [
   { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
   { key: "Palletizing", label: "Palletization", chip: "p-palletized" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
-  { key: "Dispatch", label: "Dispatch", chip: "p-completed" },
 ] as const;
 type ColKey = (typeof COLUMNS)[number]["key"];
 
@@ -48,25 +42,22 @@ type Drag = { lineIds: string[]; from: "Planning" | "Palletizing" | "Ready" } | 
 
 // Swimlane dimensions for the group-by picker (rendered in PalPlans' toolbar,
 // same mechanism as Production). Ordered multi-select → nested lanes.
-export type DispatchGroupBy = "customer" | "so" | "container" | "batch" | "item";
+export type DispatchGroupBy = "customer" | "so" | "batch" | "item";
 export const DISPATCH_GROUP_DIMS: Array<{ id: DispatchGroupBy; label: string }> = [
   { id: "customer", label: "Customer" },
   { id: "so", label: "Order" },
-  { id: "container", label: "Container" },
   { id: "batch", label: "Batch" },
   { id: "item", label: "Item" },
 ];
 
 export function DispatchBoard({
   plans,
-  boxes,
   view,
   canEdit,
   groupBy,
   onChanged,
 }: {
   plans: PalPlan[];
-  boxes: LoadBox[];
   view: "kanban" | "sheet";
   canEdit: boolean;
   groupBy: DispatchGroupBy[];
@@ -85,46 +76,22 @@ export function DispatchBoard({
   const [overCol, setOverCol] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Lines being palletised through the dialog (checkbox selection, column drop,
-  // or a Mark-ready on a line that never got a pallet — `to` is where they land).
+  // or a drag to the transient Palletization column — `to` is where they land).
   const [palletise, setPalletise] = useState<{ lines: PalPlanLine[]; to: "Palletizing" | "ReadyToLoad" } | null>(null);
 
-  // Container plans keyed by SalesOrder ROWID — the loading team packs
-  // load-boxes to plan. The SO's OWN plan (editable copy, snapshotted at
-  // conversion) wins; the source quote's snapshot is the fallback for SOs
-  // converted before SOs owned plans.
-  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
-  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
-  useEffect(() => {
-    let alive = true;
-    void listQuotes().then((r) => {
-      if (alive && r.ok) setQuotes(r.quotes);
-    });
-    void listOrders().then((r) => {
-      if (alive && r.ok) setOrders(r.orders);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-  const planBySo = new Map<string, { docNo: string; plan: ContainerPlan }>();
-  quotes.forEach((qt) => {
-    const plan = parseContainerPlan(qt.containerPlan);
-    if (plan) qt.sos?.forEach((so) => planBySo.set(so.id, { docNo: qt.quoteNo, plan }));
-  });
-  orders.forEach((o) => {
-    if (!o.salesOrderId) return;
-    const plan = parseContainerPlan(o.containerPlan);
-    if (plan) planBySo.set(o.salesOrderId, { docNo: o.orderNumber || o.poNumber, plan });
-  });
+  // Container plans keyed by SalesOrder ROWID — feeds the card subtitle and
+  // the palletise-time pallet prefill.
+  const { planBySo, defaultPalletFor } = useContainerPlanBySo();
   const planTitle = (docNo: string, plan: ContainerPlan) =>
     plan.containers
       .map((c) => `${docNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
       .join("\n");
 
   // ---- derived ------------------------------------------------
-  const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l })));
-  const boxById = new Map(boxes.map((b) => [b.id, b]));
-  const boxLabel = (b: LoadBox) => b.vehicleNumber || `Box ${b.boxNumber}`;
+  // Boxed lines + legacy Completed plans live on /loading, not this board.
+  const allLines: Entry[] = plans
+    .filter((p) => p.status !== "Completed")
+    .flatMap((p) => p.lines.filter((l) => !l.loadBoxId).map((l) => ({ p, l })));
   // Age = days since the LINE was created (auto-enqueue creates it right after
   // production; plans are reused per SO so the plan date is the wrong anchor).
   // Catalyst stamps "YYYY-MM-DD HH:mm:ss:SSS" — colon before the millis breaks
@@ -133,14 +100,10 @@ export function DispatchBoard({
     const t = Date.parse((l.createdTime || p.createdTime || "").slice(0, 19).replace(" ", "T"));
     return Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : 0;
   };
-  const stageOf = (p: PalPlan, l: PalPlanLine): ColKey => {
-    if (l.loadBoxId || p.status === "Completed") return "Dispatch"; // Completed = legacy pre-box dispatched plans
+  const stageOf = (_p: PalPlan, l: PalPlanLine): ColKey => {
     if (l.status === "ReadyToLoad") return "Ready";
     return l.status === "Palletizing" ? "Palletizing" : "Planning";
   };
-  // Within Dispatch: has the line actually left (Dispatched box / Completed plan)?
-  const isDispatched = (p: PalPlan, l: PalPlanLine) =>
-    l.loadBoxId ? boxById.get(l.loadBoxId)?.status === "Dispatched" : p.status === "Completed";
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -150,7 +113,7 @@ export function DispatchBoard({
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plans, boxes]);
+  }, [plans]);
 
   // ---- mutations (all sequential + one refresh, house pattern) ----
   const after = (ok: boolean, err: string, msg: string) => {
@@ -174,23 +137,17 @@ export function DispatchBoard({
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
-  // Palletise-dialog confirm: every target moves with its pallet. When the
-  // dialog was opened by a Mark-ready action, a final hop lands the targets
-  // in Ready for Loading (never without a pallet on record).
+  // Palletise-dialog confirm: every target moves to `to` with its pallet in
+  // one hop (Planning→ReadyToLoad is a legal transition server-side; a line
+  // never reaches Ready for Loading without a pallet on record).
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
     if (busy || entries.length === 0 || !palletise) return;
     const to = palletise.to;
     setBusy(true);
     let ok = 0, err = "";
     for (const e of entries) {
-      const res = await setPalLineStatus(e.lineId, "Palletizing", e.palletId);
+      const res = await setPalLineStatus(e.lineId, to, e.palletId);
       if (res.ok) ok++; else err = res.error || "Move failed";
-    }
-    if (to === "ReadyToLoad") {
-      for (const e of entries) {
-        const res = await setPalLineStatus(e.lineId, "ReadyToLoad");
-        if (!res.ok) err = res.error || "Move failed";
-      }
     }
     setBusy(false);
     setPalletise(null);
@@ -205,7 +162,7 @@ export function DispatchBoard({
   const onDropColumn = (colKey: ColKey) => {
     const d = drag;
     clearDnd();
-    if (!d || colKey === "Dispatch") return; // loading is paused on this page
+    if (!d) return;
     const lines = d.lineIds
       .map((id) => allLines.find(({ l }) => l.id === id)?.l)
       .filter((l): l is PalPlanLine => !!l && !l.loadBoxId);
@@ -246,11 +203,10 @@ export function DispatchBoard({
   };
   const anyFilter = !!(q || fCustomer || fCountry || fDesign || fSize);
   const visible = allLines.filter(matches);
-  // Group-by lane key per dimension (container resolves via the line's box).
+  // Group-by lane key per dimension.
   const laneKeyOf = (e: Entry, d: DispatchGroupBy): string =>
     d === "customer" ? e.l.customerName || "—"
     : d === "so" ? e.l.soNumber || "No SO"
-    : d === "container" ? (e.l.loadBoxId && boxById.get(e.l.loadBoxId) ? boxLabel(boxById.get(e.l.loadBoxId)!) : "—")
     : d === "batch" ? (e.l.batchNumber ? `Batch ${e.l.batchNumber}` : "No batch")
     : e.l.designLabel || "—";
   const groupKeyOf = (e: Entry) => groupBy.map((d) => laneKeyOf(e, d)).join("  ›  ");
@@ -274,27 +230,15 @@ export function DispatchBoard({
       if (next.has(l.id)) next.delete(l.id); else next.add(l.id);
       return next;
     });
-  const openPalletise = (lines: PalPlanLine[], to: "Palletizing" | "ReadyToLoad" = "Palletizing") => {
+  const openPalletise = (lines: PalPlanLine[], to: "Palletizing" | "ReadyToLoad" = "ReadyToLoad") => {
     if (lines.length) setPalletise({ lines, to });
   };
-  // Mark ready: straight move when the pallet is known, else ask for it first.
-  const markReady = (l: PalPlanLine) =>
-    l.palletId ? void moveLines([l.id], "ReadyToLoad") : openPalletise([l], "ReadyToLoad");
-
-  // Dispatch-stage sub-status chip (In Dispatch vs Dispatched).
-  const dispatchChip = (p: PalPlan, l: PalPlanLine) =>
-    isDispatched(p, l) ? (
-      <span className="chip palstatus p-completed" style={{ whiteSpace: "nowrap" }}>Dispatched</span>
-    ) : (
-      <span className="chip palstatus p-loading" style={{ whiteSpace: "nowrap" }}>In Dispatch</span>
-    );
 
   // ---- item card ----------------------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
     const isSel = selected.has(l.id);
-    const canDrag = canEdit && stage !== "Dispatch";
+    const canDrag = canEdit;
     const age = ageDays(p, l);
-    const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
     return (
       <div
         key={l.id}
@@ -337,7 +281,7 @@ export function DispatchBoard({
           </button>
           <span
             className="chip"
-            style={{ marginLeft: "auto", fontSize: 11 }}
+            style={{ marginLeft: "auto", fontSize: 13 }}
             title={l.palletCapacity > 0 ? `${fmt(l.boxes)} of ${fmt(l.palletCapacity)} boxes — a full ${l.palletName} container` : undefined}
           >
             {fmt(l.boxes)} box{l.palletCapacity > 0 ? ` · ${Math.round(lineFrac(l) * 100)}%` : ""}
@@ -345,7 +289,7 @@ export function DispatchBoard({
           <span
             className="chip"
             title={`${age} days since this item entered the queue`}
-            style={{ fontSize: 11, color: age >= 8 ? "var(--c-red)" : undefined, borderColor: age >= 8 ? "var(--c-red)" : undefined }}
+            style={{ fontSize: 13, color: age >= 8 ? "var(--c-red)" : undefined, borderColor: age >= 8 ? "var(--c-red)" : undefined }}
           >
             {age}d
           </span>
@@ -359,14 +303,14 @@ export function DispatchBoard({
         {(l.batchNumber || l.palletGroup) && (
           <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
             {l.batchNumber && (
-              <span className="chip mono" style={{ fontSize: 11 }} title="Production batch — load one batch per customer for uniform texture">
+              <span className="chip mono" style={{ fontSize: 13 }} title="Production batch — load one batch per customer for uniform texture">
                 Batch {l.batchNumber}
               </span>
             )}
             {l.palletGroup && (
               <span
                 className="chip"
-                style={{ fontSize: 11, color: "var(--c-amber)", borderColor: "var(--c-amber)" }}
+                style={{ fontSize: 13, color: "var(--c-amber)", borderColor: "var(--c-amber)" }}
                 title="This item shares a physical pallet with another batch/item"
               >
                 Mix Batch
@@ -389,32 +333,15 @@ export function DispatchBoard({
             </div>
           ) : null;
         })()}
-        {stage === "Dispatch" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-            {dispatchChip(p, l)}
-            {box && <span className="dim mono" style={{ fontSize: "var(--t-sm)" }}>→ {boxLabel(box)}</span>}
-          </div>
-        )}
-        {canEdit && stage === "Planning" && (
+        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
           <button
             type="button"
             className="hbtn primary"
             style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
             onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
-            title={isSel && selected.size > 1 ? `Palletise the ${selected.size} selected items` : "Palletise this item"}
+            title={isSel && selected.size > 1 ? `Palletise the ${selected.size} selected items` : "Palletise this item — lands in Ready for Loading"}
           >
             Palletise{isSel && selected.size > 1 ? ` (${selected.size})` : ""} →
-          </button>
-        )}
-        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
-          <button
-            type="button"
-            className="btn"
-            style={{ width: "100%", marginTop: stage === "Planning" ? 6 : 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); markReady(l); }}
-            title="Move to Ready for Loading"
-          >
-            Mark ready for loading →
           </button>
         )}
       </div>
@@ -434,7 +361,7 @@ export function DispatchBoard({
       {COLUMNS.map((col) => {
         const entries = list.filter((e) => stageOf(e.p, e.l) === col.key);
         const totalBoxes = entries.reduce((s, { l }) => s + l.boxes, 0);
-        const accepts = canEdit && !!drag && col.key !== "Dispatch";
+        const accepts = canEdit && !!drag;
         const overId = `${keyPrefix}|${col.key}`;
         const isOver = overCol === overId;
         return (
@@ -453,18 +380,7 @@ export function DispatchBoard({
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
               <span className={`chip palstatus ${col.chip}`}>{col.label}</span>
-              {col.key === "Dispatch" && (
-                <button
-                  type="button"
-                  className="linkish"
-                  style={{ background: "none", border: 0, padding: 0, font: "inherit", fontSize: 12, cursor: "pointer" }}
-                  onClick={() => navigate("/loading")}
-                  title="Load and dispatch on the Loading page"
-                >
-                  Loading →
-                </button>
-              )}
-              <span className="muted mono" style={{ fontSize: 12, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
+              <span className="muted mono" style={{ fontSize: 14, marginLeft: "auto" }} title={`${fmt(totalBoxes)} boxes`}>
                 {entries.length} · {fmt(totalBoxes)} bx
               </span>
             </div>
@@ -527,12 +443,12 @@ export function DispatchBoard({
               {depth === 0 ? (
                 <div className="form-section-title">
                   <span style={{ flex: 1 }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
+                  <span className="muted" style={{ fontSize: 14, fontWeight: 400, letterSpacing: 0 }}>{sub.length}</span>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, color: "var(--muted)" }}>{k}</span>
-                  <span className="muted" style={{ fontSize: 12 }}>{sub.length}</span>
+                  <span style={{ fontWeight: 600, fontSize: 15, color: "var(--muted)" }}>{k}</span>
+                  <span className="muted" style={{ fontSize: 14 }}>{sub.length}</span>
                 </div>
               )}
               {renderLevel(sub, dims.slice(1), depth + 1, `${keyPrefix}/${dims[0]}=${k}`)}
@@ -600,7 +516,6 @@ export function DispatchBoard({
                     <th>Customer · SO</th>
                     <th>Batch</th>
                     <th>Stage</th>
-                    <th>Container</th>
                     <th>Age</th>
                     <th aria-label="Action" />
                   </tr>
@@ -611,13 +526,12 @@ export function DispatchBoard({
                   {sheetRows.map(({ p, l }, i) => {
                     const stage = stageOf(p, l);
                     const col = COLUMNS.find((c) => c.key === stage)!;
-                    const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
                     const isSel = selected.has(l.id);
                     const key = groupBy.length ? groupKeyOf({ p, l }) : "";
                     const band =
                       groupBy.length && (i === 0 || groupKeyOf(sheetRows[i - 1]) !== key) ? (
                         <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
-                          <td colSpan={8}>
+                          <td colSpan={7}>
                             {key}
                             <span className="mono" style={{ fontWeight: 400, marginLeft: 10 }}>
                               {(() => {
@@ -660,39 +574,25 @@ export function DispatchBoard({
                         <td className="mono" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>
                           {l.batchNumber || "—"}
                           {l.palletGroup && (
-                            <span className="chip" style={{ fontSize: 11, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
+                            <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
                               Mix Batch
                             </span>
                           )}
                         </td>
                         <td>
-                          {stage === "Dispatch"
-                            ? dispatchChip(p, l)
-                            : <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap" }}>{col.label}</span>}
+                          <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap" }}>{col.label}</span>
                         </td>
-                        <td style={{ whiteSpace: "nowrap" }}>{box ? boxLabel(box) : "—"}</td>
                         <td className="dim">{ageDays(p, l)}d</td>
                         <td style={{ whiteSpace: "nowrap" }}>
-                          {canEdit && stage === "Planning" && (
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)", marginRight: 6 }}
-                              disabled={busy}
-                              onClick={(ev) => { ev.stopPropagation(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
-                            >
-                              Palletise →
-                            </button>
-                          )}
                           {canEdit && (stage === "Planning" || stage === "Palletizing") && (
                             <button
                               type="button"
                               className="btn"
                               style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
                               disabled={busy}
-                              onClick={(ev) => { ev.stopPropagation(); markReady(l); }}
+                              onClick={(ev) => { ev.stopPropagation(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
                             >
-                              Mark ready →
+                              Palletise →
                             </button>
                           )}
                         </td>
@@ -701,7 +601,7 @@ export function DispatchBoard({
                     );
                   })}
                   {sheetRows.length === 0 && (
-                    <tr><td colSpan={8} className="dim" style={{ textAlign: "center", padding: 24 }}>Nothing here</td></tr>
+                    <tr><td colSpan={7} className="dim" style={{ textAlign: "center", padding: 24 }}>Nothing here</td></tr>
                   )}
                 </tbody>
               </table>
@@ -757,6 +657,7 @@ export function DispatchBoard({
         <PalletiseModal
           lines={palletise.lines}
           busy={busy}
+          defaultPalletFor={(l) => defaultPalletFor(l.salesOrderId, l.designId)}
           toLabel={PAL_LINE_STATUS_LABEL[palletise.to]}
           onConfirm={(entries) => void confirmPalletise(entries)}
           onClose={() => setPalletise(null)}

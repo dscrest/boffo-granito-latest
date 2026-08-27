@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (40 tables)
+## Table Index (45 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -65,6 +65,11 @@
 | PalletizationPlanLine | (live) | Order items pulled onto a plan — added 2026-07-21 |
 | LoadBox | 69851000000089442 (live) | Cross-plan vehicle slots on the Loading board — added 2026-07-27 |
 | AppSetting | (live) | Key/value app settings store — added 2026-08-11 |
+| Panel | 69851000000189422 (live) | Panel Craft — showcase-panel master header — added 2026-08-26 |
+| PanelLine | 69851000000194524 (live) | Panel Craft — design lines on a panel — added 2026-08-26 |
+| PanelOrder | 69851000000193408 (live) | Panel Craft — customer panel orders (cutting-job lifecycle) — added 2026-08-26 |
+| CutPieceSize | 69851000000182460 (live) | Lookup — cut-piece sizes (Panel Craft) — added 2026-08-26 |
+| CutPieceStock | 69851000000183280 (live) | Panel Craft — cut-piece on-hand per design + cut size — added 2026-08-26 |
 
 ## SalesPerson (76673000000115495) — added 2026-06-23
 
@@ -656,6 +661,81 @@ set; natural key = `setting_key`. Client wrapper: `client/src/features/settings/
 
 Keys in use: `allow_duplicate_batches` — `"false"` blocks reusing a batch number
 across different designs (same-design reuse is always a 409); missing row = allow.
+
+## Panel Craft — added 2026-08-26
+
+Showcase panels (printed roll-up banners the reps show retailers) + panel
+orders with a cutting-job lifecycle. Menu: Sales ▸ Panel Craft (feature keys
+`panels`, `panel-orders`, `cut-stock` — the last is the /cut-stock on-hand
+grid, added 2026-08-26 pm). Client wrappers: `client/src/features/panels/`.
+FK columns are plain bigint holding ROWID strings (live-project convention).
+A Panel is pure master data — a spec of the cut pieces it needs (2026-08-27,
+reversing the 08-26 assembly model): `/panel-save` and `/panel-delete` never
+touch CutPieceStock. Stock moves only via the PanelOrder status machine
+(Ready +, Dispatched −) and manual `/cut-stock-adjust`. Generic writes to
+PanelLine and soft Panel deletes are still rejected (`?hard=1` stays open
+for admin/e2e cleanup).
+
+### Panel (live id 69851000000189422)
+Natural key = `panel_code`.
+| Column | Type | Notes |
+|---|---|---|
+| panel_code | varchar(60) | unique, e.g. "C01-F11-S03-118" |
+| panel_size | varchar(30) | e.g. "1200x2100" |
+| vinyl_size | varchar(30) | |
+| image_urls | text | JSON `[{id,name}]` File Store ids (max 5, same shape as Design.image_urls; shared ImageManager) — added 2026-08-26 |
+| deleted_at | datetime | soft delete |
+
+### PanelLine (live id 69851000000194524)
+One design on a panel. Replaced wholesale on panel edit (soft-delete + reinsert,
+server-side in `/panel-save`; generic PanelLine writes are rejected). No stock
+movement.
+| Column | Type | Notes |
+|---|---|---|
+| panel | bigint | logical FK → Panel |
+| design | bigint | logical FK → Design (Available Size hydrates from it) |
+| cut_piece_size | bigint | logical FK → CutPieceSize |
+| cut_piece_qty | int | pieces of this design ON the panel (not stock) |
+| deleted_at | datetime | soft delete |
+
+### PanelOrder (live id 69851000000193408)
+Status machine (server `/panel-order-status/:rowid`, forward-only; generic PATCH
+rejects `status`): Received → InCutting → Ready → Dispatched, plus direct
+Received → Dispatched when stock covers. **Ready adds** each line's
+`cut_piece_qty × qty` to CutPieceStock; **Dispatched deducts** it (409 when short).
+Flips log StatusTransition (`entity_type: PanelOrder`).
+| Column | Type | Notes |
+|---|---|---|
+| panel | bigint | logical FK → Panel |
+| customer | bigint | logical FK → Customer |
+| qty | int | panels ordered |
+| salesperson | varchar(160) | defaulted from the signed-in user |
+| order_date | date | omit when blank |
+| status | varchar(20) | Received / InCutting / Ready / Dispatched |
+| deleted_at | datetime | soft delete |
+
+### CutPieceSize (live id 69851000000182460)
+Lookup; natural key = `name`. Editable in Settings ▸ Masters; the Panel form's
+picker creates missing sizes write-through.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(160) | unique (natural key), e.g. "150x725" |
+| seq_code | varchar(10) | auto-assigned by the Masters editor |
+| deleted_at | datetime | soft delete |
+
+### CutPieceStock (live id 69851000000183280)
+On-hand cut pieces per (design, cut_piece_size) — written only server-side:
+`/cut-stock-adjust` sets the absolute qty (manual entry, Item-opening-stock
+style), while the `adjustCutStock` delta helper serves the PanelOrder status
+machine (Ready +, Dispatched −). Panel save/delete no longer moves stock
+(2026-08-27). The composite key's uniqueness lives there, not in NATURAL_KEY. Audit trail =
+OperationLog + StatusTransition (no ledger table). Browsable at /cut-stock.
+| Column | Type | Notes |
+|---|---|---|
+| design | bigint | logical FK → Design |
+| cut_piece_size | bigint | logical FK → CutPieceSize |
+| qty | int | current on-hand (never negative) |
+| deleted_at | datetime | soft delete |
 
 ### Activity (76673000000054380)
 | Column | Type | Notes |

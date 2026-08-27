@@ -229,13 +229,13 @@ export function Dashboard() {
                       <div className="mono" style={{ color: "var(--fg)" }}>
                         {o.poNumber}
                       </div>
-                      <div className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
+                      <div className="mono" style={{ fontSize: 12, color: "var(--muted)" }}>
                         {o.invoice || "pending invoice"}
                       </div>
                     </td>
                     <td>
                       <div>{o.party}</div>
-                      <div className="muted" style={{ fontSize: 10.5 }}>
+                      <div className="muted" style={{ fontSize: 12.5 }}>
                         {o.country}
                       </div>
                     </td>
@@ -327,7 +327,7 @@ export function Dashboard() {
                     <td style={{ width: 180 }}>
                       <div className="row" style={{ gap: 8 }}>
                         <ProgressBar value={s.produced} max={s.ordered} color="var(--c-blue)" height={5} />
-                        <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{pct(s.produced, s.ordered)}%</span>
+                        <span className="mono" style={{ fontSize: 13, color: "var(--muted)" }}>{pct(s.produced, s.ordered)}%</span>
                       </div>
                     </td>
                   </tr>
@@ -368,7 +368,7 @@ export function Dashboard() {
                     />
                   </div>
                   <div className="qty">{fmt(d.remaining)}</div>
-                  <div className="qty muted" style={{ fontSize: 11 }}>
+                  <div className="qty muted" style={{ fontSize: 13 }}>
                     {p}%
                   </div>
                 </div>

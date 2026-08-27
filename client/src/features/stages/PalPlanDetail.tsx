@@ -259,7 +259,7 @@ export function PalPlanDetail() {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card" style={{ padding: 16, marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={plan.palNumber}>
+            <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={plan.palNumber}>
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{plan.palNumber}</span>
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>

@@ -547,7 +547,7 @@ function ContainerisePlanner({
       {/* Header — same card pattern as the detail pages; actions right-aligned. */}
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               Plan Containerisation
             </span>
@@ -908,7 +908,7 @@ function ContainerisePlanner({
               </div>
               {trim && (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: "1px solid color-mix(in oklab, var(--c-red) 35%, transparent)", background: "color-mix(in oklab, var(--c-red) 5%, transparent)", borderRadius: 6 }}>
-                  <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--c-red)" }}>−</span>
+                  <span className="mono" style={{ fontSize: 17, fontWeight: 600, color: "var(--c-red)" }}>−</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
                     <span style={{ fontSize: "var(--t-md)", fontWeight: 600 }}>{trim.headline}</span>
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{trim.detail}</span>
@@ -920,7 +920,7 @@ function ContainerisePlanner({
               )}
               {add && (
                 <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: "1px solid color-mix(in oklab, var(--c-blue) 35%, transparent)", background: "color-mix(in oklab, var(--c-blue) 5%, transparent)", borderRadius: 6 }}>
-                  <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--c-blue)" }}>+</span>
+                  <span className="mono" style={{ fontSize: 17, fontWeight: 600, color: "var(--c-blue)" }}>+</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
                     <span style={{ fontSize: "var(--t-md)", fontWeight: 600 }}>{add.headline}</span>
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{add.detail}</span>
@@ -932,7 +932,7 @@ function ContainerisePlanner({
               )}
               {moveIns.map((mv, k) => (
                 <div key={k} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: "1px solid color-mix(in oklab, var(--c-violet) 35%, transparent)", background: "color-mix(in oklab, var(--c-violet) 5%, transparent)", borderRadius: 6 }}>
-                  <span className="mono" style={{ fontSize: 15, fontWeight: 600, color: "var(--c-violet)" }}>⇄</span>
+                  <span className="mono" style={{ fontSize: 17, fontWeight: 600, color: "var(--c-violet)" }}>⇄</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
                     <span style={{ fontSize: "var(--t-md)", fontWeight: 600 }}>{mv.headline}</span>
                     <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{mv.detail}</span>

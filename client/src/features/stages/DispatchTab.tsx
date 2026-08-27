@@ -104,7 +104,7 @@ export function DispatchTab({ scope, orderedBoxes }: {
           </span>
         )}
         {pct != null && <span className="mono" style={{ fontWeight: 600, color: "var(--c-green)" }}>{pct}%</span>}
-        <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>
+        <span className="muted" style={{ fontSize: 14, marginLeft: "auto" }}>
           {containers} container{containers === 1 ? "" : "s"}
         </span>
       </div>

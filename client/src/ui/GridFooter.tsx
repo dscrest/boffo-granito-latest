@@ -100,7 +100,7 @@ export function SortTh({
       style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", ...thProps.style }}
     >
       {label}
-      <span aria-hidden style={{ marginLeft: 4, fontSize: 9, opacity: active ? 0.9 : 0.55 }}>
+      <span aria-hidden style={{ marginLeft: 4, fontSize: 11, opacity: active ? 0.9 : 0.55 }}>
         {active ? (sort.dir === 1 ? "▲" : "▼") : "↕"}
       </span>
     </th>

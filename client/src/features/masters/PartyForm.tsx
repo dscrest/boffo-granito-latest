@@ -504,7 +504,7 @@ export function PartyForm({
                     placeholder="name@company.com"
                   />
                   {emailBad && (
-                    <span style={{ fontSize: 11, color: "var(--c-red)" }}>Enter a valid email address</span>
+                    <span style={{ fontSize: 13, color: "var(--c-red)" }}>Enter a valid email address</span>
                   )}
                 </label>
                 {phoneField("Work Phone", workPhone, setWorkPhone)}
@@ -709,7 +709,7 @@ export function PartyForm({
         <div className="df-foot">
           <span className="df-req-note">* Indicates a mandatory field</span>
           {contactBad && (
-            <span style={{ fontSize: 11, color: "var(--c-red)" }}>
+            <span style={{ fontSize: 13, color: "var(--c-red)" }}>
               Contact Persons tab: each contact needs a first name, valid email and a phone number
             </span>
           )}

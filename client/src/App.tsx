@@ -59,6 +59,11 @@ const DesignEdit = lazy(() => import("@/features/masters/DesignEdit").then((m) =
 const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
 const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
+// Panel Craft — showcase panels (master + detail) and their cutting-job orders.
+const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
+const PanelDetail = lazy(() => import("@/features/panels/PanelDetail").then((m) => ({ default: m.PanelDetail })));
+const PanelOrders = lazy(() => import("@/features/panels/PanelOrders").then((m) => ({ default: m.PanelOrders })));
+const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
 const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
@@ -138,6 +143,19 @@ function navTree(): NavNode[] {
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
         { id: "packing", label: "Palletization", icon: "palette" },
         { id: "loading", label: "Loading", icon: "truck" },
+        // Panel Craft — showcase panels the reps show retailers: the panel
+        // master + the panel-order cutting-job board (cut-piece stock).
+        {
+          label: "Panel Craft",
+          icon: "tile",
+          children: [
+            // Workflow order: stock entered first, panels assembled from it,
+            // then orders dispatch against it.
+            { id: "cut-stock", label: "Cut Stock", icon: "tile" },
+            { id: "panels", label: "Panels", icon: "tile" },
+            { id: "panel-orders", label: "Panel Orders", icon: "orders" },
+          ],
+        },
       ],
     },
     // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
@@ -296,8 +314,8 @@ export default function App() {
   useEffect(() => {
     applyAccent(TWEAK_DEFAULTS.accent);
     const d = TWEAK_DEFAULTS.density;
-    document.documentElement.style.setProperty("--t-md", d === "spacious" ? "13.5px" : "12.5px");
-    document.documentElement.style.setProperty("--t-sm", d === "spacious" ? "12px" : "11.5px");
+    document.documentElement.style.setProperty("--t-md", d === "spacious" ? "15.5px" : "14.5px");
+    document.documentElement.style.setProperty("--t-sm", d === "spacious" ? "14px" : "13.5px");
   }, []);
 
   // Live quote count for the sidebar badge — seed length is only the fallback
@@ -454,6 +472,10 @@ export default function App() {
             <Route path="/stock" element={<StockDetails />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
+            <Route path="/panels" element={<Panels />} />
+            <Route path="/panels/:id" element={<PanelDetail />} />
+            <Route path="/panel-orders" element={<PanelOrders />} />
+            <Route path="/cut-stock" element={<CutStock />} />
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />

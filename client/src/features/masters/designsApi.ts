@@ -323,8 +323,9 @@ export interface DesignInput {
 }
 
 /** Parse the image_urls JSON column → DesignImage[]. Tolerant of the legacy
-    format where entries were bare File Store id strings (name unknown → ""). */
-function parseImages(raw: string): DesignImage[] {
+    format where entries were bare File Store id strings (name unknown → "").
+    Exported for panelsApi — Panel.image_urls stores the same shape. */
+export function parseImages(raw: string): DesignImage[] {
   if (!raw) return [];
   try {
     const v = JSON.parse(raw);

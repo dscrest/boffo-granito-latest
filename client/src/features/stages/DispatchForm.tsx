@@ -103,7 +103,7 @@ export function DispatchForm({
                 </label>
               </div>
               {container && (
-                <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
                   Dispatching is final — every pallet on {container.containerNumber} will be marked dispatched.
                 </div>
               )}

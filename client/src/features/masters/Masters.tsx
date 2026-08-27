@@ -118,6 +118,17 @@ const MASTERS: MasterDef[] = [
     ],
   },
   {
+    key: "cut_piece_size",
+    label: "Cut Piece Size",
+    icon: "tile",
+    table: "CutPieceSize",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
+  {
     key: "vehicle",
     label: "Vehicle",
     icon: "truck",

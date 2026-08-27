@@ -147,10 +147,10 @@ export function LoadBoard({ containers }: { containers: ContainerRow[] }) {
               }}
             >
               <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-                <b className="mono" style={{ fontSize: 12 }}>{c.containerNumber}</b>
+                <b className="mono" style={{ fontSize: 14 }}>{c.containerNumber}</b>
                 <span className="chip">{c.containerType || "—"}</span>
               </div>
-              <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+              <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
                 {fmt(filled)}{c.capacityBoxes > 0 ? ` / ${fmt(c.capacityBoxes)}` : ""} boxes
                 {c.capacityBoxes > 0 ? ` · ${pctFill}%` : ""}
               </div>
@@ -169,14 +169,14 @@ export function LoadBoard({ containers }: { containers: ContainerRow[] }) {
                     border: "1px solid var(--line, #2a2a3a)",
                   }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{card.design}</div>
-                  <div className="muted mono" style={{ fontSize: 11 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>{card.design}</div>
+                  <div className="muted mono" style={{ fontSize: 13 }}>
                     {fmt(card.boxes)} boxes{card.orderNumber ? ` · ${card.orderNumber}` : ""}
                   </div>
                 </div>
               ))}
               {colCards.length === 0 && (
-                <div className="dim" style={{ fontSize: 11, padding: "10px 4px", textAlign: "center" }}>
+                <div className="dim" style={{ fontSize: 13, padding: "10px 4px", textAlign: "center" }}>
                   <Icon name="package" size={13} /> empty — drop a pallet here
                 </div>
               )}

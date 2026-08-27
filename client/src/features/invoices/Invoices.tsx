@@ -328,7 +328,7 @@ function GenerateDialog({
                   {containerErr && <span className="field-err">{containerErr}</span>}
                 </label>
               </div>
-              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+              <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
                 The invoice totals every loaded batch line (boxes × order rate, less line discount).
               </div>
             </div>

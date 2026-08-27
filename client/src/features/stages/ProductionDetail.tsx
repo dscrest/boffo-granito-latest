@@ -346,7 +346,7 @@ export function ProductionDetail() {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card" style={{ padding: 16, marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
+            <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{group.code}</span>
               <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
               {/* This batch's completeness — produced vs what THIS production
@@ -427,7 +427,7 @@ export function ProductionDetail() {
             <div className="card" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
                 <span style={{ fontWeight: 600 }}>Items</span>
-                <span className="muted" style={{ fontSize: 12 }}>{group.lineCount} line{group.lineCount > 1 ? "s" : ""}</span>
+                <span className="muted" style={{ fontSize: 14 }}>{group.lineCount} line{group.lineCount > 1 ? "s" : ""}</span>
               </div>
               <div style={{ overflow: "auto" }}>
                 <table className="tbl">
@@ -491,7 +491,7 @@ export function ProductionDetail() {
                 <div className="form-section-title" style={{ marginBottom: 10 }}>Order Progress</div>
                 <div className="row" style={{ gap: 10 }}>
                   <ProgressBar value={group.produced} max={group.ordered} color="var(--c-blue)" height={6} />
-                  <span className="mono" style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                  <span className="mono" style={{ fontSize: 14, color: "var(--muted)", whiteSpace: "nowrap" }}>
                     {fmt(group.produced)} / {fmt(group.ordered)} · {pct(group.produced, group.ordered)}%
                   </span>
                 </div>
@@ -509,7 +509,7 @@ export function ProductionDetail() {
           <div className="card" style={{ marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
               <span style={{ fontWeight: 600 }}>Production log</span>
-              <span className="muted" style={{ fontSize: 12 }}>{group.records.length} record{group.records.length === 1 ? "" : "s"}</span>
+              <span className="muted" style={{ fontSize: 14 }}>{group.records.length} record{group.records.length === 1 ? "" : "s"}</span>
               <div style={{ marginLeft: "auto" }}>
                 <select value={logItemFilter} onChange={(e) => setLogItemFilter(e.target.value)} title="Filter by item">
                   <option value="">All items</option>
@@ -614,7 +614,7 @@ function StageDateStrip({ group }: { group: ProductionRequestGroup }) {
       {cells.map((c) => (
         <div key={c.label}>
           <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{c.label}</div>
-          <div className="mono" style={{ fontSize: 13, color: c.date ? "var(--fg)" : "var(--muted)" }}>{c.date ? fmtLocalDate(c.date) : "—"}</div>
+          <div className="mono" style={{ fontSize: 15, color: c.date ? "var(--fg)" : "var(--muted)" }}>{c.date ? fmtLocalDate(c.date) : "—"}</div>
         </div>
       ))}
     </div>

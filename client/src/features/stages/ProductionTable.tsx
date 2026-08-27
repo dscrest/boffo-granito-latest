@@ -112,7 +112,7 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
         ) : (
           <div className="row" style={{ gap: 8, minWidth: 120 }}>
             <ProgressBar value={g.produced} max={g.ordered} color="var(--c-blue)" height={5} />
-            <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>{pct(g.produced, g.ordered)}%</span>
+            <span className="mono" style={{ fontSize: 13, color: "var(--muted)" }}>{pct(g.produced, g.ordered)}%</span>
           </div>
         ),
     },

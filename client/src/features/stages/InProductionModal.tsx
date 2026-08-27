@@ -36,8 +36,8 @@ export function InProductionModal({
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-panel card" role="dialog" aria-modal="true" aria-label={`${label} — in production`} style={{ maxWidth: 520 }}>
         <div className="row" style={{ marginBottom: 6 }}>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{label} — in production</div>
-          <span className="muted" style={{ fontSize: 12 }}>{fmt(total)} boxes</span>
+          <div style={{ fontWeight: 600, fontSize: 18 }}>{label} — in production</div>
+          <span className="muted" style={{ fontSize: 14 }}>{fmt(total)} boxes</span>
           <button className="btn x" onClick={onClose} title="Close" style={{ marginLeft: "auto" }} tabIndex={-1}>✕</button>
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 12 }}>

@@ -137,11 +137,11 @@ export function SharedQuote() {
       <div className="card" style={{ maxWidth: 760, margin: "0 auto", padding: 28 }}>
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 12 }}>Order OS · Plant Morbi</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div className="muted" style={{ fontSize: 14 }}>Order OS · Plant Morbi</div>
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>QUOTATION</div>
+            <div style={{ fontSize: 17, fontWeight: 700 }}>QUOTATION</div>
             <div className="mono muted">{quote?.quoteNo || ""}</div>
           </div>
         </div>
@@ -151,7 +151,7 @@ export function SharedQuote() {
 
         {quote && totals && (
           <>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 14, fontSize: 13 }}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 14, fontSize: 15 }}>
               <div>
                 <div><b>Customer:</b> {quote.customer}</div>
                 {quote.address && <div className="muted">{quote.address}</div>}
@@ -165,7 +165,7 @@ export function SharedQuote() {
               </div>
             </div>
 
-            <table className="tbl" style={{ width: "100%", fontSize: 13 }}>
+            <table className="tbl" style={{ width: "100%", fontSize: 15 }}>
               <thead>
                 <tr>
                   <th>#</th>
@@ -183,7 +183,7 @@ export function SharedQuote() {
                   return groups.map((g) => (
                     <Fragment key={g.design}>
                       <tr>
-                        <td colSpan={6} style={{ background: "#f1efea", color: "#17181b", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 1 }}>
+                        <td colSpan={6} style={{ background: "#f1efea", color: "#17181b", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>
                           Design: {g.design}
                         </td>
                       </tr>
@@ -194,7 +194,7 @@ export function SharedQuote() {
                             <td className="mono muted">{n}</td>
                             <td>
                               {itemSuffix(l.item, g.design) || l.item}
-                              {l.description && <div className="dim" style={{ fontSize: 12 }}>{l.description}</div>}
+                              {l.description && <div className="dim" style={{ fontSize: 14 }}>{l.description}</div>}
                             </td>
                             <td className="num mono">{l.qty}</td>
                             <td className="num mono">{fmt(l.rate)}</td>
@@ -209,7 +209,7 @@ export function SharedQuote() {
               </tbody>
             </table>
 
-            <div style={{ marginTop: 14, marginLeft: "auto", maxWidth: 280, fontSize: 13 }}>
+            <div style={{ marginTop: 14, marginLeft: "auto", maxWidth: 280, fontSize: 15 }}>
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="muted">Total Boxes</span>
                 <b className="mono">{fmt(totals.qty)}</b>
@@ -240,27 +240,27 @@ export function SharedQuote() {
                   <b className="mono">{totals.taxType === "TDS" ? "− " : "+ "}{quote.currency} {fmt(totals.taxAmt)}</b>
                 </div>
               )}
-              <div className="row" style={{ justifyContent: "space-between", marginTop: 6, fontSize: 15 }}>
+              <div className="row" style={{ justifyContent: "space-between", marginTop: 6, fontSize: 17 }}>
                 <span><b>Net Total</b></span>
                 <b className="mono">{quote.currency} {fmt(totals.net)}</b>
               </div>
             </div>
 
             {quote.customerNotes && (
-              <div style={{ marginTop: 16, fontSize: 13 }}>
+              <div style={{ marginTop: 16, fontSize: 15 }}>
                 <b>Notes</b>
                 <div className="muted">{quote.customerNotes}</div>
               </div>
             )}
             {quote.terms && (
-              <div style={{ marginTop: 10, fontSize: 13 }}>
+              <div style={{ marginTop: 10, fontSize: 15 }}>
                 <b>Terms &amp; Conditions</b>
                 <div className="muted">{quote.terms}</div>
               </div>
             )}
 
             <div className="row" style={{ marginTop: 22, justifyContent: "space-between" }}>
-              <span className="muted" style={{ fontSize: 11 }}>
+              <span className="muted" style={{ fontSize: 13 }}>
                 Read-only quotation shared by BOFFO. Contact your salesperson to accept or amend.
               </span>
               <button className="hbtn" onClick={() => void onPdf()}>Download PDF</button>

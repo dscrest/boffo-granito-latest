@@ -37,7 +37,7 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
     render: (p) => (
       <>
         {p.flag} {p.party}{" "}
-        <span className="muted" style={{ fontSize: 10.5 }}>
+        <span className="muted" style={{ fontSize: 12.5 }}>
           ({p.country})
         </span>
       </>
@@ -59,7 +59,7 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
           color={p.progress > 75 ? "var(--c-green)" : p.progress > 30 ? "var(--c-amber)" : "var(--c-blue)"}
           height={5}
         />
-        <span className="mono" style={{ fontSize: 11, color: "var(--muted)", minWidth: 32 }}>
+        <span className="mono" style={{ fontSize: 13, color: "var(--muted)", minWidth: 32 }}>
           {p.progress}%
         </span>
       </div>
@@ -71,17 +71,17 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
     label: "Docs",
     render: (p) => (
       <span className="row" style={{ gap: 4 }}>
-        <span title="PI" className="pill" style={{ height: 16, padding: "0 4px", fontSize: 10 }}>
+        <span title="PI" className="pill" style={{ height: 16, padding: "0 4px", fontSize: 12 }}>
           PI
         </span>
-        <span title="PO" className="pill" style={{ height: 16, padding: "0 4px", fontSize: 10 }}>
+        <span title="PO" className="pill" style={{ height: 16, padding: "0 4px", fontSize: 12 }}>
           PO
         </span>
         {p.stage === "final" && (
           <span
             title="Invoice"
             className="pill"
-            style={{ height: 16, padding: "0 4px", fontSize: 10, color: "var(--c-green)", borderColor: "oklch(0.78 0.16 145 / 0.4)" }}
+            style={{ height: 16, padding: "0 4px", fontSize: 12, color: "var(--c-green)", borderColor: "oklch(0.78 0.16 145 / 0.4)" }}
           >
             INV
           </span>

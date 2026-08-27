@@ -1,8 +1,9 @@
 /* ============================================================
-   Palletise dialog — moves the checked Ready-for-Palletization lines into
-   Palletization in one go (multi-item; replaces the one-at-a-time drag +
-   pallet picker). Per line: identity + batch, a size-width-filtered pallet
-   Combobox, and a pallet distribution readout (full pallets + partial).
+   Palletise dialog — confirms the pallet for the checked lines and moves
+   them in one go (multi-item), normally straight to Ready for Loading.
+   Per line: identity + batch, a size-width-filtered pallet Combobox
+   (prefilled from the SO/quote container plan when one exists), and a
+   pallet distribution readout (full pallets + partial).
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -20,21 +21,25 @@ export interface PalletiseEntry {
 export function PalletiseModal({
   lines,
   busy,
-  toLabel = "Palletization",
+  toLabel = "Ready for Loading",
+  defaultPalletFor,
   onConfirm,
   onClose,
 }: {
   lines: PalPlanLine[];
   busy: boolean;
-  /** Destination stage shown in the footer (Mark-ready routes here too). */
+  /** Destination stage shown in the footer. */
   toLabel?: string;
+  /** Preferred pallet per line (SO/quote container plan) — wins over the
+      line's own pallet as the prefill; the user can still override. */
+  defaultPalletFor?: (l: PalPlanLine) => string;
   onConfirm: (entries: PalletiseEntry[]) => void;
   onClose: () => void;
 }) {
   const panelRef = useModalA11y(onClose);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
   const [palletByLine, setPalletByLine] = useState<Record<string, string>>(() =>
-    Object.fromEntries(lines.map((l) => [l.id, l.palletId])),
+    Object.fromEntries(lines.map((l) => [l.id, defaultPalletFor?.(l) || l.palletId])),
   );
   const [showErrors, setShowErrors] = useState(false);
 
@@ -100,7 +105,14 @@ export function PalletiseModal({
             </thead>
             <tbody>
               {lines.map((l) => {
+                // Size-matched pallets, plus the chosen one even if the size
+                // filter would miss it (so the plan prefill always shows).
                 const opts = palletsForSize(pallets, l.sizeCode);
+                const chosen = palletByLine[l.id];
+                if (chosen && !opts.some((p) => p.id === chosen)) {
+                  const own = pallets.find((p) => p.id === chosen);
+                  if (own) opts.unshift(own);
+                }
                 const cap = capOf(l.id);
                 const full = cap > 0 ? Math.floor(l.boxes / cap) : 0;
                 const rem = cap > 0 ? l.boxes % cap : 0;
@@ -115,7 +127,7 @@ export function PalletiseModal({
                     </td>
                     <td>
                       {l.batchNumber ? (
-                        <span className="chip mono" style={{ fontSize: 11 }}>Batch {l.batchNumber}</span>
+                        <span className="chip mono" style={{ fontSize: 13 }}>Batch {l.batchNumber}</span>
                       ) : (
                         <span className="dim">—</span>
                       )}

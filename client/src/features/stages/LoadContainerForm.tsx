@@ -154,7 +154,7 @@ export function LoadContainerForm({
                 </table>
                 {batchErr && <span className="field-err">{batchErr}</span>}
                 {overCap && (
-                  <div style={{ color: "var(--c-red)", fontSize: 11, marginTop: 6 }}>
+                  <div style={{ color: "var(--c-red)", fontSize: 13, marginTop: 6 }}>
                     Selected {pickedBoxes} boxes exceed container capacity ({container?.capacityBoxes}).
                   </div>
                 )}

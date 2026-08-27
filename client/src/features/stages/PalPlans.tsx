@@ -15,14 +15,12 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { PalPlanForm } from "./PalPlanForm";
 import { DispatchBoard, DISPATCH_GROUP_DIMS, type DispatchGroupBy } from "./DispatchBoard";
 import {
-  cachedLoadBoxes,
   cachedPalPlans,
   createPalPlan,
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
   PAL_STATUSES,
-  type LoadBox,
   type PalPlan,
   type PalStatus,
 } from "./palPlansApi";
@@ -33,9 +31,10 @@ export const STATUS_CHIP: Record<PalStatus, string> = {
   Completed: "p-completed",
 };
 
+// Completed (dispatched) plans left this board — they live on /loading.
 const TABS: Array<{ id: string; label: string }> = [
   { id: "all", label: "All" },
-  ...PAL_STATUSES.map((s) => ({ id: s, label: PAL_STATUS_LABEL[s] })),
+  ...PAL_STATUSES.filter((s) => s !== "Completed").map((s) => ({ id: s, label: PAL_STATUS_LABEL[s] })),
 ];
 
 export function PalPlans() {
@@ -73,7 +72,6 @@ export function PalPlans() {
   const presetOrderId = params.get("fromOrder") || "";
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
-  const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -88,7 +86,6 @@ export function PalPlans() {
     }
     setError(null);
     setPlans(res.plans);
-    setBoxes(res.boxes);
   };
 
   useEffect(() => {
@@ -122,7 +119,9 @@ export function PalPlans() {
     if (newId) navigate(`/packing/${encodeURIComponent(newId)}`);
   };
 
-  const filtered = plans.filter((r) => tab === "all" || r.status === tab);
+  // A stale persisted tab (e.g. the retired "Completed") falls back to All.
+  const effTab = TABS.some((t) => t.id === tab) ? tab : "all";
+  const filtered = plans.filter((r) => effTab === "all" || r.status === effTab);
   const tabCount = (id: string) => (id === "all" ? plans.length : plans.filter((p) => p.status === id).length);
 
   const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
@@ -148,13 +147,22 @@ export function PalPlans() {
 
       <div className="fbar" style={{ marginBottom: 12 }}>
         <Icon name="filter" size={12} />
-        <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+        <select value={effTab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
           {TABS.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label} ({tabCount(t.id)})
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="linkish"
+          style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer" }}
+          onClick={() => navigate("/loading")}
+          title="Load and dispatch on the Loading page"
+        >
+          Loading →
+        </button>
         <div style={{ flex: 1 }} />
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("kanban", "kanban", "Kanban")}
@@ -181,7 +189,7 @@ export function PalPlans() {
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} onChanged={() => void load()} />
+        <DispatchBoard plans={filtered} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} onChanged={() => void load()} />
       )}
     </div>
   );

@@ -334,7 +334,7 @@ function ByOrderGroup({
                       <div style={{ flex: 1 }}>
                         <SplitBar produced={li.producedQty} palletized={li.palletizedQty} loaded={li.loadedQty} total={li.orderQty} />
                       </div>
-                      <span className="mono dim" style={{ fontSize: 11 }}>{pct(li.loadedQty, li.orderQty)}%</span>
+                      <span className="mono dim" style={{ fontSize: 13 }}>{pct(li.loadedQty, li.orderQty)}%</span>
                     </div>
                   </td>
                   <td style={{ textAlign: "right" }}>

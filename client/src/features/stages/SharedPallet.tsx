@@ -79,13 +79,13 @@ export function SharedPallet() {
       <div className="card" style={{ maxWidth: 560, margin: "0 auto", padding: 22 }}>
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 12 }}>Pallet · Plant Morbi</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div className="muted" style={{ fontSize: 14 }}>Pallet · Plant Morbi</div>
           </div>
           {box && (
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Box {box.boxNumber}</div>
-              <div className="mono muted" style={{ fontSize: 12 }}>{box.totalBoxes} boxes</div>
+              <div style={{ fontSize: 17, fontWeight: 700 }}>Box {box.boxNumber}</div>
+              <div className="mono muted" style={{ fontSize: 14 }}>{box.totalBoxes} boxes</div>
             </div>
           )}
         </div>
@@ -96,7 +96,7 @@ export function SharedPallet() {
         {box && (
           <>
             {/* Container / vehicle / status */}
-            <div style={{ display: "grid", gap: 6, fontSize: 13, marginBottom: 16 }}>
+            <div style={{ display: "grid", gap: 6, fontSize: 15, marginBottom: 16 }}>
               <div style={row}>
                 <span className="muted">Container</span>
                 <b className="mono">{box.container || "—"}</b>
@@ -122,8 +122,8 @@ export function SharedPallet() {
             </div>
 
             {/* Items */}
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted, #667)", marginBottom: 6 }}>ITEMS</div>
-            <table className="tbl" style={{ width: "100%", fontSize: 13 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--muted, #667)", marginBottom: 6 }}>ITEMS</div>
+            <table className="tbl" style={{ width: "100%", fontSize: 15 }}>
               <thead>
                 <tr>
                   <th>Item</th>
@@ -136,9 +136,9 @@ export function SharedPallet() {
                   <tr key={i}>
                     <td>
                       {it.item}
-                      {it.size && <span className="dim" style={{ fontSize: 12 }}> · {it.size}</span>}
+                      {it.size && <span className="dim" style={{ fontSize: 14 }}> · {it.size}</span>}
                       {(it.order || it.batch) && (
-                        <div className="dim" style={{ fontSize: 11 }}>
+                        <div className="dim" style={{ fontSize: 13 }}>
                           {[it.order, it.batch && `Batch ${it.batch}`].filter(Boolean).join(" · ")}
                         </div>
                       )}
@@ -156,11 +156,11 @@ export function SharedPallet() {
             {/* Salesperson call-back */}
             {box.salespersons.length > 0 && (
               <div style={{ marginTop: 18 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted, #667)", marginBottom: 6 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--muted, #667)", marginBottom: 6 }}>
                   CONTACT
                 </div>
                 {box.salespersons.map((s, i) => (
-                  <div key={i} style={{ ...row, alignItems: "center", fontSize: 13, marginBottom: 6 }}>
+                  <div key={i} style={{ ...row, alignItems: "center", fontSize: 15, marginBottom: 6 }}>
                     <span>{s.name}</span>
                     <span style={{ display: "flex", gap: 10 }}>
                       {s.phone && (
@@ -169,7 +169,7 @@ export function SharedPallet() {
                         </a>
                       )}
                       {s.email && (
-                        <a href={`mailto:${s.email}`} className="muted mono" style={{ fontSize: 12 }}>
+                        <a href={`mailto:${s.email}`} className="muted mono" style={{ fontSize: 14 }}>
                           {s.email}
                         </a>
                       )}
@@ -179,7 +179,7 @@ export function SharedPallet() {
               </div>
             )}
 
-            <div className="muted" style={{ fontSize: 11, marginTop: 18 }}>
+            <div className="muted" style={{ fontSize: 13, marginTop: 18 }}>
               Read-only pallet label shared by BOFFO.
             </div>
           </>

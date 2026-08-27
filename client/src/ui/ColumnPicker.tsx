@@ -254,7 +254,7 @@ export function ColumnPicker({
                   <span
                     aria-hidden
                     title={`Drag to reorder ${c.label}`}
-                    style={{ cursor: "grab", color: "var(--dim)", fontSize: 11, letterSpacing: 1, userSelect: "none" }}
+                    style={{ cursor: "grab", color: "var(--dim)", fontSize: 13, letterSpacing: 1, userSelect: "none" }}
                   >
                     ⋮⋮
                   </span>

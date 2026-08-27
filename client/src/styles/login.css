@@ -76,21 +76,21 @@
   display: block;
 }
 .boffo-auth-brand .sub {
-  font-size: 11px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--lg-dim);
 }
 
 .boffo-auth-h1 {
-  font-size: 30px;
+  font-size: 32px;
   font-weight: 700;
   letter-spacing: -0.6px;
   color: var(--lg-fg);
   margin: 0 0 8px;
 }
 .boffo-auth-tag {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--lg-muted);
   line-height: 1.5;
   margin: 0 0 22px;
@@ -108,7 +108,7 @@
   border-radius: 10px;
   background: var(--lg-accent);
   color: #170f0b;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
@@ -132,7 +132,7 @@
 /* Sub-line under the CTA. */
 .boffo-auth-hint {
   margin: 12px 0 0;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--lg-dim);
   line-height: 1.5;
 }
@@ -142,7 +142,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--lg-dim);
 }
 .boffo-auth-foot .dot {
@@ -206,7 +206,7 @@
   text-align: left;
 }
 .boffo-auth-field span {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--lg-muted);
 }
@@ -235,6 +235,6 @@
 }
 .boffo-auth-error {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: 15px;
   color: #ff9d85;
 }

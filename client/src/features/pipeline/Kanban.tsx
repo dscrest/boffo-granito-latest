@@ -124,7 +124,7 @@ const KanbanColumn = memo(function KanbanColumn({
       <div
         style={{
           padding: "6px 12px 4px",
-          fontSize: 10.5,
+          fontSize: 12.5,
           color: "var(--muted)",
           display: "flex",
           justifyContent: "space-between",
@@ -146,7 +146,7 @@ const KanbanColumn = memo(function KanbanColumn({
           />
         ))}
         {orders.length === 0 && (
-          <div className="muted" style={{ padding: 16, textAlign: "center", fontSize: 11.5 }}>
+          <div className="muted" style={{ padding: 16, textAlign: "center", fontSize: 13.5 }}>
             —
           </div>
         )}

@@ -605,7 +605,7 @@ export function OrderDetail() {
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontWeight: 600 }}>Items</span>
-          <span className="muted" style={{ fontSize: 12 }}>
+          <span className="muted" style={{ fontSize: 14 }}>
             {totalAvail} boxes to palletise
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>

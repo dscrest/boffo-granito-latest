@@ -55,7 +55,7 @@ function CapBar({ c, dim }: { c: FitContainer; dim: FitDim }) {
   const color = over ? "var(--c-red)" : c.underfilled ? "var(--c-amber)" : "var(--c-green)";
   return (
     <div style={{ marginBottom: 7 }}>
-      <div className="row between" style={{ fontSize: 10, marginBottom: 3 }}>
+      <div className="row between" style={{ fontSize: 12, marginBottom: 3 }}>
         <span className="muted">{DIM_LABEL[dim]}</span>
         <span className="mono" style={{ color }}>
           {fmt(used)}
@@ -145,7 +145,7 @@ export function FitSuggest() {
                   <span
                     className="badge mono"
                     title="Binding constraint — the dimension that fills first"
-                    style={{ fontSize: 10 }}
+                    style={{ fontSize: 12 }}
                   >
                     capped by: {DIM_LABEL[c.binding]}
                   </span>
@@ -157,19 +157,19 @@ export function FitSuggest() {
                 <CapBar key={d} c={c} dim={d} />
               ))}
 
-              <div className="row between" style={{ marginTop: 6, fontSize: 11 }}>
+              <div className="row between" style={{ marginTop: 6, fontSize: 13 }}>
                 <span className="muted">{c.assigned.length} pallet{c.assigned.length === 1 ? "" : "s"} assigned</span>
                 {c.underfilled && <span className="mono" style={{ color: "var(--c-amber)" }}>underfilled</span>}
               </div>
 
               {c.assigned.length > 0 ? (
-                <div className="mono muted" style={{ marginTop: 6, fontSize: 10, lineHeight: 1.6 }}>
+                <div className="mono muted" style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6 }}>
                   {c.assigned.map((id) => (
                     <span key={id} style={{ marginRight: 6 }}>#{id}</span>
                   ))}
                 </div>
               ) : (
-                <div className="muted" style={{ marginTop: 6, fontSize: 11 }}>No new pallets fit.</div>
+                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>No new pallets fit.</div>
               )}
             </div>
           </div>

@@ -20,6 +20,7 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
+import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
 
@@ -60,6 +61,11 @@ export function PalPlanForm({
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const stockFor = useStockLookup(); // per-design stock signal dot (same as the SO form)
+  // Pallet prefill from the SO/quote container plan (quotes/orders can arrive
+  // after this form's own load, so it's resolved per render, never seeded).
+  const { defaultPalletFor } = useContainerPlanBySo();
+  const effPallet = (soId: string, it: PalletizableItem) =>
+    palletByItem[it.orderItemId] ?? (defaultPalletFor(soId, it.designId) || it.palletId || "");
 
   // Dedup: which OrderItems already sit in an OPEN (non-dispatched) plan, so we can
   // warn the user before they raise a duplicate palletization request.
@@ -94,13 +100,13 @@ export function PalPlanForm({
       setSalesPersons(sp.ok ? sp.salesPersons : []);
       // Salesperson defaults to the logged-in user (unless seeded from a record).
       if (!initial?.salespersonName) setSalesperson(currentSalespersonName(sp.ok ? sp.salesPersons : []));
-      // Pallet defaults to the one chosen on the Sales Order (OrderItem.pallet).
-      const defPallet: Record<string, string> = {};
-      po.orders.forEach((o) => o.items.forEach((it) => { if (it.palletId) defPallet[it.orderItemId] = it.palletId; }));
-      // Seed boxes/pallet from an existing plan (edit / clone) — overrides the SO default.
+      // Seed boxes/pallet from an existing plan (edit / clone) — an explicitly
+      // saved pallet wins over the plan/SO default. New mode seeds nothing:
+      // the default resolves per render via effPallet (container plan → SO
+      // line's pallet), and Load Boxes start blank (partial-friendly).
       if (initial) {
         const b: Record<string, number> = {};
-        const p: Record<string, string> = { ...defPallet };
+        const p: Record<string, string> = {};
         for (const l of initial.lines) {
           // A plan may hold several lines per item (one per batch) — sum them.
           b[l.orderItemId] = (b[l.orderItemId] || 0) + l.boxes;
@@ -108,10 +114,6 @@ export function PalPlanForm({
         }
         setBoxesByItem(b);
         setPalletByItem(p);
-      } else {
-        // Pallet defaults from the SO; Load Boxes start blank so the user can
-        // palletise a subset (even one item).
-        setPalletByItem(defPallet);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -167,7 +169,7 @@ export function PalPlanForm({
           sales_order: it.salesOrderId,
           order_item: it.orderItemId,
           design: it.designId,
-          pallet: palletByItem[it.orderItemId] || "",
+          pallet: effPallet(it.salesOrderId, it),
         };
         const orig = origByItem.get(it.orderItemId) || [];
         if (!orig.length) return [{ ...base, boxes: total, batch_number: "" }];
@@ -181,7 +183,8 @@ export function PalPlanForm({
         if (remaining > 0) out[out.length - 1].boxes += remaining;
         return out;
       }),
-    [allItems, boxesByItem, palletByItem, origByItem],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allItems, boxesByItem, palletByItem, origByItem, defaultPalletFor],
   );
   const totalBoxes = saveLines.reduce((s, l) => s + l.boxes, 0);
   const linesNeedingPallet = saveLines.filter((l) => !l.pallet).length;
@@ -313,10 +316,17 @@ export function PalPlanForm({
                     </thead>
                     <tbody>
                       {o.items.map((it) => {
+                        // Size-matched pallets, plus the chosen one even if the
+                        // size filter would miss it (plan prefill always shows).
                         const opts = palletsForItem(it);
+                        const pallet = effPallet(o.salesOrderId, it);
+                        if (pallet && !opts.some((p) => p.id === pallet)) {
+                          const own = pallets.find((p) => p.id === pallet);
+                          if (own) opts.unshift(own);
+                        }
                         const boxes = boxesByItem[it.orderItemId] || 0;
                         const noStock = it.available <= 0; // nothing produced yet → can't palletise
-                        const palletErr = showErrors && boxes > 0 && !palletByItem[it.orderItemId];
+                        const palletErr = showErrors && boxes > 0 && !pallet;
                         const usedPal = usedByPlan.get(it.orderItemId);
                         return (
                           <tr key={it.orderItemId} style={noStock ? { opacity: 0.55 } : undefined}>
@@ -325,7 +335,7 @@ export function PalPlanForm({
                                 <LineStockChip stock={stockFor(it.designName)} qty={boxes} label={it.designLabel} />
                                 <span className="design-name">{it.designLabel}</span>
                                 {usedPal && (
-                                  <span className="chip" style={{ fontSize: 11 }} title={`Already in open palletization ${usedPal.pal}`}>
+                                  <span className="chip" style={{ fontSize: 13 }} title={`Already in open palletization ${usedPal.pal}`}>
                                     in <Link to={`/packing/${usedPal.id}`}>{usedPal.pal}</Link>
                                   </span>
                                 )}
@@ -347,7 +357,7 @@ export function PalPlanForm({
                             </td>
                             <td>
                               <Combobox
-                                value={palletByItem[it.orderItemId] || ""}
+                                value={pallet}
                                 options={opts.map((p) => ({ value: p.id, label: p.name }))}
                                 onChange={(v) => setPallet(it.orderItemId, v)}
                                 placeholder={opts.length ? "Choose pallet…" : "No matching pallet"}

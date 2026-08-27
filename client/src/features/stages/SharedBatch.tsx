@@ -63,13 +63,13 @@ export function SharedBatch() {
       <div className="card" style={{ maxWidth: 560, margin: "0 auto", padding: 22 }}>
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 12 }}>Batch · Plant Morbi</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div className="muted" style={{ fontSize: 14 }}>Batch · Plant Morbi</div>
           </div>
           {batch && (
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Batch {batch.batchNumber || "—"}</div>
-              <div className="mono muted" style={{ fontSize: 12 }}>{batch.qtyBoxes} boxes</div>
+              <div style={{ fontSize: 17, fontWeight: 700 }}>Batch {batch.batchNumber || "—"}</div>
+              <div className="mono muted" style={{ fontSize: 14 }}>{batch.qtyBoxes} boxes</div>
             </div>
           )}
         </div>
@@ -79,7 +79,7 @@ export function SharedBatch() {
 
         {batch && (
           <>
-            <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            <div style={{ display: "grid", gap: 6, fontSize: 15 }}>
               <div style={row}>
                 <span className="muted">Item</span>
                 <b style={{ textAlign: "right" }}>
@@ -109,7 +109,7 @@ export function SharedBatch() {
               )}
             </div>
 
-            <div className="muted" style={{ fontSize: 11, marginTop: 18 }}>
+            <div className="muted" style={{ fontSize: 13, marginTop: 18 }}>
               Read-only batch slip shared by BOFFO.
             </div>
           </>

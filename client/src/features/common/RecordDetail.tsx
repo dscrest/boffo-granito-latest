@@ -320,7 +320,8 @@ export function RecordDetail({
   );
 }
 
-function tabStyle(active: boolean) {
+/** Shared tab-button style — exported for detail pages with their own tab rows. */
+export function tabStyle(active: boolean) {
   return {
     background: "none",
     border: 0,

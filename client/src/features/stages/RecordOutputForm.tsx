@@ -1,11 +1,11 @@
 /* ============================================================
    Record Output / Add Batches — logs the ACTUAL boxes produced against one or
    MORE approved production lines in a single modal (one section per item, the
-   item name as the section title). Each section: a pallet for the record
-   (defaulted from the SO line, changeable) that rides along to the
-   palletization queue, then a TABLE of batch rows (headers once, bare inputs,
-   ✕ per row): batch no. · mfg date · qty · remark, with a "+ New Batch" link
-   underneath. Batch-tracked items make the batch no. mandatory and save via
+   item name as the section title). Each section: a TABLE of batch rows
+   (headers once, bare inputs, ✕ per row): batch no. · mfg date · qty ·
+   remark, with a "+ New Batch" link underneath. The palletization queue takes
+   the SO line's own pallet (server fallback) — the pallet is picked/confirmed
+   later, at palletise time. Batch-tracked items make the batch no. mandatory and save via
    /production-record-lines; singular items drop that column and save one
    /production-record per line. Sections left untouched are skipped on save,
    so "Record all" can record just some items. Tab flows row → row → next
@@ -15,12 +15,10 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { DateInput } from "@/ui/DateInput";
-import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
-import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import type { ProductionEntry, ProductionRecordInput, ProductionRecordLine } from "./productionApi";
@@ -66,16 +64,6 @@ export function RecordOutputForm({
 
   const [saving, setSaving] = useState(false);
   const panelRef = useModalA11y(onClose);
-
-  // Pallet for the boxes each record queues — defaults to the SO line's own
-  // spec, changeable here. Blank → the server falls back to the SO line's.
-  const [pallets, setPallets] = useState<PalletRow[]>([]);
-  const [palletIds, setPalletIds] = useState<Record<string, string>>(() =>
-    Object.fromEntries(entries.map((e) => [e.id, e.palletId])),
-  );
-  useEffect(() => {
-    void listPallets().then((r) => r.ok && setPallets(r.pallets));
-  }, []);
 
   // One rows map for both modes (mfg date · qty · remark each, + New Batch,
   // like OrderForm); batch-tracked items add a mandatory batch no. per line.
@@ -157,7 +145,7 @@ export function RecordOutputForm({
           return {
             entry,
             total,
-            payload: { batches: { rows: lines, performed_by: loggedBy, pallet: palletIds[entry.id] || undefined } },
+            payload: { batches: { rows: lines, performed_by: loggedBy } },
           };
         }
         const singles: ProductionRecordInput[] = rows.map((r) => ({
@@ -165,7 +153,6 @@ export function RecordOutputForm({
           production_date: r.date,
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
-          pallet: palletIds[entry.id] || undefined,
         }));
         return { entry, total, payload: { singles } };
       });
@@ -193,14 +180,6 @@ export function RecordOutputForm({
             const rows = rowsById[entry.id];
             const left = cap - totalFor(entry.id);
             const over = left < 0;
-            // Size-matched pallets, plus the SO line's own pallet even if the
-            // size filter would miss it (so the prefill always shows).
-            const palletOpts = palletsForSize(pallets, entry.size);
-            const chosen = palletIds[entry.id];
-            if (chosen && !palletOpts.some((p) => p.id === chosen)) {
-              const own = pallets.find((p) => p.id === chosen);
-              if (own) palletOpts.unshift(own);
-            }
             return (
               <Fragment key={entry.id}>
               <div className="form-section">
@@ -310,24 +289,6 @@ export function RecordOutputForm({
                 </div>
               </div>
 
-              {/* Make-to-stock output never reaches the palletization queue, so
-                  the pallet would have nowhere to land. Prefilled from the SO
-                  line's own pallet, changeable here. */}
-              {entry.orderItemId && (
-                <div className="form-section">
-                  <div className="form-section-title">Associate Pallet</div>
-                  <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                    <label className="form-field">
-                      <Combobox
-                        value={palletIds[entry.id]}
-                        options={palletOpts.map((p) => ({ value: p.id, label: p.name }))}
-                        onChange={(v) => setPalletIds((m) => ({ ...m, [entry.id]: v }))}
-                        placeholder={palletOpts.length ? "Choose pallet…" : "No matching pallet"}
-                      />
-                    </label>
-                  </div>
-                </div>
-              )}
               </Fragment>
             );
           })}
@@ -351,7 +312,7 @@ function Count({ label, value, color }: { label: string; value: number; color?: 
   return (
     <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
       <span className="dim">{label}:</span>
-      <span className="mono" style={{ color, fontWeight: 600, fontSize: 16 }}>{fmt(value)}</span>
+      <span className="mono" style={{ color, fontWeight: 600, fontSize: 18 }}>{fmt(value)}</span>
     </span>
   );
 }

@@ -119,7 +119,7 @@ export function LoadPlanner() {
                       <div style={{ flex: 1 }}>
                         <ProgressBar value={c.loaded} max={c.capacityBoxes} />
                       </div>
-                      <span className="mono dim" style={{ fontSize: 11 }}>{c.pctFill}%</span>
+                      <span className="mono dim" style={{ fontSize: 13 }}>{c.pctFill}%</span>
                     </div>
                   </td>
                 </tr>

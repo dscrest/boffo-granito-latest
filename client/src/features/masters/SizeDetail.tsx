@@ -290,7 +290,7 @@ export function SizeDetail() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div
                   className="title"
-                  style={{ flex: 1, minWidth: 0, fontSize: 26, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                  style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                   title={size.code}
                 >
                   {size.code || "—"}
