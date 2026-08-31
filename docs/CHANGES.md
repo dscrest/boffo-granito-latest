@@ -1,5 +1,99 @@
 # Changes
 
+> Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
+> for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
+
+## 2026-08-29 — Batch stock overhaul: FIFO reducer, 5 new reports, shade retired
+
+Working tree — **deployed LIVE 2026-08-29, not yet committed.**
+
+- **`deriveBatchStock` reducer** (`client/src/features/stages/batchStockDerive.ts`, zero
+  imports) — pure supply/consumption netting per (item, batch). Attributed consumption nets
+  its own batch first; blank-batch consumption that is *loaded* nets **FIFO** (blank bucket
+  first, then real batches oldest-mfg-date first); the unabsorbed remainder becomes `over` on
+  the blank bucket and is never reallocated. Palletising alone does not reduce stock.
+  Conservation law `Σ current = Σ supply − Σ absorbed loaded` asserted by
+  `batchStockDerive.check.ts` (7 scenarios).
+- **`unqueuedBatches` shared helper** (`functions/data-ops/index.js:2078`) — FIFO-available
+  boxes per production batch. `autoEnqueuePalletization` was refactored onto it (~25 duplicated
+  lines removed), and **`/send-to-loading` now uses it too**: instead of one blank-batch plan
+  line per item, it splits the requested boxes across the item's unqueued batches FIFO, one
+  line per batch. Skipping palletization no longer loses the batch trail.
+- **`batchLedger`** (`client/src/features/stages/batchLedger.ts`) — one row per batch ×
+  consumer (Palletised / Loaded / Dispatched / On hand), same "counts once ReadyToLoad or in a
+  box" rule as `recountOrderItems`. Invariant `Σ rows == produced + opening`.
+- **Five new reports** — Batch-wise Stock (`stock-batch`, over-consumed rows flagged ⚠),
+  Batch Movement (`batch-movement`, list + pivot by customer/stage), Palletization Status
+  (`pal-status`), Loading & Dispatch (`loading-status`), Dispatch Register
+  (`dispatch-register`). Production Batches gained a List/Matrix toggle. Registry is now 14
+  reports across 5 sections.
+- **`PivotTable.tsx`** — generic cross-tab (row/col/grand totals, rows by total desc);
+  **`bucket.ts`** — day/week/month bucketing, week keys computed in **UTC** so a viewer west of
+  Greenwich does not roll Monday into the previous week. `ReportShell` gained a `bar` slot for
+  per-report controls beside the filter button.
+- **Shade retired** — `ProductionLog.shade`, `PalletisedBatch.shade`, `PalletisedBatchLine.shade`
+  marked `RETIRED 2026-08-29` in the schema: columns kept, nothing reads or writes them. Removed
+  from every insert in `data-ops`, from the Excel import template, the Stock Details grid, the
+  batch QR PDF, and the `batchStockApi` grouping key (now `designId + batch` only).
+- **Legacy pallet entry points retired** — `FinalLoading.tsx`, `DispatchForm.tsx`,
+  `LoadContainerForm.tsx`, `PalletPackForm.tsx`, `Palletizations.tsx` carry a `RETIRED` header
+  and have no callers; the `/final` route is deleted; `PalletDetail`'s "Palletize Order" action
+  is gone (it drove the `/close-pallet` saga — a second record of boxes the live PalPlan/LoadBox
+  flow already counts). **`batchStockApi` still reads the legacy `PalletisedBatch` /
+  `ContainerLoading` data as historical supply** — the UI is retired, the data is not.
+
+## 2026-08-27 — Panel Craft, palletise straight to Ready, image manager
+
+- **Panel Craft** — new module: `Panel` / `PanelLine` / `PanelOrder` / `CutPieceSize` /
+  `CutPieceStock` tables, `/cut-stock` → `/panels` → `/panel-orders` screens, routes
+  `/panel-save`, `/panel-delete/:rowid`, `/panel-order-status/:rowid`, `/cut-stock-adjust`.
+  **Reversal in the same pass:** the Panel master is **decoupled from stock** — create/edit/
+  delete never touch `CutPieceStock`; only PanelOrder `Ready` (+) and `Dispatched` (−) move it.
+  `PANEL_ORDER_TRANSITIONS` is forward-only for that reason.
+- **Palletise straight to Ready** — `/packing` drops to 3 columns (Dispatch column gone,
+  "Mark ready" deleted); Palletise → `ReadyToLoad` in one hop. Pallet details prefill from the
+  SO container plan (`containerPlanPrefill.ts`); the Record Output pallet picker is hidden;
+  `/loading` relabels its last column "Dispatched" and shows a plan hint.
+- **Image manager** — shared `common/ImageManager.tsx`.
+- Commit `9656f22`.
+
+## 2026-08-25 — Container-first loading, Dispatch tab, Record Output multi-item
+
+- **Container-first loading** — `LoadContainerModal` replaces the box picker at all three entry
+  points; plan progress is consumed automatically, with no per-container id to manage.
+  `dispatch_date` is planned first, then actual. (`0b21918`)
+- **Dispatch visibility** — `logRelated` fans loading events onto both the sales order's and the
+  PalPlan's activity feeds; one shared `DispatchTab` renders on SO, PalPlan and Quote, and the
+  same content as a section on Customer. (`0b21918`)
+- **Record Output multi-item modal** — one modal, a section per item, Tab moves across items.
+  (`0b21918`)
+- **Production stage auto-step** — recording output steps the Kanban stage `New → InProduction`
+  on the first record and `→ Completed` once records cover `qty_requested`. QC stays manual-only
+  and is dropped from the board. (`0b00bdd`)
+- **Produced counter shows committed output only.** (`fa40145`)
+- **Loading first-class** — `/loading/:id` detail page, New Loading + delete, `/send-to-loading`
+  to skip palletization entirely, Shipping Stage chip; grouped DESIGN-band estimates in all
+  three quote renderers, lines storing `unique_name`. (`8d9b75c`)
+
+## 2026-08-22 — Dispatch Control Board redesign + Palletization 2nd stage
+
+- **Dispatch Control Board declutter** — full-width 4-column board, one header Kanban/Sheet
+  toggle; dock + loading panes paused (own section later); checkbox multi-select opens
+  `PalletiseModal`; Mix Batch top-up via `pallet_group` + `POST /pal-topup`.
+- **Palletization 2nd stage** — the Palletizing line status becomes its own "Palletization"
+  column; the pallet picker is dropped; Record Output gains a 2nd-stage checkbox. The
+  queued-filter invariant holds throughout.
+- Deployed LIVE 2026-08-22, commit `b600df5`.
+
+## 2026-08-17 — Batch-aware loading + batch QR share
+
+- **One batch per customer** — PalPlan lines are per-batch; a mixed-batch pallet raises a
+  "Mixed batches" warning rather than a block.
+- **Batch QR slip + public share page** — `batchQrPdf.ts`, `SharedBatch.tsx`, tokenless
+  `GET /public/batch/:token`, token minted by `POST /production-record-share/:rowid`.
+- **Uniform Record Output lines.**
+- Deployed LIVE 2026-08-17, commit `9349e36`.
+
 ## 2026-08-12 — Production polish: designStock unification, SO picker filter, Excel import placement, container tab
 
 - **designStock unification** — Item detail, Reports and transaction line rows all

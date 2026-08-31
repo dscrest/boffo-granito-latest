@@ -5,9 +5,13 @@
 > the product owner. Next step after this: the **technical plan** (ZCQL column types, function
 > contracts, Zod schemas, phase task breakdown), then development.
 
-## Status vs. reality (2026-08-13)
+> **For the system as it is today, read [`docs/SYSTEM.md`](docs/SYSTEM.md).** This file is the
+> *decisions* record — what was locked, and why. It is not maintained as a status document.
 
-The decisions below are the locked historical record; where the build diverged, reality wins:
+## Status vs. reality
+
+The decisions below are the locked historical record; where the build diverged, reality wins.
+The headline divergences:
 
 - **Catalyst project** — `boffo-latest-project` was **deleted 2026-07-04**. Live project:
   `boffo-granito-export-tracker` (projectId `69851000000043001`, org OCTFIS `925638796`).
@@ -25,22 +29,11 @@ The decisions below are the locked historical record; where the build diverged, 
   (→ app-layer enforcement), Advanced I/O timeout 30s.
 - `BoffoExport_Tracker.md` is no longer in the repo; `PRODUCT.md` is the product reference.
 
-Major subsystems built after this record was locked (see `docs/CHANGES.md` for detail,
-`DATASTORE-SCHEMA.md` for tables):
-
-- **Approval workflows** (2026-07-13) — Quote/SO status state machines (`/quote-status`,
-  `/so-status`), StatusTransition audit, in-app Notifications, Currency master + daily FX cron.
-- **Production lifecycle** (2026-07-15→08-12) — ProductionLog request→approve→record sagas;
-  SO-confirm auto-enqueue; **batch-wise production** (`Design.is_batched`, batch numbers
-  `B/FY/NNN`, shades, batch-wise opening stock with lock, duplicate-batch guard via
-  AppSetting); Production Sheet view + Excel import; live stock derived in one place
-  (`client/src/lib/stock.ts`).
-- **Palletization & Loading** (2026-07-21→07-29) — PalletizationPlan/Line (`PAL/FY/NNN`,
-  multi-SO vehicle plans), Vehicle master, LoadBox cross-plan vehicle slots with
-  loading capture (container/seals/supervisor) and dispatch, `/packing` = two-panel
-  Dispatch Control Board; mixed pallets + pallet QR labels with a public scanner page.
-- **Plan Containerisation** (2026-07-31→08-03) — quote-level container planning with
-  Box Fitting / Weight Fitting modes.
+Everything built after this record was locked — approval workflows, the production lifecycle,
+batch tracking, palletization and loading, plan containerisation, Panel Craft, the batch-stock
+ledger — is described in [`docs/SYSTEM.md`](docs/SYSTEM.md), with the dated narrative in
+[`docs/CHANGES.md`](docs/CHANGES.md) and the tables in `DATASTORE-SCHEMA.md`. That list used to
+be maintained here and always fell behind; it now lives in one place.
 
 ## What BOFFO is
 Order-tracking system for a ceramic/porcelain **tile exporter** (Plant Morbi). Tracks the physical
@@ -72,22 +65,11 @@ weights. Core business goal: **"containers shall not go empty"** (the container-
 6. **Backend = Zoho Catalyst** — Advanced I/O Functions (Node 18+), Data Store (ZCQL), Embedded Auth,
    File Store. Catalyst project already exists: `boffo-latest-project` (see `.catalystrc`).
 
-## Repository shape (Catalyst monorepo)
-```
-boffo-granito-latest/
-├── client/                 # Vite + React 18 + TS  → Catalyst hosted (static)
-│   └── src/{app, features/*, ui, lib, styles}
-├── functions/              # Catalyst Advanced I/O Functions (Node 18+)
-│   ├── api-{customers,designs,pallets,quotes,orders,orderitems,
-│   │        palletisation,containers,invoices}
-│   ├── api-books-sync/     # Zoho Books integration
-│   └── lib/{db.ts (ZCQL DAL), auth.ts, currency.ts, ids.ts, errors.ts}
-├── prototype/              # copied in VERBATIM, never edited (reference)
-├── catalyst.json
-├── BOFFO_Build_Plan.md
-├── BoffoExport_Tracker.md
-└── BOFFO_Architecture.md   # this file
-```
+## Repository shape
+
+The per-resource `api-{customers,designs,…}` function split sketched here was never built —
+everything shipped as one router function. Current layout: [`README.md`](README.md) and
+[`docs/SYSTEM.md` §2](docs/SYSTEM.md#2--architecture--runtime).
 
 ## Data-model insight (prototype ↔ schema reconciliation)
 - The prototype's `ORDER` object is really a **line item** (one design + qty + stage + produced/
