@@ -311,7 +311,6 @@ export interface OrderBatchRow {
   date: string; // palletization date (delivery_date)
   status: string;
   batchNumber: string; // production batch (blank on a mixed pallet — see lines)
-  shade: string;
 }
 
 /** Palletised batches committed against one Sales Order — powers the SO
@@ -339,7 +338,6 @@ export async function listOrderBatches(
       date: str(b.delivery_date) || "—",
       status: str(b.status) || "—",
       batchNumber: str(b.batch_number),
-      shade: str(b.shade),
     }));
   return { ok: true, rows };
 }
@@ -348,7 +346,6 @@ export interface ClosePalletLine {
   order_item: string; // OrderItem ROWID
   boxes: number;
   batch_number?: string; // per-line batch (falls back to header); mixed pallets keep each line's own
-  shade?: string;
 }
 export interface ClosePalletInput {
   sales_order: string; // SalesOrder ROWID
@@ -357,8 +354,7 @@ export interface ClosePalletInput {
   delivery_date?: string; // "" omitted server-side
   remarks?: string;
   performed_by?: string;
-  batch_number?: string; // single-batch pallet: header batch/shade for the slip
-  shade?: string;
+  batch_number?: string; // single-batch pallet: header batch for the slip
   lines: ClosePalletLine[];
 }
 
@@ -387,13 +383,12 @@ export function closePallet(input: ClosePalletInput) {
 /* ---- mixed pallet: full pallets + leftover-remainder combining ----
    An item's boxes ÷ its pallet capacity gives whole pallets + a leftover that
    doesn't fill a pallet. Leftovers across items auto-combine into a REAL mixed
-   pallet (is_mixed), each line keeping its own batch/shade. */
+   pallet (is_mixed), each line keeping its own batch. */
 export interface LeftoverItem {
   orderItemId: string;
   salesOrderId: string;
   designId?: string;
   batchNumber?: string;
-  shade?: string;
   qty: number; // boxes to palletise for this item
   boxesPerPallet: number; // this item's pallet capacity
 }
@@ -417,7 +412,6 @@ export interface MixedPalletLine {
   order_item: string;
   boxes: number;
   batch_number?: string;
-  shade?: string;
 }
 export interface MixedPallet {
   lines: MixedPalletLine[];
@@ -434,7 +428,7 @@ export function packRemaindersIntoMixed(splits: PalletSplit[], capacity: number)
     let left = s.remainder;
     while (left > 0) {
       const take = Math.min(left, cap - cur.boxes);
-      cur.lines.push({ order_item: s.item.orderItemId, boxes: take, batch_number: s.item.batchNumber, shade: s.item.shade });
+      cur.lines.push({ order_item: s.item.orderItemId, boxes: take, batch_number: s.item.batchNumber });
       cur.boxes += take;
       left -= take;
       if (cur.boxes >= cap) { pallets.push(cur); cur = { lines: [], boxes: 0 }; }

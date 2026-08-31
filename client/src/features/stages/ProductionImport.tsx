@@ -25,7 +25,6 @@ const FIELDS = [
   { key: "sku", label: "SKU / Item", required: true, synonyms: ["sku", "item", "item code", "itemcode", "design", "design name", "product"] },
   { key: "qty", label: "Qty (boxes)", required: true, synonyms: ["qty", "quantity", "boxes", "box", "qty boxes", "qty (boxes)"] },
   { key: "batch", label: "Batch Number", required: false, synonyms: ["batch", "batch no", "batch no.", "batch number"] },
-  { key: "shade", label: "Shade", required: false, synonyms: ["shade", "tone"] },
   { key: "date", label: "Production Date", required: false, synonyms: ["date", "production date", "mfg date", "mfg. date", "prod date"] },
   { key: "shift", label: "Shift", required: false, synonyms: ["shift"] },
   { key: "note", label: "Note", required: false, synonyms: ["note", "notes", "remark", "remarks", "comment"] },
@@ -39,7 +38,6 @@ interface PreviewRow {
   raw: string; // the SKU cell as typed
   qty: number;
   batch: string;
-  shade: string;
   date: string;
   shift: string;
   note: string;
@@ -83,7 +81,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<unknown[][]>([]);
-  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, shade: -1, date: -1, shift: -1, note: -1 });
+  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, date: -1, shift: -1, note: -1 });
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<RowResult[]>([]);
@@ -103,11 +101,11 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
   const downloadTemplate = async () => {
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([
-      ["SKU", "Qty (boxes)", "Batch Number", "Shade", "Production Date", "Shift", "Note"],
-      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", "A", todayISO(), "Day", "blank batch = auto-numbered"],
-      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", "B", todayISO(), "Night", ""],
+      ["SKU", "Qty (boxes)", "Batch Number", "Production Date", "Shift", "Note"],
+      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", todayISO(), "Day", "blank batch = auto-numbered"],
+      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", todayISO(), "Night", ""],
     ]);
-    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 15 }, { wch: 8 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 15 }, { wch: 8 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Production");
     XLSX.writeFile(wb, "production-import-template.xlsx");
@@ -169,7 +167,6 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
         raw,
         qty,
         batch: str(r, "batch"),
-        shade: str(r, "shade"),
         date: date ?? "",
         shift: str(r, "shift"),
         note: str(r, "note"),
@@ -211,7 +208,6 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
           performed_by: importedBy,
           note: r.note || undefined,
           batch_number: r.batch || undefined,
-          shade: r.shade || undefined,
         });
         if (res.ok) {
           done.push(id);
@@ -297,7 +293,6 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <th>Item</th>
                     <th className="num" style={{ textAlign: "right" }}>Qty</th>
                     <th>Batch</th>
-                    <th>Shade</th>
                     <th>Date</th>
                     <th>Shift</th>
                     <th>Note</th>
@@ -308,13 +303,12 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <tr key={p.rowNum}>
                       <td className="mono dim">{p.rowNum}</td>
                       {p.error ? (
-                        <td colSpan={7} style={{ color: "var(--c-red)" }}>{p.error}</td>
+                        <td colSpan={6} style={{ color: "var(--c-red)" }}>{p.error}</td>
                       ) : (
                         <>
                           <td><span className="design-name">{p.design!.uniqueName || p.design!.designName}</span></td>
                           <td className="num mono">{fmt(p.qty)}</td>
                           <td className="mono">{p.batch || <span className="dim">auto</span>}</td>
-                          <td>{p.shade}</td>
                           <td className="mono">{p.date}</td>
                           <td>{p.shift}</td>
                           <td>{p.note}</td>

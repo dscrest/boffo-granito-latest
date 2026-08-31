@@ -1760,9 +1760,8 @@ async function closePallet(catalyst, ds, body) {
     return {
       order_item: String(l.order_item),
       boxes,
-      // Batch/shade rides per line so a mixed pallet keeps each leftover's own.
+      // Batch rides per line so a mixed pallet keeps each leftover's own.
       batch_number: String(l.batch_number || body.batch_number || "").trim(),
-      shade: String(l.shade || body.shade || "").trim(),
     };
   });
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
@@ -1788,16 +1787,15 @@ async function closePallet(catalyst, ds, body) {
     boxes_packed: totalBoxes,
     delivery_date: body.delivery_date || undefined, // date col rejects "" → omit
     status: "closed",
-    // Denormalised header batch/shade for a single-batch pallet's slip (blank on mixed).
+    // Denormalised header batch for a single-batch pallet's slip (blank on mixed).
     batch_number: String(body.batch_number || "").trim(),
-    shade: String(body.shade || "").trim(),
     remarks: body.remarks || "",
   });
   const batchId = batchRow.ROWID;
   const insertedLines = [];
   try {
     for (const l of lines) {
-      const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number, shade: l.shade });
+      const lr = await ds.table("PalletisedBatchLine").insertRow({ batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number });
       insertedLines.push(lr.ROWID);
     }
     for (const [oiId, reqBoxes] of reqByOi) {
@@ -1822,10 +1820,10 @@ async function closePallet(catalyst, ds, body) {
 }
 
 /* Combine leftover (sub-pallet) boxes from MULTIPLE items into ONE real mixed
-   pallet (is_mixed=true, design=null). Each line keeps its own batch/shade so a
+   pallet (is_mixed=true, design=null). Each line keeps its own batch so a
    mixed pallet legitimately holds several. Mirrors closePallet's
    validate → insert → compensate shape. body: { sales_order, pallet,
-   performed_by?, lines: [{ order_item, boxes, batch_number?, shade? }] } */
+   performed_by?, lines: [{ order_item, boxes, batch_number? }] } */
 app.post("/combine-leftovers", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -1855,7 +1853,6 @@ async function combineLeftovers(catalyst, ds, body) {
       order_item: String(l.order_item),
       boxes,
       batch_number: String(l.batch_number || "").trim(),
-      shade: String(l.shade || "").trim(),
     };
   });
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
@@ -1881,7 +1878,7 @@ async function combineLeftovers(catalyst, ds, body) {
   try {
     for (const l of lines) {
       const lr = await ds.table("PalletisedBatchLine").insertRow({
-        batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number, shade: l.shade,
+        batch: batchId, order_item: l.order_item, boxes: l.boxes, batch_number: l.batch_number,
       });
       insertedLines.push(lr.ROWID);
     }
@@ -2070,6 +2067,42 @@ app.post("/pal-plan", async (req, res) => {
    Output form — it wins over the SO line's own spec for the boxes this record
    queues (and corrects the card it merges into). Callers wrap in try/catch: a
    queue failure must never fail an already-committed production record. */
+/* FIFO batch allocation for one order item: the boxes of each production batch
+   that are NOT yet sitting on a live plan line. Returns [{ batch, available }],
+   oldest batch first. Ground truth both sides — produced per batch (record
+   children) minus already-enqueued per batch (ANY status, so boxes already
+   palletized/dispatched for a batch never re-enqueue).
+   Shared by autoEnqueuePalletization and /send-to-loading so both keep the batch
+   trail; boxes with no batch attribution (legacy qty_boxes, /production-complete)
+   are simply absent, and callers put the residue on a "" line. */
+async function unqueuedBatches(catalyst, orderItemId, liveLines) {
+  const oiId = String(orderItemId);
+  const recs = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
+    ),
+  );
+  const producedByBatch = new Map(); // batch → { qty, first }
+  for (const r of recs) {
+    const b = String(r.batch_number || "");
+    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
+    cur.qty += Number(r.qty_boxes) || 0;
+    if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
+    producedByBatch.set(b, cur);
+  }
+  const enqueuedByBatch = new Map();
+  for (const l of liveLines || []) {
+    if (String(l.order_item) !== oiId) continue;
+    const b = String(l.batch_number || "");
+    enqueuedByBatch.set(b, (enqueuedByBatch.get(b) || 0) + (Number(l.boxes) || 0));
+  }
+  return [...producedByBatch.entries()]
+    .filter(([b]) => b !== "")
+    .sort((a, c) => (a[1].first < c[1].first ? -1 : 1)) // FIFO by first record
+    .map(([batch, p]) => ({ batch, available: Math.max(0, p.qty - (enqueuedByBatch.get(batch) || 0)) }))
+    .filter((x) => x.available > 0);
+}
+
 async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverride) {
   const oiId = String(orderItemId || "");
   if (!/^\d+$/.test(oiId)) return;
@@ -2131,30 +2164,9 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverrid
   }
 
   // Distribute the top-up per batch so each queue card is ONE batch of the
-  // item (uniform tile texture per customer). Ground truth both sides:
-  // produced per batch (record children) minus already-enqueued per batch
-  // (ANY status — boxes palletized/dispatched for a batch never re-enqueue).
-  // Residue with no batch attribution (legacy qty_boxes, /production-complete)
+  // item (uniform tile texture per customer). Residue with no batch attribution
   // lands on the "" line — exactly the old aggregate behavior.
-  const recs = rowList(
-    await zcql.executeZCQLQuery(
-      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
-    ),
-  );
-  const producedByBatch = new Map(); // batch → { qty, first }
-  for (const r of recs) {
-    const b = String(r.batch_number || "");
-    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
-    cur.qty += Number(r.qty_boxes) || 0;
-    if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
-    producedByBatch.set(b, cur);
-  }
-  const enqueuedByBatch = new Map();
-  for (const l of liveLines) {
-    if (String(l.order_item) !== oiId) continue;
-    const b = String(l.batch_number || "");
-    enqueuedByBatch.set(b, (enqueuedByBatch.get(b) || 0) + (Number(l.boxes) || 0));
-  }
+  const batches = await unqueuedBatches(catalyst, oiId, liveLines);
 
   // Every new card is born "Planning" — the Ready for Palletization column.
   const upsert = async (batch, alloc) => {
@@ -2191,15 +2203,11 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverrid
   };
 
   let remaining = topUp;
-  const batches = [...producedByBatch.entries()]
-    .filter(([b]) => b !== "")
-    .sort((a, c) => (a[1].first < c[1].first ? -1 : 1)); // FIFO by first record
-  for (const [b, p] of batches) {
+  for (const { batch, available } of batches) {
     if (remaining <= 0) break;
-    const want = p.qty - (enqueuedByBatch.get(b) || 0);
-    const alloc = Math.min(Math.max(want, 0), remaining);
+    const alloc = Math.min(available, remaining);
     if (alloc <= 0) continue;
-    await upsert(b, alloc);
+    await upsert(batch, alloc);
     remaining -= alloc;
   }
   if (remaining > 0) await upsert("", remaining);
@@ -3214,24 +3222,59 @@ app.post("/send-to-loading", async (req, res) => {
             `SELECT ROWID FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
           ),
         ).length;
+        // Batch trail: split each item's boxes across its unqueued production
+        // batches (FIFO), one line per batch — same rule as the auto-enqueue, so
+        // skipping palletization doesn't lose the batch. The cap here is
+        // ordered−palletized, which can exceed what's produced, so whatever the
+        // batches don't cover falls through to one unattributed "" line.
+        // Soft-deleting a plan leaves its lines live, so restrict to live plans
+        // (mirror of recountOrderItems / autoEnqueuePalletization).
+        const allSoLines = rowList(
+          await zcql.executeZCQLQuery(
+            `SELECT plan, order_item, boxes, batch_number FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`,
+          ),
+        );
+        const soPlanIds = [...new Set(allSoLines.map((l) => String(l.plan)))].filter(Boolean);
+        const liveSoPlans = new Set();
+        if (soPlanIds.length) {
+          rowList(
+            await zcql.executeZCQLQuery(
+              `SELECT ROWID FROM PalletizationPlan WHERE ROWID IN (${soPlanIds.join(",")}) AND deleted_at is null`,
+            ),
+          ).forEach((p) => liveSoPlans.add(String(p.ROWID)));
+        }
+        const soLines = allSoLines.filter((l) => liveSoPlans.has(String(l.plan)));
         for (const [oiId, n] of wanted) {
           const oi = byId.get(oiId);
-          const lr = await ds.table("PalletizationPlanLine").insertRow({
-            plan: planId,
-            sales_order: soId,
-            order_item: oiId,
-            design: oi.design ? String(oi.design) : null,
-            pallet: oi.pallet ? String(oi.pallet) : null,
-            boxes: n,
-            position: pos++,
-            status: "ReadyToLoad",
-            batch_number: "",
-            ...(box ? { load_box: String(box.ROWID) } : {}),
-          });
-          await logTransition(catalyst, {
-            entity_type: "PalletizationPlanLine", entity_rowid: String(lr.ROWID),
-            from_status: "", to_status: "ReadyToLoad", note: "sent to loading",
-          });
+          const chunks = [];
+          let left = n;
+          for (const { batch, available } of await unqueuedBatches(catalyst, oiId, soLines)) {
+            if (left <= 0) break;
+            const alloc = Math.min(available, left);
+            if (alloc <= 0) continue;
+            chunks.push({ batch, boxes: alloc });
+            left -= alloc;
+          }
+          if (left > 0) chunks.push({ batch: "", boxes: left });
+          for (const c of chunks) {
+            const lr = await ds.table("PalletizationPlanLine").insertRow({
+              plan: planId,
+              sales_order: soId,
+              order_item: oiId,
+              design: oi.design ? String(oi.design) : null,
+              pallet: oi.pallet ? String(oi.pallet) : null,
+              boxes: c.boxes,
+              position: pos++,
+              status: "ReadyToLoad",
+              batch_number: c.batch,
+              ...(box ? { load_box: String(box.ROWID) } : {}),
+            });
+            soLines.push({ order_item: oiId, boxes: c.boxes, batch_number: c.batch });
+            await logTransition(catalyst, {
+              entity_type: "PalletizationPlanLine", entity_rowid: String(lr.ROWID),
+              from_status: "", to_status: "ReadyToLoad", note: "sent to loading",
+            });
+          }
         }
         // Allocated straight into a box → plan follows, same as /pal-line-box.
         if (box) {
@@ -3616,12 +3659,11 @@ app.post("/production-record/:rowid", async (req, res) => {
             });
         }
 
-        // Batch/shade: one batch = one shade. Blank batch → auto-mint B/FY/NNN;
-        // a supplied batch must pass the duplicate guard (setting-controlled).
+        // Blank batch → auto-mint B/FY/NNN; a supplied batch must pass the
+        // duplicate guard (setting-controlled).
         const suppliedBatch = String(body.batch_number || "").trim();
         await assertBatchesAllowed(catalyst, [suppliedBatch], pl.design);
         const batchNumber = suppliedBatch || (await nextBatchNumber(catalyst));
-        const shade = String(body.shade || "").trim();
 
         const rec = await ds.table("ProductionLog").insertRow({
           parent_log: rowid,
@@ -3635,7 +3677,6 @@ app.post("/production-record/:rowid", async (req, res) => {
           status: "Produced",
           stage: String(pl.stage || "New"),
           batch_number: batchNumber,
-          shade,
           production_date: body.production_date != null ? String(body.production_date) : "",
           shift: body.shift != null ? String(body.shift) : "",
           performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -3663,7 +3704,7 @@ app.post("/production-record/:rowid", async (req, res) => {
 /* Record several batches at once against a plan line (batch-tracked items).
    Atomic: validates Σ qty ≤ remaining (and ≤ order remaining) ONCE, bumps
    OrderItem.produced by the sum + steps po→prod, then inserts one dated `record`
-   child per batch (blank batch auto-minted per row; shade dropped, written "").
+   child per batch (blank batch auto-minted per row).
    On any insert failure it deletes the rows it added and reverts the OrderItem
    bump, so a partial record never sticks.
    body: { rows: [{ qty_boxes, batch_number?, mfg_date?, note? }], shift?, performed_by?, pallet? } */
@@ -3752,7 +3793,6 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
               status: "Produced",
               stage: String(pl.stage || "New"),
               batch_number: batchNumber,
-              shade: "",
               production_date: l.mfg_date,
               shift: body.shift != null ? String(body.shift) : "",
               performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -3841,7 +3881,6 @@ app.post("/opening-stock/:designId", async (req, res) => {
             status: "",
             stage: "",
             batch_number: batchNumber,
-            shade: "",
             production_date: l.mfg_date,
             note: l.note,
           });
@@ -3957,16 +3996,15 @@ app.post("/production-complete", async (req, res) => {
                 touchedOrderItems.add(orderItemId);
               }
             }
-            // Batch/shade per line (each completed line is one design's run);
-            // blank batch → auto-mint. One batch = one shade.
+            // Batch per line (each completed line is one design's run);
+            // blank batch → auto-mint.
             const batchNumber = String((l && l.batch_number) || "").trim() || (await nextBatchNumber(catalyst));
-            const shade = String((l && l.shade) || "").trim();
             await ds.table("ProductionLog").insertRow({
               parent_log: id, entry_type: "record",
               design: pl.design || null, sales_order: pl.sales_order || null,
               order_item: pl.order_item || null, request_group: pl.request_group || null,
               qty_requested: 0, qty_boxes: delta, status: "Produced", stage: "Completed",
-              batch_number: batchNumber, shade,
+              batch_number: batchNumber,
               production_date: productionDate, shift: "", performed_by: performedBy, note,
             });
           }

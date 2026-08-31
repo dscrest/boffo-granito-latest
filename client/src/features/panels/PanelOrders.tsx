@@ -206,14 +206,12 @@ export function PanelOrders() {
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
               <th>Sales Person</th>
-              <th>Stock</th>
               <th>Status</th>
               <th />
             </tr>
           </thead>
           <tbody>
             {orders.map((o) => {
-              const shortages = shortagesFor(o, panelById.get(o.panelId), stock);
               const action = actionFor(o);
               return (
                 <tr key={o.id}>
@@ -224,17 +222,6 @@ export function PanelOrders() {
                   <td className="num mono">{fmt(o.qty)}</td>
                   <td className="mono muted">{o.orderDate || "—"}</td>
                   <td>{o.salesperson || "—"}</td>
-                  <td>
-                    {o.status === "Dispatched" ? (
-                      <span className="dim">—</span>
-                    ) : shortages.length ? (
-                      <span title={shortages.map((s) => `${s.designName} ${s.cutSizeName} (${fmt(s.have)}/${fmt(s.need)})`).join(", ")} style={{ color: "var(--c-red)" }}>
-                        Short
-                      </span>
-                    ) : (
-                      <span style={{ color: "var(--c-green)" }}>Covered</span>
-                    )}
-                  </td>
                   <td>{PANEL_ORDER_STATUS_LABEL[o.status]}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {action && (
@@ -248,7 +235,7 @@ export function PanelOrders() {
             })}
             {orders.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={7}>
                   <EmptyState title="No panel orders yet" hint="Record the first one with New Order" />
                 </td>
               </tr>

@@ -507,7 +507,7 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | sales_order | bigint | SalesOrder ROWID — null on independent (logical FK) |
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
 | batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
-| shade | varchar(60) | shade of the batch (one batch = one shade) — added 2026-08-07 |
+| shade | varchar(60) | RETIRED 2026-08-29 (batch is the only tracked dimension; never populated in live data). Column kept, nothing reads or writes it — added 2026-08-07 |
 | second_stage | boolean | **RETIRED 2026-08-25** — no longer read or written. Was: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` instead of `Planning`. Removed because it silently kept production output out of "Ready for Palletization" (the flag was sticky per batch). Column left in place; old rows keep their value. |
 
 Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
@@ -543,9 +543,9 @@ Not in the column table but used throughout the sagas: `entry_type` (`plan`|`rec
 | pallet | FK → Pallet | SET-NULL |
 | design | FK → Design | SET-NULL (null on a mixed pallet) |
 | is_demo | boolean, default false | demo pool flag (fit tier 3) |
-| is_mixed | boolean, default false | mixed pallet — combined sub-pallet leftovers across items (design null; batch/shade per line). Created via `/combine-leftovers` — added 2026-08-07 |
+| is_mixed | boolean, default false | mixed pallet — combined sub-pallet leftovers across items (design null; batch per line). Created via `/combine-leftovers` — added 2026-08-07 |
 | batch_number | varchar(40) | denormalised header batch for a single-batch pallet's slip (blank on mixed) — added 2026-08-07 |
-| shade | varchar(60) | header shade for a single-batch pallet (blank on mixed) — added 2026-08-07 |
+| shade | varchar(60) | RETIRED 2026-08-29 (see ProductionLog.shade) — added 2026-08-07 |
 
 ### PalletisedBatchLine (live id 69851000000041727)
 | Column | Type | Notes |
@@ -554,7 +554,7 @@ Not in the column table but used throughout the sagas: `entry_type` (`plan`|`rec
 | batch | FK → PalletisedBatch | **CASCADE** |
 | order_item | FK → OrderItem | SET-NULL |
 | batch_number | varchar(40) | per-line production batch — mixed-pallet truth (each leftover keeps its own) — added 2026-08-07 |
-| shade | varchar(60) | per-line shade — added 2026-08-07 |
+| shade | varchar(60) | RETIRED 2026-08-29 (see ProductionLog.shade) — added 2026-08-07 |
 
 ### Container (76673000000055377)
 | Column | Type | Notes |
@@ -604,6 +604,8 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
 | status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call); `Palletizing` added 2026-08-17 |
+| batch_number | varchar(40) | production batch these boxes come from (`""` = unattributed legacy aggregate). Set by `autoEnqueuePalletization`, `/pal-plan`, `/pal-topup` and `/send-to-loading` via the shared `unqueuedBatches()` FIFO split; preserved when `/pal-line-box` splits a line for a partial load. **The batch trail from ProductionLog to dispatch runs through this column** — batch-wise stock and the batch reports read it |
+| pallet_group | varchar(60) | shared physical pallet group (`""` = none) — legacy mixed pallets |
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
 | load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box). Optional `boxes` in the body = partial load: the line SPLITS (loaded part + a Ready remainder line) |
 | deleted_at | datetime | soft delete |

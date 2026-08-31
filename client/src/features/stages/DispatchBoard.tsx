@@ -341,7 +341,7 @@ export function DispatchBoard({
             onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
             title={isSel && selected.size > 1 ? `Palletise the ${selected.size} selected items` : "Palletise this item — lands in Ready for Loading"}
           >
-            Palletise{isSel && selected.size > 1 ? ` (${selected.size})` : ""} →
+            Palletise{isSel && selected.size > 1 ? ` (${selected.size})` : ""}
           </button>
         )}
       </div>
@@ -566,9 +566,11 @@ export function DispatchBoard({
                             {l.itemCode}
                           </span>
                         </td>
-                        <td>{l.designLabel}</td>
-                        <td>
-                          {l.customerName || "—"}
+                        <td className="nw">
+                          <span className="clip" style={{ maxWidth: 260 }} title={l.designLabel}>{l.designLabel}</span>
+                        </td>
+                        <td className="nw">
+                          <span className="clip" style={{ maxWidth: 180 }} title={l.customerName}>{l.customerName || "—"}</span>
                           <div className="dim mono" style={{ fontSize: "var(--t-xs)" }}>{l.soNumber || "—"}</div>
                         </td>
                         <td className="mono" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>
@@ -592,7 +594,7 @@ export function DispatchBoard({
                               disabled={busy}
                               onClick={(ev) => { ev.stopPropagation(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
                             >
-                              Palletise →
+                              Palletise
                             </button>
                           )}
                         </td>
@@ -636,7 +638,8 @@ export function DispatchBoard({
             </div>
           )}
 
-          {/* Stage summary. */}
+          {/* Stage summary — kanban only; the sheet already shows a Stage column. */}
+          {view === "kanban" && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 10px", borderTop: "1px solid var(--border)" }}>
             {COLUMNS.map((col, i) => {
               const n = allLines.filter((e) => stageOf(e.p, e.l) === col.key).length;
@@ -650,6 +653,7 @@ export function DispatchBoard({
               );
             })}
           </div>
+          )}
         </section>
       </div>
 

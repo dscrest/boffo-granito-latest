@@ -28,6 +28,10 @@ export interface OpResult<T = unknown> {
   row?: DSRow;
   data?: T;
   error?: string;
+  /** listAll only: true when the table exceeded the page cap — `rows` is
+      incomplete. Aggregating callers must treat this as a failure, never as a
+      small table. */
+  truncated?: boolean;
 }
 
 export interface ListOpts {
@@ -60,8 +64,15 @@ export async function list(table: string, opts: ListOpts = {}): Promise<OpResult
 
 /** Fetch ALL rows of a table by paging through ZCQL's 300-row cap.
     One request for tables under 300 rows (same cost as before); larger
-    tables transparently page until a short page arrives. Guards against
-    servers that ignore `offset` (would echo page 1 forever). */
+    tables transparently page until a short page arrives.
+
+    Correctness of `LIMIT offset, n` paging depends on a stable ordering, which
+    ZCQL does NOT guarantee for unordered queries — so a default
+    `ORDER BY ROWID asc` is applied (callers can still override `order`), and
+    rows are deduped by ROWID so a mid-pagination shift can never double-count.
+    Guards against servers that ignore `offset` (would echo page 1 forever).
+    Hitting the page cap sets `truncated` instead of silently returning a
+    partial table. */
 export async function listAll(
   table: string,
   opts: Omit<ListOpts, "limit" | "offset"> = {},
@@ -69,18 +80,25 @@ export async function listAll(
   const PAGE = 300;
   const MAX_PAGES = 34; // ~10k rows safety valve
   const all: DSRow[] = [];
+  const seen = new Set<string>();
   let prevFirstId: string | null = null;
+  let truncated = true; // proven false by any short/duplicate page
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await list(table, { ...opts, limit: PAGE, offset: page * PAGE });
+    const res = await list(table, { order: "ROWID asc", ...opts, limit: PAGE, offset: page * PAGE });
     if (!res.ok) return res;
     const rows = res.rows || [];
     const firstId = rows.length ? String(rows[0].ROWID) : null;
-    if (page > 0 && firstId !== null && firstId === prevFirstId) break; // offset unsupported
+    if (page > 0 && firstId !== null && firstId === prevFirstId) { truncated = false; break; } // offset unsupported
     prevFirstId = firstId;
-    all.push(...rows);
-    if (rows.length < PAGE) break;
+    for (const r of rows) {
+      const id = String(r.ROWID);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      all.push(r);
+    }
+    if (rows.length < PAGE) { truncated = false; break; }
   }
-  return { ok: true, rows: all };
+  return truncated ? { ok: true, rows: all, truncated } : { ok: true, rows: all };
 }
 
 export async function getOne(table: string, rowid: string): Promise<OpResult> {

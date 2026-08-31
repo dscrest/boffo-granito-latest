@@ -490,8 +490,8 @@ export function LoadContainerModal({
             {busy || saving
               ? "Saving…"
               : line
-                ? `Load ${fmt(effCount)} boxes →`
-                : "Create container →"}
+                ? `Load ${fmt(effCount)} boxes`
+                : "Create container"}
           </button>
         </div>
       </div>

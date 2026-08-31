@@ -370,7 +370,7 @@ export function ProductionTable() {
   const commitStage = async (e: ProductionEntry, stage: ProductionStage) => {
     if (stage === e.stage) return;
     // Completing a line with boxes still to make opens the record dialog to
-    // capture the final output + batch/shade (same as the board's onMove).
+    // capture the final output + batch (same as the board's onMove).
     if (stage === "Completed" && e.qtyRequested - e.producedSoFar > 0) { setRecordEntry(e); return; }
     const res = await setProductionStage([e.id], stage);
     if (!res.ok) { toast.error(res.error || "Could not change status"); return; }
@@ -522,7 +522,7 @@ export function ProductionTable() {
             {loading && entries.length === 0 ? (
               <SkeletonRows rows={6} />
             ) : (
-              <table className="tbl">
+              <table className="tbl ruled">
                 <thead>
                   <tr>
                     <SortTh id="code" label="Production ID" sort={sort} />
@@ -617,7 +617,7 @@ export function ProductionTable() {
           {loading && entries.length === 0 ? (
             <SkeletonRows rows={6} />
           ) : (
-            <table className="tbl">
+            <table className="tbl ruled">
               <thead>
                 <tr>
                   <th style={{ width: 34, textAlign: "center" }}>

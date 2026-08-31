@@ -19,8 +19,6 @@ import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
-import { PalletPackForm } from "@/features/stages/PalletPackForm";
-import { closePallet, combineLeftovers, type ClosePalletInput, type CombineLeftoversInput } from "@/features/stages/palletisationApi";
 import { PalletForm } from "./PalletForm";
 import {
   cachedPalletOrders,
@@ -69,7 +67,6 @@ export function PalletDetail() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
-  const [packing, setPacking] = useState(false);
 
   const refresh = () =>
     listPallets().then((res) => {
@@ -143,39 +140,10 @@ export function PalletDetail() {
     navigate("/pallets");
   };
 
-  // Pack an order onto this spec without leaving for the Palletization stage.
-  // The saga busts the pallet-orders cache, so Associated Orders refetches.
-  const onPalletize = async (inputs: ClosePalletInput[], mixed?: CombineLeftoversInput[]) => {
-    let done = 0;
-    let boxes = 0;
-    for (const input of inputs) {
-      const res = await closePallet(input);
-      if (!res.ok) {
-        // Keep the form open — closing here would discard everything typed.
-        toast.error(res.error || "Palletisation failed");
-        await refreshOrders();
-        return;
-      }
-      done += 1;
-      boxes += res.data?.boxes_packed ?? 0;
-    }
-    for (const m of mixed ?? []) {
-      const res = await combineLeftovers(m);
-      if (!res.ok) {
-        toast.error(res.error || "Mixed-pallet combine failed");
-        await refreshOrders();
-        return;
-      }
-      done += 1;
-      boxes += res.data?.boxes_packed ?? 0;
-    }
-    setPacking(false);
-    toast.success(`Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
-    await refreshOrders();
-  };
-
+  // "Palletize Order" retired 2026-08-29: it drove the legacy /close-pallet
+  // saga (PalletisedBatch), a second record of boxes the live PalPlan/LoadBox
+  // flow also counts — palletise from /packing instead.
   const moreItems = [
-    { label: "Palletize Order", onClick: () => setPacking(true) },
     ...(can("items", "create") && pallet ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
@@ -232,10 +200,6 @@ export function PalletDetail() {
           onSave={onClone}
           onClose={() => setCloning(false)}
         />
-      )}
-
-      {packing && pallet && (
-        <PalletPackForm presetPalletId={pallet.id} onSave={onPalletize} onClose={() => setPacking(false)} />
       )}
 
       {/* Pallet list — fixed viewport height with its OWN scroll, sticky while

@@ -1,3 +1,6 @@
+/* RETIRED 2026-08-29 — legacy PalletisedBatch/ContainerLoading flow; no route or
+   caller imports this. The live path is PalPlans (/packing) + LoadingBay (/loading).
+   Kept for git history; delete freely. */
 /* ============================================================
    Dispatch form — closes out a loaded container via the dispatch saga
    (loaded → dispatched). Cascades dispatched_qty_boxes across every

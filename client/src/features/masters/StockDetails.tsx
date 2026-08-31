@@ -1,7 +1,9 @@
 /* ============================================================
-   Stock Details — Inventory ▸ batch/shade-wise on-hand stock. One row per
-   (item · batch · shade) with Current Stock = produced − loaded, derived in
-   batchStockApi (no per-batch stock is stored). Read-only aggregate: no
+   Stock Details — Inventory ▸ batch-wise on-hand stock. One row per
+   (item · batch) with Current Stock = opening + produced − loaded, derived in
+   batchStockApi (no per-batch stock is stored); the "—" batch row is the
+   Unattributed bucket. Reports ▸ Batch-wise
+   Stock is the same data with date filters and CSV. Read-only aggregate: no
    create/edit/delete. Row-click opens the item detail Stock tab.
    Follows the master-grid convention (see Sizes / DesignMaster).
    ============================================================ */
@@ -16,7 +18,7 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 
 const dash = <span className="dim">—</span>;
-const rowKey = (r: BatchStockRow) => `${r.designId} ${r.batchNumber} ${r.shade}`;
+const rowKey = (r: BatchStockRow) => `${r.designId} ${r.batchNumber}`;
 
 // Toggleable + reorderable columns. Produced/Loaded default-hidden — Current
 // Stock is the headline; the two components sit behind the column picker.
@@ -35,11 +37,25 @@ const STOCK_COLUMNS: ColumnDef<BatchStockRow>[] = [
     label: "Current Stock",
     className: "num mono",
     style: { textAlign: "right" },
-    render: (r) => fmt(r.current),
+    render: (r) =>
+      r.over > 0 ? (
+        <span style={{ color: "var(--c-amber)", fontWeight: 600 }} title={`${fmt(r.over)} more boxes consumed than this batch ever supplied — check the batch numbers`}>
+          {fmt(r.current)} ⚠
+        </span>
+      ) : (
+        fmt(r.current)
+      ),
   },
   { key: "size", label: "Size", render: (r) => (r.sizeCode ? <span className="chip size">{r.sizeCode}</span> : dash) },
-  { key: "batch", label: "Batch", className: "mono", render: (r) => r.batchNumber || dash },
-  { key: "shade", label: "Shade", render: (r) => r.shade || dash },
+  {
+    key: "batch",
+    label: "Batch",
+    className: "mono",
+    render: (r) =>
+      r.batchNumber || (
+        <span className="dim" title="Unattributed — legacy production, non-batched stock, and boxes palletised before recording">—</span>
+      ),
+  },
   {
     key: "produced",
     label: "Produced",
@@ -90,7 +106,6 @@ export function StockDetails() {
           (r) =>
             r.designLabel.toLowerCase().includes(q) ||
             r.batchNumber.toLowerCase().includes(q) ||
-            r.shade.toLowerCase().includes(q) ||
             r.sizeCode.toLowerCase().includes(q),
         )
       : rows;
@@ -112,7 +127,7 @@ export function StockDetails() {
         <div style={{ flex: 1 }} />
         <span className="gsearch">
           <Icon name="search" size={13} />
-          <input type="text" placeholder="Search item, batch or shade…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input type="text" placeholder="Search item, batch or size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
       </div>

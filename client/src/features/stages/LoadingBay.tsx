@@ -95,16 +95,32 @@ const ageDays = (p: PalPlan, l: PalPlanLine) => {
   return Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : 0;
 };
 
-/* Data-driven sheet columns (item code pinned outside as the row identity). */
+/* Data-driven sheet columns (item code pinned outside as the row identity).
+   Every cell is one line: `nw` on short values, a `clip` span with its own
+   max-width on the long ones (see the .clip note in styles.css). */
 function loadColumns(): ColumnDef<Row>[] {
   return [
-    { key: "design", label: "Design", render: (r) => <span className="design-name">{r.l.designLabel}</span> },
-    { key: "customer", label: "Customer", render: (r) => r.l.customerName || "—" },
-    { key: "so", label: "Order", className: "mono", render: (r) => r.l.soNumber || "—" },
+    {
+      key: "design",
+      label: "Design",
+      className: "nw",
+      render: (r) => (
+        <span className="design-name clip" style={{ maxWidth: 260 }} title={r.l.designLabel}>{r.l.designLabel}</span>
+      ),
+    },
+    {
+      key: "customer",
+      label: "Customer",
+      className: "nw",
+      render: (r) => (
+        <span className="clip" style={{ maxWidth: 170 }} title={r.l.customerName}>{r.l.customerName || "—"}</span>
+      ),
+    },
+    { key: "so", label: "Order", className: "mono nw", render: (r) => r.l.soNumber || "—" },
     {
       key: "batch",
       label: "Batch",
-      className: "mono",
+      className: "mono nw",
       render: (r) => (
         <>
           {r.l.batchNumber || "—"}
@@ -122,17 +138,54 @@ function loadColumns(): ColumnDef<Row>[] {
       label: "Status",
       render: (r) => <span className={`chip palstatus ${stageMeta(r.stage).chip}`} style={{ whiteSpace: "nowrap" }}>{stageMeta(r.stage).label}</span>,
     },
-    { key: "container", label: "Container", render: (r) => (r.box ? boxLabel(r.box) : "—") },
-    { key: "vehicle", label: "Vehicle", render: (r) => (r.box ? [r.box.vehicleNumber, r.box.driverName].filter(Boolean).join("  ·  ") || "—" : "—") },
-    { key: "containerNo", label: "Container No.", className: "mono", render: (r) => r.box?.containerNumber || "—" },
-    { key: "seal", label: "Seals", className: "mono", render: (r) => (r.box ? [r.box.lineSeal, r.box.electronicSeal].filter(Boolean).join("  ·  ") || "—" : "—") },
-    { key: "containerSize", label: "Size", render: (r) => r.box?.containerSize || "—" },
-    { key: "transporter", label: "Transporter", render: (r) => r.box?.transporter || "—" },
-    { key: "lrNumber", label: "LR / Docket", className: "mono", render: (r) => r.box?.lrNumber || "—" },
-    { key: "destination", label: "Destination", render: (r) => r.box?.destination || "—" },
-    { key: "supervisor", label: "Supervisor", render: (r) => r.box?.loadingSupervisor || "—" },
-    { key: "dispatchDate", label: "Dispatch Date", className: "mono muted", render: (r) => r.box?.dispatchDate || "—" },
-    { key: "age", label: "Age", className: "muted", render: (r) => `${ageDays(r.p, r.l)}d` },
+    { key: "container", label: "Container", className: "nw", render: (r) => (r.box ? boxLabel(r.box) : "—") },
+    {
+      key: "vehicle",
+      label: "Vehicle",
+      className: "nw",
+      render: (r) => {
+        const v = r.box ? [r.box.vehicleNumber, r.box.driverName].filter(Boolean).join("  ·  ") : "";
+        return <span className="clip" style={{ maxWidth: 160 }} title={v}>{v || "—"}</span>;
+      },
+    },
+    { key: "containerNo", label: "Container No.", className: "mono nw", render: (r) => r.box?.containerNumber || "—" },
+    {
+      key: "seal",
+      label: "Seals",
+      className: "mono nw",
+      render: (r) => {
+        const s = r.box ? [r.box.lineSeal, r.box.electronicSeal].filter(Boolean).join("  ·  ") : "";
+        return <span className="clip" style={{ maxWidth: 150 }} title={s}>{s || "—"}</span>;
+      },
+    },
+    { key: "containerSize", label: "Size", className: "nw", render: (r) => r.box?.containerSize || "—" },
+    {
+      key: "transporter",
+      label: "Transporter",
+      className: "nw",
+      render: (r) => (
+        <span className="clip" style={{ maxWidth: 150 }} title={r.box?.transporter}>{r.box?.transporter || "—"}</span>
+      ),
+    },
+    { key: "lrNumber", label: "LR / Docket", className: "mono nw", render: (r) => r.box?.lrNumber || "—" },
+    {
+      key: "destination",
+      label: "Destination",
+      className: "nw",
+      render: (r) => (
+        <span className="clip" style={{ maxWidth: 150 }} title={r.box?.destination}>{r.box?.destination || "—"}</span>
+      ),
+    },
+    {
+      key: "supervisor",
+      label: "Supervisor",
+      className: "nw",
+      render: (r) => (
+        <span className="clip" style={{ maxWidth: 150 }} title={r.box?.loadingSupervisor}>{r.box?.loadingSupervisor || "—"}</span>
+      ),
+    },
+    { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box?.dispatchDate || "—" },
+    { key: "age", label: "Age", className: "muted nw", render: (r) => `${ageDays(r.p, r.l)}d` },
   ];
 }
 
@@ -651,7 +704,7 @@ export function LoadingBay() {
             onClick={(ev) => { ev.stopPropagation(); setPicker({ lineId: l.id }); }}
             title="Load into a container"
           >
-            <Icon name="truck" size={11} /> Load →
+            <Icon name="truck" size={11} /> Load
           </button>
         )}
         {canEdit && stage === "InLoading" && box && (
@@ -663,7 +716,7 @@ export function LoadingBay() {
             onClick={(ev) => { ev.stopPropagation(); setVehModal({ box }); }}
             title={`Capture vehicle + seals for ${boxLabel(box)}`}
           >
-            Confirm Load →
+            Confirm Load
           </button>
         )}
         {canEdit && stage === "ReadyDispatch" && box && (
@@ -675,7 +728,7 @@ export function LoadingBay() {
             onClick={(ev) => { ev.stopPropagation(); void dispatchBox(box); }}
             title={`Dispatch ${boxLabel(box)} — the Dispatch Entry opens after`}
           >
-            <Icon name="check" size={11} /> Dispatch →
+            <Icon name="check" size={11} /> Dispatch
           </button>
         )}
       </div>
@@ -764,8 +817,6 @@ export function LoadingBay() {
   };
 
   // ---- render -------------------------------------------------
-  const stageCount = (s: LoadStage) => rows.filter((r) => r.stage === s).length;
-
   const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
     <button
       onClick={() => setView(v)}
@@ -783,15 +834,6 @@ export function LoadingBay() {
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <div className="title">Loading</div>
-          <div className="sub">
-            {stageCount("Ready")} ready · {stageCount("InLoading")} in loading · {stageCount("ReadyDispatch")} ready for dispatch
-          </div>
-        </div>
-      </div>
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar" style={{ marginBottom: 12 }}>
@@ -905,17 +947,17 @@ export function LoadingBay() {
                           <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
                             {stage === "Ready" && (
                               <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setPicker({ lineId: l.id })}>
-                                Load →
+                                Load
                               </button>
                             )}
                             {stage === "InLoading" && box && (
                               <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setVehModal({ box })}>
-                                Confirm Load →
+                                Confirm Load
                               </button>
                             )}
                             {stage === "ReadyDispatch" && box && (
                               <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => void dispatchBox(box)}>
-                                Dispatch →
+                                Dispatch
                               </button>
                             )}
                             {box && <span style={{ display: "inline-flex", verticalAlign: "middle", marginLeft: 6 }}><MoreMenu kebab items={menuFor(r)} /></span>}

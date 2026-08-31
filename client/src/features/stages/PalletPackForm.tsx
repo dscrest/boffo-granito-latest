@@ -1,3 +1,6 @@
+/* RETIRED 2026-08-29 — legacy PalletisedBatch/ContainerLoading flow; no route or
+   caller imports this. The live path is PalPlans (/packing) + LoadingBay (/loading).
+   Kept for git history; delete freely. */
 /* ============================================================
    Palletization form — commits one or more PalletisedBatches via the
    close-pallet saga. The operator picks a sales order, then per LINE ITEM

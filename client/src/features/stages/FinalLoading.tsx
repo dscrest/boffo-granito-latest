@@ -1,3 +1,6 @@
+/* RETIRED 2026-08-29 — legacy PalletisedBatch/ContainerLoading flow; no route or
+   caller imports this. The live path is PalPlans (/packing) + LoadingBay (/loading).
+   Kept for git history; delete freely. */
 /* Final Loading & Invoicing — invoice tables are live (listOrders, Data
    Store), grouped by invoice number. The "Dispatch" action opens the
    dispatch saga form (loaded → dispatched); tables reload on success.

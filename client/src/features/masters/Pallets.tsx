@@ -31,7 +31,7 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
     label: "Name",
     render: (r) => (
       <Link className="linkish" to={`/pallets/${r.id}`} onClick={(e) => e.stopPropagation()} title="View pallet">
-        <span className="chip">{r.name}</span>
+        {r.name}
       </Link>
     ),
   },
@@ -39,8 +39,7 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
   {
     key: "size",
     label: "Size",
-    render: (r) =>
-      r.sizeLabel || r.palletSizeLabel ? <span className="chip size">{r.sizeLabel || r.palletSizeLabel}</span> : dash,
+    render: (r) => r.sizeLabel || r.palletSizeLabel || dash,
   },
   { key: "type", label: "Type", className: "muted", render: (r) => r.palletType || dash },
   {

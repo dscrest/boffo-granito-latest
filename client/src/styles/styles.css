@@ -71,11 +71,11 @@
   --font-sans: 'Zoho Puvi', system-ui, sans-serif;
   --font-mono: 'Zoho Puvi', ui-monospace, monospace;
 
-  /* Sizes (compact) — +2px app-wide bump (2026-08-26 request) */
+  /* Sizes — body text flat at 12.5px app-wide (2026-08-27 request); headings keep the scale */
   --t-xs: 12.5px;
-  --t-sm: 13.5px;
-  --t-md: 14.5px;
-  --t-lg: 15.5px;
+  --t-sm: 12.5px;
+  --t-md: 12.5px;
+  --t-lg: 12.5px;
   --t-xl: 18px;
   --t-2xl: 22px;
   --t-3xl: 30px;
@@ -643,24 +643,60 @@ a { color: inherit; text-decoration: none; }
   text-align: left;
   font-weight: 700;
   font-size: 12.5px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--fg-2);
   padding: 8px 10px;
+  /* Headings stay on one line everywhere — a wrapped heading doubles the row height. */
+  white-space: nowrap;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
   position: sticky; top: 0; z-index: 1;
 }
 .tbl td {
-  padding: 7px 10px;
+  padding: 5px 10px;
+  height: 36px;              /* min row height — text and control rows match */
   border-bottom: 1px solid var(--border);
   color: var(--fg-2);
   vertical-align: middle;
 }
+/* Controls sitting in a cell are sized to fit that row height, so a Status
+   select or an inline action button never makes its row taller than the rest. */
+.tbl td select,
+.tbl td .btn,
+.tbl td input:not([type="checkbox"]):not([type="radio"]) { height: 26px; padding-top: 0; padding-bottom: 0; }
+.tbl td select { padding-right: 24px; background-position: right 7px center; }
+.tbl td .btn.x { width: 26px; }
 .tbl tr:hover td { background: var(--hover); }
 .tbl tr:last-child td { border-bottom: 0; }
 .tbl td.num { font-family: var(--font-mono); text-align: right; color: var(--fg); }
 .tbl td .design-name { color: var(--fg); }
+/* Single-line cells — keep a long value from wrapping the row taller.
+   `nw` on the td stops the wrap; `clip` on the VALUE ellipsises it at its own
+   max-width (which the caller sets). The cap has to live on a block box, not
+   the td: under auto table layout a cell is never laid out below its
+   min-content width, so max-width on a nowrap td does nothing. Give a clipped
+   value a title so the full text is still readable on hover. */
+/* Ruled grid — full black cell borders instead of the faint row separators. */
+.tbl.ruled th, .tbl.ruled td { border: 1px solid var(--fg); }
+.tbl.ruled tr:last-child td { border-bottom: 1px solid var(--fg); }
+.tbl td.nw { white-space: nowrap; }
+.tbl .clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Matrix / cross-tab reports (PivotTable). A wide matrix scrolls sideways, so
+   the row-label column and the grand-total column stay pinned to either edge —
+   otherwise you lose track of which row you're reading. */
+.tbl.pivot th, .tbl.pivot td { white-space: nowrap; }
+.tbl.pivot .pivot-rh {
+  position: sticky; left: 0; z-index: 2;
+  background: var(--panel);
+  max-width: 260px;
+  border-right: 1px solid var(--border);
+}
+.tbl.pivot thead .pivot-rh { z-index: 3; background: var(--panel-2); }
+.tbl.pivot tr:hover td.pivot-rh { background: var(--hover); }
+.tbl.pivot .pivot-tot { border-left: 1px solid var(--border); }
+.tbl.pivot tfoot .pivot-rh { background: var(--elevated); }
 
 /* Kanban */
 .kanban-grid {

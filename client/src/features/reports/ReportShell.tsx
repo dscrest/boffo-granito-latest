@@ -42,12 +42,14 @@ interface ReportShellProps {
   date?: { value: DateRangeState; onChange: (r: DateRangeState) => void };
   /** Show the advanced-filter modal button when provided. */
   filter?: { title: string; fields: FilterField[]; criteria: FilterCriteria; onChange: (c: FilterCriteria) => void };
+  /** Report-specific controls (view toggle, grouping) — sits right of the filter button. */
+  bar?: ReactNode;
   csv?: CsvSpec;
   children: ReactNode;
 }
 
-export function ReportShell({ title, subtitle, kpis, date, filter, csv, children }: ReportShellProps) {
-  const showBar = !!date || !!filter;
+export function ReportShell({ title, subtitle, kpis, date, filter, bar, csv, children }: ReportShellProps) {
+  const showBar = !!date || !!filter || !!bar;
   return (
     <div>
       <div className="page-head">
@@ -92,6 +94,7 @@ export function ReportShell({ title, subtitle, kpis, date, filter, csv, children
           {filter && (
             <AdvancedFilterButton title={filter.title} fields={filter.fields} criteria={filter.criteria} onChange={filter.onChange} />
           )}
+          {bar}
         </div>
       )}
 

@@ -49,7 +49,6 @@ const PalPlanDetail = lazy(() => import("@/features/stages/PalPlanDetail").then(
 const LoadingBay = lazy(() => import("@/features/stages/LoadingBay").then((m) => ({ default: m.LoadingBay })));
 const LoadingDetail = lazy(() => import("@/features/stages/LoadingDetail").then((m) => ({ default: m.LoadingDetail })));
 const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
-const FinalLoading = lazy(() => import("@/features/stages/FinalLoading").then((m) => ({ default: m.FinalLoading })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
 const PartiesView = lazy(() => import("@/features/masters/Parties").then((m) => ({ default: m.PartiesView })));
 const CustomerDetail = lazy(() => import("@/features/masters/CustomerDetail").then((m) => ({ default: m.CustomerDetail })));
@@ -113,7 +112,7 @@ function navTree(): NavNode[] {
       icon: "tile",
       children: [
         { id: "design", label: "Items", icon: "tile" },
-        // Stock Details — batch/shade-wise on-hand (produced − loaded), derived
+        // Stock Details — batch-wise on-hand (produced − loaded), derived
         // in batchStockApi; also surfaced as the item detail Stock tab.
         { id: "stock", label: "Stock Details", icon: "tile" },
         // Size Master owns per-box packing data (dims, pcs/box, coverage,
@@ -313,9 +312,7 @@ export default function App() {
 
   useEffect(() => {
     applyAccent(TWEAK_DEFAULTS.accent);
-    const d = TWEAK_DEFAULTS.density;
-    document.documentElement.style.setProperty("--t-md", d === "spacious" ? "15.5px" : "14.5px");
-    document.documentElement.style.setProperty("--t-sm", d === "spacious" ? "14px" : "13.5px");
+    // ponytail: text size is flat 12.5px in styles.css now; density no longer overrides it.
   }, []);
 
   // Live quote count for the sidebar badge — seed length is only the fallback
@@ -464,7 +461,6 @@ export default function App() {
             <Route path="/packing/:id" element={<PalPlanDetail />} />
             <Route path="/loading" element={<LoadingBay />} />
             <Route path="/loading/:id" element={<LoadingDetail />} />
-            <Route path="/final" element={<FinalLoading />} />
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/reports" element={<ReportsHome />} />
             <Route path="/reports/:id" element={<ReportView />} />

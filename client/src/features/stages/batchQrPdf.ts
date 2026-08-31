@@ -23,7 +23,6 @@ function summaryLines(rec: ProductionRecordRow): string[] {
     `Qty: ${rec.qtyBoxes} boxes`,
     `Mfg date: ${rec.productionDate || rec.createdTime.slice(0, 10) || "—"}`,
   ];
-  if (rec.shade) lines.push(`Shade: ${rec.shade}`);
   if (rec.performedBy) lines.push(`Logged by: ${rec.performedBy}`);
   if (rec.note) lines.push(`Remark: ${rec.note}`);
   return lines;

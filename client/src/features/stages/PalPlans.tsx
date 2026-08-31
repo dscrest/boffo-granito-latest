@@ -154,15 +154,6 @@ export function PalPlans() {
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="linkish"
-          style={{ background: "none", border: 0, padding: 0, font: "inherit", cursor: "pointer" }}
-          onClick={() => navigate("/loading")}
-          title="Load and dispatch on the Loading page"
-        >
-          Loading →
-        </button>
         <div style={{ flex: 1 }} />
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("kanban", "kanban", "Kanban")}

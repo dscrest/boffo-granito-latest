@@ -1,3 +1,6 @@
+/* RETIRED 2026-08-29 — legacy PalletisedBatch/ContainerLoading flow; no route or
+   caller imports this. The live path is PalPlans (/packing) + LoadingBay (/loading).
+   Kept for git history; delete freely. */
 /* Palletization — a grid of palletised batches (the simple "these boxes are on
    a pallet in the warehouse" indicator). Loading happens later, at the Loading
    step. Mirrors the Quotes/PalPlans grid chrome: status tabs + search + advanced

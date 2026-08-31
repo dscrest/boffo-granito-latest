@@ -44,10 +44,8 @@ export interface ProductionRecordRow {
   shift: string;
   performedBy: string;
   note: string;
-  /** Production batch (B/FY/NNN) this output belongs to. One batch = one shade. */
+  /** Production batch (B/FY/NNN) this output belongs to. */
   batchNumber: string;
-  /** Shade of the batch (a property recorded once with the batch). */
-  shade: string;
   orderItemId: string;
   createdTime: string;
 }
@@ -76,9 +74,8 @@ export interface ProductionEntry {
   shift: string;
   performedBy: string;
   note: string;
-  /** Batch/shade of the latest recorded output on this line (blank if none). */
+  /** Batch of the latest recorded output on this line (blank if none). */
   batchNumber: string;
-  shade: string;
   /** SO link — empty on independent production. */
   salesOrderId: string;
   orderItemId: string;
@@ -198,7 +195,6 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       performedBy: str(r.performed_by),
       note: str(r.note),
       batchNumber: str(r.batch_number),
-      shade: str(r.shade),
       orderItemId: str(r.order_item),
       createdTime: str(r.CREATEDTIME),
     };
@@ -224,7 +220,6 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       performedBy: str(r.performed_by),
       note: str(r.note),
       batchNumber: str(r.batch_number),
-      shade: str(r.shade),
       orderItemId: "",
       createdTime: str(r.CREATEDTIME),
     });
@@ -262,7 +257,6 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
         performedBy: str(r.performed_by),
         note: str(r.note),
         batchNumber: lastRec ? lastRec.batchNumber : "",
-        shade: lastRec ? lastRec.shade : "",
         salesOrderId: soId,
         orderItemId: str(r.order_item),
         orderNumber: so ? str(so.order_number) : "",
@@ -303,9 +297,8 @@ export interface ProductionRecordInput {
   shift?: string;
   performed_by?: string;
   note?: string;
-  /** Batch number; blank → server auto-mints B/FY/NNN. One batch = one shade. */
+  /** Batch number; blank → server auto-mints B/FY/NNN. */
   batch_number?: string;
-  shade?: string;
   /** Pallet spec for the queue line this record creates; blank → the SO line's own. */
   pallet?: string;
 }
