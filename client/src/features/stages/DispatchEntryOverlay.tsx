@@ -55,7 +55,7 @@ export function DispatchEntryOverlay({ box, entries, onClose }: { box: LoadBox; 
   return createPortal(
     <div className="qprint-overlay" onClick={onClose}>
       <div className="qprint-bar" onClick={(e) => e.stopPropagation()}>
-        <span className="mono dim">Box {box.boxNumber}</span>
+        <span className="mono dim">Container {box.boxNumber}</span>
         <div style={{ flex: 1 }} />
         <button
           className="hbtn"
@@ -76,7 +76,7 @@ export function DispatchEntryOverlay({ box, entries, onClose }: { box: LoadBox; 
           <div>
             <div className="dentry-title">Dispatch Entry</div>
             <div className="dentry-sub mono">
-              Box {box.boxNumber}
+              Container {box.boxNumber}
               {box.containerNumber ? ` · ${box.containerNumber}` : ""}
             </div>
           </div>

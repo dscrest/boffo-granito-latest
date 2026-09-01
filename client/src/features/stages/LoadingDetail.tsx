@@ -139,7 +139,7 @@ export function LoadingDetail() {
       return;
     }
     const nowSealed = !!(capture.container_number || capture.line_seal);
-    toast.success(nowSealed ? `${boxLabel(box)} → Ready for Dispatch` : "Loading details saved");
+    toast.success(open && nowSealed ? `${boxLabel(box)} → Ready for Dispatch` : "Loading details saved");
     refresh();
   };
 
@@ -213,9 +213,9 @@ export function LoadingDetail() {
                 <Icon name="plus" size={13} /> Add Items
               </button>
             )}
-            {canEdit && open && (
+            {canEdit && (
               <button className="hbtn primary" disabled={busy} onClick={() => setVehModal(true)} title="Capture vehicle + container/seal details">
-                {sealed(box) ? "Edit Load Details" : "Confirm Load"}
+                {open && !sealed(box) ? "Confirm Load" : "Edit Load Details"}
               </button>
             )}
             {canEdit && open && sealed(box) && (
@@ -337,12 +337,20 @@ export function LoadingDetail() {
             </div>
           )}
         </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button className="hbtn" onClick={() => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries))}>
+            Print QR Label
+          </button>
+          <button className="hbtn" onClick={() => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries))}>
+            Dispatch Copy
+          </button>
+        </div>
       </RecordDetail>
 
       {vehModal && (
         <VehicleLoadModal
           palNumber={boxLabel(box)}
-          title="Confirm Load"
+          title={open && !sealed(box) ? "Confirm Load" : "Edit Load Details"}
           busy={busy}
           initialVehicleId={box.vehicleId}
           initialCapture={{

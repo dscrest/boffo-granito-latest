@@ -254,6 +254,15 @@ file already written in the template. Use it as the worked example.*
 | 100 | Billing and shipping address on the customer | **Done** | `billing_*` / `shipping_*` columns on `Customer`, `PartyForm.tsx` |
 | 101 | New Pallet — pallet size should be length and width | **Open** | Not confirmed against `PalletForm.tsx` |
 
+
+## CR-108…110 · Multi-select palletise & loading, Container rename (2026-08-31)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 108 | Palletise acts on ALL checked items, whichever card's button is clicked | **Deployed 2026-08-31, uncommitted** | `palletiseTargets` — selection ∪ clicked line ([`DispatchBoard.tsx:238`](../client/src/features/stages/DispatchBoard.tsx#L238)) |
+| 109 | Loading shows all checked items in the modal; save loads them all into the chosen container | **Deployed 2026-08-31, uncommitted** | Multi-line `LoadContainerModal` + all-or-nothing `POST /pal-lines-box` ([`LoadContainerModal.tsx`](../client/src/features/stages/LoadContainerModal.tsx), [`index.js:3085`](../functions/data-ops/index.js#L3085)) |
+| 110 | Rename container labels "Box N" → "Container N" | **Deployed 2026-08-31, uncommitted** | `boxLabel` ([`palPlansApi.ts:108`](../client/src/features/stages/palPlansApi.ts#L108)) + toasts, QR slip, Dispatch Copy, server errors |
+
 ---
 
 ## Open items, collected

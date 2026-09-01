@@ -28,3 +28,6 @@ catalyst-migration/
 
 # graphify generated knowledge-graph cache
 graphify-out/
+
+# rowids minted by scripts/seed-flow.mjs (its teardown key)
+scripts/.seed-flow-state*.json

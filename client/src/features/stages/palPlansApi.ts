@@ -104,8 +104,8 @@ export interface LoadBox {
   createdTime: string;
 }
 
-/** Display label for a loading: its vehicle once assigned, else "Box N". */
-export const boxLabel = (b: LoadBox) => b.vehicleNumber || `Box ${b.boxNumber}`;
+/** Display label for a loading: its vehicle once assigned, else "Container N". */
+export const boxLabel = (b: LoadBox) => b.vehicleNumber || `Container ${b.boxNumber}`;
 /** Sealed = container no or line seal captured → derives Ready for Dispatch. */
 export const sealed = (b: LoadBox) => !!(b.containerNumber || b.lineSeal);
 
@@ -446,6 +446,17 @@ export function dispatchLoadBox(rowid: string, capture?: LoadingCapture) {
     count below the line's total loads that many and splits off a Ready remainder. */
 export function setLineBox(lineId: string, box: string, boxes?: number) {
   return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, boxes ? { box, boxes } : { box }));
+}
+
+/** Put several Ready lines into one Open container in a single all-or-nothing
+    call — one bad line rejects the whole batch server-side. */
+export function setLinesBox(box: string, entries: { lineId: string; boxes?: number }[]) {
+  return bust(
+    op<{ ROWID: string; lines: number }>("pal-lines-box", {
+      box,
+      lines: entries.map((e) => ({ id: e.lineId, ...(e.boxes !== undefined ? { boxes: e.boxes } : {}) })),
+    }),
+  );
 }
 
 /** Send order items straight to loading (skips palletization): mints

@@ -233,6 +233,10 @@ export function DispatchBoard({
   const openPalletise = (lines: PalPlanLine[], to: "Palletizing" | "ReadyToLoad" = "ReadyToLoad") => {
     if (lines.length) setPalletise({ lines, to });
   };
+  // A card's Palletise button acts on the checked items plus the clicked one —
+  // a selection is never silently ignored.
+  const palletiseTargets = (l: PalPlanLine) =>
+    selected.size ? [...selEntries.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
 
   // ---- item card ----------------------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
@@ -338,10 +342,10 @@ export function DispatchBoard({
             type="button"
             className="hbtn primary"
             style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
-            title={isSel && selected.size > 1 ? `Palletise the ${selected.size} selected items` : "Palletise this item — lands in Ready for Loading"}
+            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(palletiseTargets(l)); }}
+            title={palletiseTargets(l).length > 1 ? `Palletise the ${palletiseTargets(l).length} selected items` : "Palletise this item — lands in Ready for Loading"}
           >
-            Palletise{isSel && selected.size > 1 ? ` (${selected.size})` : ""}
+            Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
           </button>
         )}
       </div>
@@ -592,9 +596,9 @@ export function DispatchBoard({
                               className="btn"
                               style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
                               disabled={busy}
-                              onClick={(ev) => { ev.stopPropagation(); openPalletise(isSel && selected.size > 1 ? selEntries.map(({ l: sl }) => sl) : [l]); }}
+                              onClick={(ev) => { ev.stopPropagation(); openPalletise(palletiseTargets(l)); }}
                             >
-                              Palletise
+                              Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
                             </button>
                           )}
                         </td>

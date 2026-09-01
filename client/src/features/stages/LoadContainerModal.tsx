@@ -21,6 +21,8 @@ import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
+import { type Order } from "@/data";
+import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { CONTAINER_TYPES } from "@/features/masters/containersApi";
 import { createVehicle, formatVehicleNumber, listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
@@ -301,60 +303,107 @@ function AfterLoadingBar({ box, lines, adding }: { box: LoadBox; lines: PalPlanL
 
 /* ---- The modal ---- */
 
+/** An order item loaded straight from production (send-to-loading path). */
+interface ProdPick {
+  salesOrderId: string;
+  soNumber: string;
+  orderItemId: string;
+  label: string;
+  customer: string;
+  boxes: number;
+  remaining: number;
+}
+
+const remainingOf = (o: Order) => Math.max(0, o.orderQty - o.palletizedQty);
+
 export function LoadContainerModal({
-  line,
+  lines = [],
+  availableLines = [],
   boxes,
   linesOfBox,
-  presetBoxId,
   busy,
   planHint,
   onConfirm,
   onClose,
 }: {
-  /** The pallet being loaded. Omit for container-only mode ("New Loading"). */
-  line?: PalPlanLine;
+  /** The pallets being loaded. Empty for container-only mode ("New Loading"). */
+  lines?: PalPlanLine[];
+  /** Every Ready (unboxed) line on the board — the "Add item" pallet pool. */
+  availableLines?: PalPlanLine[];
   boxes: LoadBox[]; // Open boxes only
   linesOfBox: (boxId: string) => Array<{ p: PalPlan; l: PalPlanLine }>;
-  presetBoxId?: string;
   busy: boolean;
   /** The SO/quote container plan's next target for this design (guide + warn only). */
   planHint?: { docNo: string; containerNo: number; boxes: number; palletName: string };
-  /** boxId = load into that container; details = mint a new one first. */
+  /** boxId = load into that container; details = mint a new one first. Entries
+      carry `boxes` only for a partial load (below the line's total).
+      `prodEntries` are order items loaded straight from production — the
+      caller sends them via /send-to-loading with the box. */
   onConfirm: (
     target: { boxId: string } | { details: { vehicle?: string; dispatch_date?: string } & LoadingCapture },
-    boxes: number,
+    entries: Array<{ lineId: string; boxes?: number }>,
+    prodEntries: Array<{ salesOrderId: string; orderItemId: string; boxes: number }>,
   ) => void;
   onClose: () => void;
 }) {
   const panelRef = useModalA11y(onClose);
-  // Loading a pallet defaults to the dropped-on container, else the first open
-  // one; "New Loading" (no line) always starts a fresh container.
-  const [sel, setSel] = useState<string>(line ? (presetBoxId ?? boxes[0]?.id ?? NEW_CONTAINER) : NEW_CONTAINER);
+  // Loading pallets defaults to the first open container; "New Loading"
+  // (no lines) always starts a fresh container.
+  const [sel, setSel] = useState<string>(lines.length ? (boxes[0]?.id ?? NEW_CONTAINER) : NEW_CONTAINER);
   const [draft, setDraft] = useState<ContainerDraft>(newContainerDraft);
   const [showErrors, setShowErrors] = useState(false);
   const [partial, setPartial] = useState(false);
-  const [count, setCount] = useState(line?.boxes ?? 0);
+  // The load list is editable: ✕ drops a supplied line, the Add-item picker
+  // pulls in more Ready pallets or order items straight from production.
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [extraLines, setExtraLines] = useState<PalPlanLine[]>([]);
+  const [prodPicks, setProdPicks] = useState<ProdPick[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
+  const effLines = lines.filter((l) => !removed.has(l.id)).concat(extraLines);
+  const single = effLines.length === 1 && prodPicks.length === 0 ? effLines[0] : undefined;
+  const [count, setCount] = useState(single?.boxes ?? 0);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void listVehicles().then((r) => r.ok && setVehicles(r.vehicles));
+    void listOrders().then((r) => r.ok && setOrders(r.orders));
   }, []);
 
   const selBox = boxes.find((b) => b.id === sel);
-  const fillOf = (b: LoadBox) => boxFill(linesOfBox(b.id).map(({ l }) => l));
-  // Free space expressed in THIS item's boxes: free fraction × its pallet capacity.
-  const freeOf = (b: LoadBox) => (line && line.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - fillOf(b)) * line.palletCapacity) : 0);
-  // Hard 100% cap — the most that can go into the selected container (new = whole line).
-  const maxLoad = line ? (selBox && line.palletCapacity > 0 ? Math.min(line.boxes, freeOf(selBox)) : line.boxes) : 0;
-  const effCount = line ? (partial ? Math.min(count, maxLoad) : Math.min(line.boxes, maxLoad)) : 0;
+  // Greedy 100% cap, line by line in selection order: each line loads what
+  // still fits (in ITS pallet's boxes-per-container), the rest stays Ready.
+  // Every clamp is shown in the table below — nothing is dropped silently.
+  let runningFill = selBox ? boxFill(linesOfBox(selBox.id).map(({ l }) => l)) : 0;
+  const fits = effLines.map((l) => {
+    const fit = l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - runningFill) * l.palletCapacity) : l.boxes;
+    const n = Math.max(0, Math.min(l.boxes, fit));
+    if (l.palletCapacity > 0) runningFill += n / l.palletCapacity;
+    return { l, n };
+  });
+  const maxLoad = single ? fits[0].n : 0;
+  const effCount = single ? (partial ? Math.min(count, maxLoad) : maxLoad) : 0;
+  const entries: Array<{ lineId: string; boxes?: number }> = single
+    ? effCount > 0
+      ? [{ lineId: single.id, ...(effCount < single.boxes ? { boxes: effCount } : {}) }]
+      : []
+    : fits.filter(({ n }) => n > 0).map(({ l, n }) => ({ lineId: l.id, ...(n < l.boxes ? { boxes: n } : {}) }));
+  // ponytail: prod picks skip the greedy fit clamp (no client-side capacity
+  // before palletisation — same as capacity-0 lines) and the mixed-batch
+  // warning: the server splits them across batches FIFO, invisible here.
+  const prodEntries = prodPicks.map((p) => ({ salesOrderId: p.salesOrderId, orderItemId: p.orderItemId, boxes: p.boxes }));
+  const prodTotal = prodPicks.reduce((s, p) => s + p.boxes, 0);
+  const adding = (single ? effCount : fits.reduce((s, { n }) => s + n, 0)) + prodTotal;
+  const totalItems = effLines.length + prodPicks.length;
+  const totalBoxes = effLines.reduce((s, l) => s + l.boxes, 0) + prodPicks.reduce((s, p) => s + p.remaining, 0);
   // Warn-only batch rule: flag when this load would make one order item span
   // batches inside the selected container.
-  const wouldMixBatches = !!selBox && !!line && mixedBatchOrderItems([...linesOfBox(selBox.id).map(({ l }) => l), line]);
+  const wouldMixBatches = !!selBox && effLines.length > 0 && mixedBatchOrderItems([...linesOfBox(selBox.id).map(({ l }) => l), ...effLines]);
 
   const newContainer = !selBox;
   const invalid = newContainer && draftMissing(draft);
-  const blocked = busy || saving || invalid || (!!line && (maxLoad <= 0 || effCount <= 0));
+  const blocked =
+    busy || saving || invalid || ((lines.length > 0 || totalItems > 0) && entries.length === 0 && prodEntries.length === 0);
 
   const submit = async () => {
     if (busy || saving) return;
@@ -363,7 +412,7 @@ export function LoadContainerModal({
       return;
     }
     if (selBox) {
-      onConfirm({ boxId: selBox.id }, effCount);
+      onConfirm({ boxId: selBox.id }, entries, prodEntries);
       return;
     }
     setSaving(true);
@@ -373,28 +422,95 @@ export function LoadContainerModal({
       setShowErrors(true);
       return;
     }
-    onConfirm({ details }, effCount);
+    onConfirm({ details }, entries, prodEntries);
   };
+
+  // "Add item" pool: Ready pallets not already on the list (a ✕'d supplied
+  // line comes back via un-remove), then order items with boxes left to send.
+  const effIds = new Set(effLines.map((l) => l.id));
+  const palOpts = availableLines
+    .filter((l) => !effIds.has(l.id))
+    .map((l) => ({
+      value: `pal:${l.id}`,
+      label: `${l.itemCode} · ${l.designLabel}`,
+      hint: [l.customerName, l.soNumber].filter(Boolean).join(" · "),
+      badge: `${fmt(l.boxes)} boxes`,
+    }));
+  const oiOpts = orders
+    .filter(
+      (o) =>
+        o.salesOrderId &&
+        remainingOf(o) > 0 &&
+        !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(o.status || "") &&
+        !prodPicks.some((p) => p.orderItemId === o.id),
+    )
+    .map((o) => ({
+      value: `oi:${o.id}`,
+      label: o.design,
+      hint: ["From production", o.party, o.orderNumber].filter(Boolean).join(" · "),
+      badge: `${fmt(remainingOf(o))} left`,
+    }));
+  const addItem = (v: string) => {
+    if (v.startsWith("pal:")) {
+      const id = v.slice(4);
+      if (removed.has(id)) {
+        setRemoved((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } else {
+        const l = availableLines.find((x) => x.id === id);
+        if (l) setExtraLines((prev) => [...prev, l]);
+      }
+    } else if (v.startsWith("oi:")) {
+      const o = orders.find((x) => x.id === v.slice(3));
+      const so = o?.salesOrderId;
+      if (o && so)
+        setProdPicks((prev) => [
+          ...prev,
+          {
+            salesOrderId: so,
+            soNumber: o.orderNumber || "",
+            orderItemId: o.id,
+            label: o.design,
+            customer: o.party || "",
+            boxes: remainingOf(o),
+            remaining: remainingOf(o),
+          },
+        ]);
+    }
+  };
+  const removeLine = (id: string) =>
+    extraLines.some((l) => l.id === id)
+      ? setExtraLines((prev) => prev.filter((l) => l.id !== id))
+      : setRemoved((prev) => new Set(prev).add(id));
 
   const target = selBox ? (selBox.containerNumber || boxLabel(selBox)) : draft.container_number.trim() || "the new container";
   const hint = invalid
     ? "Fill container no., vehicle no., driver, e-seal"
-    : line
+    : totalItems
       ? `Loading into ${target}`
       : `Creating ${target}`;
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: !single && totalItems > 0 ? 760 : 560 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico"><Icon name="truck" size={18} /></div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>{line ? "Load pallet" : "New Loading"}</div>
-            {line && (
+            <div style={{ fontWeight: 600 }}>
+              {single ? "Load pallet" : totalItems ? `Load ${totalItems} item${totalItems === 1 ? "" : "s"}` : "New Loading"}
+            </div>
+            {single ? (
               <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                <span className="mono">{line.itemCode}</span> · {line.designLabel} · {fmt(line.boxes)} boxes ready
+                <span className="mono">{single.itemCode}</span> · {single.designLabel} · {fmt(single.boxes)} boxes ready
               </div>
-            )}
+            ) : totalItems > 0 ? (
+              <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                {totalItems} items · {fmt(totalBoxes)} boxes ready
+              </div>
+            ) : null}
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
@@ -408,11 +524,95 @@ export function LoadContainerModal({
             draft={draft}
             onDraft={setDraft}
             showErrors={showErrors}
-            adding={effCount}
-            onlyNew={!line}
+            adding={adding}
+            onlyNew={lines.length === 0}
           />
 
-          {line && (
+          {!single && totalItems > 0 && (
+            <table className="tbl" style={{ marginBottom: 10 }}>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Batch</th>
+                  <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+                  <th style={{ minWidth: 180 }}>Loads</th>
+                  <th aria-hidden />
+                </tr>
+              </thead>
+              <tbody>
+                {fits.map(({ l, n }) => (
+                  <tr key={l.id}>
+                    <td>
+                      <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
+                      <div className="design-name">{l.designLabel}</div>
+                      <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                        {[l.customerName, l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
+                      </div>
+                    </td>
+                    <td>
+                      {l.batchNumber ? (
+                        <span className="chip mono" style={{ fontSize: 13 }}>Batch {l.batchNumber}</span>
+                      ) : (
+                        <span className="dim">—</span>
+                      )}
+                    </td>
+                    <td className="num mono">{fmt(l.boxes)}</td>
+                    <td style={{ fontSize: "var(--t-sm)" }}>
+                      {n === l.boxes ? (
+                        <span style={{ color: "var(--c-green)", fontWeight: 600 }}>All {fmt(n)}</span>
+                      ) : n > 0 ? (
+                        <span style={{ color: "var(--c-amber)", fontWeight: 600 }}>
+                          {fmt(n)} of {fmt(l.boxes)} — rest stays in Ready
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--c-red)", fontWeight: 600 }}>Won't fit — stays in Ready</span>
+                      )}
+                    </td>
+                    <td>
+                      <button type="button" className="btn ord-rm" tabIndex={-1} title="Remove from this load" onClick={() => removeLine(l.id)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+                {prodPicks.map((p) => (
+                  <tr key={p.orderItemId}>
+                    <td>
+                      <div className="design-name">{p.label}</div>
+                      <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                        {[p.customer, p.soNumber, "From production"].filter(Boolean).join("  ·  ")}
+                      </div>
+                    </td>
+                    <td><span className="dim">—</span></td>
+                    <td className="num">
+                      <input
+                        type="number"
+                        min={1}
+                        max={p.remaining}
+                        value={p.boxes}
+                        onChange={(e) =>
+                          setProdPicks((prev) =>
+                            prev.map((x) =>
+                              x.orderItemId === p.orderItemId
+                                ? { ...x, boxes: Math.max(1, Math.min(p.remaining, Math.floor(Number(e.target.value)) || 1)) }
+                                : x,
+                            ),
+                          )
+                        }
+                        style={{ width: 90, textAlign: "right" }}
+                      />
+                    </td>
+                    <td style={{ fontSize: "var(--t-sm)" }}>
+                      <span style={{ color: "var(--c-green)", fontWeight: 600 }}>Direct — {fmt(p.boxes)}</span>
+                    </td>
+                    <td>
+                      <button type="button" className="btn ord-rm" tabIndex={-1} title="Remove from this load" onClick={() => setProdPicks((prev) => prev.filter((x) => x.orderItemId !== p.orderItemId))}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {single && (() => { const line = single; return (
             <>
               <div className="form-section-title" style={{ marginTop: 4 }}>Quantity</div>
               <div style={{ display: "flex", gap: 10 }}>
@@ -479,6 +679,25 @@ export function LoadContainerModal({
                 </div>
               )}
             </>
+          ); })()}
+
+          {(palOpts.length > 0 || oiOpts.length > 0) && (
+            <label className="form-field" style={{ marginTop: single ? 10 : 0, marginBottom: 4 }}>
+              <span className="lbl">Add item</span>
+              <Combobox
+                value=""
+                options={[...palOpts, ...oiOpts]}
+                onChange={addItem}
+                placeholder="Add a Ready pallet or an order item from production…"
+                ariaLabel="Add item"
+              />
+            </label>
+          )}
+
+          {!single && wouldMixBatches && (
+            <div style={{ fontSize: "var(--t-sm)", marginTop: 8, color: "var(--c-amber)", fontWeight: 600 }}>
+              An order item would ride in {selBox!.containerNumber || boxLabel(selBox!)} from more than one batch — tile texture may vary
+            </div>
           )}
         </div>
 
@@ -489,8 +708,8 @@ export function LoadContainerModal({
             <Icon name="check" size={13} />
             {busy || saving
               ? "Saving…"
-              : line
-                ? `Load ${fmt(effCount)} boxes`
+              : totalItems
+                ? `Load ${fmt(adding)} boxes`
                 : "Create container"}
           </button>
         </div>

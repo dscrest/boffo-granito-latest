@@ -118,6 +118,10 @@ export function NotificationBell() {
   useEffect(() => {
     let alive = true;
     const check = () => {
+      // Background tabs must not poll: all projects in the Catalyst org share
+      // one Dev-env FUNCTIONS concurrency pool, and idle boffo tabs were
+      // starving the SKU app into 429s (2026-09-01).
+      if (document.visibilityState !== "visible") return;
       void list("OperationLog", { order: "ROWID desc", limit: 1 }).then((res) => {
         if (!alive) return;
         const ts = str((res.rows || [])[0]?.occurred_at);

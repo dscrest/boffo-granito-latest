@@ -84,7 +84,7 @@ export function SharedPallet() {
           </div>
           {box && (
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 17, fontWeight: 700 }}>Box {box.boxNumber}</div>
+              <div style={{ fontSize: 17, fontWeight: 700 }}>Container {box.boxNumber}</div>
               <div className="mono muted" style={{ fontSize: 14 }}>{box.totalBoxes} boxes</div>
             </div>
           )}

@@ -36,7 +36,7 @@ const td = (text: string, right = false): ContentText => ({
 
 async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLine }>): Promise<TDocumentDefinitions> {
   const logo = await logoDataUrl();
-  const label = box.vehicleNumber || `Box ${box.boxNumber}`;
+  const label = box.vehicleNumber || `Container ${box.boxNumber}`;
   const total = entries.reduce((s, { l }) => s + l.boxes, 0);
 
   const lineRow = ({ l }: { l: PalPlanLine }, i: number): Content[] => [
@@ -113,7 +113,7 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
             table: {
               widths: ["auto", "*"],
               body: ([
-                ["BOX NO.", `Box ${box.boxNumber}`, QP.ink],
+                ["CONTAINER NO.", `Container ${box.boxNumber}`, QP.ink],
                 ["STATUS", box.status === "Dispatched" ? "Dispatched" : "Loading", box.status === "Dispatched" ? QP.orange : QP.ink],
                 ["DISPATCH DATE", box.dispatchDate ? prettyDate(box.dispatchDate) : "—", QP.ink],
                 ["TOTAL BOXES", nfmt(total), QP.ink],
@@ -211,6 +211,6 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
 
 /** Build + download the Dispatch Copy PDF for one load box. */
 export async function downloadDispatchCopyPdf(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLine }>): Promise<void> {
-  const label = box.vehicleNumber || `Box ${box.boxNumber}`;
+  const label = box.vehicleNumber || `Container ${box.boxNumber}`;
   await downloadPdf(await buildDispatchCopyDoc(box, entries), `Dispatch-${label.replace(/[\s/]+/g, "-")}.pdf`);
 }

@@ -2745,7 +2745,7 @@ async function getBox(catalyst, boxId) {
       `SELECT ROWID, box_number, status, vehicle, capacity, dispatch_date, container_number FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
     ),
   );
-  if (!rows.length) throw badRequest(`Load box not found: ${boxId}`, 404);
+  if (!rows.length) throw badRequest(`Container not found: ${boxId}`, 404);
   return rows[0];
 }
 
@@ -2823,7 +2823,7 @@ app.post("/load-box-share/:rowid", async (req, res) => {
         `SELECT ROWID, share_token FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
       ),
     )[0];
-    if (!box) throw badRequest(`Load box not found: ${boxId}`, 404);
+    if (!box) throw badRequest(`Container not found: ${boxId}`, 404);
     let token = String(box.share_token || "");
     if (!token) {
       token = crypto.randomBytes(16).toString("hex");
@@ -2871,8 +2871,9 @@ app.post("/load-box-update/:rowid", async (req, res) => {
       catalyst,
       { table_name: "LoadBox", operation: "update", payload: { ROWID: boxId, ...body } },
       async () => {
-        const box = await getBox(catalyst, boxId);
-        if (String(box.status) !== "Open") throw badRequest("Only an open box can be changed", 409);
+        // Details stay editable after dispatch (late LR numbers, corrections);
+        // getBox still 404s deleted boxes.
+        await getBox(catalyst, boxId);
         const patch = { ROWID: boxId };
         if (body.vehicle !== undefined) {
           if (!String(body.vehicle || "")) throw badRequest("A vehicle is required", 400);
@@ -2908,7 +2909,7 @@ app.post("/load-box-delete/:rowid", async (req, res) => {
       { table_name: "LoadBox", operation: "delete", payload: { ROWID: boxId } },
       async () => {
         const box = await getBox(catalyst, boxId);
-        if (String(box.status) !== "Open") throw badRequest("A dispatched box cannot be removed", 409);
+        if (String(box.status) !== "Open") throw badRequest("A dispatched container cannot be removed", 409);
         const lines = await boxLines(catalyst, boxId);
         for (const l of lines) await ds.table("PalletizationPlanLine").updateRow({ ROWID: l.ROWID, load_box: null });
         // Plans left with no allocated lines drop back from Loading to Planning.
@@ -2955,10 +2956,10 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
       { table_name: "LoadBox", operation: "dispatch", payload: { ROWID: boxId } },
       async () => {
         const box = await getBox(catalyst, boxId);
-        if (String(box.status) !== "Open") throw badRequest("Box is already dispatched", 409);
+        if (String(box.status) !== "Open") throw badRequest("Container is already dispatched", 409);
         if (!String(box.vehicle || "")) throw badRequest("Assign a vehicle before dispatch", 400);
         const lines = await boxLines(catalyst, boxId);
-        if (!lines.length) throw badRequest("An empty box cannot be dispatched", 400);
+        if (!lines.length) throw badRequest("An empty container cannot be dispatched", 400);
         // A date entered on the container (load form / Confirm Load) wins; only
         // an unset one falls back to today (IST).
         const dispatchDate =
@@ -2983,7 +2984,7 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
             event_type: "dispatched",
             qty_delta: addQty,
             performed_by: "",
-            note: `Box ${box.box_number} dispatched`,
+            note: `Container ${box.box_number} dispatched`,
           });
         }
         await recountOrderItems(catalyst, ds, [...addByOi.keys()]);
@@ -3023,11 +3024,115 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
           "dispatched",
           {
             boxes: lines.reduce((s, l) => s + (Number(l.boxes) || 0), 0),
-            container: String(dispatchPatch.container_number || box.container_number || "") || `Box ${box.box_number}`,
+            container: String(dispatchPatch.container_number || box.container_number || "") || `Container ${box.box_number}`,
             dispatch_date: dispatchDate,
           },
         );
         return { rowid: boxId, data: { ROWID: boxId, status: "Dispatched", dispatch_date: dispatchDate } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Write one validated line into an Open box. n < the line's boxes = PARTIAL
+   load: split — remainder first (stays Ready, unloaded) so a mid-write failure
+   leaves state recoverable; then shrink + load the original. */
+async function writeLineIntoBox(ds, line, boxRowid, n) {
+  const lineId = String(line.ROWID);
+  const lineBoxes = Number(line.boxes) || 0;
+  if (n !== undefined && n < lineBoxes) {
+    const rem = await ds.table("PalletizationPlanLine").insertRow({
+      plan: String(line.plan || "") || undefined,
+      sales_order: line.sales_order ? String(line.sales_order) : undefined,
+      order_item: line.order_item ? String(line.order_item) : undefined,
+      design: line.design ? String(line.design) : undefined,
+      pallet: line.pallet ? String(line.pallet) : undefined,
+      boxes: lineBoxes - n,
+      position: Number(line.position) || 0,
+      status: "ReadyToLoad",
+      batch_number: line.batch_number ? String(line.batch_number) : "",
+    });
+    try {
+      await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: n, load_box: boxRowid });
+    } catch (e) {
+      try { await ds.table("PalletizationPlanLine").deleteRow(rem.ROWID); } catch (_) {}
+      throw e;
+    }
+  } else {
+    await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: boxRowid });
+  }
+}
+
+/* First allocation pulls a Planning plan into Loading. */
+async function promotePlansToLoading(catalyst, ds, planIds) {
+  for (const planId of planIds) {
+    if (!planId) continue;
+    const plan = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT ROWID, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
+      ),
+    )[0];
+    if (plan && String(plan.status) === "Planning")
+      await setPlanStatus(catalyst, ds, planId, "Planning", "Loading");
+  }
+}
+
+/* Batch allocate: several Ready lines into ONE Open box in one call.
+   body: { box, lines: [{ id, boxes? }] }. Validates the box and EVERY line
+   before any write — one bad line rejects the whole batch. */
+app.post("/pal-lines-box", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const toBox = boxIdParam(String((req.body || {}).box || ""));
+    const entries = Array.isArray((req.body || {}).lines) ? (req.body || {}).lines : [];
+    if (!entries.length) throw badRequest("lines is required");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "box-allocate-batch", payload: { box: toBox, lines: entries } },
+      async () => {
+        const box = await getBox(catalyst, toBox);
+        if (String(box.status) !== "Open") throw badRequest("That container is already dispatched", 409);
+        const ids = entries.map((e) => boxIdParam(String((e || {}).id || "")));
+        const byId = new Map(
+          rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
+            ),
+          ).map((r) => [String(r.ROWID), r]),
+        );
+        // All-or-nothing gate: every line checked before the first write.
+        const jobs = entries.map((e, i) => {
+          const line = byId.get(ids[i]);
+          if (!line) throw badRequest(`Palletization line not found: ${ids[i]}`, 404);
+          if (String(line.load_box || "")) throw badRequest("An item is already loaded into a container", 409);
+          if (String(line.status) !== "ReadyToLoad")
+            throw badRequest("Only a Ready-for-Loading item can be loaded into a container", 409);
+          let n;
+          if (e.boxes !== undefined) {
+            n = Number(e.boxes);
+            if (!Number.isInteger(n) || n <= 0) throw badRequest("boxes must be a positive integer");
+            if (n > (Number(line.boxes) || 0)) throw badRequest("Cannot load more boxes than the line has");
+          }
+          return { line, n };
+        });
+        for (const { line, n } of jobs) await writeLineIntoBox(ds, line, String(box.ROWID), n);
+        await promotePlansToLoading(catalyst, ds, [...new Set(jobs.map(({ line }) => String(line.plan || "")))]);
+        await recountOrderItems(catalyst, ds, [...new Set(jobs.map(({ line }) => line.order_item))]);
+        // One "loaded" event per owning order + plan (deduped).
+        const targets = new Map();
+        for (const { line } of jobs) {
+          if (line.sales_order) targets.set(`SO${line.sales_order}`, { table: "SalesOrder", rowid: line.sales_order });
+          if (line.plan) targets.set(`PP${line.plan}`, { table: "PalletizationPlan", rowid: String(line.plan) });
+        }
+        await logRelated(catalyst, [...targets.values()], "loaded", {
+          boxes: jobs.reduce((s, { line, n }) => s + (n !== undefined ? n : Number(line.boxes) || 0), 0),
+          box: String(box.ROWID),
+        });
+        return { rowid: String(box.ROWID), data: { ROWID: String(box.ROWID), lines: jobs.length } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -3065,51 +3170,18 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
         }
         if (toBox) {
           if (String(line.status) !== "ReadyToLoad")
-            throw badRequest("Only a Ready-for-Loading item can be loaded into a box", 409);
+            throw badRequest("Only a Ready-for-Loading item can be loaded into a container", 409);
           const box = await getBox(catalyst, boxIdParam(toBox));
-          if (String(box.status) !== "Open") throw badRequest("That box is already dispatched", 409);
+          if (String(box.status) !== "Open") throw badRequest("That container is already dispatched", 409);
           const lineBoxes = Number(line.boxes) || 0;
+          let n;
           if (reqBoxes !== undefined) {
-            const n = Number(reqBoxes);
+            n = Number(reqBoxes);
             if (!Number.isInteger(n) || n <= 0) throw badRequest("boxes must be a positive integer");
             if (n > lineBoxes) throw badRequest("Cannot load more boxes than the line has");
-            if (n < lineBoxes) {
-              // Split: remainder first (stays Ready, unloaded) so a mid-write
-              // failure leaves state recoverable; then shrink + load the original.
-              const rem = await ds.table("PalletizationPlanLine").insertRow({
-                plan: planId,
-                sales_order: line.sales_order ? String(line.sales_order) : undefined,
-                order_item: line.order_item ? String(line.order_item) : undefined,
-                design: line.design ? String(line.design) : undefined,
-                pallet: line.pallet ? String(line.pallet) : undefined,
-                boxes: lineBoxes - n,
-                position: Number(line.position) || 0,
-                status: "ReadyToLoad",
-                batch_number: line.batch_number ? String(line.batch_number) : "",
-              });
-              try {
-                await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: n, load_box: String(box.ROWID) });
-              } catch (e) {
-                try { await ds.table("PalletizationPlanLine").deleteRow(rem.ROWID); } catch (_) {}
-                throw e;
-              }
-              // Plan-status follow happens below, same as a whole-line load.
-            } else {
-              await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: String(box.ROWID) });
-            }
-          } else {
-            await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: String(box.ROWID) });
           }
-          // First allocation pulls the plan into Loading.
-          if (planId) {
-            const plan = rowList(
-              await catalyst.zcql().executeZCQLQuery(
-                `SELECT ROWID, status FROM PalletizationPlan WHERE ROWID = ${planId}`,
-              ),
-            )[0];
-            if (plan && String(plan.status) === "Planning")
-              await setPlanStatus(catalyst, ds, planId, "Planning", "Loading");
-          }
+          await writeLineIntoBox(ds, line, String(box.ROWID), n);
+          await promotePlansToLoading(catalyst, ds, [planId]);
         } else {
           await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: null });
           if (planId) await demoteEmptyPlans(catalyst, ds, [planId]);
@@ -3295,7 +3367,7 @@ app.post("/send-to-loading", async (req, res) => {
           {
             boxes: [...wanted.values()].reduce((s, n) => s + n, 0),
             items: wanted.size,
-            ...(box ? { container: String(box.container_number || "") || `Box ${box.box_number}` } : {}),
+            ...(box ? { container: String(box.container_number || "") || `Container ${box.box_number}` } : {}),
           },
         );
         return { rowid: planId, data: { ROWID: planId, lines: wanted.size } };

@@ -345,6 +345,14 @@ Screen `/loading` (kanban + sheet), detail at `/loading/:id`.
 **Container-first.** `LoadContainerModal` replaced the old box picker at all three entry points.
 Plan progress is consumed automatically; there is no per-container id to manage.
 
+**Multi-select loading (2026-08-31).** The modal takes `lines: PalPlanLine[]`: checked Ready
+items plus the clicked one all appear in it (table with a per-line fit readout — "All N" /
+"N of M — rest stays in Ready" / "Won't fit"), and "Load selected" opens the same modal instead
+of writing straight from a dropdown. Save goes through `POST /pal-lines-box` — one
+all-or-nothing batch call (validates the container and every line before any write); the
+per-line `POST /pal-line-box/:rowid` remains for unload. Containers display as **"Container N"**
+(`boxLabel`), never "Box N".
+
 **Vehicle and seals are captured at Confirm Load — *before* dispatch**, not at dispatch time.
 Confirm Load and Dispatch are two separate actions. `dispatch_date` is planned first, then
 actual.

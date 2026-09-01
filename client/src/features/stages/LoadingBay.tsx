@@ -28,7 +28,7 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { fmt } from "@/lib/format";
+import { fmt, fmtDateTime } from "@/lib/format";
 import { isoInfo } from "@/features/masters/customersApi";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { planProgress } from "@/features/quotes/planProgress";
@@ -49,7 +49,9 @@ import {
   lineFrac,
   listPalPlans,
   sealed,
+  sendToLoading,
   setLineBox,
+  setLinesBox,
   updateLoadBox,
   type LoadBox,
   type LoadingCapture,
@@ -89,11 +91,12 @@ const laneKey = (r: Row, d: LoadGroupBy): string =>
   : d === "batch" ? (r.l.batchNumber ? `Batch ${r.l.batchNumber}` : "No batch")
   : r.l.designLabel || "—";
 
-// Age = days since the LINE was created (same rule as the Palletization board).
-const ageDays = (p: PalPlan, l: PalPlanLine) => {
-  const t = Date.parse((l.createdTime || p.createdTime || "").slice(0, 19).replace(" ", "T"));
+const daysSince = (iso: string) => {
+  const t = Date.parse((iso || "").slice(0, 19).replace(" ", "T"));
   return Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : 0;
 };
+// Age = days since the LINE was created (same rule as the Palletization board).
+const ageDays = (p: PalPlan, l: PalPlanLine) => daysSince(l.createdTime || p.createdTime || "");
 
 /* Data-driven sheet columns (item code pinned outside as the row identity).
    Every cell is one line: `nw` on short values, a `clip` span with its own
@@ -214,6 +217,103 @@ function loadSortVal(r: Row, k: string): string | number {
   }
 }
 
+/* Loadings view: one row per LoadBox — the box-level master grid. Status is
+   derived exactly like LoadingDetail's chip; aggregates are precomputed so
+   renderers and sorting share them. */
+type BoxStatus = "Empty" | "In Loading" | "Ready for Dispatch" | "Dispatched";
+const BOX_STATUS_CHIP: Record<BoxStatus, string> = { Empty: "p-planning", "In Loading": "p-loading", "Ready for Dispatch": "p-palletized", Dispatched: "p-completed" };
+const BOX_STATUS_IDX: Record<BoxStatus, number> = { Empty: 0, "In Loading": 1, "Ready for Dispatch": 2, Dispatched: 3 };
+type BoxRow = {
+  box: LoadBox;
+  lines: PalPlanLine[];
+  customers: string; // distinct, joined
+  sos: string; // distinct SO numbers, joined
+  totalBoxes: number;
+  fillPct: number; // vs pallet capacity (boxFill)
+  status: BoxStatus;
+};
+
+function boxColumns(): ColumnDef<BoxRow>[] {
+  return [
+    {
+      key: "customers",
+      label: "Customers",
+      className: "nw",
+      render: (r) => <span className="clip" style={{ maxWidth: 200 }} title={r.customers}>{r.customers || "—"}</span>,
+    },
+    {
+      key: "sos",
+      label: "Orders",
+      className: "mono nw",
+      render: (r) => <span className="clip" style={{ maxWidth: 180 }} title={r.sos}>{r.sos || "—"}</span>,
+    },
+    { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.lines.length) },
+    { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.totalBoxes) },
+    { key: "fill", label: "Fill", className: "num mono", style: { textAlign: "right" }, render: (r) => `${r.fillPct}%` },
+    {
+      key: "status",
+      label: "Status",
+      render: (r) => <span className={`chip palstatus ${BOX_STATUS_CHIP[r.status]}`} style={{ whiteSpace: "nowrap" }}>{r.status}</span>,
+    },
+    { key: "containerNo", label: "Container No.", className: "mono nw", render: (r) => r.box.containerNumber || "—" },
+    {
+      key: "seal",
+      label: "Seals",
+      className: "mono nw",
+      render: (r) => {
+        const s = [r.box.lineSeal, r.box.electronicSeal].filter(Boolean).join("  ·  ");
+        return <span className="clip" style={{ maxWidth: 150 }} title={s}>{s || "—"}</span>;
+      },
+    },
+    { key: "containerSize", label: "Size", className: "nw", render: (r) => r.box.containerSize || "—" },
+    {
+      key: "transporter",
+      label: "Transporter",
+      className: "nw",
+      render: (r) => <span className="clip" style={{ maxWidth: 150 }} title={r.box.transporter}>{r.box.transporter || "—"}</span>,
+    },
+    { key: "lrNumber", label: "LR / Docket", className: "mono nw", render: (r) => r.box.lrNumber || "—" },
+    {
+      key: "destination",
+      label: "Destination",
+      className: "nw",
+      render: (r) => <span className="clip" style={{ maxWidth: 150 }} title={r.box.destination}>{r.box.destination || "—"}</span>,
+    },
+    {
+      key: "supervisor",
+      label: "Supervisor",
+      className: "nw",
+      render: (r) => <span className="clip" style={{ maxWidth: 150 }} title={r.box.loadingSupervisor}>{r.box.loadingSupervisor || "—"}</span>,
+    },
+    { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box.dispatchDate || "—" },
+    { key: "age", label: "Age", className: "muted nw", render: (r) => `${daysSince(r.box.createdTime)}d` },
+    { key: "created", label: "Created", className: "mono muted nw", render: (r) => fmtDateTime(r.box.createdTime) },
+  ];
+}
+
+function boxSortVal(r: BoxRow, k: string): string | number {
+  switch (k) {
+    case "label": return boxLabel(r.box);
+    case "customers": return r.customers;
+    case "sos": return r.sos;
+    case "items": return r.lines.length;
+    case "boxes": return r.totalBoxes;
+    case "fill": return r.fillPct;
+    case "status": return BOX_STATUS_IDX[r.status];
+    case "containerNo": return r.box.containerNumber || "";
+    case "seal": return r.box.lineSeal || "";
+    case "containerSize": return r.box.containerSize || "";
+    case "transporter": return r.box.transporter || "";
+    case "lrNumber": return r.box.lrNumber || "";
+    case "destination": return r.box.destination || "";
+    case "supervisor": return r.box.loadingSupervisor || "";
+    case "dispatchDate": return r.box.dispatchDate || "";
+    case "age": return daysSince(r.box.createdTime);
+    case "created": return r.box.createdTime || "";
+    default: return "";
+  }
+}
+
 export function LoadingBay() {
   const navigate = useNavigate();
   const canEdit = can("stages", "edit");
@@ -242,12 +342,12 @@ export function LoadingBay() {
   // Interaction state.
   const [q, setQ] = usePersistedState("loading.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("loading.criteria", {});
-  const [view, setView] = usePersistedState<"kanban" | "sheet">("loading.view", "kanban");
+  const [view, setView] = usePersistedState<"kanban" | "sheet" | "loadings">("loading.view", "kanban");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
   // lineId "" = container-only mode ("New Loading" — create the container, then open it).
-  const [picker, setPicker] = useState<{ lineId: string; presetBoxId?: string } | null>(null);
+  const [picker, setPicker] = useState<{ lineIds: string[] } | null>(null);
   // Post-dispatch printable Dispatch Entry — entries snapshotted pre-refresh.
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
 
@@ -284,11 +384,22 @@ export function LoadingBay() {
   // Fill is fractional vs each line's PALLET capacity — a box holding 50 boxes
   // of a 100-box pallet reads 50%, whatever the LoadBox.capacity says.
   const fillOf = (b: LoadBox) => boxFill(linesOfBox(b.id).map(({ l }) => l));
-  // Hard 100% cap: how many of THIS line's boxes still fit (its pallet's boxes).
-  const fitOf = (l: PalPlanLine, b: LoadBox) =>
-    l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - fillOf(b)) * l.palletCapacity) : l.boxes;
   const isEmptyBox = (b: LoadBox) => linesOfBox(b.id).length === 0;
   const openBoxes = boxes.filter((b) => b.status === "Open");
+
+  // Loadings view rows: every box (Empty and Dispatched included — it's the master list).
+  const boxRows: BoxRow[] = boxes.map((b) => {
+    const inBox = linesOfBox(b.id).map(({ l }) => l);
+    return {
+      box: b,
+      lines: inBox,
+      customers: [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", "),
+      sos: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", "),
+      totalBoxes: inBox.reduce((s, l) => s + l.boxes, 0),
+      fillPct: Math.round(boxFill(inBox) * 100),
+      status: b.status !== "Open" ? "Dispatched" : sealed(b) ? "Ready for Dispatch" : inBox.length ? "In Loading" : "Empty",
+    };
+  });
 
   // Guide-by-plan: the SO/quote container plan's next unfilled container that
   // wants this design — shown as a hint (never enforced) in LoadContainerModal.
@@ -372,6 +483,21 @@ export function LoadingBay() {
     return m;
   })();
 
+  // ---- loadings view: box-level grid state --------------------
+  const BOX_COLS = useMemo(() => boxColumns(), []);
+  const boxCols = useColumns("loadingBoxColumns", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created"]);
+  // Plain search only — the advanced-filter criteria and group dims are
+  // line-shaped and would silently half-apply to box rows.
+  const boxSearched = boxRows.filter(
+    (r) =>
+      !qLower ||
+      `${boxLabel(r.box)} ${r.box.containerNumber} ${r.customers} ${r.sos} ${r.box.transporter} ${r.box.destination}`
+        .toLowerCase()
+        .includes(qLower),
+  );
+  const boxSort = useSortRows(boxSearched, boxSortVal, "created", -1);
+  const boxPager = usePagination(boxSearched.length, "loadingBoxPageSize", q);
+
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
     setSelected((prev) => {
@@ -390,64 +516,6 @@ export function LoadingBay() {
     void load();
   };
 
-  // Hard 100% cap: each line loads only what fits (server-side split keeps the
-  // remainder in Ready); once the box is full the rest stay behind for the next box.
-  // ponytail: cap is client-side only — every load path routes through here or
-  // confirmLoad; the pal-line-box route stays permissive for legacy data.
-  const assignLines = async (ids: string[], box: LoadBox) => {
-    if (busy || ids.length === 0) return;
-    setBusy(true);
-    let fill = fillOf(box);
-    let ok = 0, leftBehind = 0, err = "";
-    for (const id of ids) {
-      const l = allLines.find((e) => e.l.id === id)?.l;
-      if (!l) continue;
-      const fit = l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - fill) * l.palletCapacity) : l.boxes;
-      if (fit <= 0) { leftBehind++; continue; }
-      const n = Math.min(l.boxes, fit);
-      const res = await setLineBox(id, box.id, n < l.boxes ? n : undefined);
-      if (res.ok) { ok++; if (n < l.boxes) leftBehind++; } else err = res.error || "Could not load the item";
-      if (res.ok && l.palletCapacity > 0) fill += n / l.palletCapacity;
-    }
-    setBusy(false);
-    setSelected(new Set());
-    after(
-      !err,
-      err,
-      leftBehind > 0
-        ? `${boxLabel(box)} full at 100% — ${ok} loaded, the rest stay in Ready for Loading`
-        : `${ok} item${ok === 1 ? "" : "s"} → ${boxLabel(box)}`,
-    );
-    if (err && ok > 0) { invalidatePalPlans(); void load(); }
-  };
-
-  // "Load selected" into a chosen container. boxId null = reuse a lingering
-  // empty box before minting another, so box numbers don't pile up.
-  const loadBatch = async (ids: string[], boxId: string | null) => {
-    if (busy || ids.length === 0) return;
-    let box = boxId ? boxes.find((b) => b.id === boxId) : openBoxes.find(isEmptyBox);
-    if (!box) {
-      setBusy(true);
-      const created = await createLoadBox();
-      setBusy(false);
-      if (!created.ok || !created.data?.ROWID) {
-        after(false, created.error || "Could not add a box", "");
-        return;
-      }
-      // Fresh box — enough of a stub for assignLines (fill 0, label "Box N").
-      box = {
-        id: String(created.data.ROWID),
-        boxNumber: Number(created.data.box_number) || 0,
-        vehicleId: "", vehicleNumber: "", driverName: "", mobileNumber: "",
-        capacity: 0, status: "Open", dispatchDate: "",
-        containerNumber: "", lineSeal: "", electronicSeal: "", loadingSupervisor: "",
-        containerSize: "", transporter: "", lrNumber: "", destination: "",
-        createdTime: "",
-      };
-    }
-    await assignLines(ids, box);
-  };
-
   const unload = async (line: PalPlanLine, box: LoadBox) => {
     if (busy) return;
     setBusy(true);
@@ -457,18 +525,17 @@ export function LoadingBay() {
   };
 
   // Confirm from the load modal. `target` is either an existing container or
-  // the details of a new one to mint first (container-first: the box lands
-  // complete, no follow-up Confirm Load needed). A count below the line's
-  // total splits it server-side. With no line (New Loading) we just create the
-  // container and open it.
+  // the details of a new one to mint first (container-first: the container
+  // lands complete, no follow-up Confirm Load needed). `entries` is what the
+  // modal showed the user — every line, with a `boxes` count only on a partial
+  // (split server-side). One all-or-nothing batch call: a bad line loads
+  // nothing. With no entries (New Loading) we just create the container.
   const confirmLoad = async (
     target: { boxId: string } | { details: { vehicle?: string; dispatch_date?: string } & LoadingCapture },
-    count: number,
+    entries: Array<{ lineId: string; boxes?: number }>,
+    prodEntries: Array<{ salesOrderId: string; orderItemId: string; boxes: number }> = [],
   ) => {
-    const t = picker;
-    if (!t || busy) return; // in-flight guard: a double-confirm must not double-load
-    const line = t.lineId ? allLines.find(({ l }) => l.id === t.lineId)?.l : undefined;
-    if (t.lineId && !line) return;
+    if (!picker || busy) return; // in-flight guard: a double-confirm must not double-load
     setBusy(true);
     let toBox: string;
     let label: string;
@@ -483,30 +550,55 @@ export function LoadingBay() {
         return;
       }
       toBox = String(created.data.ROWID);
-      label = target.details.container_number || `Box ${created.data.box_number ?? ""}`.trim();
+      label = target.details.container_number || `Container ${created.data.box_number ?? ""}`.trim();
     }
     // Container-only mode: nothing to allocate, open the new loading.
-    if (!line) {
+    if (entries.length === 0 && prodEntries.length === 0) {
       setBusy(false);
       setPicker(null);
       after(true, "", `${label} created`);
       navigate(`/loading/${encodeURIComponent(toBox)}`);
       return;
     }
-    // Hard 100% cap — the modal clamps too; this is the last gate before the write.
-    const targetBox = boxes.find((b) => b.id === toBox);
-    const fit = targetBox ? fitOf(line, targetBox) : line.boxes;
-    if (fit <= 0) {
-      setBusy(false);
-      setPicker(null);
-      after(false, `${label} is already at 100%`, "");
-      return;
+    // Pallet lines first — all-or-nothing, so a failure aborts before any
+    // direct-from-production lines are minted.
+    if (entries.length > 0) {
+      const res = await setLinesBox(toBox, entries);
+      if (!res.ok) {
+        setBusy(false);
+        setPicker(null);
+        after(false, res.error || "Could not load the items", "");
+        return;
+      }
     }
-    const n = Math.min(count, fit, line.boxes);
-    const res = await setLineBox(line.id, toBox, n < line.boxes ? n : undefined);
+    // Direct-from-production picks: /send-to-loading mints ReadyToLoad lines
+    // and lands them in the box in one call. One call per SO, sequential.
+    let prodError = "";
+    const bySo = new Map<string, { order_item: string; boxes: number }[]>();
+    for (const e of prodEntries) bySo.set(e.salesOrderId, [...(bySo.get(e.salesOrderId) ?? []), { order_item: e.orderItemId, boxes: e.boxes }]);
+    for (const [so, soLines] of bySo) {
+      const res = await sendToLoading({ sales_order: so, box: toBox, lines: soLines });
+      if (!res.ok) {
+        prodError = res.error || "Could not add the order items";
+        break;
+      }
+    }
     setBusy(false);
     setPicker(null);
-    after(res.ok, res.error || "Could not load the item", `${line.itemCode} → ${label}`);
+    setSelected(new Set());
+    if (prodError) {
+      // Pallets (if any) are already in — recoverable via Add Items on the loading.
+      toast.error(
+        entries.length > 0
+          ? `Pallets loaded into ${label}, but adding order items failed: ${prodError} — retry via Add Items on the loading`
+          : prodError,
+      );
+      invalidatePalPlans();
+      void load();
+      return;
+    }
+    const total = entries.length + prodEntries.length;
+    after(true, "", `${total} item${total === 1 ? "" : "s"} → ${label}`);
   };
 
   // "Confirm Load": capture vehicle + container/seal details on the Open box.
@@ -520,7 +612,7 @@ export function LoadingBay() {
     const res = await updateLoadBox(t.box.id, { ...(vehicleId ? { vehicle: vehicleId } : {}), ...capture });
     setBusy(false);
     const nowSealed = !!(capture.container_number || capture.line_seal);
-    after(res.ok, res.error || "Could not save loading details", nowSealed ? `${boxLabel(t.box)} → Ready for Dispatch` : "Loading details saved");
+    after(res.ok, res.error || "Could not save loading details", t.box.status === "Open" && nowSealed ? `${boxLabel(t.box)} → Ready for Dispatch` : "Loading details saved");
   };
 
   // "Dispatch": the box is already sealed (Confirm Load) — just confirm + date.
@@ -564,7 +656,7 @@ export function LoadingBay() {
     const inBox = linesOfBox(box.id);
     if (inBox.length === 0) return;
     const ok = await confirmDialog({
-      title: "Empty box",
+      title: "Empty container",
       message: `Are you sure you want to empty ${boxLabel(box)}? ${inBox.length} item${inBox.length === 1 ? "" : "s"} return to Ready for Loading.`,
     });
     if (!ok) return;
@@ -588,23 +680,42 @@ export function LoadingBay() {
       return next;
     });
 
-  // "Load selected" targets: the open containers plus a fresh one.
-  const batchMenuItems = (ids: string[]) => [
-    ...openBoxes.map((b) => ({ label: `${boxLabel(b)} · ${Math.round(fillOf(b) * 100)}% full`, onClick: () => void loadBatch(ids, b.id) })),
-    { label: "New box", onClick: () => void loadBatch(ids, null) },
-  ];
+  // A row's Load button acts on the checked items plus the clicked one —
+  // a selection is never silently ignored.
+  const loadTargets = (l: PalPlanLine) => (selected.size ? [...new Set([...selected, l.id])] : [l.id]);
 
   // Per-row container actions (Edit option) by stage.
   const menuFor = (r: Row): { label: string; danger?: boolean; onClick: () => void }[] => {
     const box = r.box;
     if (!box) return [];
     const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
+    if (canEdit) {
+      items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Confirm Load" : "Edit load details", onClick: () => setVehModal({ box }) });
+    }
     if (canEdit && box.status === "Open") {
-      items.push({ label: r.stage === "ReadyDispatch" ? "Edit load details" : "Confirm Load", onClick: () => setVehModal({ box }) });
       items.push({ label: "Unload item", onClick: () => void unload(r.l, box) });
-      items.push({ label: "Empty box", danger: true, onClick: () => void emptyBox(box) });
+      items.push({ label: "Empty container", danger: true, onClick: () => void emptyBox(box) });
     }
     items.push({ label: "Loading details", onClick: () => navigate(`/loading/${encodeURIComponent(box.id)}`) });
+    items.push({ label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, linesOfBox(box.id))) });
+    items.push({ label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, linesOfBox(box.id))) });
+    if (canEdit && box.status === "Open") {
+      items.push({ label: "Delete loading", danger: true, onClick: () => void deleteBox(box) });
+    }
+    return items;
+  };
+
+  // Box-scoped actions for the Loadings grid (row click opens the detail).
+  const boxMenuFor = (r: BoxRow): { label: string; danger?: boolean; onClick: () => void }[] => {
+    const { box } = r;
+    const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
+    if (canEdit) {
+      items.push({ label: box.status === "Open" && !sealed(box) ? "Confirm Load" : "Edit load details", onClick: () => setVehModal({ box }) });
+    }
+    if (canEdit && box.status === "Open") {
+      if (sealed(box)) items.push({ label: "Dispatch", onClick: () => void dispatchBox(box) });
+      if (r.lines.length > 0) items.push({ label: "Empty container", danger: true, onClick: () => void emptyBox(box) });
+    }
     items.push({ label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, linesOfBox(box.id))) });
     items.push({ label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, linesOfBox(box.id))) });
     if (canEdit && box.status === "Open") {
@@ -644,8 +755,8 @@ export function LoadingBay() {
             type="button"
             className="linkish mono"
             style={{ background: "none", border: 0, padding: 0, font: "inherit", fontWeight: 600, cursor: "pointer" }}
-            onClick={(ev) => { ev.stopPropagation(); navigate(`/packing/${p.id}`); }}
-            title={`Open ${p.palNumber}`}
+            onClick={(ev) => { ev.stopPropagation(); navigate(box ? `/loading/${encodeURIComponent(box.id)}` : `/packing/${p.id}`); }}
+            title={box ? `Open ${boxLabel(box)}` : `Open ${p.palNumber}`}
           >
             {l.itemCode}
           </button>
@@ -701,10 +812,10 @@ export function LoadingBay() {
             className="btn"
             disabled={busy}
             style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); setPicker({ lineId: l.id }); }}
-            title="Load into a container"
+            onClick={(ev) => { ev.stopPropagation(); setPicker({ lineIds: loadTargets(l) }); }}
+            title={loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container"}
           >
-            <Icon name="truck" size={11} /> Load
+            <Icon name="truck" size={11} /> Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
           </button>
         )}
         {canEdit && stage === "InLoading" && box && (
@@ -756,9 +867,17 @@ export function LoadingBay() {
   // ---- kanban: stage columns + nested swimlanes ---------------
   // ponytail: empty loadings render on the ungrouped board only — inside
   // group lanes they'd duplicate per lane; the sheet stays line-rows only.
+  const PANELS: { title: string; keys: LoadStage[] }[] = [
+    { title: "Ready for Loading", keys: ["Ready"] },
+    { title: "Loading & Dispatch", keys: ["InLoading", "ReadyDispatch", "Dispatched"] },
+  ];
   const stageGrid = (laneRows: Row[], showEmpties = false) => (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${STAGES.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
-      {STAGES.map((col) => {
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 12, alignItems: "start", overflowX: "auto" }}>
+      {PANELS.map((panel) => (
+        <div key={panel.title} className="form-section" style={{ padding: 10 }}>
+          <div className="form-section-title">{panel.title}</div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${panel.keys.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start" }}>
+            {STAGES.filter((s) => panel.keys.includes(s.key)).map((col) => {
         const cards = laneRows.filter((r) => r.stage === col.key);
         const totalBoxes = cards.reduce((s, r) => s + r.l.boxes, 0);
         const empties = showEmpties && col.key === "InLoading" ? openBoxes.filter(isEmptyBox) : [];
@@ -778,6 +897,9 @@ export function LoadingBay() {
           </div>
         );
       })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 
@@ -817,7 +939,7 @@ export function LoadingBay() {
   };
 
   // ---- render -------------------------------------------------
-  const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
+  const viewBtn = (v: "kanban" | "sheet" | "loadings", icon: "kanban" | "orders" | "truck", label: string) => (
     <button
       onClick={() => setView(v)}
       title={label}
@@ -842,24 +964,28 @@ export function LoadingBay() {
           <input type="text" placeholder="Search item, SO, customer, batch, container…" value={q} onChange={(e) => setQ(e.target.value)} />
         </span>
         <div style={{ flex: 1 }} />
-        <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+        {view !== "loadings" && <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("kanban", "kanban", "Kanban")}
           {viewBtn("sheet", "orders", "Sheet")}
+          {viewBtn("loadings", "truck", "Loadings")}
         </span>
-        <ColumnPicker
-          columns={groupCols}
-          hidden={groupHidden}
-          onToggle={toggleGroup}
-          onMove={moveGroup}
-          onClear={() => setGroupBy([])}
-          label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
-          icon="menu"
-          title="Group into sections — check dimensions, drag to set order"
-        />
+        {view !== "loadings" && (
+          <ColumnPicker
+            columns={groupCols}
+            hidden={groupHidden}
+            onToggle={toggleGroup}
+            onMove={moveGroup}
+            onClear={() => setGroupBy([])}
+            label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
+            icon="menu"
+            title="Group into sections — check dimensions, drag to set order"
+          />
+        )}
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
+        {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={busy} onClick={() => setPicker({ lineId: "" })}>
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={busy} onClick={() => setPicker({ lineIds: [] })}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
@@ -870,7 +996,14 @@ export function LoadingBay() {
       {canEdit && selected.size > 0 && (
         <div className="fbar" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
           <span className="mono" style={{ color: "var(--accent)" }}>{selected.size} selected · {fmt(selBoxes)} boxes</span>
-          <MoreMenu label="Load selected" items={batchMenuItems([...selected])} />
+          <button
+            className="hbtn primary"
+            style={{ height: 26, padding: "0 12px", borderRadius: 5 }}
+            disabled={busy}
+            onClick={() => setPicker({ lineIds: [...selected] })}
+          >
+            <Icon name="truck" size={12} /> Load selected ({selected.size})
+          </button>
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={() => setSelected(new Set())}>Clear</button>
         </div>
@@ -880,8 +1013,58 @@ export function LoadingBay() {
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : view === "kanban" ? (
         renderLevel(filtered, groupBy, 0)
-      ) : (
+      ) : view === "loadings" ? (
         <div className="card">
+          <div style={{ overflow: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <SortTh id="label" label="Loading" sort={boxSort} />
+                  {boxCols.visible.map((c) => (
+                    <SortTh key={c.key} id={c.key} label={c.label} sort={boxSort} style={c.style} />
+                  ))}
+                  <th style={{ width: 36 }} aria-label="Action" />
+                </tr>
+              </thead>
+              <tbody>
+                {boxPager.slice(boxSort.sorted).map((r) => (
+                  <tr
+                    key={r.box.id}
+                    onClick={() => navigate(`/loading/${encodeURIComponent(r.box.id)}`)}
+                    title={`Open ${boxLabel(r.box)}`}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td className="mono nw" style={{ fontWeight: 600 }}>{boxLabel(r.box)}</td>
+                    {boxCols.visible.map((c) => (
+                      <td key={c.key} className={c.className} style={c.style}>
+                        {c.render!(r)}
+                      </td>
+                    ))}
+                    <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
+                      <MoreMenu kebab items={boxMenuFor(r)} />
+                    </td>
+                  </tr>
+                ))}
+                {!loading && boxSearched.length === 0 && (
+                  <tr>
+                    <td colSpan={boxCols.visible.length + 2}>
+                      <EmptyState title="No loadings yet" hint="New Loading creates the first container" />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <GridFooter {...boxPager} />
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {PANELS.map((panel) => {
+            const rows = sheetRows.filter((r) => panel.keys.includes(r.stage));
+            return (
+        <div key={panel.title} className="form-section" style={{ padding: 10 }}>
+          <div className="form-section-title">{panel.title}</div>
+          <div className="card">
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
               <thead>
@@ -898,7 +1081,7 @@ export function LoadingBay() {
                   const out: ReactNode[] = [];
                   const span = visible.length + 1 + (canEdit ? 1 : 0);
                   let prevKey: string | null = null;
-                  for (const r of sheetRows) {
+                  for (const r of rows) {
                     if (groupBy.length) {
                       const key = groupKeyOf(r);
                       if (key !== prevKey) {
@@ -946,8 +1129,8 @@ export function LoadingBay() {
                         {canEdit && (
                           <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
                             {stage === "Ready" && (
-                              <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setPicker({ lineId: l.id })}>
-                                Load
+                              <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setPicker({ lineIds: loadTargets(l) })}>
+                                Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
                               </button>
                             )}
                             {stage === "InLoading" && box && (
@@ -966,10 +1149,10 @@ export function LoadingBay() {
                       </tr>,
                     );
                   }
-                  if (!loading && sheetRows.length === 0) {
+                  if (!loading && rows.length === 0) {
                     out.push(
                       <tr key="empty">
-                        <td colSpan={span}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                        <td colSpan={span} className="dim" style={{ fontSize: "var(--t-sm)" }}>—</td>
                       </tr>,
                     );
                   }
@@ -978,23 +1161,30 @@ export function LoadingBay() {
               </tbody>
             </table>
           </div>
+          </div>
+        </div>
+            );
+          })}
+          {!loading && filtered.length === 0 && <EmptyState title="No matching results" hint="Try a different filter" />}
           {!(loading && plans.length === 0) && <GridFooter {...pager} />}
         </div>
       )}
 
       {picker && (() => {
-        const line = picker.lineId ? allLines.find(({ l }) => l.id === picker.lineId)?.l : undefined;
-        // No lineId = "New Loading": the same modal in container-only mode.
-        if (picker.lineId && !line) return null;
+        const lines = picker.lineIds
+          .map((id) => allLines.find(({ l }) => l.id === id)?.l)
+          .filter((l): l is PalPlanLine => !!l);
+        // No lineIds = "New Loading": the same modal in container-only mode.
+        if (picker.lineIds.length && !lines.length) return null;
         return (
           <LoadContainerModal
-            line={line}
+            lines={lines}
+            availableLines={allLines.filter(({ l }) => l.status === "ReadyToLoad" && !l.loadBoxId).map(({ l }) => l)}
             boxes={openBoxes}
             linesOfBox={linesOfBox}
-            presetBoxId={picker.presetBoxId}
             busy={busy}
-            planHint={line ? planHintFor(line) : undefined}
-            onConfirm={(target, count) => void confirmLoad(target, count)}
+            planHint={lines.length === 1 ? planHintFor(lines[0]) : undefined}
+            onConfirm={(target, entries, prodEntries) => void confirmLoad(target, entries, prodEntries)}
             onClose={() => setPicker(null)}
           />
         );
@@ -1003,7 +1193,7 @@ export function LoadingBay() {
       {vehModal && (
         <VehicleLoadModal
           palNumber={boxLabel(vehModal.box)}
-          title="Confirm Load"
+          title={vehModal.box.status === "Open" && !sealed(vehModal.box) ? "Confirm Load" : "Edit Load Details"}
           busy={busy}
           initialVehicleId={vehModal.box.vehicleId}
           initialCapture={{

@@ -21,7 +21,7 @@ import type { LoadBox, PalPlan } from "./palPlansApi";
 // ponytail: mirrors palPlansApi.boxLabel. Importing it as a VALUE would pull the
 // whole dataOps/cache chain into this pure module and into its self-check; one
 // line kept in step is the cheaper trade. Change both together.
-const labelOf = (b: LoadBox) => b.vehicleNumber || `Box ${b.boxNumber}`;
+const labelOf = (b: LoadBox) => b.vehicleNumber || `Container ${b.boxNumber}`;
 
 export type BatchStage = "On hand" | "Palletised" | "Loaded" | "Dispatched";
 

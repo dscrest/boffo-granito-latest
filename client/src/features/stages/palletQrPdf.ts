@@ -60,7 +60,7 @@ async function buildDoc(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLin
       { text: "BOFFO", fontSize: 16, bold: true, color: QP.ink, characterSpacing: 2 },
       {
         columns: [
-          { width: "*", text: `Box ${box.boxNumber}`, fontSize: 11, bold: true, color: QP.ink },
+          { width: "*", text: `Container ${box.boxNumber}`, fontSize: 11, bold: true, color: QP.ink },
           { width: "auto", text: `${total} box`, fontSize: 9, color: QP.dim, alignment: "right" },
         ],
         margin: [0, 2, 0, 6],
@@ -82,5 +82,5 @@ async function buildDoc(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLin
 export async function downloadPalletQrPdf(box: LoadBox, entries: Array<{ p: PalPlan; l: PalPlanLine }>): Promise<void> {
   const token = await shareLoadBox(box.id);
   const url = `${window.location.origin}${window.location.pathname}#/share/box/${token}`;
-  await downloadPdf(await buildDoc(box, entries, url), `Pallet-QR-Box-${box.boxNumber}.pdf`);
+  await downloadPdf(await buildDoc(box, entries, url), `Pallet-QR-Container-${box.boxNumber}.pdf`);
 }

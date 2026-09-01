@@ -142,10 +142,10 @@ export function SendToLoadingModal({
         return;
       }
       box = String(created.data.ROWID);
-      label = draft.container_number.trim() || `Box ${created.data.box_number ?? ""}`.trim();
+      label = draft.container_number.trim() || `Container ${created.data.box_number ?? ""}`.trim();
     } else if (box && !label) {
       const b = loadBoxes.find((x) => x.id === box);
-      label = b ? b.containerNumber || `Box ${b.boxNumber}` : "the loading";
+      label = b ? b.containerNumber || `Container ${b.boxNumber}` : "the loading";
     }
     const res = await sendToLoading({
       sales_order: soId,

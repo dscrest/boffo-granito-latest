@@ -338,9 +338,14 @@ export function PalPlanDetail() {
                               <td className="muted">{l.palletName}</td>
                               <td className="muted">
                                 {box ? (
-                                  <span title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "In Dispatch"}>
-                                    {box.vehicleNumber || `Box ${box.boxNumber}`}
-                                  </span>
+                                  <Link
+                                    className="linkish"
+                                    to={`/loading/${encodeURIComponent(box.id)}`}
+                                    onClick={(ev) => ev.stopPropagation()}
+                                    title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "Open the loading"}
+                                  >
+                                    {box.vehicleNumber || `Container ${box.boxNumber}`}
+                                  </Link>
                                 ) : (
                                   "—"
                                 )}
