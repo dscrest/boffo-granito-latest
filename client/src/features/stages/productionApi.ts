@@ -44,7 +44,7 @@ export interface ProductionRecordRow {
   shift: string;
   performedBy: string;
   note: string;
-  /** Production batch (B/FY/NNN) this output belongs to. */
+  /** Production batch (B/YYYY-MM/NNN) this output belongs to. */
   batchNumber: string;
   orderItemId: string;
   createdTime: string;
@@ -297,7 +297,7 @@ export interface ProductionRecordInput {
   shift?: string;
   performed_by?: string;
   note?: string;
-  /** Batch number; blank → server auto-mints B/FY/NNN. */
+  /** Batch number; blank → server auto-mints B/YYYY-MM/NNN. */
   batch_number?: string;
   /** Pallet spec for the queue line this record creates; blank → the SO line's own. */
   pallet?: string;
@@ -305,7 +305,7 @@ export interface ProductionRecordInput {
 /** One batch row of a multi-batch record (batch-tracked items). */
 export interface ProductionRecordLine {
   qty_boxes: number;
-  /** Blank → server auto-mints B/FY/NNN per row. */
+  /** Blank → server auto-mints B/YYYY-MM/NNN per row. */
   batch_number?: string;
   /** Batch mfg date. */
   mfg_date?: string;

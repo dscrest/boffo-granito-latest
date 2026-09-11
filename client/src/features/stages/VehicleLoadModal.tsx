@@ -124,7 +124,7 @@ export function VehicleLoadModal({
                 </button>
               </div>
               <label className="form-field">
-                <span className="lbl">Vehicle<span className="req"> *</span></span>
+                <span className="lbl">Vehicle</span>
                 <Combobox
                   value={selected}
                   options={vehicles.map((v) => ({
@@ -205,7 +205,7 @@ export function VehicleLoadModal({
           ) : (
             <>
               <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-              <button className="hbtn primary" onClick={() => onConfirm(selected, capture)} disabled={busy || !selected}>
+              <button className="hbtn primary" onClick={() => onConfirm(selected, capture)} disabled={busy}>
                 <Icon name="check" size={13} /> {busy ? "Saving…" : title}
               </button>
             </>

@@ -222,7 +222,7 @@ export interface Quote {
 
 /* ---- Container-plan snapshot (Quote.container_plan JSON) ---- */
 export interface ContainerPlanLine {
-  design: string; // design_name — the key the rest of the client joins on
+  design: string; // unique_name (older plans: design_name) — joins resolve both via designIdOf
   palletId: string;
   palletName: string;
   pallets: number;
@@ -250,6 +250,44 @@ export function parseContainerPlan(raw: string | undefined | null): ContainerPla
   try {
     const p = JSON.parse(raw) as ContainerPlan;
     return Array.isArray(p?.containers) && p.containers.length > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---- Loading-plan snapshot (LoadBox.load_plan JSON) — the per-loading plan:
+   written by NewLoadingModal on create; read as the "Planned" fallback on
+   the /loading grid and LoadingDetail while nothing is loaded yet. ---- */
+export interface LoadPlanLine {
+  so: string; // SalesOrder ROWID
+  design: string; // unique_name (designIdOf-compatible)
+  batch: string; // production batch number ("" = no batch)
+  boxes: number; // planned boxes for this loading
+  palletId: string;
+  rate?: number;
+  /** Pallet position in the loading order (1-based). Lines sharing a `plt`
+      are one physical pallet (a mixed pallet spans batches). Absent on
+      legacy plans — readers must treat each line as its own pallet. */
+  plt?: number;
+  mix?: true; // the `plt` group is a composed mixed pallet
+}
+export interface LoadPlan {
+  v: 1;
+  mode?: "boxes" | "weight";
+  tonCapacity?: number; // weight mode cap (default 28)
+  lines: LoadPlanLine[];
+  /** Multi-container group: a plan spanning N containers stores one slice per
+      LoadBox, all pointing at the primary box's ROWID. Absent = standalone.
+      ponytail: a JSON key instead of a LoadBox column — the server never reads
+      load_plan, and siblings are found client-side from the cached box list. */
+  group?: { id: string; no: number; of: number };
+}
+/** Parse a LoadBox.loadPlan JSON string; null when absent/invalid. */
+export function parseLoadPlan(raw: string | undefined | null): LoadPlan | null {
+  if (!raw) return null;
+  try {
+    const p = JSON.parse(raw) as LoadPlan;
+    return Array.isArray(p?.lines) && p.lines.length > 0 ? p : null;
   } catch {
     return null;
   }

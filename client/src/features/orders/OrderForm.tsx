@@ -465,6 +465,7 @@ export function OrderForm({
                     </div>
                     <NumberInput
                       value={l.rate}
+                      maxDecimals={2}
                       onChange={(e) => setLine(i, "rate", e.target.value)}
                       placeholder="0.00"
                       aria-invalid={showErrors && !!l.design && !String(l.rate).trim()}

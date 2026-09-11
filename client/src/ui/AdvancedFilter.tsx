@@ -12,6 +12,7 @@ import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { NumberInput } from "./NumberInput";
+import { DateInput } from "./DateInput";
 
 export type FilterFieldType = "text" | "select" | "multiselect" | "daterange" | "numrange";
 
@@ -204,9 +205,9 @@ function FieldInput({
       const r = (value as DateRange) || {};
       return (
         <div className="row" style={{ gap: 8 }}>
-          <input type="date" value={r.from || ""} onChange={(e) => onChange({ ...r, from: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+          <DateInput value={r.from || ""} max={r.to || undefined} onChange={(e) => onChange({ ...r, from: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
           <span className="dim" style={{ flex: "0 0 auto" }}>–</span>
-          <input type="date" value={r.to || ""} onChange={(e) => onChange({ ...r, to: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+          <DateInput value={r.to || ""} min={r.from || undefined} onChange={(e) => onChange({ ...r, to: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
         </div>
       );
     }

@@ -29,10 +29,12 @@ import {
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
+  oiProgressOf,
   planToInput,
   setPalStatus,
   setPalVehicle,
   updatePalPlan,
+  PAL_LINE_STATUS_LABEL,
   type LoadBox,
   type PalPlan,
   type PalPlanInput,
@@ -99,6 +101,8 @@ export function PalPlanDetail() {
     return [...m.values()];
   }, [plan]);
 
+  const oiProgress = useMemo(() => oiProgressOf(plan?.lines || []), [plan]);
+
   const changeStatus = async (to: PalStatus, msg: string) => {
     if (!plan) return;
     setBusy(true);
@@ -119,6 +123,10 @@ export function PalPlanDetail() {
 
   const assignVehicle = async (vehicleId: string) => {
     if (!plan) return;
+    if (!vehicleId) {
+      toast.error("Pick a vehicle first");
+      return;
+    }
     setBusy(true);
     const res = await setPalVehicle(plan.id, vehicleId);
     setBusy(false);
@@ -176,6 +184,12 @@ export function PalPlanDetail() {
     void import("./palletSlipPdf").then((m) => m.downloadPalletSlipPdf(plan));
   };
 
+  const onPrintPacking = () => {
+    if (!plan) return;
+    if (!plan.lines.some((l) => l.status === "ReadyToLoad" || l.loadBoxId)) { toast.error("No palletised items yet"); return; }
+    void import("./packingReportPdf").then((m) => m.downloadPackingReportForPlan(plan));
+  };
+
   if (loading && !plan) {
     return (
       <div className="card" style={{ padding: 20 }}>
@@ -201,6 +215,7 @@ export function PalPlanDetail() {
   const moreItems = [
     ...(can("stages", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     { label: "Print Palletization slip", onClick: onPrint },
+    { label: "Print Packing Report", onClick: onPrintPacking },
     ...(can("stages", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
@@ -323,19 +338,30 @@ export function PalPlanDetail() {
                           <th>Design</th>
                           <th>Size</th>
                           <th>Pallet</th>
+                          <th>Status</th>
                           <th>Vehicle</th>
                           <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+                          <th style={{ width: 30 }} />
                         </tr>
                       </thead>
                       <tbody>
                         {g.lines.map((l) => {
                           const box = boxById.get(l.loadBoxId);
+                          const done = l.status === "ReadyToLoad" || !!l.loadBoxId;
+                          const prog = oiProgress.get(l.orderItemId);
+                          const partial = !done && prog && prog.done > 0 && prog.done < prog.total;
+                          const chipCls = l.status === "ReadyToLoad" ? "p-ready" : l.status === "Palletizing" ? "p-palletized" : "p-planning";
                           return (
                             <tr key={l.id}>
                               <td className="mono">{l.itemCode}</td>
                               <td><span className="design-name">{l.designLabel}</span></td>
                               <td className="muted mono">{l.sizeCode || "—"}</td>
                               <td className="muted">{l.palletName}</td>
+                              <td>
+                                <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`}>
+                                  {partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status]}
+                                </span>
+                              </td>
                               <td className="muted">
                                 {box ? (
                                   <Link
@@ -351,11 +377,24 @@ export function PalPlanDetail() {
                                 )}
                               </td>
                               <td className="num mono">{fmt(l.boxes)}</td>
+                              <td>
+                                {done && (
+                                  <button
+                                    type="button"
+                                    className="btn"
+                                    title="Print pallet packing report for this item"
+                                    style={{ padding: 0, height: 22, width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                                    onClick={() => void import("./packingReportPdf").then((m) => m.downloadPackingReportForLines([l], plan.lines))}
+                                  >
+                                    <Icon name="printer" size={12} />
+                                  </button>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
                         <tr>
-                          <td colSpan={5} style={{ fontWeight: 500 }}>Subtotal</td>
+                          <td colSpan={7} style={{ fontWeight: 500 }}>Subtotal</td>
                           <td className="num mono" style={{ fontWeight: 500 }}>{fmt(subtotal)}</td>
                         </tr>
                       </tbody>

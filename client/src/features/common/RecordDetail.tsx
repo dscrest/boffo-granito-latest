@@ -47,7 +47,10 @@ export function ActivityLog({
     setLoading(true);
     const idSet = entityIds && entityIds.length ? new Set(entityIds) : null;
     const exSet = excludeOps && excludeOps.length ? new Set(excludeOps) : null;
-    void list("OperationLog", { order: "ROWID desc", limit: 200 }).then((res) => {
+    // Filter server-side (one predicate allowed): the entity row when known,
+    // else the table — a global newest-200 window drops older records' rows.
+    const where = entityId ? `entity_rowid = '${entityId}'` : `table_name = '${table}'`;
+    void list("OperationLog", { where, order: "ROWID desc", limit: 200 }).then((res) => {
       if (!alive) return;
       setLoading(false);
       setActs(
@@ -117,7 +120,7 @@ export function StatusTimeline({ entityType, entityId }: { entityType: string; e
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    void list("StatusTransition", { order: "ROWID desc", limit: 300 }).then((res) => {
+    void list("StatusTransition", { where: `entity_rowid = '${entityId}'`, order: "ROWID desc", limit: 300 }).then((res) => {
       if (!alive) return;
       setLoading(false);
       setRows(

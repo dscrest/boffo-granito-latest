@@ -1,7 +1,21 @@
 /* Shared UI primitives, ported verbatim from prototype/ui.jsx + views.jsx (KPI).
    Markup unchanged; only typed and exported (no more window globals). */
+import { useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
 import { stageOf } from "../data";
+
+/* "‹ Settings" back button for pages reached only through Settings
+   (Users, Roles, Currencies, Masters, Sizes, Data Operations). Sits
+   left of the page title inside a .row wrapper. */
+export function BackToSettings() {
+  const navigate = useNavigate();
+  return (
+    <button className="hbtn" onClick={() => navigate("/settings")} title="Back to Settings">
+      <Icon name="chev-l" size={13} />
+      Settings
+    </button>
+  );
+}
 
 export function StageBadge({ stage }: { stage: string }) {
   const s = stageOf(stage);

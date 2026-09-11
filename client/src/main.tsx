@@ -7,6 +7,7 @@ import { SharedPallet } from "./features/stages/SharedPallet";
 import { SharedBatch } from "./features/stages/SharedBatch";
 import App from "./App";
 import "./styles/styles.css";
+import "./styles/theme.css"; // 2026-09 design system (slate/indigo) — overrides styles.css
 
 // HashRouter: routes live in the URL fragment (e.g. /app/index.html#/pipeline),
 // so deep links and refreshes work on Catalyst static hosting without any

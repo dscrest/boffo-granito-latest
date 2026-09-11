@@ -10,6 +10,7 @@ import { QuickView } from "./QuickView";
 import { OrderDrawer } from "@/features/orders/OrderDrawer";
 import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "@/features/orders/OrdersFilter";
 import { ViewToggle } from "@/features/orders/ViewToggle";
+import { can } from "@/lib/auth";
 
 export function Kanban() {
   const { orders, loading, error, reload } = useOrders();
@@ -54,10 +55,12 @@ export function Kanban() {
         actions={
           <>
             <ViewToggle />
-            <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }} title="New Order">
-              <Icon name="plus" size={13} />
-              New Order
-            </button>
+            {can("orders", "create") && (
+              <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }} title="New Order">
+                <Icon name="plus" size={13} />
+                New Order
+              </button>
+            )}
           </>
         }
       />

@@ -47,6 +47,7 @@ export const CUSTOMER_EXTRA_FIELDS = [
   "handling_person",
   "company_name",
   "customer_type", // "business" | "individual" (stored lowercase)
+  "overseas", // "true" | "" — overseas customer indicator
   "contact_salutation",
   "contact_first_name",
   "contact_last_name",
@@ -155,6 +156,8 @@ export interface CustomerRow {
   currency: string;
   paymentTermId: string; // PaymentTerm ROWID ("" if unset)
   paymentTermLabel: string;
+  boxBrandId: string; // Brand ROWID ("" if unset) — default carton brand for loadings
+  boxBrandLabel: string;
   handlingPersonLabel: string; // SalesPerson name ("" if unset)
   booksContactId: string;
   address: string;
@@ -211,10 +214,11 @@ async function fetchCustomers(): Promise<{
   error?: string;
 }> {
   // listAll pages past ZCQL's 300-row cap; lookups project their label.
-  const [customers, terms, reps] = await Promise.all([
+  const [customers, terms, reps, brands] = await Promise.all([
     listAll("Customer", { order: "ROWID desc" }),
     list("PaymentTerm", { limit: 300, columns: ["name"] }),
     list("SalesPerson", { limit: 300, columns: ["name", "email"] }),
+    list("Brand", { limit: 300, columns: ["name"] }),
   ]);
   if (!customers.ok)
     return { ok: false, customers: [], paymentTerms: [], salesPersons: [], error: customers.error };
@@ -228,6 +232,8 @@ async function fetchCustomers(): Promise<{
   (terms.rows || []).forEach((r) => termLabel.set(String(r.ROWID), str(r.name)));
   const repLabel = new Map<string, string>();
   (reps.rows || []).forEach((r) => repLabel.set(String(r.ROWID), str(r.name)));
+  const brandLabel = new Map<string, string>();
+  (brands.rows || []).forEach((r) => brandLabel.set(String(r.ROWID), str(r.name)));
 
   const paymentTerms = toOptions(terms.rows);
   const salesPersons = toOptions(reps.rows);
@@ -246,6 +252,8 @@ async function fetchCustomers(): Promise<{
       currency: str(c.currency),
       paymentTermId: termId,
       paymentTermLabel: termLabel.get(termId) || "",
+      boxBrandId: str(c.box_brand),
+      boxBrandLabel: brandLabel.get(str(c.box_brand)) || "",
       handlingPersonLabel: repLabel.get(str(c.handling_person)) || "",
       booksContactId: str(c.books_contact_id),
       address: str(c.address),
@@ -268,6 +276,7 @@ export interface CustomerInput extends Partial<CustomerExtras> {
   country_code: string; // ISO ("PL"), never the emoji
   currency: string;
   payment_term: string; // PaymentTerm ROWID ("" = leave unset)
+  box_brand: string; // Brand ROWID ("" = leave unset)
   address: string;
   port_of_discharge: string;
   active: boolean;
@@ -285,6 +294,7 @@ function toPayload(input: CustomerInput): Record<string, unknown> {
     active: input.active,
   };
   if (input.payment_term) p.payment_term = input.payment_term; // FK only when chosen
+  if (input.box_brand) p.box_brand = input.box_brand; // FK only when chosen
   for (const k of CUSTOMER_EXTRA_FIELDS) {
     if (input[k] !== undefined) p[k] = String(input[k]).trim();
   }
@@ -309,6 +319,7 @@ export function updateCustomer(rowid: string, input: CustomerInput) {
   // On edit, always send payment_term (allow clearing → null) to unset the FK.
   const patch = toPayload(input);
   if (!input.payment_term) patch.payment_term = null;
+  if (!input.box_brand) patch.box_brand = null;
   return bust(update("Customer", rowid, patch));
 }
 

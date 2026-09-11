@@ -5,6 +5,7 @@
    it with sessionStorage keeps it for the tab's lifetime and clears on close.
    ============================================================ */
 import { useEffect, useState } from "react";
+import { cachedDefaultView } from "@/features/settings/settingsApi";
 
 export function usePersistedState<T>(key: string, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
@@ -23,4 +24,11 @@ export function usePersistedState<T>(key: string, initial: T): [T, React.Dispatc
     }
   }, [key, value]);
   return [value, setValue];
+}
+
+/** usePersistedState for a board's view, seeded from the org "Default view"
+    setting (Settings → Preferences). The user's own toggle still wins for the
+    rest of the session — this only decides where a fresh tab lands. */
+export function useViewState<T extends string>(key: string, sheet: T, kanban: T) {
+  return usePersistedState<T>(key, cachedDefaultView() === "kanban" ? kanban : sheet);
 }

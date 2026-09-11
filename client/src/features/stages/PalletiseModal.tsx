@@ -1,6 +1,8 @@
 /* ============================================================
    Palletise dialog — confirms the pallet for the checked lines and moves
-   them in one go (multi-item), normally straight to Ready for Loading.
+   them in one go (multi-item), normally to In Palletization (two-step
+   flow since 2026-09-04; pallet-less legacy lines still pass through it
+   on their way to Ready for Loading).
    Per line: identity + batch, a size-width-filtered pallet Combobox
    (prefilled from the SO/quote container plan when one exists), and a
    pallet distribution readout (full pallets + partial).
@@ -8,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
+import { NumberInput } from "@/ui/NumberInput";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
@@ -16,6 +19,9 @@ import type { PalPlanLine } from "./palPlansApi";
 export interface PalletiseEntry {
   lineId: string;
   palletId: string;
+  /** Boxes to move (≤ line boxes). Less than the line's boxes = partial —
+      the remainder stays behind in its current stage. */
+  boxes: number;
 }
 
 export function PalletiseModal({
@@ -30,16 +36,21 @@ export function PalletiseModal({
   busy: boolean;
   /** Destination stage shown in the footer. */
   toLabel?: string;
-  /** Preferred pallet per line (SO/quote container plan) — wins over the
-      line's own pallet as the prefill; the user can still override. */
+  /** Fallback pallet per line (SO/quote container plan) — used only when the
+      line has no saved pallet of its own; the user can still override. */
   defaultPalletFor?: (l: PalPlanLine) => string;
   onConfirm: (entries: PalletiseEntry[]) => void;
   onClose: () => void;
 }) {
   const panelRef = useModalA11y(onClose);
   const [pallets, setPallets] = useState<PalletRow[]>([]);
+  // The line's own saved pallet wins; the container plan only fills a blank.
   const [palletByLine, setPalletByLine] = useState<Record<string, string>>(() =>
-    Object.fromEntries(lines.map((l) => [l.id, defaultPalletFor?.(l) || l.palletId])),
+    Object.fromEntries(lines.map((l) => [l.id, l.palletId || defaultPalletFor?.(l) || ""])),
+  );
+  // Boxes to move per line (string drafts) — defaults to the full line.
+  const [boxesByLine, setBoxesByLine] = useState<Record<string, string>>(() =>
+    Object.fromEntries(lines.map((l) => [l.id, String(l.boxes)])),
   );
   const [showErrors, setShowErrors] = useState(false);
 
@@ -59,15 +70,18 @@ export function PalletiseModal({
 
   const setPallet = (lineId: string, pid: string) => setPalletByLine((p) => ({ ...p, [lineId]: pid }));
 
+  const boxesOf = (l: PalPlanLine) => Math.min(Math.max(0, Math.floor(Number(boxesByLine[l.id]) || 0)), l.boxes);
   const entries: PalletiseEntry[] = lines.map((l) => ({
     lineId: l.id,
     palletId: palletByLine[l.id] || "",
+    boxes: boxesOf(l),
   }));
   const missingPallet = entries.filter((e) => !e.palletId).length;
-  const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+  const missingBoxes = entries.filter((e) => e.boxes <= 0).length;
+  const totalBoxes = lines.reduce((s, l) => s + boxesOf(l), 0);
 
   const submit = () => {
-    if (missingPallet > 0) {
+    if (missingPallet > 0 || missingBoxes > 0) {
       setShowErrors(true);
       return;
     }
@@ -114,8 +128,9 @@ export function PalletiseModal({
                   if (own) opts.unshift(own);
                 }
                 const cap = capOf(l.id);
-                const full = cap > 0 ? Math.floor(l.boxes / cap) : 0;
-                const rem = cap > 0 ? l.boxes % cap : 0;
+                const moving = boxesOf(l);
+                const full = cap > 0 ? Math.floor(moving / cap) : 0;
+                const rem = cap > 0 ? moving % cap : 0;
                 return (
                   <tr key={l.id}>
                     <td>
@@ -132,7 +147,23 @@ export function PalletiseModal({
                         <span className="dim">—</span>
                       )}
                     </td>
-                    <td className="num mono">{fmt(l.boxes)}</td>
+                    <td className="num">
+                      {/* Editable: palletise part of the line now, the rest later —
+                          the remainder stays in its current stage. */}
+                      <NumberInput
+                        value={boxesByLine[l.id] ?? ""}
+                        onChange={(e) => setBoxesByLine((p) => ({ ...p, [l.id]: e.target.value }))}
+                        placeholder="0"
+                        style={{ width: 84, textAlign: "right" }}
+                        aria-label={`${l.designLabel} boxes to palletise`}
+                        className={showErrors && boxesOf(l) <= 0 ? "error" : undefined}
+                      />
+                      {moving < l.boxes && (
+                        <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }}>
+                          of {fmt(l.boxes)} — {fmt(l.boxes - moving)} stay back
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <Combobox
                         value={palletByLine[l.id] || ""}
@@ -167,8 +198,10 @@ export function PalletiseModal({
 
         <div className="df-foot">
           <span className="df-req-note">
-            {showErrors && missingPallet > 0 ? (
-              <span className="field-err">Choose a pallet for every item</span>
+            {showErrors && (missingPallet > 0 || missingBoxes > 0) ? (
+              <span className="field-err">
+                {missingPallet > 0 ? "Choose a pallet for every item" : "Enter the boxes to palletise for every item"}
+              </span>
             ) : (
               `${fmt(totalBoxes)} boxes · ${lines.length} item${lines.length === 1 ? "" : "s"} → ${toLabel}`
             )}

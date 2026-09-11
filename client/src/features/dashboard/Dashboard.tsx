@@ -8,6 +8,7 @@ import { fmt, pct } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { STAGES } from "@/data";
 import { useOrders } from "@/features/orders/useOrders";
+import { StageBarChart, TrendChart, type TrendPoint } from "@/ui/charts";
 
 /** Monday 00:00 of the week containing `d`. */
 function startOfWeek(d: Date): Date {
@@ -92,6 +93,28 @@ export function Dashboard() {
       .slice(0, 7);
   }, [orders]);
 
+  // Boxes ordered per day over the last 14 days (local dates, zero-filled).
+  const intakeByDay = useMemo<TrendPoint[]>(() => {
+    const buckets = new Map<string, number>();
+    orders.forEach((o) => {
+      const d = (o.orderDate || "").slice(0, 10);
+      if (d) buckets.set(d, (buckets.get(d) || 0) + o.orderQty);
+    });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const days: TrendPoint[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      days.push({
+        label: d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+        value: buckets.get(key) || 0,
+      });
+    }
+    return days;
+  }, [orders]);
+
   const todayProd = useMemo(
     () => orders.filter((o) => o.stage === "prod" || o.stage === "packing").slice(0, 6),
     [orders],
@@ -131,10 +154,12 @@ export function Dashboard() {
             <Icon name="calendar" size={13} />
             {range === "week" ? "This week ✓" : "This week"}
           </button>
-          <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
-            <Icon name="plus" size={13} />
-            New Order
-          </button>
+          {can("orders", "create") && (
+            <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
+              <Icon name="plus" size={13} />
+              New Order
+            </button>
+          )}
         </div>
       </div>
 
@@ -144,7 +169,7 @@ export function Dashboard() {
         <SkeletonRows rows={1} height={88} />
       ) : (
       <div className="kpi-grid">
-        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="boxes" delta={`${orders.length} active orders`} />
+        <KPI label="Total Order Qty" value={fmt(totalQty)} unit="boxes" delta={`${orders.length} active orders`} spark={intakeByDay.map((d) => d.value)} />
         <KPI label="Produced" value={fmt(totalProd)} unit="boxes" delta={`${pct(totalProd, totalQty)}% of ordered`} color="var(--c-blue)" />
         <KPI label="Pallets Packed" value={fmt(packedPallets)} unit="pallets" delta={`${fmt(totalPal)} boxes total`} color="var(--c-violet)" />
         <KPI label="Ready to Load" value={fmt(readyPallets)} unit="pallets" delta={`${fmt(readyBoxes)} boxes ready`} color="var(--c-cyan)" />
@@ -189,6 +214,38 @@ export function Dashboard() {
           </div>
         ))}
       </div>
+      )}
+
+      {!showSkeleton && (
+        <div className="split" style={{ marginTop: 16, alignItems: "stretch" }}>
+          <div className="card">
+            <div className="card-head">
+              <Icon name="tile" size={13} />
+              <span className="title">Boxes by Stage</span>
+              <span className="muted">· {fmt(totalQty)} total</span>
+            </div>
+            <div className="card-body" style={{ paddingTop: 4 }}>
+              <StageBarChart
+                data={STAGES.map((s) => ({
+                  label: s.short,
+                  value: byStage[s.id].qty,
+                  count: byStage[s.id].count,
+                  color: s.color,
+                }))}
+              />
+            </div>
+          </div>
+          <div className="card">
+            <div className="card-head">
+              <Icon name="calendar" size={13} />
+              <span className="title">Order Intake</span>
+              <span className="muted">· boxes ordered, last 14 days</span>
+            </div>
+            <div className="card-body" style={{ paddingTop: 4 }}>
+              <TrendChart data={intakeByDay} />
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="split" style={{ marginTop: 16, alignItems: "stretch" }}>

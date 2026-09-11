@@ -3,6 +3,249 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-09-10 — CR-143 undone: New Loading is a modal form (CR-144)
+
+**DEPLOYED LIVE 2026-09-10 (client only), uncommitted.** The same-day queue board + pallet-first workspace
+(CR-143 below) is deleted — `LoadingQueueBoard`, `StartLoadingModal`, `LoadingPlan`,
+`virtualPallets`, the `/loading/:id/plan` route and `LoadingDetailsModal` are gone
+(28ft/30ft container sizes from CR-142 stay). "New Loading" opens **`NewLoadingModal`**:
+SO picker (optional Customer filter, options from Ready-for-Loading stock) + container
+size; the SO's containerisation plan propagates (containers with `planProgress` chips,
+first unsent container prefilled against ready stock FIFO, all editable), or a flat
+checkbox+qty list of palletised lines when no plan exists. One submit = one loading:
+`/load-box` minted with a single-slice `load_plan`, `allocateFifo` + `/pal-lines-box`
+allocate the lines, land on `/loading/:id`. LoadingDetail's "Plan Loading" → **Add
+Pallets** (same modal scoped to the box); `/packing`'s Load confirm lands on the loading
+detail; `/loading` opens on Sheet (a persisted "board" view falls back to kanban).
+
+## 2026-09-10 — Loading redesign: queue board + pallet-first workspace, 28ft/30ft (CR-142…143)
+
+**DEPLOYED LIVE 2026-09-10, uncommitted.** The Loading pages follow the Claude Design "Container
+Loading" spec (layout + features; house slate/indigo skin, fonts unchanged).
+
+- **Container sizes are 28ft / 30ft** (CR-142): `CONTAINER_TYPES` shrunk from 20ft/40ft/40HQ,
+  default 28ft everywhere a default exists; legacy stored sizes still display as-is. The
+  **Send as Single/Multiple toggle is gone** — packing is automatic (fits in one container →
+  one; overflow chunks into siblings).
+- **`/loading` queue board** (CR-143): new default view — active-loading cards (one per Open
+  LoadBox: status, customers, container, loaded/planned boxes, fill) + the Loading queue
+  (ready work grouped by SO, derived pallet counts, Start loading →). "New Loading" opens
+  `StartLoadingModal` (Sales order / Customer / Container / Free pick tabs). Kanban / Sheet /
+  Loadings / Customer Sheet unchanged.
+- **Pallet-first loading workspace** (CR-143): `/loading/:id/plan` rebuilt — 3 columns:
+  Container gauges + Order requirement · Ready pallets (virtual pallet cards from
+  `virtualPallets.ts`: full/partial per batch, weight incl. tare; scan input matching pallet
+  code / batch / LOAD number; design filters) · Loading plan (floor map + ordered list).
+  **Suggest fill** plans full pallets from the requirement and proposes a **Compose mixed
+  pallet** for the shortfall (plan-level composition across batches). **Save plan** = advisory
+  `load_plan` JSON only (plan-only loadings intact; lines gain `plt`/`mix` keys); **Send for
+  loading** also allocates lines via `/pal-lines-box` (partial takes split server-side). The
+  old items-table planner (Dispatch Qty grid, SO-plan seeding via `loadingPlanSeed.ts`) is
+  retired — `loadingPlanSeed.ts` deleted.
+
+## 2026-09-10 — Loading-first sheet + Customer-only grouping + dispatch reset (CR-141)
+
+**DEPLOYED LIVE 2026-09-10** (this deploy also shipped CR-140's client + data-ops). The
+`/loading` Sheet's pinned first column now identifies the **Loading** (LOAD/FY/NNN via
+`boxLabel`, vehicle/"Container N" fallback) instead of the display-only PAL-NNN pallet
+sequence; the duplicate Container column is gone and the advanced-filter facet is relabelled
+"Loading". **Group by offers Customer only** for now — Order/Container/Batch/Item dims removed
+from board and sheet; stale persisted selections self-filter on read. Alongside, the LIVE
+loading/dispatch test data was reset for a clean Loading retest: every LoadBox soft-deleted,
+boxed plan lines un-boxed back to Ready for Loading, plans reverted (ReadyToLoad, or Planning
+when only Planning lines remain; dispatch dates cleared), legacy loaded/dispatched
+PalletisedBatch rows back to closed, OrderItem loaded/dispatched counters zeroed with stage →
+packing, and dispatch history purged (OrderItemEvents, LoadBox/plan/OrderItem
+StatusTransitions, OperationLog `dispatched` fan-outs). New loadings continue the LOAD number
+sequence.
+
+## 2026-09-10 — Customer Sheet on /loading + Box Brand master (CR-140)
+
+**DEPLOYED LIVE 2026-09-10 (with CR-141).** Fourth `/loading` view **Customer Sheet**: pick one customer
+and see every loaded line across all their SOs as the export-style loading sheet — one section
+per container (merged Sr / L.R. / Truck / Container / E-seal / Line-seal cells), P.O. per SO
+run, Design/Size/Finish/Batch per line, auto-computed pallet ranges ("1 TO 16", running per
+container from `ceil(boxes / boxesPerPallet)`), Pallet 1/2 from the Pallet master's A/B
+arrangements, Total footer. **Edit** stages everything into drafts and saves sequentially:
+L.R./truck/container/seals → `/load-box-update`, P.O. → `SalesOrder.po_number`, per-line
+**Box Brand** override → new `PalletizationPlanLine.box_brand` (grey = inherited from the new
+`Customer.box_brand` default, set in the customer form). New **BoxBrand** lookup master
+(Settings ▸ Product Masters ▸ Box Brand); table + both FK columns already live
+(`BoxBrand` 69851000000265385). Server change: `BoxBrand` added to the generic-CRUD ALLOWED
+set — **requires a `functions/data-ops` redeploy**. Pure sheet logic in
+`customerSheetEdit.ts` with an `npx tsx` self-check.
+
+## 2026-09-09 — SO-first New Loading (CR-126)
+
+**DEPLOYED LIVE 2026-09-09 (client only), uncommitted.** "New Loading" on `/loading` now asks for just
+the **Sales Order** and opens the load planner at `/loading/new/plan?so=…` — no record yet.
+The planner seeds from the SO's container plan remainder when one exists (empty planner with
+Add-item otherwise, same as before); the first **Save mints the LoadBox(es)** — primary created
+plain, group stamped once the ROWID exists, siblings pointing at it — and pops a **skippable
+container/vehicle details modal** (`LoadingDetailsModal`, reusing the ContainerPicker form;
+"Later" defers to Confirm Load). Abandoning the planner leaves nothing behind. The old
+container-details-first branch of `useLoadFlow.confirmLoad` is deleted; pallet-mode Load from
+`/packing` is unchanged. No server change.
+
+## 2026-09-08 — Batch series setting (CR-125)
+
+**DEPLOYED LIVE 2026-09-08, uncommitted.** Settings → Preferences: admin sets the batch series
+**prefix, separator and start number** (defaults `B`, `/`, `1`) with a live preview; the server
+builds the auto-minted format `<prefix><sep>YYYY-MM<sep>NNN` from AppSetting keys
+(`batch_series_*`, read by `nextBatchNumber`). Per-item monthly restart unchanged. Changing
+prefix/separator starts a fresh series (old batches no longer match the scan's LIKE).
+
+## 2026-09-04 — Multi-container loading plan, LOAD series, per-item-month batches (CR-120…124)
+
+**DEPLOYED LIVE 2026-09-08** (`LoadBox.load_number` column → functions → client, in that order), **uncommitted**.
+
+- **Loading plan goes multi-container + SO-plan-seeded** (CR-120): an empty `/loading/:id/plan`
+  seeds from the box's own lines + the SO container plan's remainder (`loadingPlanSeed.ts` + test);
+  "Send as Single / Multiple containers" auto-packs item-wise with the shared `containerPack.ts`
+  math (extracted from the SO planner + test) and Save creates/updates one **sibling LoadBox per
+  extra container**, linked via `load_plan.group {id,no,of}` (JSON key, no new column). Items
+  table gains Pcs/Box, Ordered, Balance-after; container cards show per-container pallet cells,
+  status and vehicle. Reverses CR-119's "one loading = one container" note; stock still moves
+  only via the load modal flows.
+- **Multi-select Load lands on the plan screen** (CR-121): `useLoadFlow.confirmLoad` navigates
+  to `/loading/:id/plan` after loading lines.
+- **LOAD series** (CR-122): `LoadBox.load_number` = `LOAD/FY/NNN`, minted in `/load-box`
+  (`nextLoadNumber`, prefix-scoped scan); `boxLabel` and server dispatch labels prefer it; old
+  boxes keep the fallback label (no backfill). `/packing` item codes stay PAL-NNN.
+- **Batch format** (CR-123): auto-minted batches are now `B/YYYY-MM/NNN`, series **per item per
+  calendar month** — `nextBatchNumber(catalyst, designId)` with a design+month-scoped scan (also
+  fixes the 300-row ZCQL truncation the old global scan silently hit). Typed batches unchanged.
+- **Container Planning tab embeds the editable SO planner** (CR-124): `PlanSoContainerisation`
+  takes `{soId, embedded}`; multi-SO loadings get an SO chip selector. Save still writes
+  `SalesOrder.container_plan`; the `/orders/:id/containerise` route stays.
+- Loadings grid + detail derive a **Planned** display state (Open + plan, nothing loaded) and
+  show `C n/of` sibling chips / a sibling strip.
+
+## 2026-09-04 — Loading & Dispatch revamp + SO planner fix (CR-115…119)
+
+**DEPLOYED LIVE 2026-09-04** (column → functions → client, in that order), **uncommitted**.
+Plan Loading screen re-laid-out same day from the Claude Design "Loading and Dispatch" spec
+(info cards + SO chips, mono items table, container pallet-cell graphic), palette mapped to
+app theme tokens.
+
+- **BUG fixed:** SO Plan Containerisation's item combobox showed empty — lines were seeded
+  with plain `designName` while options are keyed `uniqueName || name`. One-word fix
+  (`o.design || o.designName`); also stops the SO planner opening dirty. Quote planner now
+  reopens on the saved pallet; "Ready Pallets" header corrected to "Pallets".
+- **Two-step palletise** on `/packing` (reverses 2026-08-27's one-hop): Palletise → *In
+  Palletization* (pallet confirmed in the modal), then **Mark Palletised** → *Ready for
+  Loading*. Middle column/status label renamed "In Palletization".
+- **Load lives on `/packing`** now: Ready-for-Loading cards/rows have the Load button and
+  load-together checkboxes (shared `useLoadFlow` hook, extracted from LoadingBay). `/loading`
+  drops its "Ready for Loading" panel — boxed lines only: In Loading → Ready for Dispatch →
+  Dispatched (+ the Loadings grid). Sidebar renamed **"Loading and Dispatch"**.
+- **Per-loading plan** (`/loading/:id/plan`, "Plan Loading" on the detail): lines = item +
+  batch + order across ANY SOs/customers; "Ready" column = palletised un-boxed stock;
+  fulfillment bar = planned % and palletised-covered % of container capacity (Box/Weight
+  fitting); per-line "planned earlier" hint from the SO container plan. Stored as
+  `LoadBox.load_plan` JSON (text 10000; whitelisted in `/load-box` + `/load-box-update`).
+- Deploy order for the plan feature: column (done) → `catalyst deploy` functions → client.
+- Verified: tsc, vite build, `productionSheetEdit` + `planProgress` self-checks.
+
+## 2026-09-04 — Design system applied APP-WIDE (slate/indigo)
+
+Working tree — **built, not deployed.** The Panel Craft trial (below, same day) was accepted;
+the theme now applies to the whole app.
+
+- **`styles/panelcraft.css` → `styles/theme.css`** — tokens moved to `:root`, all component
+  rules de-scoped (the `.nd` wrapper is gone from CSS and the four page roots). The file
+  still loads after `styles.css`; equal-specificity ties resolve to it, which is how it
+  re-skins the old rules without editing them. Extra `.fbar`/`.page-head`/`.lp-search`
+  control overrides were added at the specificity the old 26px skins held.
+- **Legacy aliases now on `:root`** — `--panel`, `--fg`, `--muted`, `--c-*`, `--t-*`… point
+  at the new palette, so all ~2300 lines of styles.css re-theme untouched. Retire an alias
+  only by migrating every rule that reads it.
+- **`App.tsx` boot accent override deleted** (`TWEAK_DEFAULTS`/`applyAccent`) — it wrote the
+  old orange onto `<html>` at runtime, which would have beaten the `:root` tokens.
+- **Deliberately unchanged:** the logo and dark sidebar (`--sidebar-bg`/`--sb-*` not
+  remapped), the login screen (`.boffo-auth` scoped), print sheets (own palette), and
+  per-grid *behaviour* on non-Panel-Craft pages (row-click, text toolbars) — the new
+  conventions (hover row-actions, icon toolbars, `Chip`) retrofit page-by-page as follow-ups.
+- Verified: tsc + build clean; headless-Chromium sweep over /quotes, /orders, /prod,
+  /loading, /settings, /cut-stock — all themed, no page errors.
+
+## 2026-09-04 — Panel Craft design-system TRIAL (light slate/indigo)
+
+**Superseded same day** — trial accepted and applied app-wide (entry above). Kept for the
+record of what the trial covered.
+
+- **`styles/panelcraft.css`** (new, imported after `styles.css`) — the full token set
+  (slate surfaces, `--blue` primary, `--accent` indigo, radius/shadow tokens, Inter /
+  Space Grotesk / JetBrains Mono) scoped under a **`.nd`** wrapper class, plus a trial-only
+  legacy-alias block that re-points the old token names (`--panel`, `--fg`, `--muted`,
+  `--c-*`, `--t-*`…) so global classes inside `.nd` re-theme with no TSX changes. Same
+  scoping pattern as `login.css`/`.boffo-auth`. Fonts self-hosted in `public/fonts/`
+  (7 woff2 files), matching the Puvi precedent.
+- **`.nd` applied to the four Panel Craft roots only**: `/cut-stock`, `/panels`,
+  `/panels/:id`, `/panel-orders` (+ their in-tree modals). `PanelsPanel` embeds on
+  Item/Customer detail keep the old look. Toast/Confirm hosts sit outside the scope (known
+  trial limitation).
+- **New grid conventions (trial)** — no row-click; hover pencil/trash `.row-actions`
+  (always visible on touch), record code is an indigo link to the detail, toolbar is a
+  slate bar joined to the grid card with 30×30 icon buttons (`pcBits.tsx` `IconBtn`:
+  Edit/Clone enabled at exactly 1 selected, Delete ≥1, disabled = dimmed), per-column
+  `FilterSelect` fed by distinct data values, 44px footer.
+- **`ui/Chip.tsx`** (new) — the one status-chip component: 9-tone map, tinted pill
+  (tone + `18` alpha), CamelCase→spaced labels, renders nothing without a status.
+  Panel-order tones: Received amber, InCutting blue, Ready teal, Dispatched green
+  (`STAGE_COLOR` dots now match).
+- **Page upgrades riding along**: Panels grid gained header sorting (was unsortable) and
+  toolbar edit/clone/delete without leaving the grid; Panel Orders sheet became a full
+  record grid (sorting, pagination + `GridFooter`, search, status filter — both views
+  share the filters); Panel Orders/Panels/CutStock chips + statuses render via `Chip`.
+- **`ui/Icon.tsx`**: added `trash`, `copy`, `refresh` (additive).
+- Verified via headless-Chromium drive with mocked `data-ops` responses: all 4 pages +
+  modal render to spec; `.nd` appears only on the 4 page roots; tsc + vite build clean.
+
+## 2026-09-02 — Sheet-first: every board opens on the grid, default is a setting
+
+Working tree — **built, not deployed.** CR-113, CR-114.
+
+- **Sheet/Grid is the default view** on `/packing`, `/loading`, `/panel-orders` (all three
+  previously opened on Kanban) and stays the default on `/prod`. The per-page toggle is
+  unchanged and still wins for the rest of the browser session.
+- **`useViewState(key, sheet, kanban)`** (`lib/usePersistedState.ts`) — one seam every board
+  goes through. Thin wrapper over `usePersistedState`: same sessionStorage behaviour, but the
+  initial value comes from the org preference instead of a hard-coded literal.
+- **Settings → Preferences → Default view** (Sheet | Kanban) writes `AppSetting.default_view`;
+  a missing row means Sheet. `settingsApi.ts` was generalised — the per-key bodies now sit on
+  shared `rowFor` / `putSetting` helpers, and the duplicate-batch functions are unchanged
+  wrappers over them.
+- The setting is fetched asynchronously but a view is seeded synchronously at mount, so
+  `settingsApi` mirrors the resolved value to `localStorage["pref.defaultView"]` and
+  `cachedDefaultView()` falls back to it. No first-paint flip on a cold tab. `App.tsx` refreshes
+  the preference on boot alongside the session check.
+- **`/prod` view state moved from `localStorage` to sessionStorage** (key `productionView` →
+  `production.view`) so it matches the other three boards and the org default actually applies
+  on a new session. Anyone who had Production pinned to Board loses that pinning — one click to
+  restore. Its status-tab seed (board → All, else Pending) now reads the resolved view.
+
+## 2026-09-02 — Production sheet: edit mode (bulk qty + status)
+
+Working tree — **deployed LIVE 2026-09-02, not yet committed.** CR-111, CR-112.
+
+- **Edit mode on `/prod` sheet view** (`ProductionTable.tsx`). **Edit** makes three columns
+  editable across every row — **In Production** (`qty_requested`), **Produced** (boxes made now),
+  **Status** — staged in a draft keyed by plan-line id. Nothing reaches the server until **Save**;
+  Cancel or leaving the view asks before discarding. Remaining and the group band totals recompute
+  live from the draft. Kanban and grid views are untouched.
+- The sheet's old `Requested` column **is** the new editable In Production column (same field);
+  the `Produced` column hidden on 2026-08-12 is back, now as the inline output input.
+- **`productionSheetEdit.ts`** — pure `resolveSheetEdit(entry, draft)` → server ops or an error.
+  Mirrors `RecordOutputForm.capFor()` (line remaining ∩ order remaining, reading the drafted plan
+  qty) and refuses a qty change once output exists, matching `/production-update`. An invalid cell
+  turns red and disables Save. Self-check: `npx tsx client/src/features/stages/productionSheetEdit.test.ts`.
+- **Save** runs per row: `/production-update` → `/production-record` → `/production-stage`, stage
+  last so an explicit choice outranks the server's auto-step. Sequential and non-atomic (no
+  array-accepting production endpoint); failed rows stay in the draft with a per-row toast.
+- Inline output sends **no batch number** — the server mints `B/FY/NNN`. Batch-specific entry
+  still goes through the `+` dialog, which is hidden while editing.
+
 ## 2026-08-29 — Batch stock overhaul: FIFO reducer, 5 new reports, shade retired
 
 Working tree — **deployed LIVE 2026-08-29, not yet committed.**

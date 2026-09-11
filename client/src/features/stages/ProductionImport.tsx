@@ -192,7 +192,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
       const ids = req.data.ids;
       const done: string[] = [];
       const out: RowResult[] = [];
-      // Sequential on purpose — parallel record calls race the B/FY/NNN batch counter.
+      // Sequential on purpose — parallel record calls race the per-item batch counter.
       for (let i = 0; i < valid.length; i++) {
         const r = valid[i];
         const id = ids[i];

@@ -1,0 +1,373 @@
+/* ============================================================
+   BOFFO design system (2026-09-04) — light slate/indigo.
+   Started as the Panel Craft trial (panelcraft.css, scoped to .nd);
+   accepted 2026-09-04 and applied app-wide: tokens on :root, rules
+   unscoped. Loads AFTER styles.css — equal-specificity ties resolve
+   to this file, which is how it re-skins the older rules without
+   editing them.
+
+   Deliberately untouched: the logo + dark sidebar (--sidebar-bg /
+   --sb-* tokens in styles.css), the login screen (.boffo-auth), and
+   the print sheets (.qprint-* / .dentry-* own their palette).
+   ============================================================ */
+
+/* ---- fonts (self-hosted, /public/fonts — Puvi precedent) ---- */
+@font-face { font-family: "Inter"; src: url("/fonts/inter-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("/fonts/inter-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Inter"; src: url("/fonts/inter-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Space Grotesk"; src: url("/fonts/space-grotesk-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Space Grotesk"; src: url("/fonts/space-grotesk-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/jetbrains-mono-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/jetbrains-mono-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+
+/* ---- design tokens ---- */
+:root {
+  /* surfaces */
+  --bg: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-secondary: #f1f5f9;
+  /* borders */
+  --border: #e2e8f0;
+  --border-mid: #cbd5e1;
+  /* text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  /* action colors */
+  --blue: #2563eb;
+  --blue-light: #eff6ff;
+  --blue-border: #bfdbfe;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef2ff;
+  --accent-ring: rgba(79, 70, 229, 0.2);
+  /* semantic */
+  --ok: #16a34a;   --ok-soft: #f0fdf4;
+  --warn: #b45309; --warn-soft: #fffbeb;
+  --danger: #dc2626; --danger-soft: #fee2e2; --danger-border: #fca5a5;
+  /* geometry */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  /* elevation */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 4px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 32px -8px rgba(15, 23, 42, 0.12), 0 4px 8px -4px rgba(15, 23, 42, 0.06);
+  /* typography */
+  --font: "Inter", ui-sans-serif, sans-serif;
+  --font-display: "Space Grotesk", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ---- legacy aliases ----
+   Re-point the old styles.css token names at the new palette so its
+   ~2300 lines of component rules re-theme without edits. Retire an
+   alias only by migrating every rule that reads it. The dark-sidebar
+   tokens (--sidebar-bg, --sb-*) are deliberately NOT remapped. */
+:root {
+  --panel: var(--bg-card);
+  --panel-2: var(--bg-secondary);
+  --elevated: var(--bg-secondary);
+  --border-2: var(--border-mid);
+  --hover: var(--bg-secondary);
+  --fg: var(--text-primary);
+  --fg-2: var(--text-secondary);
+  --muted: var(--text-secondary);
+  --dim: var(--text-muted);
+  --faint: var(--border-mid);
+  --accent-fg: #fff;
+  --accent-ink: var(--accent);
+  --font-sans: var(--font);
+  --t-xs: 11px; --t-sm: 12px; --t-md: 13px; --t-lg: 13px;
+  --c-amber: var(--warn);
+  --c-blue: var(--blue);
+  --c-green: var(--ok);
+  --c-red: var(--danger);
+  --c-violet: #7c3aed;
+  --c-cyan: #0369a1;
+}
+
+/* ---- base ---- */
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg);
+}
+h1, h2, h3, .title { font-family: var(--font-display); }
+.title { font-size: 15px; font-weight: 600; }
+@keyframes ndFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* thin scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 4px; border: 0; }
+* { scrollbar-width: thin; scrollbar-color: var(--border-mid) transparent; }
+
+/* number inputs: plain boxes */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+/* ---- inputs (over the 35px house skin in styles.css) ---- */
+input:not([type]),
+input[type="text"],
+input[type="search"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+select,
+textarea {
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  transition: border-color 0.1s, box-shadow 0.1s, background 0.1s;
+}
+textarea { height: auto; min-height: 30px; padding: 6px 10px; }
+input:not([type]):hover, input[type="text"]:hover, input[type="search"]:hover,
+input[type="number"]:hover, input[type="email"]:hover, input[type="password"]:hover,
+input[type="date"]:hover, input[type="datetime-local"]:hover, input[type="time"]:hover,
+select:hover, textarea:hover {
+  border-color: var(--border-mid);
+  background-color: var(--bg-card);
+}
+input:not([type]):focus, input[type="text"]:focus, input[type="search"]:focus,
+input[type="number"]:focus, input[type="email"]:focus, input[type="password"]:focus,
+input[type="date"]:focus, input[type="datetime-local"]:focus, input[type="time"]:focus,
+select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  background-color: var(--bg-card);
+}
+::placeholder { color: var(--text-muted); }
+/* the styles.css .fbar/.page-head 26px control skins outrank the bare
+   element rules above — re-assert the new skin at their specificity */
+.fbar input[type="text"], .page-head .right input[type="text"],
+.fbar input[type="date"] {
+  height: 30px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.fbar select, .page-head .right select {
+  height: 30px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted); /* "All X" resting state */
+  padding: 0 24px 0 10px;
+}
+.fbar select.on { color: var(--text-primary); }
+.fbar select:focus, .page-head .right select:focus { border-color: var(--accent); }
+.lp-search input[type="text"] {
+  height: 30px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* ---- buttons ---- */
+.btn, .fbar .btn {
+  height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.btn:hover, .fbar .btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.btn.active, .fbar .btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+.hbtn {
+  height: 30px;
+  padding: 0 11px;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.hbtn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.hbtn.primary, .btn.primary {
+  font-weight: 600;
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+.hbtn.primary:hover, .btn.primary:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.btn.x { border-radius: var(--radius-sm); }
+.btn:disabled, .hbtn:disabled, .pc-ibtn:disabled { opacity: 0.35; cursor: not-allowed; }
+.hbtn.danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* toolbar icon button */
+.pc-ibtn {
+  width: 30px; height: 30px; padding: 0; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.pc-ibtn:hover:not(:disabled) { background: var(--border); color: var(--text-primary); }
+.pc-ibtn.danger:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-border); }
+.pc-ibtn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+.pc-divider { width: 1px; height: 18px; background: var(--border-mid); flex-shrink: 0; margin: 0 4px; }
+
+/* ---- toolbar (.fbar) — joined to the grid card below it ---- */
+.fbar {
+  padding: 10px 18px;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 0;
+  font-size: 12px;
+}
+/* joined to the grid card directly below (sheet views); boards keep a gap */
+.fbar:has(+ .card) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.fbar + .card { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+
+/* ---- record grid ---- */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+.tbl { background: var(--bg-card); font-size: 13px; }
+.tbl th {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.tbl td {
+  padding: 8px 12px;
+  height: auto;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.tbl td.num { font-family: var(--font-mono); text-align: right; }
+.mono { font-family: var(--font-mono); }
+.tbl tbody tr:hover td { background: var(--bg-secondary); }
+/* selected row */
+.tbl tr.sel td { background: var(--blue-light); }
+.tbl tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--blue); }
+/* row hover actions (grids adopting the no-row-click convention) */
+.row-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity 0.1s; }
+tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
+@media (hover: none) { .row-actions { opacity: 1; } }
+.row-actions .pc-ibtn { width: 26px; height: 26px; }
+
+/* ---- pinned footer ---- */
+.grid-footer {
+  height: 44px;
+  padding: 0 24px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: nowrap;
+}
+.grid-footer > .muted { color: var(--text-muted); font-size: 12px; }
+.grid-footer .btn { width: auto; min-width: 26px; height: 26px; padding: 0 7px; font-size: 12px; border-radius: var(--radius-sm); }
+.grid-footer select.pg-size {
+  height: 26px; padding: 0 24px 0 8px;
+  font-size: 12px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+/* ---- links (content area only — sidebar/header keep their own colors) ---- */
+.main a, .linkish { color: var(--accent); text-decoration: none; cursor: pointer; }
+.main a:hover, .linkish:hover, .linkish:focus-visible { text-decoration: underline; }
+.tbl td .design-name { color: inherit; }
+
+/* ---- chips ---- */
+.nd-chip {
+  display: inline-flex; align-items: center;
+  font-family: var(--font);
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+/* legacy .chip: pill geometry; the styles.css tone variants (higher
+   specificity) keep their own colors until migrated to ui/Chip */
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 0;
+  background: #64748b18;
+  color: #64748b;
+}
+
+/* ---- search boxes ---- */
+.gsearch input[type="text"] { padding-left: 30px; width: 220px; }
+.gsearch > svg, .lp-search > svg { color: var(--text-muted); }
+.lp-search { padding: 10px; border-bottom: 1px solid var(--border); }
+.lp-search input[type="text"] { width: 100%; padding-left: 30px; }
+
+/* ---- modals ---- */
+.modal-backdrop { background: rgba(15, 23, 42, 0.4); }
+.modal-panel {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: ndFadeIn 0.2s ease;
+}
+.df-modal { border-radius: var(--radius-lg); }
+.df-head {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+}
+.df-head .ico {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: none;
+}
+.df-head .ttl { font-size: 15px; font-weight: 600; font-family: var(--font-display); }
+.df-head .sub2 { font-size: 13px; color: var(--text-muted); }
+.df-foot { background: var(--bg-card); border-top: 1px solid var(--border); }
+
+/* ---- kanban job cards (Panel Orders board) ---- */
+.pc-job-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: var(--bg);
+  transition: border-color 0.1s;
+}
+.pc-job-card:hover { border-color: var(--border-mid); }

@@ -3,10 +3,12 @@
    from one Sales Order (or several, when editing). Header (palletization date /
    salesperson / optional vehicle) + a per-SO item picker (boxes + pallet per
    line). Palletise Boxes start blank so a partial (even single-item)
-   palletization is allowed. Only produced boxes can be palletised (rows with
-   nothing produced are disabled). Vehicle is optional — it can also be assigned
-   later, at the Loading step. On save it emits a PalPlanInput; the PAL number
-   is minted server-side. Reuses the shared form/modal CSS.
+   palletization is allowed. Boxes are capped at the SO ordered qty across
+   ALL plans/lines (produced qty is a hint, not a clamp — CR 2026-09-10);
+   untouched rows with nothing produced stay disabled in new mode. Vehicle is
+   optional — it can also be assigned later, at the Loading step. On save it
+   emits a PalPlanInput (Planning lines only); the PAL number is minted
+   server-side. Reuses the shared form/modal CSS.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -101,16 +103,19 @@ export function PalPlanForm({
       // Salesperson defaults to the logged-in user (unless seeded from a record).
       if (!initial?.salespersonName) setSalesperson(currentSalespersonName(sp.ok ? sp.salesPersons : []));
       // Seed boxes/pallet from an existing plan (edit / clone) — an explicitly
-      // saved pallet wins over the plan/SO default. New mode seeds nothing:
-      // the default resolves per render via effPallet (container plan → SO
-      // line's pallet), and Load Boxes start blank (partial-friendly).
+      // saved pallet wins over the plan/SO default. Only Planning lines are
+      // editable here (and re-sent on save); Palletizing/ReadyToLoad lines are
+      // locked and survive the save untouched (server replaces Planning only).
+      // New mode seeds nothing: the default resolves per render via effPallet
+      // (container plan → SO line's pallet), and Load Boxes start blank.
       if (initial) {
         const b: Record<string, number> = {};
         const p: Record<string, string> = {};
         for (const l of initial.lines) {
+          if (l.palletId) p[l.orderItemId] = l.palletId;
+          if (l.status !== "Planning") continue;
           // A plan may hold several lines per item (one per batch) — sum them.
           b[l.orderItemId] = (b[l.orderItemId] || 0) + l.boxes;
-          if (l.palletId) p[l.orderItemId] = l.palletId;
         }
         setBoxesByItem(b);
         setPalletByItem(p);
@@ -122,17 +127,85 @@ export function PalPlanForm({
   // Pallet specs offered for a line = those whose size WIDTH matches the item's.
   const palletsForItem = (it: PalletizableItem) => palletsForSize(pallets, it.sizeCode);
 
-  // Clamp to the produced-available qty — you can't palletise more than is produced.
   const setBoxes = (itemId: string, raw: string, max: number) =>
     setBoxesByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
   const setPallet = (itemId: string, pid: string) => setPalletByItem((p) => ({ ...p, [itemId]: pid }));
 
+  // Edit mode: the palletizable work list SKIPS items with nothing left to
+  // palletise (available ≤ 0), which used to silently DROP those plan lines on
+  // save. Merge the plan's own lines back in, synthesising entries the list
+  // didn't return (ordered 0 = unknown → those rows are reduce-only).
+  const mergedOrders = useMemo(() => {
+    if (!initial) return orders;
+    const out = orders.map((o) => ({ ...o, items: [...o.items] }));
+    const bySo = new Map(out.map((o) => [o.salesOrderId, o] as const));
+    for (const l of initial.lines) {
+      let o = bySo.get(l.salesOrderId);
+      if (!o) {
+        o = {
+          salesOrderId: l.salesOrderId,
+          label: [l.soNumber, l.customerName].filter(Boolean).join(" · ") || l.salesOrderId,
+          portOfDischarge: "",
+          items: [],
+        };
+        bySo.set(l.salesOrderId, o);
+        out.push(o);
+      }
+      if (!o.items.some((it) => it.orderItemId === l.orderItemId)) {
+        o.items.push({
+          orderItemId: l.orderItemId,
+          designId: l.designId,
+          designLabel: l.designLabel,
+          designName: "",
+          palletId: l.palletId,
+          sizeId: "",
+          sizeCode: l.sizeCode,
+          ordered: 0, // unknown here — maxFor treats 0 as "reduce-only"
+          available: 0,
+          produced: 0,
+          palletized: 0,
+          toProduce: 0,
+          inProduction: 0,
+          inProductionOrders: [],
+        });
+      }
+    }
+    return out;
+  }, [orders, initial]);
+
   // Orders shown as item sections: edit/clone/preset show what the API returned;
   // New mode shows only the SO picked above (nothing until one is chosen).
   const visibleOrders = useMemo(
-    () => (pickSo ? orders.filter((o) => o.salesOrderId === selectedSo) : orders),
-    [pickSo, orders, selectedSo],
+    () => (pickSo ? mergedOrders.filter((o) => o.salesOrderId === selectedSo) : mergedOrders),
+    [pickSo, mergedOrders, selectedSo],
   );
+
+  // Boxes locked in THIS plan (Palletizing/ReadyToLoad lines — not editable here).
+  const lockedByItem = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of initial?.lines || [])
+      if (l.status !== "Planning") m.set(l.orderItemId, (m.get(l.orderItemId) || 0) + l.boxes);
+    return m;
+  }, [initial]);
+  // Boxes already planned in OTHER plans (any status — the SO-qty budget is
+  // spent once boxes are on any plan, dispatched included).
+  const otherPlansByItem = useMemo(() => {
+    const m = new Map<string, number>();
+    existingPlans.forEach((p) => {
+      if (initial && p.id === initial.id) return;
+      p.lines.forEach((l) => m.set(l.orderItemId, (m.get(l.orderItemId) || 0) + l.boxes));
+    });
+    return m;
+  }, [existingPlans, initial]);
+  // Cap per user rule: total planned across all lines/plans ≤ the SO's ordered
+  // qty (produced-based clamp dropped — production may lag the plan).
+  const maxFor = (it: PalletizableItem) => {
+    if (!it.ordered) return boxesByItem[it.orderItemId] || 0; // synthesized row — reduce-only
+    return Math.max(
+      0,
+      it.ordered - (otherPlansByItem.get(it.orderItemId) || 0) - (lockedByItem.get(it.orderItemId) || 0),
+    );
+  };
 
   // Picking an SO scopes the item table; Load Boxes stay blank (partial-friendly).
   const onSelectSo = (soId: string) => {
@@ -146,12 +219,14 @@ export function PalPlanForm({
     [visibleOrders],
   );
 
-  // The form edits each item's TOTAL; an edited plan may hold one line per
-  // batch, so the total is re-distributed FIFO over the item's original batch
-  // lines — batch identity survives an edit (server replaces all lines).
+  // The form edits each item's Planning TOTAL; an edited plan may hold one
+  // line per batch, so the total is re-distributed FIFO over the item's
+  // original Planning batch lines — batch identity survives an edit (the
+  // server replaces Planning lines only; advanced lines are untouched).
   const origByItem = useMemo(() => {
     const m = new Map<string, { batch: string; boxes: number }[]>();
     for (const l of initial?.lines || []) {
+      if (l.status !== "Planning") continue;
       const arr = m.get(l.orderItemId) || [];
       arr.push({ batch: l.batchNumber, boxes: l.boxes });
       m.set(l.orderItemId, arr);
@@ -325,7 +400,11 @@ export function PalPlanForm({
                           if (own) opts.unshift(own);
                         }
                         const boxes = boxesByItem[it.orderItemId] || 0;
-                        const noStock = it.available <= 0; // nothing produced yet → can't palletise
+                        const locked = lockedByItem.get(it.orderItemId) || 0;
+                        // "Needs production" hint only for untouched new-mode rows;
+                        // in edit mode a plan line is always editable (reduce-only
+                        // when its item has nothing left).
+                        const noStock = !initial && it.available <= 0 && boxes <= 0;
                         const palletErr = showErrors && boxes > 0 && !pallet;
                         const usedPal = usedByPlan.get(it.orderItemId);
                         return (
@@ -347,12 +426,20 @@ export function PalPlanForm({
                               {noStock ? (
                                 <span className="dim" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>⚠ needs production</span>
                               ) : (
-                                <NumberInput
-                                  value={boxesByItem[it.orderItemId] ?? ""}
-                                  onChange={(e) => setBoxes(it.orderItemId, e.target.value, it.available)}
-                                  placeholder="0"
-                                  style={{ width: 110, textAlign: "right" }}
-                                />
+                                <>
+                                  <NumberInput
+                                    value={boxesByItem[it.orderItemId] ?? ""}
+                                    onChange={(e) => setBoxes(it.orderItemId, e.target.value, maxFor(it))}
+                                    placeholder="0"
+                                    style={{ width: 110, textAlign: "right" }}
+                                    title={it.ordered ? `Up to ${fmt(maxFor(it))} — total across plans capped at the ordered ${fmt(it.ordered)}` : undefined}
+                                  />
+                                  {locked > 0 && (
+                                    <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: 2, whiteSpace: "nowrap" }}>
+                                      +{fmt(locked)} already palletised
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </td>
                             <td>

@@ -56,7 +56,7 @@ export function ByOrderView() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get("new") === "1") {
-      setShowForm(true);
+      if (can("orders", "create")) setShowForm(true);
       searchParams.delete("new");
       setSearchParams(searchParams, { replace: true });
     }

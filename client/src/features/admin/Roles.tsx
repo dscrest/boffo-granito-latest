@@ -7,6 +7,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -33,10 +34,11 @@ interface Draft {
 
 const MODULES: { key: PermModule; label: string }[] = [
   { key: "quotes", label: "Quotes" },
-  { key: "orders", label: "Sales Orders" },
+  { key: "orders", label: "Sales" },
   { key: "customers", label: "Customers" },
-  { key: "items", label: "Items & Masters" },
-  { key: "stages", label: "Production / Stages" },
+  { key: "items", label: "Item" },
+  { key: "panel_craft", label: "Panel Craft" },
+  { key: "stages", label: "Production" },
   { key: "invoices", label: "Invoices" },
   { key: "reports", label: "Reports" },
 ];
@@ -47,10 +49,11 @@ const ACTIONS: { key: PermAction; label: string }[] = [
   { key: "delete", label: "Delete" },
   { key: "export", label: "Export" },
 ];
+// Production approval is retired server-side — offering it here minted a tick
+// that sanitizeMatrix silently stripped, so it's gone from the list.
 const APPROVABLES: { key: string; label: string }[] = [
   { key: "Quote", label: "Quotations" },
   { key: "SalesOrder", label: "Sales Orders" },
-  { key: "Production", label: "Production Requests" },
 ];
 
 function toDraft(r: RoleRow): Draft {
@@ -175,9 +178,12 @@ export function RolesAdmin() {
   return (
     <div>
       <div className="page-head">
-        <div>
-          <div className="title">Roles</div>
-          <div className="sub">{loading ? "Loading…" : "Per-module permissions and approval rights"}</div>
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <BackToSettings />
+          <div>
+            <div className="title">Roles</div>
+            <div className="sub">{loading ? "Loading…" : "Per-module permissions and approval rights"}</div>
+          </div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">

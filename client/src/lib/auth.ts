@@ -13,6 +13,7 @@ export type PermModule =
   | "orders"
   | "customers"
   | "items"
+  | "panel_craft"
   | "stages"
   | "invoices"
   | "reports"

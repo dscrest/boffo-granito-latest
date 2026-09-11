@@ -9,12 +9,13 @@
    The customer code is system-assigned (CUS-00001…, lib/seq) and
    read-only here. Reuses shared form/modal CSS (df-*, form-*).
    ============================================================ */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { storedAuth } from "@/lib/auth";
 import { useMasters } from "./useMasters";
+import { listMaster, type MasterRow } from "./mastersApi";
 import { currencyCodes } from "./currenciesApi";
 import {
   composeAddress,
@@ -205,6 +206,7 @@ export function PartyForm({
     code: initial?.code ?? "",
     currency: initial?.currency ?? "INR",
     payment_term: initial?.payment_term ?? "",
+    box_brand: initial?.box_brand ?? "",
     port_of_discharge: initial?.port_of_discharge ?? "",
     address: initial?.address ?? "",
     active: initial?.active ?? true,
@@ -222,6 +224,14 @@ export function PartyForm({
     }
     return base;
   });
+  // Box Brand options (DB-sourced pick list; the saved id keeps working
+  // even while options load — the select just shows blank briefly).
+  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
+  useEffect(() => {
+    void listMaster("Brand", ["name"]).then((r) => {
+      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
+    });
+  }, []);
   const [workPhone, setWorkPhone] = useState(() => splitPhone((initial?.contact_work_phone as string) ?? ""));
   const [mobile, setMobile] = useState(() => splitPhone((initial?.contact_mobile as string) ?? ""));
   // Books-style tab strip below the always-visible Customer section. All
@@ -305,6 +315,7 @@ export function PartyForm({
       country_code: NAME_TO_ISO.get(x.billing_country.trim()) ?? initial?.country_code ?? "",
       currency: v.currency,
       payment_term: v.payment_term,
+      box_brand: v.box_brand,
       port_of_discharge: v.port_of_discharge,
       address: composed || v.address,
       active: v.active,
@@ -468,6 +479,17 @@ export function PartyForm({
                   placeholder="Same as Company Name if left blank"
                 />
               </label>
+              <label className="form-field" title="Highlight this customer as an overseas (export) account">
+                <span className="lbl">Overseas</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 34, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={x.overseas === "true"}
+                    onChange={(e) => setExtra("overseas", e.target.checked ? "true" : "")}
+                  />
+                  <span className="dim">Overseas customer</span>
+                </div>
+              </label>
               <label className="form-field" style={{ gridColumn: "1 / -1" }}>
                 <span className="lbl">Primary Contact</span>
                 <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr", gap: 6 }}>
@@ -557,6 +579,17 @@ export function PartyForm({
                   {paymentTerms.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">Default Box Brand</span>
+                <select value={v.box_brand} onChange={(e) => set("box_brand", e.target.value)}>
+                  <option value=""></option>
+                  {boxBrands.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name}
                     </option>
                   ))}
                 </select>

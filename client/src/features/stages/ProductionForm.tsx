@@ -114,13 +114,14 @@ export function ProductionForm({
       if (!covered) a.open += 1;
       bySo.set(o.salesOrderId, a);
     }
+    // Fully-covered SOs stay pickable — production may be logged regardless of
+    // existing qty (CR); the badge tells the operator nothing is strictly left.
     return [...bySo.entries()]
-      .filter(([, a]) => a.open > 0)
       .map(([value, a]) => ({
         value,
         label: a.label,
         hint: a.hint,
-        badge: a.open < a.total ? `${a.open} of ${a.total} items left` : undefined,
+        badge: a.open === 0 ? "all covered" : a.open < a.total ? `${a.open} of ${a.total} items left` : undefined,
       }));
   }, [orders, stockFor]);
 
@@ -144,8 +145,10 @@ export function ProductionForm({
     };
   }, [orderId, mode]);
 
-  const setQty = (itemId: string, raw: string, max: number) =>
-    setQtyByItem((p) => ({ ...p, [itemId]: Math.max(0, Math.min(Number(raw) || 0, max)) }));
+  // No upper clamp: production may be requested beyond Remaining (CR) — the
+  // hint columns still show the shortfall math.
+  const setQty = (itemId: string, raw: string) =>
+    setQtyByItem((p) => ({ ...p, [itemId]: Math.max(0, Number(raw) || 0) }));
   const designOptions = useMemo<ComboOption[]>(
     () =>
       designRows.map((d) => ({
@@ -156,15 +159,12 @@ export function ProductionForm({
     [designRows],
   );
 
-  // Only lines with a real shortfall are requestable; each defaults to its shortfall
-  // unless the user overrode it (qtyByItem holds overrides only).
+  // Each line defaults to its shortfall (0 when covered) unless the user
+  // overrode it — covered lines are requestable too (CR).
   const orderLines = useMemo(
     () =>
       items
-        .map((it) => {
-          const short = shortfallOf(it);
-          return { order_item: it.orderItemId, qty_requested: short > 0 ? qtyByItem[it.orderItemId] ?? short : 0 };
-        })
+        .map((it) => ({ order_item: it.orderItemId, qty_requested: qtyByItem[it.orderItemId] ?? shortfallOf(it) }))
         .filter((l) => l.qty_requested > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [items, qtyByItem, stockFor],
@@ -298,8 +298,8 @@ export function ProductionForm({
 
           {/* Order mode — item-wise desired qty table. Every line shows, with a
               3-state stock signal (designStock): green = covered by stock in hand,
-              amber = covered by in-production, red = shortfall. Covered lines are
-              read-only; only lines with a real shortfall take a Desired qty. */}
+              amber = covered by in-production, red = shortfall. Every line takes a
+              Desired qty (covered lines default to 0) — no upper cap (CR). */}
           {mode === "order" && orderId && (
             <div className="form-section">
               <div className="form-section-title">
@@ -350,20 +350,14 @@ export function ProductionForm({
                               needs producing. ordered 10000, stock 3300, in-prod 0 → 6700. */}
                           <td className="num mono">{fmt(short)}</td>
                           <td className="num">
-                            {covered ? (
-                              <span className="dim" style={{ color, whiteSpace: "normal", fontSize: "var(--t-sm)" }} title={inProd ? "Covered by boxes already in production" : "Covered by available stock in hand"}>
-                                {inProd ? "In production — none needed" : "In stock — none needed"}
-                              </span>
-                            ) : (
-                              <NumberInput
-                                min={0}
-                                max={short}
-                                value={qtyByItem[it.orderItemId] ?? short}
-                                onChange={(e) => setQty(it.orderItemId, e.target.value, short)}
-                                placeholder="0"
-                                style={{ width: 100, textAlign: "right" }}
-                              />
-                            )}
+                            <NumberInput
+                              min={0}
+                              value={qtyByItem[it.orderItemId] ?? short}
+                              onChange={(e) => setQty(it.orderItemId, e.target.value)}
+                              placeholder="0"
+                              style={{ width: 100, textAlign: "right" }}
+                              title={covered ? (inProd ? "Covered by boxes already in production — extra qty allowed" : "Covered by available stock in hand — extra qty allowed") : undefined}
+                            />
                           </td>
                         </tr>
                       );

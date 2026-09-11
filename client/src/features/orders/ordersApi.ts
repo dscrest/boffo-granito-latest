@@ -247,7 +247,7 @@ export function shippingStage(items: Order[]): { label: string; cls: string; ran
   const waiting = sum((o) => Math.max(0, o.producedQty - o.palletizedQty));
   if (palletized > 0)
     return waiting > 0
-      ? { label: `Partially palletised — ${waiting} left`, cls: "q-accepted", rank: 2 }
+      ? { label: "Partially palletised", cls: "q-accepted", rank: 2 }
       : { label: "Ready for Loading", cls: "q-accepted", rank: 3 };
   if (waiting > 0) return { label: `Ready for Palletisation — ${waiting}`, cls: "q-accepted", rank: 1 };
   return null;

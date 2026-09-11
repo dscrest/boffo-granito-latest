@@ -1,14 +1,17 @@
 /* ============================================================
    Dispatch Control Board — the /packing board view (replaces PalKanban).
    Full-width stage board: 3 columns of PalletizationPlanLines — Ready for
-   Palletization → Palletization → Ready for Loading. Palletise moves a line
-   STRAIGHT to Ready for Loading (pallet confirmed in PalletiseModal);
-   Palletization is a transient stage reachable by drag. Kanban/Sheet is
-   chosen by the page-header toggle in PalPlans and arrives as the `view` prop.
-   Ready-for-Palletization cards carry a record-level checkbox — the selection
-   palletises together through PalletiseModal (pallet choice + distribution).
-   Lines allocated to a load box (and legacy Completed plans) leave this board
-   entirely — loading/dispatch lives on the Loading page (/loading).
+   Palletization → In Palletization → Ready for Loading. Two-step flow
+   (2026-09-04, reverses the 2026-08-27 one-hop): Palletise moves a line to
+   In Palletization (pallet confirmed in PalletiseModal); "Mark Palletised"
+   then moves it to Ready for Loading. Ready-for-Loading cards carry the
+   Load button (useLoadFlow + LoadContainerModal) — loading starts HERE;
+   /loading holds only boxed lines onward. Kanban/Sheet is chosen by the
+   page-header toggle in PalPlans and arrives as the `view` prop.
+   Ready-for-Palletization and Ready-for-Loading cards carry a record-level
+   checkbox — the selection palletises / loads together.
+   Lines allocated to a load box (and legacy Completed plans) leave this
+   board entirely — they live on the Loading and Dispatch page (/loading).
    ============================================================ */
 import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -20,19 +23,23 @@ import { isoInfo } from "@/features/masters/customersApi";
 import {
   invalidatePalPlans,
   lineFrac,
+  oiProgressOf,
   PAL_LINE_STATUS_LABEL,
   setPalLineStatus,
+  type LoadBox,
   type PalPlan,
   type PalPlanLine,
   type PalLineStatus,
 } from "./palPlansApi";
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { PalletiseModal, type PalletiseEntry } from "./PalletiseModal";
+import { LoadContainerModal } from "./LoadContainerModal";
+import { useLoadFlow } from "./useLoadFlow";
 
 // Board columns — all hold ITEM cards (a PalPlanLine each).
 const COLUMNS = [
   { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
-  { key: "Palletizing", label: "Palletization", chip: "p-palletized" },
+  { key: "Palletizing", label: "In Palletization", chip: "p-palletized" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
 ] as const;
 type ColKey = (typeof COLUMNS)[number]["key"];
@@ -52,12 +59,14 @@ export const DISPATCH_GROUP_DIMS: Array<{ id: DispatchGroupBy; label: string }> 
 
 export function DispatchBoard({
   plans,
+  boxes,
   view,
   canEdit,
   groupBy,
   onChanged,
 }: {
   plans: PalPlan[];
+  boxes: LoadBox[];
   view: "kanban" | "sheet";
   canEdit: boolean;
   groupBy: DispatchGroupBy[];
@@ -82,6 +91,8 @@ export function DispatchBoard({
   // Container plans keyed by SalesOrder ROWID — feeds the card subtitle and
   // the palletise-time pallet prefill.
   const { planBySo, defaultPalletFor } = useContainerPlanBySo();
+  // Shared load flow — Ready-for-Loading cards load into containers from here.
+  const flow = useLoadFlow({ plans, boxes, onChanged });
   const planTitle = (docNo: string, plan: ContainerPlan) =>
     plan.containers
       .map((c) => `${docNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
@@ -92,6 +103,9 @@ export function DispatchBoard({
   const allLines: Entry[] = plans
     .filter((p) => p.status !== "Completed")
     .flatMap((p) => p.lines.filter((l) => !l.loadBoxId).map((l) => ({ p, l })));
+  // Partial-palletise progress across ALL lines (boxed + Completed included,
+  // or split siblings would deflate the totals).
+  const oiProgress = oiProgressOf(plans.flatMap((p) => p.lines));
   // Age = days since the LINE was created (auto-enqueue creates it right after
   // production; plans are reused per SO so the plan date is the wrong anchor).
   // Catalyst stamps "YYYY-MM-DD HH:mm:ss:SSS" — colon before the millis breaks
@@ -108,8 +122,10 @@ export function DispatchBoard({
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
     setSelected((prev) => {
-      const planning = new Set(allLines.filter(({ p, l }) => stageOf(p, l) === "Planning").map(({ l }) => l.id));
-      const next = new Set([...prev].filter((id) => planning.has(id)));
+      const selectable = new Set(
+        allLines.filter(({ p, l }) => { const s = stageOf(p, l); return s === "Planning" || s === "Ready"; }).map(({ l }) => l.id),
+      );
+      const next = new Set([...prev].filter((id) => selectable.has(id)));
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,6 +147,13 @@ export function DispatchBoard({
       const res = await setPalLineStatus(id, to);
       if (res.ok) ok++; else err = res.error || "Move failed";
     }
+    // Palletised without the dialog (already-palleted lines dropped on Ready):
+    // print the packing report for what moved.
+    if (to === "ReadyToLoad" && ok > 0) {
+      const pool = plans.flatMap((p) => p.lines);
+      const moved = pool.filter((l) => ids.includes(l.id)).map((l) => ({ ...l, status: "ReadyToLoad" as const }));
+      void import("./packingReportPdf").then((m) => m.downloadPackingReportForLines(moved, pool));
+    }
     setBusy(false);
     // Batch failure mid-way: report + refresh anyway so the board resyncs.
     after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${PAL_LINE_STATUS_LABEL[to]}`);
@@ -138,16 +161,25 @@ export function DispatchBoard({
   };
 
   // Palletise-dialog confirm: every target moves to `to` with its pallet in
-  // one hop (Planning→ReadyToLoad is a legal transition server-side; a line
-  // never reaches Ready for Loading without a pallet on record).
+  // one call (`to` = Palletizing from the Palletise button, ReadyToLoad from
+  // a pallet-less Mark Palletised / drop on Ready — a line never reaches
+  // Ready for Loading without a pallet on record).
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
     if (busy || entries.length === 0 || !palletise) return;
     const to = palletise.to;
+    const src = palletise.lines;
     setBusy(true);
     let ok = 0, err = "";
     for (const e of entries) {
-      const res = await setPalLineStatus(e.lineId, to, e.palletId);
+      const res = await setPalLineStatus(e.lineId, to, e.palletId, e.boxes);
       if (res.ok) ok++; else err = res.error || "Move failed";
+    }
+    // Packing report only when items become PALLETISED (reach Ready), not when
+    // palletization merely starts — pre-refresh `plans` still holds the
+    // pre-split boxes the remaining-box math needs.
+    if (to === "ReadyToLoad" && ok > 0) {
+      void import("./packingReportPdf").then((m) =>
+        m.downloadPackingReportForEntries(entries, src, plans.flatMap((p) => p.lines)));
     }
     setBusy(false);
     setPalletise(null);
@@ -210,33 +242,40 @@ export function DispatchBoard({
     : d === "batch" ? (e.l.batchNumber ? `Batch ${e.l.batchNumber}` : "No batch")
     : e.l.designLabel || "—";
   const groupKeyOf = (e: Entry) => groupBy.map((d) => laneKeyOf(e, d)).join("  ›  ");
-  // Sheet rows: group sections first (when grouped), then stage order, then pallet code.
+  // Sheet rows: stage sections first, group bands nested inside, then pallet code.
   const stageIdx = new Map(COLUMNS.map((c, i) => [c.key, i]));
   const sheetRows = [...visible].sort((a, b) => {
+    const d = (stageIdx.get(stageOf(a.p, a.l)) ?? 0) - (stageIdx.get(stageOf(b.p, b.l)) ?? 0);
+    if (d !== 0) return d;
     if (groupBy.length) {
       const g = groupKeyOf(a).localeCompare(groupKeyOf(b));
       if (g !== 0) return g;
     }
-    const d = (stageIdx.get(stageOf(a.p, a.l)) ?? 0) - (stageIdx.get(stageOf(b.p, b.l)) ?? 0);
-    return d !== 0 ? d : a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
+    return a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
   });
 
   // ---- selection ----------------------------------------------
+  // Selection spans two stages: Planning items palletise together, Ready
+  // items load together — each button acts on its own stage's subset.
   const selEntries = allLines.filter(({ l }) => selected.has(l.id));
   const selBoxes = selEntries.reduce((s, { l }) => s + l.boxes, 0);
+  const selPlanning = selEntries.filter(({ p, l }) => stageOf(p, l) === "Planning");
+  const selReady = selEntries.filter(({ p, l }) => stageOf(p, l) === "Ready");
   const toggleSelect = (l: PalPlanLine) =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(l.id)) next.delete(l.id); else next.add(l.id);
       return next;
     });
-  const openPalletise = (lines: PalPlanLine[], to: "Palletizing" | "ReadyToLoad" = "ReadyToLoad") => {
+  const openPalletise = (lines: PalPlanLine[], to: "Palletizing" | "ReadyToLoad" = "Palletizing") => {
     if (lines.length) setPalletise({ lines, to });
   };
-  // A card's Palletise button acts on the checked items plus the clicked one —
-  // a selection is never silently ignored.
+  // A card's Palletise/Load button acts on the checked same-stage items plus
+  // the clicked one — a selection is never silently ignored.
   const palletiseTargets = (l: PalPlanLine) =>
-    selected.size ? [...selEntries.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
+    selected.size ? [...selPlanning.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
+  const loadTargets = (l: PalPlanLine) =>
+    selected.size ? [...new Set([...selReady.map(({ l: sl }) => sl.id), l.id])] : [l.id];
 
   // ---- item card ----------------------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
@@ -264,13 +303,13 @@ export function DispatchBoard({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {canEdit && stage === "Planning" && (
+          {canEdit && (stage === "Planning" || stage === "Ready") && (
             <input
               type="checkbox"
               checked={isSel}
               onClick={(ev) => ev.stopPropagation()}
               onChange={() => toggleSelect(l)}
-              title="Select to palletise together"
+              title={stage === "Planning" ? "Select to palletise together" : "Select to load together"}
               style={{ margin: 0, flex: "0 0 auto" }}
             />
           )}
@@ -337,15 +376,45 @@ export function DispatchBoard({
             </div>
           ) : null;
         })()}
-        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+        {canEdit && stage === "Planning" && (
           <button
             type="button"
             className="hbtn primary"
             style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(palletiseTargets(l)); }}
-            title={palletiseTargets(l).length > 1 ? `Palletise the ${palletiseTargets(l).length} selected items` : "Palletise this item — lands in Ready for Loading"}
+            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(palletiseTargets(l), "Palletizing"); }}
+            title={palletiseTargets(l).length > 1 ? `Palletise the ${palletiseTargets(l).length} selected items` : "Palletise this item — moves to In Palletization"}
           >
             Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
+          </button>
+        )}
+        {canEdit && stage === "Palletizing" && (
+          <button
+            type="button"
+            className="hbtn primary"
+            style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
+            disabled={busy}
+            onClick={(ev) => {
+              ev.stopPropagation(); ev.preventDefault();
+              // Pallet already picked at Palletise — move direct; legacy
+              // pallet-less lines detour through the dialog (same as drop-on-Ready).
+              if (l.palletId) void moveLines([l.id], "ReadyToLoad");
+              else openPalletise([l], "ReadyToLoad");
+            }}
+            title="Palletisation done — moves to Ready for Loading"
+          >
+            Mark Palletised
+          </button>
+        )}
+        {canEdit && stage === "Ready" && (
+          <button
+            type="button"
+            className="btn"
+            disabled={flow.busy}
+            style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
+            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); flow.setPicker({ lineIds: loadTargets(l) }); }}
+            title={loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container"}
+          >
+            <Icon name="truck" size={11} /> Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
           </button>
         )}
       </div>
@@ -532,14 +601,28 @@ export function DispatchBoard({
                     const col = COLUMNS.find((c) => c.key === stage)!;
                     const isSel = selected.has(l.id);
                     const key = groupBy.length ? groupKeyOf({ p, l }) : "";
+                    const stageChanged = i === 0 || stageOf(sheetRows[i - 1].p, sheetRows[i - 1].l) !== stage;
+                    const stageBand = stageChanged ? (
+                      <tr key={`s-${stage}`} style={{ background: "var(--panel-2)", borderTop: "2px solid var(--border)" }}>
+                        <td colSpan={7} style={{ padding: "8px 10px" }}>
+                          <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{col.label}</span>
+                          <span className="mono dim" style={{ marginLeft: 10 }}>
+                            {(() => {
+                              const sub = sheetRows.filter((e) => stageOf(e.p, e.l) === stage);
+                              return `${sub.length} item${sub.length === 1 ? "" : "s"} · ${fmt(sub.reduce((s, e) => s + e.l.boxes, 0))} bx`;
+                            })()}
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null;
                     const band =
-                      groupBy.length && (i === 0 || groupKeyOf(sheetRows[i - 1]) !== key) ? (
-                        <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
-                          <td colSpan={7}>
+                      groupBy.length && (stageChanged || groupKeyOf(sheetRows[i - 1]) !== key) ? (
+                        <tr key={`h-${stage}-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
+                          <td colSpan={7} style={{ paddingLeft: 20 }}>
                             {key}
                             <span className="mono" style={{ fontWeight: 400, marginLeft: 10 }}>
                               {(() => {
-                                const sub = sheetRows.filter((e) => groupKeyOf(e) === key);
+                                const sub = sheetRows.filter((e) => groupKeyOf(e) === key && stageOf(e.p, e.l) === stage);
                                 return `${sub.length} item${sub.length === 1 ? "" : "s"} · ${fmt(sub.reduce((s, e) => s + e.l.boxes, 0))} bx`;
                               })()}
                             </span>
@@ -548,6 +631,7 @@ export function DispatchBoard({
                       ) : null;
                     return (
                       <Fragment key={l.id}>
+                      {stageBand}
                       {band}
                       <tr
                         key={l.id}
@@ -557,13 +641,13 @@ export function DispatchBoard({
                       >
                         <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            {canEdit && stage === "Planning" && (
+                            {canEdit && (stage === "Planning" || stage === "Ready") && (
                               <input
                                 type="checkbox"
                                 checked={isSel}
                                 onClick={(ev) => ev.stopPropagation()}
                                 onChange={() => toggleSelect(l)}
-                                title="Select to palletise together"
+                                title={stage === "Planning" ? "Select to palletise together" : "Select to load together"}
                                 style={{ margin: 0 }}
                               />
                             )}
@@ -587,18 +671,49 @@ export function DispatchBoard({
                         </td>
                         <td>
                           <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap" }}>{col.label}</span>
+                          {(() => {
+                            const prog = oiProgress.get(l.orderItemId);
+                            return prog && prog.done > 0 && prog.done < prog.total ? (
+                              <div className="chip palstatus p-palletized" style={{ marginTop: 2, whiteSpace: "nowrap" }}
+                                   title="Part of this order item is still not palletised">
+                                Partially palletised
+                              </div>
+                            ) : null;
+                          })()}
                         </td>
                         <td className="dim">{ageDays(p, l)}d</td>
-                        <td style={{ whiteSpace: "nowrap" }}>
-                          {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+                        <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
+                          {canEdit && stage === "Planning" && (
                             <button
                               type="button"
                               className="btn"
                               style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
                               disabled={busy}
-                              onClick={(ev) => { ev.stopPropagation(); openPalletise(palletiseTargets(l)); }}
+                              onClick={() => openPalletise(palletiseTargets(l), "Palletizing")}
                             >
                               Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
+                            </button>
+                          )}
+                          {canEdit && stage === "Palletizing" && (
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
+                              disabled={busy}
+                              onClick={() => { if (l.palletId) void moveLines([l.id], "ReadyToLoad"); else openPalletise([l], "ReadyToLoad"); }}
+                            >
+                              Mark Palletised
+                            </button>
+                          )}
+                          {canEdit && stage === "Ready" && (
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
+                              disabled={flow.busy}
+                              onClick={() => flow.setPicker({ lineIds: loadTargets(l) })}
+                            >
+                              Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
                             </button>
                           )}
                         </td>
@@ -620,20 +735,45 @@ export function DispatchBoard({
               <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? "var(--fg)" : "var(--muted)" }}>
                 {selected.size
                   ? `${selected.size} selected · ${fmt(selBoxes)} boxes`
-                  : "Tick Ready for Palletization items to palletise several together"}
+                  : "Tick items to palletise or load several together"}
               </span>
               <span style={{ flex: 1 }} />
               {selected.size > 0 && (
                 <>
-                  <button
-                    type="button"
-                    className="hbtn primary"
-                    style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
-                    disabled={busy}
-                    onClick={() => openPalletise(selEntries.map(({ l }) => l))}
-                  >
-                    <Icon name="package" size={12} /> Palletise ({selected.size})
-                  </button>
+                  {selPlanning.length > 0 && (
+                    <button
+                      type="button"
+                      className="hbtn primary"
+                      style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
+                      disabled={busy}
+                      onClick={() => openPalletise(selPlanning.map(({ l }) => l), "Palletizing")}
+                    >
+                      <Icon name="package" size={12} /> Palletise ({selPlanning.length})
+                    </button>
+                  )}
+                  {selReady.length > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        className="hbtn"
+                        style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
+                        title="Print the pallet packing report for the selected palletised items"
+                        onClick={() => void import("./packingReportPdf").then((m) =>
+                          m.downloadPackingReportForLines(selReady.map(({ l }) => l), plans.flatMap((p) => p.lines)))}
+                      >
+                        <Icon name="printer" size={12} /> Packing Report ({selReady.length})
+                      </button>
+                      <button
+                        type="button"
+                        className="hbtn primary"
+                        style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
+                        disabled={flow.busy}
+                        onClick={() => flow.setPicker({ lineIds: selReady.map(({ l }) => l.id) })}
+                      >
+                        <Icon name="truck" size={12} /> Load ({selReady.length})
+                      </button>
+                    </>
+                  )}
                   <button type="button" className="btn" style={{ flex: "0 0 auto" }} onClick={() => setSelected(new Set())}>
                     Clear
                   </button>
@@ -671,6 +811,27 @@ export function DispatchBoard({
           onClose={() => setPalletise(null)}
         />
       )}
+
+      {flow.picker && (() => {
+        // Use the hook's UNfiltered lines for box previews — this board's own
+        // list excludes boxed lines, the modal's fill preview must not.
+        const lines = flow.picker.lineIds
+          .map((id) => flow.allLines.find(({ l }) => l.id === id)?.l)
+          .filter((l): l is PalPlanLine => !!l);
+        if (!lines.length) return null;
+        return (
+          <LoadContainerModal
+            lines={lines}
+            availableLines={flow.allLines.filter(({ l }) => l.status === "ReadyToLoad" && !l.loadBoxId).map(({ l }) => l)}
+            boxes={flow.openBoxes}
+            linesOfBox={flow.linesOfBox}
+            busy={flow.busy}
+            planHint={lines.length === 1 ? flow.planHintFor(lines[0].salesOrderId, lines[0].designId) : undefined}
+            onConfirm={(target, entries, prodEntries) => void flow.confirmLoad(target, entries, prodEntries, () => setSelected(new Set()))}
+            onClose={() => flow.setPicker(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

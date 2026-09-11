@@ -21,7 +21,7 @@ import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
-import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, statusChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
+import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, stageChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
 import { designStock, openingStockFor } from "@/lib/stock";
 import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
@@ -51,7 +51,7 @@ function soDisplayStatus(
   const remaining = items.reduce((s, o) => s + toPalletise(o), 0);
   if (readyForPalletisation) return { label: `Ready for Palletisation — ${remaining} left`, cls: "q-accepted" };
   // Partial: some boxes already palletised but produced stock still waits — come back to finish.
-  if (remaining > 0 && items.some((o) => o.palletizedQty > 0)) return { label: `Partially palletised — ${remaining} left`, cls: "q-accepted" };
+  if (remaining > 0 && items.some((o) => o.palletizedQty > 0)) return { label: "Partially palletised", cls: "q-accepted" };
   const workStarted = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
   if (!workStarted) return base;
   const stage = STAGES[Math.min(...items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))))];
@@ -80,32 +80,45 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
               <th>Date</th>
               <th>Design</th>
               <th>Size</th>
+              <th>Batch</th>
               <th>Status</th>
               <th className="num" style={{ textAlign: "right" }}>Requested</th>
               <th className="num" style={{ textAlign: "right" }}>Produced</th>
+              <th className="num" style={{ textAlign: "right" }}>Remaining</th>
               <th>By</th>
               <th>Note</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((e) => {
-              const s = statusChip(e.status);
+              const s = stageChip(e.stage);
+              const lastRec = e.records[e.records.length - 1];
+              const date = e.productionDate || lastRec?.productionDate || e.createdTime.slice(0, 10);
+              const batches = [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))];
+              if (!batches.length && e.batchNumber) batches.push(e.batchNumber);
+              const remaining = Math.max(0, e.qtyRequested - e.producedSoFar);
               return (
                 <tr key={e.id}>
-                  <td className="mono muted">{e.productionDate || "—"}</td>
+                  <td className="mono muted nw">{date || "—"}</td>
                   <td><span className="design-name">{e.design}</span></td>
-                  <td>{e.size ? <span className={`chip size ${e.size.startsWith("200") || e.size.startsWith("75") ? "b" : ""}`}>{e.size}</span> : "—"}</td>
-                  <td><span className="chip" style={{ color: s.color }}>{s.label}</span></td>
+                  <td className="nw">{e.size ? <span className={`chip size ${e.size.startsWith("200") || e.size.startsWith("75") ? "b" : ""}`}>{e.size}</span> : "—"}</td>
+                  <td className="nw">
+                    {batches.length
+                      ? batches.map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>)
+                      : <span className="dim">—</span>}
+                  </td>
+                  <td className="nw"><span className="chip" style={{ color: s.color }}>{s.label}</span></td>
                   <td className="num mono">{fmt(e.qtyRequested)}</td>
-                  <td className="num mono">{e.qtyBoxes ? fmt(e.qtyBoxes) : "—"}</td>
-                  <td className="muted">{e.performedBy || "—"}</td>
-                  <td className="muted" style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.note}>{e.note || "—"}</td>
+                  <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
+                  <td className="num mono">{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
+                  <td className="muted nw">{e.performedBy || lastRec?.performedBy || "—"}</td>
+                  <td className="muted" style={{ maxWidth: 240 }}><span className="clip" title={e.note}>{e.note || "—"}</span></td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   No production requested against this order yet.
                 </td>
               </tr>
@@ -285,9 +298,6 @@ export function OrderDetail() {
     return head.salesOrderId ? orders.filter((o) => o.salesOrderId === head.salesOrderId) : [head];
   }, [orders, head]);
 
-  // Line items still owing production — pre-filled job list for "Send for
-  // Production". Kept above the early returns so hook order stays stable.
-  const prodJobs = useMemo(() => items.filter((o) => o.producedQty < o.orderQty), [items]);
 
   if (loading && !head) {
     return <div className="muted mono" style={{ padding: 24 }}>Loading order…</div>;
@@ -540,7 +550,9 @@ export function OrderDetail() {
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
                 ? [{ label: "Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
                 : []),
-              ...(prodJobs.length > 0 && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
+              // Always offered post-approval — production may be logged even on a
+              // fully-produced order (CR); the form's hint columns show coverage.
+              ...(!["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
                 ? [{ label: "Record New Production", onClick: () => setProd(true) }]
                 : []),
               ...(head.salesOrderId && can("orders", "edit")

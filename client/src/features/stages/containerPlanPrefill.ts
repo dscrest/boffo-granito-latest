@@ -7,16 +7,30 @@
    everything else is keyed by Design ROWID, so a name→id map rides along.
    ============================================================ */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
-import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
-import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
+import { parseContainerPlan, type ContainerPlan, type ContainerPlanLine, type Order, type Quote } from "@/data";
+import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
+import { cachedOrders, listOrders, subscribeOrders } from "@/features/orders/ordersApi";
 import { useMasters } from "@/features/masters/useMasters";
+import { planProgress } from "@/features/quotes/planProgress";
+import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
+import type { LoadBox, PalPlan } from "./palPlansApi";
 
 export function useContainerPlanBySo() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   useEffect(() => {
     let alive = true;
+    // Subscribe so a plan saved elsewhere (SO planner, loading tab) reaches
+    // every mounted consumer; adopt only non-null snapshots (invalidate()
+    // notifies with an empty cache mid-refetch).
+    const unsubQ = subscribeQuotes(() => {
+      const c = cachedQuotes();
+      if (alive && c) setQuotes(c);
+    });
+    const unsubO = subscribeOrders(() => {
+      const c = cachedOrders();
+      if (alive && c) setOrders(c);
+    });
     void listQuotes().then((r) => {
       if (alive && r.ok) setQuotes(r.quotes);
     });
@@ -25,6 +39,8 @@ export function useContainerPlanBySo() {
     });
     return () => {
       alive = false;
+      unsubQ();
+      unsubO();
     };
   }, []);
 
@@ -65,4 +81,24 @@ export function useContainerPlanBySo() {
   );
 
   return { planBySo, designIdOf, defaultPalletFor };
+}
+
+/** First not-yet-Sent container of the SO's LATEST plan — what the next
+    loading is slated to carry. Plan-only loadings render this live instead
+    of their minted load_plan snapshot (which stays as the fallback), so a
+    plan edit shows everywhere immediately. null = no parseable plan.
+    ponytail: several simultaneously-planned loadings on one multi-container
+    plan all show this same "next" container — fine while group is unused. */
+export function nextPlanContainer(
+  soId: string,
+  planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
+  plans: PalPlan[],
+  boxes: LoadBox[],
+  designIdOf: (name: string) => string,
+): { ci: number; lines: ContainerPlanLine[] } | null {
+  const cp = soId ? planBySo.get(soId) : undefined;
+  if (!cp) return null;
+  const prog = planProgress(cp.plan, dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] })), designIdOf);
+  const ci = cp.plan.containers.findIndex((_, i) => prog[i]?.status !== "Sent");
+  return ci >= 0 ? { ci, lines: cp.plan.containers[ci].lines } : null;
 }

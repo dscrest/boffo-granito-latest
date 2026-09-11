@@ -11,16 +11,18 @@ import { toast } from "@/ui/Toast";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, type ColumnDef } from "@/ui/ColumnPicker";
 import { can } from "@/lib/auth";
-import { usePersistedState } from "@/lib/usePersistedState";
+import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { PalPlanForm } from "./PalPlanForm";
 import { DispatchBoard, DISPATCH_GROUP_DIMS, type DispatchGroupBy } from "./DispatchBoard";
 import {
+  cachedLoadBoxes,
   cachedPalPlans,
   createPalPlan,
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
   PAL_STATUSES,
+  type LoadBox,
   type PalPlan,
   type PalStatus,
 } from "./palPlansApi";
@@ -40,9 +42,10 @@ const TABS: Array<{ id: string; label: string }> = [
 export function PalPlans() {
   const navigate = useNavigate();
   const [tab, setTab] = usePersistedState("palplans.tab", "all");
-  // The ONE view switch — Kanban vs Sheet, passed down to the board.
-  // Key kept from the old inner toggle so existing users keep their preference.
-  const [view, setView] = usePersistedState<"kanban" | "sheet">("dispatch.boardView", "kanban");
+  // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
+  // whatever Settings → Default view says; key kept from the old inner toggle
+  // so existing users keep their preference.
+  const [view, setView] = useViewState("dispatch.boardView", "sheet" as const, "kanban" as const);
   // Grouping: an ordered list of dimensions → nested swimlanes / sheet bands
   // (same mechanism as Production; the picker reuses ColumnPicker).
   const [groupBy, setGroupBy] = useState<DispatchGroupBy[]>(() => {
@@ -72,6 +75,8 @@ export function PalPlans() {
   const presetOrderId = params.get("fromOrder") || "";
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
+  // Open containers — the board's Load flow needs them (same fetch).
+  const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -86,6 +91,7 @@ export function PalPlans() {
     }
     setError(null);
     setPlans(res.plans);
+    setBoxes(res.boxes);
   };
 
   useEffect(() => {
@@ -155,6 +161,21 @@ export function PalPlans() {
           ))}
         </select>
         <div style={{ flex: 1 }} />
+        <button
+          className="hbtn"
+          style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+          title="Print the pallet packing report for everything palletised today"
+          onClick={() =>
+            void import("./packingReportPdf")
+              .then((m) => m.downloadTodaysPackingReport(plans))
+              .then(
+                (n) => { if (n === 0) toast.error("Nothing palletised today"); },
+                () => toast.error("Failed to load today's palletisation activity"),
+              )
+          }
+        >
+          <Icon name="printer" size={13} /> Today's Report
+        </button>
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("kanban", "kanban", "Kanban")}
           {viewBtn("sheet", "orders", "Sheet")}
@@ -180,7 +201,7 @@ export function PalPlans() {
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={filtered} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} onChanged={() => void load()} />
+        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} onChanged={() => void load()} />
       )}
     </div>
   );

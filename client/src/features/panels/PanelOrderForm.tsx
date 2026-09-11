@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { NumberInput } from "@/ui/NumberInput";
+import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
@@ -117,7 +118,7 @@ export function PanelOrderForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Order Date</span>
-                <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
+                <DateInput value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">Sales Person</span>

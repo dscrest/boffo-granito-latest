@@ -137,9 +137,9 @@ plus `PalletisedBatch` / `PalletisedBatchLine` / `ContainerLoading` (legacy — 
 | **Size** | Owns per-box packing data — dims, pcs/box, coverage, box weight. Items and pallets **snapshot** it so the operator is never asked twice. Editing a Size fans the new packing out to those snapshots ([`/resync-size-snapshots`](../functions/data-ops/index.js#L4668) backfills). |
 | **Pallet Master** | The master of pallet *formats* (an Inventory master). |
 | **Palletization** | The *process* under Sales that consumes pallet formats. **Never** merge the two — they are different things with similar names. |
-| **Batch** | A production run of one item, numbered `B/FY/NNN`. Unique per item always; cross-item reuse is allowed by default, controlled by `AppSetting.allow_duplicate_batches`. |
+| **Batch** | A production run of one item, numbered `B/YYYY-MM/NNN` (series per item per calendar month; format changed 2026-09-04, older batches keep `B/FY/NNN`). Unique per item always; cross-item reuse is allowed by default, controlled by `AppSetting.allow_duplicate_batches`. |
 | **PalPlan** | A `PalletizationPlan`, numbered `PAL/FY/NNN`. Can span multiple sales orders. |
-| **LoadBox** | A vehicle/container slot that boxes are loaded into. Cross-plan. |
+| **LoadBox** | A vehicle/container slot that boxes are loaded into. Cross-plan. Numbered `LOAD/FY/NNN` (`load_number`, since 2026-09-04; older boxes fall back to vehicle / "Container N"). One LoadBox = one container; a multi-container loading plan groups sibling LoadBoxes via `load_plan.group`. |
 | **Customer** | Always "Customer" in the UI — never "Party", despite `Parties.tsx`. |
 | **Shade** | **Retired 2026-08-29.** Columns still exist on `ProductionLog`, `PalletisedBatch` and `PalletisedBatchLine`; nothing reads or writes them. Batch is the only dimension. |
 
@@ -157,7 +157,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 |---|---|
 | **Dashboard** | Dashboard |
 | **Inventory** | Items · Stock Details · Size Master · Pallet Master · Production |
-| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading · **Panel Craft** (Cut Stock · Panels · Panel Orders) |
+| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading and Dispatch · **Panel Craft** (Cut Stock · Panels · Panel Orders) |
 | **Reports** | Reports · Audit Log |
 | *header gear* | Settings (admin only) |
 
@@ -181,7 +181,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/orders/:id` | `orders/OrderDetail.tsx` | |
 | `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy |
 | `/packing` · `/packing/:id` | `stages/PalPlans` · `PalPlanDetail` | Palletization board |
-| `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading board |
+| `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading and Dispatch board |
 | `/cut-stock` · `/panels` · `/panels/:id` · `/panel-orders` | `panels/*` | Panel Craft |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
 | `/ops` | `ops/OperationsLog.tsx` | Audit log |
@@ -222,7 +222,7 @@ if the two ever disagree, the server wins and the client is the bug.
 | PanelOrder | `Received → InCutting → Ready → Dispatched`, **forward-only** | `PANEL_ORDER_TRANSITIONS` [`index.js:2378`](../functions/data-ops/index.js#L2378) |
 
 Line-status labels differ from their stored values and the labels are what users say:
-`Planning` = **"Ready for Palletization"**, `Palletizing` = **"Palletization"**,
+`Planning` = **"Ready for Palletization"**, `Palletizing` = **"In Palletization"**,
 `ReadyToLoad` = **"Ready for Loading"** ([`palPlansApi.ts:40-45`](../client/src/features/stages/palPlansApi.ts#L40)).
 
 ### 5.1 Quote
@@ -245,7 +245,10 @@ Screen `/quotes` → `/quotes/:id`. Routes `POST /quote-with-items`,
   null/0 is treated as unconstrained, so mixed pallet types fall out for free.
 - Public share link + `pdfmake` PDF.
 - Approval runs through `/approvals`, writing `StatusTransition` rows and firing a
-  `Notification` to the quote's sales person.
+  `Notification` to the quote's sales person. **Approver bypass (CR-139, 2026-09-10):** a user
+  who can approve the doc type (Admin, or a role-approver) creates quotes born `Approved` and
+  SOs born `Confirmed` (convert included), and their edits keep the approved status instead of
+  resetting to Draft — the Draft → PendingApproval loop only applies to non-approvers.
 
 ### 5.2 Convert → Sales Order
 
@@ -255,13 +258,26 @@ quotes.** Full or partial; a partial conversion leaves the quote `PartiallyConve
 On conversion the quote's container plan is **snapshotted onto the SO**, which then owns its
 own editable copy at `/orders/:id/containerise`. Saving the SO writes only the plan JSON.
 
-**Confirming an SO auto-enqueues production.** `POST /so-status/:rowid` → `Confirmed` seeds
-`ProductionLog` plan rows for the order's items. See §5.3 for how those interact with manual
-requests.
+**Confirming an SO auto-enqueues production.** Entering `Confirmed` (via `/so-status`, or at
+create/convert under the approver bypass) runs `enqueueSoProduction`, seeding `ProductionLog`
+plan rows for the order's items. See §5.3 for how those interact with manual requests.
 
 ### 5.3 Production
 
 Screen `/prod` — a Kanban board and a Sheet (grid) view of the same rows.
+
+**Sheet edit mode** (sheet view only). **Edit** turns three columns editable across every row —
+**In Production** (the plan qty, `qty_requested`), **Produced** (boxes made now) and **Status** —
+and nothing is written until **Save**. Edits are staged in a draft keyed by plan-line id; caps and
+lock rules live in [`productionSheetEdit.ts`](../client/src/features/stages/productionSheetEdit.ts)
+(`resolveSheetEdit`, self-checked by `productionSheetEdit.test.ts`), so an invalid cell disables
+Save instead of firing a doomed request. Save runs per row, in order:
+`POST /production-update` → `POST /production-record` → `POST /production-stage` (stage last, so an
+explicit choice outranks the auto-step). It is sequential and non-atomic; failed rows stay in the
+draft with a per-row toast. Inline output leaves the batch blank, so the server mints `B/YYYY-MM/NNN` (per item per month) —
+a specific batch still means the `+` dialog. In Production is locked once a line has output
+(`/production-update` refuses it). Outside edit mode the sheet behaves as before: Status commits on
+change, `+` opens Record Output.
 
 **Stages:** `New → InProduction → Completed`. QC exists in the type but is **parked** — it is
 dropped from the board, the tabs and the flow
@@ -284,7 +300,7 @@ across them (`RecordOutputForm.tsx`). Behind it:
 - The Produced counter shows **committed** output only.
 
 **Batches.** `Design.is_batched` marks batch-tracked items; the server refuses to flip the flag
-once the item carries stock. Batch numbers are auto-minted `B/FY/NNN`. Duplicate batch on the
+once the item carries stock. Batch numbers are auto-minted `B/YYYY-MM/NNN` — a per-item series that restarts at 001 each calendar month. Duplicate batch on the
 same item is always `409`; across items it is governed by
 `AppSetting.allow_duplicate_batches`.
 
@@ -300,17 +316,29 @@ the same file twice will double-count.
 touched**. An untouched auto job is superseded by a manual request for the same item, so
 confirming an SO and then raising the request by hand does not double-count.
 
-**Remaining / Desired** defaults to `ordered − produced − inflight − stock`. The
-order-completion *filters* are deliberately **not** stock-adjusted.
+**Remaining / Desired** defaults to `ordered − produced − inflight − stock` — a **hint only
+since CR-131 (2026-09-10)**: the qty input has no upper clamp, covered lines/SOs stay
+requestable, and the server cap against `ordered` is gone. The order-completion *filters* are
+deliberately **not** stock-adjusted.
 
 ### 5.4 Palletization
 
-Screen `/packing` (grid + kanban, board is the default). Title: "Palletization and Loading".
+Screen `/packing` (grid + kanban; opens on Sheet, see §Default view). Title: "Palletization and Loading".
 Plans are `PAL/FY/NNN` and may span sales orders.
 
-**Three columns** since 2026-08-27: *Ready for Palletization* (grouped by SO) → *Palletization*
-→ *Ready for Loading*. The Dispatch column and the separate "Mark ready" step were removed —
-**Palletise now goes straight to `ReadyToLoad` in one hop.**
+**Three columns**: *Ready for Palletization* (grouped by SO) → *In Palletization*
+→ *Ready for Loading*. **Two-step flow since 2026-09-04** (reverses the 2026-08-27 one-hop):
+**Palletise** confirms the pallet (`PalletiseModal`) and moves the line to *In Palletization*
+(`Palletizing`); **Mark Palletised** then moves it to *Ready for Loading* (`ReadyToLoad`) —
+direct when the pallet is on record, via the dialog when a legacy line lacks one.
+**Partial palletise (CR-132, 2026-09-10):** the dialog takes a per-line Boxes qty; less than
+the full line splits it via `/pal-line-status` `boxes` — only the slice transitions, the
+remainder keeps its column, so a partial never lands the whole line in Ready for Loading.
+
+**Loading starts on this board (2026-09-04).** Ready-for-Loading cards/rows carry the **Load**
+button (and load-together checkboxes): it opens `LoadContainerModal` through the shared
+[`useLoadFlow`](../client/src/features/stages/useLoadFlow.ts) hook — the same all-or-nothing
+`POST /pal-lines-box` confirm `/loading` used to own. `/loading` no longer shows un-boxed lines.
 
 - Two entry points share `PalPlanForm`: **New** plan, and **Send to Palletise** from an order.
   A change to one almost always belongs in both — check before shipping one side.
@@ -325,25 +353,108 @@ Plans are `PAL/FY/NNN` and may span sales orders.
 - Pallet QR labels (`palletQrPdf.ts`), batch QR slips (`batchQrPdf.ts`), pallet slips
   (`palletSlipPdf.ts`) — all `pdfmake`, all with a public scan page.
 
-**Every production record tops up the item's planning queue** (`produced − palletized`) on one
-reused open plan per SO — `autoEnqueuePalletization` ([`index.js:2106`](../functions/data-ops/index.js#L2106)).
+**Every production record tops up the item's planning queue** (`produced − palletized`, capped
+at `ordered`) on one reused open plan per SO — `autoEnqueuePalletization`. **Manual edits pin
+the plan (CR-129, 2026-09-10):** `/pal-plan` and `/update-pal-plan` stamp their lines
+`manual_edit`; an item with a manual Planning line is skipped by the top-up (the un-queued
+remainder stays in the work list for the user to queue as another line). Plan edits replace
+**Planning lines only** — advanced lines keep their status/box/pallet-group — and total planned
+boxes per order item across all lines/plans are capped at the SO ordered qty
+(`assertPlanWithinOrdered`, mirrored by the form clamp).
 
-### 5.5 Loading
+### 5.5 Loading and Dispatch
 
-Screen `/loading` (kanban + sheet), detail at `/loading/:id`.
+Screen `/loading` (Workspace + kanban + sheet + Loadings grid + Customer Sheet), detail at
+`/loading/:id`. Nav label renamed **"Loading and Dispatch"** 2026-09-04.
 
-**Four stages, all derived** — nothing stores them
-([`LoadingBay.tsx:5-8`](../client/src/features/stages/LoadingBay.tsx#L5)):
+**Workspace (CR-145, 2026-09-11).** Default (5th) `/loading` view, from the Claude Design
+"Loading Sheet" spec — structure/UX from the design, house skin. Pick Customer + Sales Order
+(Comboboxes; SO options newest-first from the orders cache), then an SO summary strip (ordered /
+planned / palletised / balance boxes, planned %) and three tabs:
+**Items** — the SO's items split into *Ready for Loading* (multi-select → target container
+picker → **Assign to Loading** modal: per-item load quantity clamped to ready stock,
+`allocateFifo` → `/pal-lines-box` all-or-nothing into an existing Open box or one minted by
+`/load-box` with the capture fields — container no / size / vehicle / transporter / LR / seals /
+destination — all optional, Confirm Load still works later) and *In Palletisation* (read-only
+`palletizedQty/orderQty` progress + batches; "Palletise" links to `/packing` — palletising never
+happens here). **Container Plan** — the SO's LoadBoxes as cards (fill bar via `boxFill`, status
+chip, delete when empty): one row per pallet line, whole-line **Move** between containers /
+new / out via `/pal-line-box` (quantities split only at assign time), an amber "Ready, not in
+any container" strip with per-item Add-to, and an Add-container card (28ft/30ft). **Loading
+Sheet** — `LoadingCustomerSheet` scoped by its new `soFilter` prop (same columns/edit mode, SO
+rows only, customer picker hidden). View in
+[`LoadingWorkspace.tsx`](../client/src/features/stages/LoadingWorkspace.tsx); zero server
+changes.
+
+**Customer Sheet (CR-140, 2026-09-10).** Fourth `/loading` view: pick one customer and see
+every loaded line across all their SOs as the export-style loading sheet — grouped by container
+(merged Sr / L.R. / Truck / Container / seal cells), P.O. per SO run, design/size/finish/batch
+per line, auto-computed pallet ranges ("1 TO 16" from `ceil(boxes / boxesPerPallet)`), the
+Pallet master's A/B arrangements as Pallet 1 / Pallet 2, and a Total footer. **Always editable
+in place since CR-145** (no Edit toggle, rows don't navigate): the load-detail captures
+(P.O. → `SalesOrder.po_number`, L.R./truck/container/seals → `/load-box-update`) plus a
+per-line **Box Brand** override (Brand master, relabeled "Box Brand" 2026-09-11 — the short-lived
+separate BoxBrand table was merged into it; customer default on `Customer.box_brand`,
+override on `PalletizationPlanLine.box_brand`) stage into drafts — Save/Cancel appear once
+dirty and save sequentially — pure diff/range logic in
+[`customerSheetEdit.ts`](../client/src/features/stages/customerSheetEdit.ts), view in
+[`LoadingCustomerSheet.tsx`](../client/src/features/stages/LoadingCustomerSheet.tsx).
+
+**Loading-first sheet (CR-141, 2026-09-10).** The Sheet's pinned first column is **Loading** —
+`boxLabel` (LOAD/FY/NNN, vehicle-number or "Container N" fallback) — not the display-only
+PAL-NNN pallet sequence (which stays on `/packing`); the redundant Container column is gone and
+the advanced-filter facet is labelled "Loading" (key `container` retained for saved filters).
+**Group by offers Customer only** for now, on both kanban and sheet; stale persisted
+`loading.groups` selections filter out on read.
+
+**Three stages, all derived** — nothing stores them. Un-boxed lines (including Ready for
+Loading) live on `/packing` since 2026-09-04; this board holds boxed lines only:
 
 | Stage | Derived from |
 |---|---|
-| Ready | line has no box |
 | In Loading | line is in an `Open` box |
 | Ready for Dispatch | `Open` box **with** a container number or line seal captured |
-| Dispatch | box status is `Dispatched` |
+| Dispatched | box status is `Dispatched` |
 
-**Container-first.** `LoadContainerModal` replaced the old box picker at all three entry points.
-Plan progress is consumed automatically; there is no per-container id to manage.
+**Plan-only loadings are visible everywhere (CR-127, 2026-09-09).** A loading minted by the
+SO-first flow has a `load_plan` but no boxed lines, so it produces no line rows. Every view
+now surfaces it: the Loadings grid derives Customers/Orders/Boxes from the plan JSON (SO
+ROWIDs resolved via pal-plan lines, then the orders cache), the sheet shows one **Planned**
+summary row per such box at the top, and the kanban shows the dashed stub card in In Loading —
+in grouped mode as a "Planned / empty loadings" strip above the lanes. Search matches the
+stub's LOAD number / SOs / customers. Planned is a presentation state, not a fourth stage.
+The detail page follows suit (CR-128, 2026-09-09): with nothing loaded, Loaded Items renders
+the plan lines as **Planned** rows, header counts and the subtitle read from the plan,
+Container Planning resolves its SOs from the plan JSON, and Details shows Order(s) / Customer /
+Planned Boxes. Edit Load Details saves without a vehicle (the server always allowed it;
+dispatch still requires one), so seals/transporter/LR can be captured on their own.
+
+**Container-first for pallet loads; New Loading is a modal form.** `LoadContainerModal`
+replaced the old box picker at the multi-select Load entry points (/packing's Load button);
+the load confirm + SO-plan hint live in the shared `useLoadFlow` hook, and the confirm now
+lands on the loading's **detail page** (`/loading/:id`). Since CR-144 (2026-09-10, undoing
+the CR-143 workspace) **"New Loading" opens `NewLoadingModal`**
+([`NewLoadingModal.tsx`](../client/src/features/stages/NewLoadingModal.tsx)) — a single
+modal form: pick the **Sales Order** (optionally narrowed by a Customer filter; options
+come from Ready-for-Loading palletised stock) and a **Container Size** (28ft/30ft). The
+SO's saved containerisation plan **propagates**: its containers render section by section
+with the `planProgress` chip, and the first not-yet-sent container's planned quantities are
+**prefilled** against ready stock (capped at availability, drained FIFO; everything stays
+editable, Sent containers dim). An SO without a plan shows a flat line-item list of its
+palletised stock (checkbox + qty per PAL-NNN line). **One submit = one loading**: the
+LoadBox is minted via `POST /load-box` with a single-slice `load_plan` snapshot (no
+`group`, so the CR-127/128 Planned-row fallbacks still render if the allocation fails),
+then the picked quantities map onto actual plan lines FIFO
+([`allocateFifo.ts`](../client/src/features/stages/allocateFifo.ts)) and land via the
+all-or-nothing `POST /pal-lines-box` (partial takes split server-side); you land on the
+loading detail. Container/vehicle details are captured later via Confirm Load / Edit Load
+Details. The loading detail's **Add Pallets** reopens the same modal scoped to the box
+(`boxId` — no new LoadBox, no size field). The CR-143 queue board, `StartLoadingModal`,
+the `/loading/:id/plan` pallet-first workspace and `virtualPallets.ts` are **deleted**;
+`/loading` opens on the Workspace view since CR-145 (a persisted "board" view key falls back
+to kanban).
+The Container Planning tab on the loading detail still embeds the full editable SO planner
+(`PlanSoContainerisation soId embedded`).
 
 **Multi-select loading (2026-08-31).** The modal takes `lines: PalPlanLine[]`: checked Ready
 items plus the clicked one all appear in it (table with a per-line fit readout — "All N" /
@@ -516,6 +627,8 @@ Dispatch); a report may appear in more than one. Registry: `REPORTS` in
 **Audit.** Every mutation writes to `Activity` (actor + human-readable detail); `OperationLog`
 carries data-operation records including admin overrides and their reasons; `StatusTransition`
 records every state-machine move. `/ops` renders the audit log with local-time timestamps.
+Detail pages' Activity/Status tabs filter server-side (`?where=` on `entity_rowid`, else
+`table_name` — CR-128); the old global newest-N fetch dropped older records' history.
 
 ---
 
@@ -529,6 +642,13 @@ where it was reported.
 footer pager; data-driven column defs with show/hide **and** reorder (`useColumns`, icon-only
 `ColumnPicker`); advanced-search modal; Created/Modified hidden by default; **whole row** clicks
 through to the detail page; newest-first default sort (`useSortRows(..., "created", -1)`).
+
+**Default view.** Every page with a Kanban/Sheet switch (`/prod`, `/packing`, `/loading`,
+`/panel-orders`) opens on **Sheet/Grid**. The default is org-wide and settable — Settings →
+Preferences → *Default view* writes `AppSetting.default_view` (`sheet` | `kanban`, missing row =
+`sheet`). Boards seed from it through `useViewState` ([`usePersistedState.ts`](../client/src/lib/usePersistedState.ts));
+a user's own toggle still wins for the rest of that browser session. Never hard-code a view
+default in a page — go through `useViewState` so the setting keeps reaching every board.
 
 **ColumnPicker Apply is locked.** Checkbox changes and reorder both *stage*; nothing applies
 until **Apply**. Never make it immediate. Detail-page Fields pickers use the same component.

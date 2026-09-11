@@ -5,7 +5,7 @@
    design-coloured fill bar, each associated SO's containerisation plan
    (planned vs loaded), and the LoadBox activity/status timeline.
    Actions mirror the /loading board: Add Items (direct send-to-loading),
-   Confirm Load (vehicle + seals), Dispatch, QR/Dispatch Copy prints and
+   Assign Vehicle (vehicle + seals), Dispatch, QR/Dispatch Copy prints and
    Delete Loading (Open only — items return to Ready for Loading).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
@@ -15,17 +15,19 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
-import { type Order } from "@/data";
+import { parseLoadPlan, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
-import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
+import { PlanSoContainerisation } from "@/features/quotes/PlanContainerisation";
 import { useMasters } from "@/features/masters/useMasters";
-import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
+import { useOrders } from "@/features/orders/useOrders";
+import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import { VehicleLoadModal } from "./VehicleLoadModal";
+import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { SendToLoadingModal } from "./SendToLoadingModal";
+import { NewLoadingModal } from "./NewLoadingModal";
 import {
   boxFill,
   boxLabel,
@@ -55,23 +57,18 @@ export function LoadingDetail() {
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
   const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
-  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
+  // Live orders — the embedded planner's save invalidates the cache and this
+  // subscription refreshes soHeads (and the plan below) without a reload.
+  const { orders } = useOrders();
+  const { planBySo, designIdOf } = useContainerPlanBySo();
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState(false);
   const [addItems, setAddItems] = useState(false);
+  const [addPallets, setAddPallets] = useState(false);
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
-  const { designRows } = useMasters();
-
-  // Plan lines store a design NAME; dispatch counts are keyed by Design ROWID.
-  const designKey = useMemo(() => {
-    const byName = new Map<string, string>();
-    designRows.forEach((d) => {
-      if (d.designName) byName.set(d.designName, d.id);
-      if (d.uniqueName) byName.set(d.uniqueName, d.id);
-    });
-    return (name: string) => byName.get(name) || name;
-  }, [designRows]);
+  const [planSo, setPlanSo] = useState(""); // Container Planning tab: selected SO
+  useMasters(); // warm the designs cache for the embedded planner
 
   const load = async () => {
     const res = await listPalPlans();
@@ -83,7 +80,6 @@ export function LoadingDetail() {
   };
   useEffect(() => {
     void load();
-    void listOrders().then((r) => r.ok && setOrders(r.orders));
   }, []);
 
   const box = boxes.find((b) => b.id === boxId) ?? null;
@@ -92,6 +88,13 @@ export function LoadingDetail() {
     [plans, boxId],
   );
   const lines = entries.map(({ l }) => l);
+  // All boxed lines app-wide, for the SO-scoped editable Loading Sheet tab —
+  // the sheet filters to the selected SO and shows EVERY container of it, so
+  // vehicles/details for a multi-container order are assignable in one grid.
+  const sheetRows = useMemo(
+    () => plans.flatMap((p) => p.lines.map((l) => ({ l, box: boxes.find((b) => b.id === l.loadBoxId) }))),
+    [plans, boxes],
+  );
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
   const pct = Math.round(boxFill(lines) * 100);
   // Stable colour per design (first-seen) — same rule as the board's box cards.
@@ -100,13 +103,30 @@ export function LoadingDetail() {
     if (!colorByDesign.has(l.designId)) colorByDesign.set(l.designId, DESIGN_PALETTE[colorByDesign.size % DESIGN_PALETTE.length]);
   });
 
-  // One order head per associated SO — for the Container Planning tab.
+  // Plan-only loading (SO-first New Loading, CR-126): nothing loaded yet, but
+  // the load_plan JSON carries the planned lines — fall back to it for the
+  // items table, counts and SOs, same as the Loadings grid (CR-127). When the
+  // SO still has a live containerisation plan, render THAT (its next unsent
+  // container) instead of the minted snapshot, so plan edits show here.
+  const planLines = useMemo(() => {
+    const snap = box && lines.length === 0 ? (parseLoadPlan(box.loadPlan)?.lines ?? []) : [];
+    const soId = snap[0]?.so || "";
+    const slice = soId && snap.every((l) => l.so === soId) ? nextPlanContainer(soId, planBySo, plans, boxes, designIdOf) : null;
+    return slice
+      ? slice.lines.map((ln) => ({ so: soId, design: ln.design, batch: "", boxes: ln.boxes, palletId: ln.palletId }))
+      : snap;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box?.loadPlan, lines.length, planBySo, plans, boxes, designIdOf]);
+  const plannedBoxes = planLines.reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+
+  // One order head per associated SO — loaded lines plus the plan JSON.
   const soHeads = useMemo(() => {
-    const ids = [...new Set(lines.map((l) => l.salesOrderId).filter(Boolean))];
+    const planSos = box ? (parseLoadPlan(box.loadPlan)?.lines ?? []).map((l) => l.so) : [];
+    const ids = [...new Set([...lines.map((l) => l.salesOrderId), ...planSos].filter(Boolean))];
     return ids
       .map((soId) => ({ soId, head: orders.find((o) => o.salesOrderId === soId) }))
       .filter((x): x is { soId: string; head: Order } => !!x.head);
-  }, [orders, entries]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orders, entries, box?.loadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading && !box) {
     return <div className="muted mono" style={{ padding: 24 }}>Loading…</div>;
@@ -116,13 +136,21 @@ export function LoadingDetail() {
   }
 
   const open = box.status === "Open";
+  const plan = parseLoadPlan(box.loadPlan);
   const stage = !open
     ? { label: "Dispatched", cls: "palstatus p-completed" }
     : sealed(box)
       ? { label: "Ready for Dispatch", cls: "palstatus p-palletized" }
       : entries.length > 0
         ? { label: "In Loading", cls: "palstatus p-loading" }
-        : { label: "Empty", cls: "palstatus p-planning" };
+        : plan
+          ? { label: "Planned", cls: "palstatus p-planning" }
+          : { label: "Empty", cls: "palstatus p-planning" };
+  // Sibling containers of a multi-container plan (LoadPlan.group). The
+  // primary's own slice can lack the group key (it's patched in after the
+  // mint), so also match boxes whose group points at this one.
+  const groupId = plan?.group?.id || box.id;
+  const siblings = boxes.filter((b) => b.id !== box.id && (b.id === groupId || parseLoadPlan(b.loadPlan)?.group?.id === groupId));
 
   const refresh = () => {
     invalidatePalPlans();
@@ -185,6 +213,9 @@ export function LoadingDetail() {
   };
 
   const fields: RecordField[] = [
+    { key: "orders", label: "Order(s)", value: soHeads.map(({ head }) => head.orderNumber || head.poNumber).filter(Boolean).join(", ") || "—" },
+    { key: "customer", label: "Customer", value: [...new Set(soHeads.map(({ head }) => head.party).filter(Boolean))].join(", ") || "—" },
+    { key: "plannedBoxes", label: "Planned Boxes", value: planLines.length ? fmt(plannedBoxes) : totalBoxes ? fmt(totalBoxes) : "—" },
     { key: "vehicle", label: "Vehicle", value: box.vehicleNumber || "—" },
     { key: "driver", label: "Driver", value: box.driverName || "—" },
     { key: "mobile", label: "Mobile", value: box.mobileNumber || "—" },
@@ -205,9 +236,18 @@ export function LoadingDetail() {
         backTo="/loading"
         title={boxLabel(box)}
         statusChip={{ label: stage.label, cls: stage.cls }}
-        subtitle={`${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`}
+        subtitle={
+          planLines.length > 0
+            ? `${planLines.length} item${planLines.length === 1 ? "" : "s"} planned · ${fmt(plannedBoxes)} boxes — nothing loaded yet`
+            : `${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`
+        }
         actions={
           <>
+            {canEdit && open && (
+              <button className="hbtn" disabled={busy} onClick={() => setAddPallets(true)} title="Load more palletised stock into this container">
+                <Icon name="kanban" size={13} /> Add Pallets
+              </button>
+            )}
             {canEdit && open && (
               <button className="hbtn" disabled={busy} onClick={() => setAddItems(true)} title="Send order items into this loading — no palletization step">
                 <Icon name="plus" size={13} /> Add Items
@@ -215,7 +255,7 @@ export function LoadingDetail() {
             )}
             {canEdit && (
               <button className="hbtn primary" disabled={busy} onClick={() => setVehModal(true)} title="Capture vehicle + container/seal details">
-                {open && !sealed(box) ? "Confirm Load" : "Edit Load Details"}
+                {open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details"}
               </button>
             )}
             {canEdit && open && sealed(box) && (
@@ -241,36 +281,70 @@ export function LoadingDetail() {
         created={box.createdTime}
         extraTabs={[
           {
+            id: "sheet",
+            label: "Loading Sheet",
+            // The Excel-style edit-in-place sheet scoped to this loading's
+            // SO — every container of the order, vehicle/seal/LR/brand/PO
+            // editable per row (same component as the /loading views).
+            content: (() => {
+              if (soHeads.length === 0)
+                return <div className="card dim" style={{ padding: 18 }}>No orders associated yet — the order's loading sheet shows here.</div>;
+              const selSo = soHeads.find((x) => x.soId === planSo)?.soId || soHeads[0].soId;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {soHeads.length > 1 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {soHeads.map(({ soId, head }) => (
+                        <button key={soId} className={`chip mono${soId === selSo ? " palstatus p-loading" : ""}`}
+                          style={{ cursor: "pointer" }} onClick={() => setPlanSo(soId)} title={head.party}>
+                          {head.orderNumber || head.poNumber}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <LoadingCustomerSheet rows={sheetRows} canEdit={canEdit} onSaved={refresh} soFilter={selSo} />
+                </div>
+              );
+            })(),
+          },
+          {
             id: "containers",
             label: "Container Planning",
-            content:
-              soHeads.length > 0 ? (
+            // The SO's containerisation plan, editable right here (Save writes
+            // to the SalesOrder, same as /orders/:id/containerise).
+            content: (() => {
+              if (soHeads.length === 0)
+                return <div className="card dim" style={{ padding: 18 }}>No orders associated yet — the orders' container plans show here.</div>;
+              const selSo = soHeads.find((x) => x.soId === planSo)?.soId || soHeads[0].soId;
+              return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {soHeads.map(({ soId, head }) => {
-                    const soBoxes = lines.filter((l) => l.salesOrderId === soId).reduce((s, l) => s + l.boxes, 0);
-                    return (
-                      <div key={soId}>
-                        <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>
-                          <Link className="linkish mono" to={`/orders/${encodeURIComponent(soId)}`}>{head.orderNumber || head.poNumber}</Link>
-                          {"  ·  "}{head.party}{"  ·  "}loaded on this vehicle: {fmt(soBoxes)} boxes
-                        </div>
-                        <ContainerPlanCard
-                          containerPlan={head.containerPlan}
-                          docNo={head.orderNumber || head.poNumber}
-                          plannerPath={`/orders/${soId}/containerise`}
-                          dispatchedByDesign={dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] }))}
-                          designKey={designKey}
-                        />
-                      </div>
-                    );
-                  })}
+                  {soHeads.length > 1 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {soHeads.map(({ soId, head }) => (
+                        <button key={soId} className={`chip mono${soId === selSo ? " palstatus p-loading" : ""}`}
+                          style={{ cursor: "pointer" }} onClick={() => setPlanSo(soId)} title={head.party}>
+                          {head.orderNumber || head.poNumber}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <PlanSoContainerisation key={selSo} soId={selSo} embedded />
                 </div>
-              ) : (
-                <div className="card dim" style={{ padding: 18 }}>Nothing loaded yet — the associated orders' container plans show here.</div>
-              ),
+              );
+            })(),
           },
         ]}
       >
+        {siblings.length > 0 && (
+          <div className="card" style={{ padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Part of a {siblings.length + 1}-container plan · {plan?.group?.no ? `container ${plan.group.no} of ${plan.group.of}` : ""}</span>
+            {siblings.map((b) => (
+              <Link key={b.id} className="chip mono linkish" to={`/loading/${encodeURIComponent(b.id)}`} title={`Open ${boxLabel(b)}`}>
+                {boxLabel(b)}
+              </Link>
+            ))}
+          </div>
+        )}
         <div className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
             <span style={{ fontWeight: 600 }}>Loaded Items</span>
@@ -283,7 +357,9 @@ export function LoadingDetail() {
                 <div key={l.id} style={{ width: `${lineFrac(l) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
               ))}
             </div>
-            <span className="mono dim" style={{ fontSize: "var(--t-sm)", marginLeft: "auto" }}>{fmt(totalBoxes)} box · {pct}%</span>
+            <span className="mono dim" style={{ fontSize: "var(--t-sm)", marginLeft: "auto" }}>
+              {planLines.length > 0 ? `${fmt(plannedBoxes)} box planned` : `${fmt(totalBoxes)} box · ${pct}%`}
+            </span>
           </div>
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
@@ -321,7 +397,29 @@ export function LoadingDetail() {
                     <td className="muted">{l.customerName || "—"}</td>
                   </tr>
                 ))}
-                {entries.length === 0 && (
+                {/* Planned-but-not-loaded lines from the load_plan JSON. */}
+                {entries.length === 0 &&
+                  planLines.map((l, i) => {
+                    const o = orders.find((x) => x.salesOrderId === l.so);
+                    return (
+                      <tr key={`plan-${i}`}>
+                        <td><span className="palstatus p-planning">Planned</span></td>
+                        <td><span className="design-name">{l.design}</span></td>
+                        <td className="mono">{l.batch || "—"}</td>
+                        <td className="muted">—</td>
+                        <td className="num mono">{fmt(l.boxes)}</td>
+                        <td className="mono">
+                          {o ? (
+                            <Link className="linkish" to={`/orders/${encodeURIComponent(l.so)}`} title="Open order">{o.orderNumber || o.poNumber}</Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="muted">{o?.party || "—"}</td>
+                      </tr>
+                    );
+                  })}
+                {entries.length === 0 && planLines.length === 0 && (
                   <tr>
                     <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 18 }}>
                       Nothing loaded yet{canEdit && open ? " — use Add Items, or load Ready items from the board." : "."}
@@ -350,7 +448,7 @@ export function LoadingDetail() {
       {vehModal && (
         <VehicleLoadModal
           palNumber={boxLabel(box)}
-          title={open && !sealed(box) ? "Confirm Load" : "Edit Load Details"}
+          title={open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details"}
           busy={busy}
           initialVehicleId={box.vehicleId}
           initialCapture={{
@@ -377,6 +475,15 @@ export function LoadingDetail() {
             refresh();
           }}
           onClose={() => setAddItems(false)}
+        />
+      )}
+
+      {addPallets && (
+        <NewLoadingModal
+          boxId={box.id}
+          boxName={boxLabel(box)}
+          onDone={refresh}
+          onClose={() => setAddPallets(false)}
         />
       )}
 

@@ -16,6 +16,8 @@ import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { update } from "@/lib/dataOps";
+import { Chip } from "@/ui/Chip";
+import { ORDER_STATUS_TONE } from "./pcBits";
 import { ActivityLog, tabStyle } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ImageManager } from "@/features/common/ImageManager";
@@ -116,8 +118,8 @@ export function PanelDetail() {
   };
 
   const moreItems = [
-    ...(can("items", "create") && panel ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
-    ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
+    ...(can("panel_craft", "create") && panel ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("panel_craft", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
@@ -200,7 +202,7 @@ export function PanelDetail() {
                 >
                   {panel.panelCode}
                 </div>
-                {can("items", "edit") && (
+                {can("panel_craft", "edit") && (
                   <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit panel">
                     <Icon name="edit" size={13} />
                     Edit
@@ -241,7 +243,7 @@ export function PanelDetail() {
 
                 {/* Image upload — same manager as the Item master (#12). */}
                 <div style={{ flex: "0 1 340px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: 14, alignSelf: "flex-start" }}>
-                  <ImageManager images={panel.images} canEdit={can("items", "edit")} onSave={saveImages} />
+                  <ImageManager images={panel.images} canEdit={can("panel_craft", "edit")} onSave={saveImages} />
                 </div>
               </div>
               )}
@@ -301,7 +303,9 @@ export function PanelDetail() {
                         <td>{o.customerName}</td>
                         <td className="num mono">{fmt(o.qty)}</td>
                         <td className="mono muted">{o.orderDate || "—"}</td>
-                        <td>{PANEL_ORDER_STATUS_LABEL[o.status]}</td>
+                        <td>
+                          <Chip tone={ORDER_STATUS_TONE[o.status]} label={PANEL_ORDER_STATUS_LABEL[o.status]} />
+                        </td>
                       </tr>
                     ))}
                     {panelOrders.length === 0 && (

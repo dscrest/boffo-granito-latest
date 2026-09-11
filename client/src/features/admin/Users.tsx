@@ -6,6 +6,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -149,9 +150,12 @@ export function UsersAdmin() {
   return (
     <div>
       <div className="page-head">
-        <div>
-          <div className="title">Users</div>
-          <div className="sub">{loading ? "Loading…" : "Roles control feature access"}</div>
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <BackToSettings />
+          <div>
+            <div className="title">Users</div>
+            <div className="sub">{loading ? "Loading…" : "Roles control feature access"}</div>
+          </div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">

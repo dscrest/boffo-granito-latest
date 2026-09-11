@@ -34,7 +34,25 @@ interface Charges {
   taxPct: string;
 }
 
-const emptyLine = (): QuoteLine => ({ item: "", qty: 1, rate: 0, discount: 0, description: "" });
+/* Line-edit draft: numeric fields held as raw strings so decimals survive
+   typing ("12." / "12.50" — Number() per keystroke ate the dot); converted
+   via toLine at compute/submit time, same pattern as OrderForm. */
+type LineDraft = { item: string; qty: string; rate: string; discount: string; description: string };
+const emptyLine = (): LineDraft => ({ item: "", qty: "1", rate: "", discount: "", description: "" });
+const toDraft = (l: QuoteLine): LineDraft => ({
+  item: l.item,
+  qty: l.qty ? String(l.qty) : "",
+  rate: l.rate ? String(l.rate) : "",
+  discount: l.discount ? String(l.discount) : "",
+  description: l.description || "",
+});
+const toLine = (l: LineDraft): QuoteLine => ({
+  item: l.item,
+  qty: Number(l.qty) || 0,
+  rate: Number(l.rate) || 0,
+  discount: Number(l.discount) || 0,
+  description: l.description,
+});
 
 /* The customer's addresses of one kind: the primary billing or shipping
    column set plus any same-typed extra addresses added from the customer
@@ -112,8 +130,8 @@ export function QuoteForm({
     customerNotes: initial?.customerNotes ?? "",
     terms: initial?.terms ?? "",
   });
-  const [lines, setLines] = useState<QuoteLine[]>(
-    initial && initial.lines.length ? initial.lines.map((l) => ({ ...l })) : [emptyLine()],
+  const [lines, setLines] = useState<LineDraft[]>(
+    initial && initial.lines.length ? initial.lines.map(toDraft) : [emptyLine()],
   );
   const num2str = (n: number | undefined) => (n ? String(n) : "");
   const [charges, setCharges] = useState<Charges>({
@@ -182,16 +200,12 @@ export function QuoteForm({
     }
   }, [salesPersons, editing]);
 
-  const setLine = (i: number, k: keyof QuoteLine, val: string) =>
-    setLines((ls) =>
-      ls.map((l, j) =>
-        j === i ? { ...l, [k]: k === "item" || k === "description" ? val : Number(val) || 0 } : l,
-      ),
-    );
+  const setLine = (i: number, k: keyof LineDraft, val: string) =>
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
   const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
 
-  const validLines = lines.filter((l) => l.item && l.qty > 0);
+  const validLines = lines.map(toLine).filter((l) => l.item && l.qty > 0);
   const charge = useMemo(
     () => ({
       docDiscount: Number(charges.docDiscount) || 0,
@@ -359,7 +373,7 @@ export function QuoteForm({
                 <span />
               </div>
               {lines.map((l, i) => {
-                const t = lineTotals(l);
+                const t = lineTotals(toLine(l));
                 return (
                   <div className="ord-line qt-line" key={i}>
                     <div className="form-field" style={{ gap: 2 }}>
@@ -381,9 +395,9 @@ export function QuoteForm({
                         placeholder="Add a description to your item"
                       />
                     </div>
-                    <NumberInput  value={l.qty || ""} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
-                    <NumberInput  value={l.rate || ""} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
-                    <NumberInput  value={l.discount || ""} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
+                    <NumberInput  value={l.qty} onChange={(e) => setLine(i, "qty", e.target.value)} placeholder="0" />
+                    <NumberInput  value={l.rate} maxDecimals={2} onChange={(e) => setLine(i, "rate", e.target.value)} placeholder="0.00" />
+                    <NumberInput  value={l.discount} onChange={(e) => setLine(i, "discount", e.target.value)} placeholder="0" />
                     <span className="mono qt-sub">
                       {fmt(t.subTotal)}
                     </span>

@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -216,6 +217,7 @@ export function Sizes() {
         </div>
       ) : (
         <div className="fbar">
+          <BackToSettings />
           {/* Type filter intentionally omitted for now — search covers it. */}
           <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
           <div style={{ flex: 1 }} />

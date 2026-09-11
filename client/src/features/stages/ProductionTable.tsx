@@ -14,10 +14,14 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
+import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
-import { usePersistedState } from "@/lib/usePersistedState";
+import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
+import { todayISO } from "@/lib/dates";
 import { confirmDialog } from "@/ui/ConfirmDialog";
+import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
+import { effectiveRequested, hasOps, resolveSheetEdit, type SheetDraft, type SheetOps } from "./productionSheetEdit";
 import { ProductionForm } from "./ProductionForm";
 import { ProductionImport } from "./ProductionImport";
 import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
@@ -33,6 +37,7 @@ import {
   recordProductionLines,
   requestProduction,
   setProductionStage,
+  updateProductionLine,
   stageChip,
   PRODUCTION_STAGE_ORDER,
   PRODUCTION_STAGE_META,
@@ -64,11 +69,11 @@ const GROUP_DIMS: Array<{ id: ProductionGroupBy; label: string }> = [
    Status, Requested, Produced, Order Progress, Requested by. */
 function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
   return [
-    { key: "design", label: "Design", render: (g) => <span className="design-name">{g.designSummary}</span> },
+    { key: "design", label: "Design", className: "nw", render: (g) => <span className="design-name">{g.designSummary}</span> },
     {
       key: "order",
       label: "Order",
-      className: "mono",
+      className: "mono nw",
       render: (g) =>
         g.independent ? (
           <span className="chip" title="No Sales Order — make-to-stock">Independent</span>
@@ -78,11 +83,12 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
           </Link>
         ),
     },
-    { key: "customer", label: "Customer", render: (g) => g.customer || (g.independent ? "—" : "") },
-    { key: "date", label: "Date", className: "mono muted", render: (g) => g.date || "—" },
+    { key: "customer", label: "Customer", className: "nw", render: (g) => g.customer || (g.independent ? "—" : "") },
+    { key: "date", label: "Date", className: "mono muted nw", render: (g) => (g.date || "").slice(0, 10) || "—" },
     {
       key: "stage",
       label: "Status",
+      className: "nw",
       render: (g) => {
         const s = stageChip(g.stage);
         return <span className="chip" style={{ color: s.color }}>{s.label}</span>;
@@ -116,7 +122,7 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
           </div>
         ),
     },
-    { key: "by", label: "Requested by", className: "muted", render: (g) => g.performedBy || "—" },
+    { key: "by", label: "Requested by", className: "muted nw", render: (g) => g.performedBy || "—" },
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (g) => g.lineCount },
     { key: "created", label: "Created", className: "muted mono", render: (g) => fmtDateTime(g.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (g) => fmtDateTime(g.modifiedTime) },
@@ -146,22 +152,12 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
 
 export function ProductionTable() {
   const navigate = useNavigate();
+  // View opens on whatever Settings → Default view says, then persists for the
+  // session (board stays board until switched back).
+  const [view, setView] = useViewState<"grid" | "board" | "sheet">("production.view", "grid", "board");
   // Filter follows the view: board → All (see everything), grid → Pending (hide
-  // the completed pile). Seed from the persisted view so a board reload starts on All.
-  const [tab, setTab] = useState(() => (localStorage.getItem("productionView") === "board" ? "all" : "pending"));
-  // View persists across visits (board stays board until switched back).
-  const [view, setView] = useState<"grid" | "board" | "sheet">(() => {
-    const v = localStorage.getItem("productionView");
-    return v === "board" || v === "sheet" ? v : "grid";
-  });
-  useEffect(() => {
-    localStorage.setItem("productionView", view);
-  }, [view]);
-  // Switching view snaps the filter back to that view's default (board=All; grid/sheet=Pending).
-  const changeView = (v: "grid" | "board" | "sheet") => {
-    setView(v);
-    setTab(v === "board" ? "all" : "pending");
-  };
+  // the completed pile). Seeded from the opening view so a board reload starts on All.
+  const [tab, setTab] = useState(() => (view === "board" ? "all" : "pending"));
   // Board grouping: an ordered list of dimensions → nested swimlanes (empty = flat).
   const [groupBy, setGroupBy] = useState<ProductionGroupBy[]>(() => {
     try {
@@ -195,7 +191,18 @@ export function ProductionTable() {
   // Logging output (the `+` on a card, or dragging a remaining card → Completed)
   // opens the record dialog; all output flows through recordProduction.
   const [recordEntry, setRecordEntry] = useState<ProductionEntry | null>(null);
-  // Sheet view: in-flight inline qty edits, keyed by production-line id.
+  // Sheet edit mode: staged edits keyed by production-line id. Nothing reaches
+  // the server until Save (ColumnPicker/PlanContainerisation draft idiom).
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<Record<string, SheetDraft>>({});
+  const [savingEdits, setSavingEdits] = useState(false);
+  // "Recorded by" on inline output. Only the one list, and only once edit mode
+  // is opened — /prod otherwise fetches nothing but production logs.
+  const [salesPersons, setSalesPersons] = useState(() => cachedSalesPersons() ?? []);
+  useEffect(() => {
+    if (editMode && !salesPersons.length) void listSalesPersons().then((r) => r.ok && setSalesPersons(r.salesPersons));
+  }, [editMode, salesPersons.length]);
+  const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
@@ -304,15 +311,18 @@ export function ProductionTable() {
     const m = new Map<string, { requested: number; produced: number }>();
     if (!groupBy.length) return m;
     for (const g of sheetSorted) {
+      const e = g.entries[0];
+      const d = (editMode && draft[e.id]) || {};
       const k = groupKeyOf(g);
       const cur = m.get(k) || { requested: 0, produced: 0 };
-      cur.requested += g.totalRequested;
-      cur.produced += g.totalProduced;
+      // Staged edits count towards the band totals, so they move as you type.
+      cur.requested += editMode ? effectiveRequested(e, d) : g.totalRequested;
+      cur.produced += g.totalProduced + (parseInt(d.qty || "", 10) || 0);
       m.set(k, cur);
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetSorted, groupBy]);
+  }, [sheetSorted, groupBy, draft, editMode]);
 
   const tabCount = (t: (typeof TABS)[number]) =>
     t.match
@@ -374,6 +384,80 @@ export function ProductionTable() {
     if (stage === "Completed" && e.qtyRequested - e.producedSoFar > 0) { setRecordEntry(e); return; }
     const res = await setProductionStage([e.id], stage);
     if (!res.ok) { toast.error(res.error || "Could not change status"); return; }
+    invalidateProductionLogs();
+    await load();
+  };
+
+  // ---- Sheet view: edit mode (bulk qty + status, committed on Save) ----
+  const setCell = (id: string, k: "inProd" | "qty", v: string) =>
+    setDraft((m) => ({ ...m, [id]: { ...m[id], [k]: v } }));
+  const setStageCell = (id: string, stage: ProductionStage) =>
+    setDraft((m) => ({ ...m, [id]: { ...m[id], stage } }));
+
+  // Resolve every drafted row once: what Save must do, and whether anything is
+  // invalid (a bad row disables Save rather than firing a doomed request).
+  const editOps = useMemo(() => {
+    const rows: Array<{ entry: ProductionEntry; ops: SheetOps }> = [];
+    let bad = false;
+    for (const g of groups) {
+      const e = g.entries[0];
+      if (!draft[e.id]) continue;
+      const { ops, error } = resolveSheetEdit(e, draft[e.id]);
+      if (error) bad = true;
+      else if (hasOps(ops)) rows.push({ entry: e, ops });
+    }
+    return { rows, bad };
+  }, [groups, draft]);
+  const editDirty = editOps.rows.length > 0 || editOps.bad;
+
+  const leaveEdit = async () => {
+    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return false;
+    setDraft({});
+    setEditMode(false);
+    return true;
+  };
+
+  // Switching view snaps the filter back to that view's default (board=All;
+  // grid/sheet=Pending). Leaving the sheet with staged edits asks first.
+  const changeView = async (v: "grid" | "board" | "sheet") => {
+    if (editMode && !(await leaveEdit())) return;
+    setView(v);
+    setTab(v === "board" ? "all" : "pending");
+  };
+
+  const saveDraft = async () => {
+    if (!editOps.rows.length || editOps.bad || savingEdits) return;
+    setSavingEdits(true);
+    const failed: Record<string, SheetDraft> = {};
+    let done = 0;
+    // ponytail: sequential + non-atomic, one request per op — there is no
+    // array-accepting production endpoint and a shift-end pass is a few rows.
+    for (const { entry: e, ops } of editOps.rows) {
+      let err: string | null = null;
+      if (ops.qtyRequested != null) {
+        const r = await updateProductionLine(e.id, { qty_requested: ops.qtyRequested });
+        if (!r.ok) err = r.error || "Could not change quantity";
+      }
+      if (!err && ops.record != null) {
+        // Batch left blank on purpose — the server mints B/YYYY-MM/NNN. Operators who
+        // need a specific batch use the + dialog (RecordOutputForm).
+        const r = await recordProduction(e.id, { qty_boxes: ops.record, production_date: todayISO(), performed_by: loggedBy });
+        if (!r.ok) err = r.error || "Could not record output";
+      }
+      // Stage last so an explicit choice outranks the server's auto-step.
+      if (!err && ops.stage) {
+        const r = await setProductionStage([e.id], ops.stage);
+        if (!r.ok) err = r.error || "Could not change status";
+      }
+      if (err) {
+        failed[e.id] = draft[e.id];
+        toast.error(`${e.design}: ${err}`);
+      } else done += 1;
+    }
+    setSavingEdits(false);
+    setDraft(failed);
+    if (done) toast.success(`${done} line${done === 1 ? "" : "s"} saved`);
+    if (!Object.keys(failed).length) setEditMode(false);
     invalidateProductionLogs();
     await load();
   };
@@ -470,7 +554,7 @@ export function ProductionTable() {
             <button
               key={v}
               type="button"
-              onClick={() => changeView(v)}
+              onClick={() => void changeView(v)}
               title={v === "grid" ? "Table view" : v === "sheet" ? "Sheet — inline edit qty & stage" : "Kanban board"}
               style={{
                 background: view === v ? "var(--accent-soft)" : "transparent",
@@ -495,6 +579,36 @@ export function ProductionTable() {
           />
         )}
         {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
+        {/* Sheet edit mode: In Production + Produced + Status go editable across
+            every row; nothing is written until Save. */}
+        {view === "sheet" && canEdit && (
+          editMode ? (
+            <>
+              <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+                Cancel
+              </button>
+              <button
+                className="hbtn primary"
+                style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                disabled={!editOps.rows.length || editOps.bad || savingEdits}
+                onClick={() => void saveDraft()}
+                title={editOps.bad ? "Fix the highlighted cells first" : "Save every edited line"}
+              >
+                {savingEdits ? "Saving…" : `Save${editOps.rows.length ? ` (${editOps.rows.length})` : ""}`}
+              </button>
+            </>
+          ) : (
+            <button
+              className="hbtn"
+              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+              onClick={() => setEditMode(true)}
+              title="Edit quantities and status across rows, then Save"
+            >
+              <Icon name="edit" size={13} />
+              Edit
+            </button>
+          )
+        )}
         {canEdit && (
           <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowImport(true)}>
             <Icon name="upload" size={13} />
@@ -522,15 +636,17 @@ export function ProductionTable() {
             {loading && entries.length === 0 ? (
               <SkeletonRows rows={6} />
             ) : (
-              <table className="tbl ruled">
+              <table className="tbl">
                 <thead>
                   <tr>
                     <SortTh id="code" label="Production ID" sort={sort} />
                     <th>Design</th>
                     <th>Order</th>
                     <th>Customer</th>
-                    <th className="num" style={{ textAlign: "right" }}>Requested</th>
-                    {/* ponytail: Produced column hidden 2026-08-12 — recording goes through the + dialog; restore from git if inline entry returns */}
+                    {/* In Production = the plan qty (qty_requested) — editable in
+                        edit mode; Produced takes the boxes made now. */}
+                    <th className="num" style={{ textAlign: "right", width: editMode ? 110 : undefined }}>In Production</th>
+                    <th className="num" style={{ textAlign: "right", width: editMode ? 110 : undefined }}>Produced</th>
                     <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                     <th style={{ width: 150 }}>Status</th>
                     {canEdit && <th style={{ width: 44 }} />}
@@ -551,13 +667,20 @@ export function ProductionTable() {
                             <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
                               <td colSpan={4}>{key}</td>
                               <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.requested)}</td>
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.produced)}</td>
                               <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, tot.requested - tot.produced))}</td>
                               <td colSpan={canEdit ? 2 : 1} />
                             </tr>,
                           );
                         }
                       }
-                      const remaining = Math.max(0, e.qtyRequested - e.producedSoFar);
+                      const d = (editMode && draft[e.id]) || {};
+                      const typed = parseInt(d.qty || "", 10) || 0;
+                      const inProd = editMode ? effectiveRequested(e, d) : e.qtyRequested;
+                      const remaining = Math.max(0, inProd - e.producedSoFar - typed);
+                      const rowErr = editMode && draft[e.id] ? resolveSheetEdit(e, d).error : null;
+                      const bad = rowErr ? { borderColor: "var(--c-red)" } : undefined;
+                      const locked = e.producedSoFar > 0; // /production-update refuses a qty change after output
                       const detail = `/prod/${encodeURIComponent(productionDetailKey(e))}`;
                       out.push(
                         <tr key={g.group}>
@@ -567,11 +690,47 @@ export function ProductionTable() {
                           <td><span className="design-name">{g.designSummary}</span></td>
                           <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
                           <td>{g.customer || (g.independent ? "—" : "")}</td>
-                          <td className="num mono" style={{ textAlign: "right" }}>{fmt(e.qtyRequested)}</td>
+                          <td className="num mono" style={{ textAlign: "right" }}>
+                            {editMode ? (
+                              <NumberInput
+                                value={d.inProd ?? String(e.qtyRequested)}
+                                disabled={locked}
+                                onChange={(ev) => setCell(e.id, "inProd", ev.target.value)}
+                                style={{ width: "100%", textAlign: "right", ...bad }}
+                                title={locked ? "Output already recorded — quantity is locked" : rowErr || "Boxes to produce on this line"}
+                              />
+                            ) : (
+                              fmt(e.qtyRequested)
+                            )}
+                          </td>
+                          <td className="num mono" style={{ textAlign: "right" }}>
+                            {editMode ? (
+                              <NumberInput
+                                value={d.qty ?? ""}
+                                placeholder={e.producedSoFar ? fmt(e.producedSoFar) : "0"}
+                                onChange={(ev) => setCell(e.id, "qty", ev.target.value)}
+                                style={{ width: "100%", textAlign: "right", ...bad }}
+                                title={rowErr || (e.producedSoFar ? `Boxes produced now — adds to the ${fmt(e.producedSoFar)} already recorded` : "Boxes produced now")}
+                              />
+                            ) : e.producedSoFar ? (
+                              <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span>
+                            ) : (
+                              <span className="dim">—</span>
+                            )}
+                          </td>
                           <td className="num mono" style={{ textAlign: "right" }}>{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
                           <td>
                             {canEdit ? (
-                              <select value={e.stage} onChange={(ev) => void commitStage(e, ev.target.value as ProductionStage)}>
+                              // In edit mode the Status select stages; outside it commits
+                              // on change (and Completed-with-remaining opens the dialog).
+                              <select
+                                value={editMode ? d.stage ?? e.stage : e.stage}
+                                onChange={(ev) =>
+                                  editMode
+                                    ? setStageCell(e.id, ev.target.value as ProductionStage)
+                                    : void commitStage(e, ev.target.value as ProductionStage)
+                                }
+                              >
                                 {PRODUCTION_STAGE_ORDER.map((s) => (
                                   <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
                                 ))}
@@ -582,6 +741,9 @@ export function ProductionTable() {
                           </td>
                           {canEdit && (
                             <td>
+                              {/* The Produced column is the capture while editing —
+                                  the dialog stays for batch-specific entry. */}
+                              {editMode ? null : (
                               <button
                                 type="button"
                                 className="btn x"
@@ -591,6 +753,7 @@ export function ProductionTable() {
                               >
                                 <Icon name="plus" size={13} />
                               </button>
+                              )}
                             </td>
                           )}
                         </tr>,
@@ -599,7 +762,7 @@ export function ProductionTable() {
                     if (!loading && sheetRows.length === 0) {
                       out.push(
                         <tr key="empty">
-                          <td colSpan={canEdit ? 8 : 7}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                          <td colSpan={canEdit ? 9 : 8}><EmptyState title="No matching results" hint="Try a different filter" /></td>
                         </tr>,
                       );
                     }
@@ -617,7 +780,7 @@ export function ProductionTable() {
           {loading && entries.length === 0 ? (
             <SkeletonRows rows={6} />
           ) : (
-            <table className="tbl ruled">
+            <table className="tbl">
               <thead>
                 <tr>
                   <th style={{ width: 34, textAlign: "center" }}>

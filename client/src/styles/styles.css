@@ -350,8 +350,10 @@ a { color: inherit; text-decoration: none; }
   border-right: 1px solid var(--sb-border);
   display: flex; flex-direction: column;
   font-size: var(--t-md);
-  /* Light-on-dark reads thinner than dark-on-light; bold the whole rail. */
-  font-weight: 600;
+  /* Mono rail (2026-09-04) — same JetBrains Mono as detail codes/numbers.
+     500 is the heaviest self-hosted mono weight; 600 would faux-bold. */
+  font-family: var(--font-mono);
+  font-weight: 500;
 }
 .sidebar .brand {
   display: flex; align-items: center; gap: 10px;
@@ -534,6 +536,93 @@ a { color: inherit; text-decoration: none; }
 .card-head .title { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
 .card-head .right { margin-left: auto; display: flex; gap: 6px; align-items: center; color: var(--muted); }
 .card-body { padding: 14px; }
+
+/* ---- Settings workspace (two-pane, 2026-09-03) ----
+   Replaces the flat five-card grid on /settings: a persistent group rail
+   plus one pane of work at a time. The rail carries icon + label only —
+   no count chips (user mandate 2026-09-03), and the pane shows no row
+   counts either, which keeps this page a zero-fetch surface (counting
+   every master would cost one Catalyst call per list on every open, and
+   FUNCTIONS concurrency is shared org-wide). */
+.set-wrap {
+  display: grid;
+  grid-template-columns: 268px 1fr;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden; /* the rail's border-right stops at the rounded corner */
+}
+.set-rail {
+  background: var(--panel-2);
+  border-right: 1px solid var(--border);
+  padding: 18px 14px;
+}
+/* Bare .title is 18px app-wide; the rail heading is the page's real title. */
+.set-rail .title { font-size: var(--t-2xl); font-weight: 700; letter-spacing: -0.02em; }
+.set-rail .sub { color: var(--muted); font-size: var(--t-sm); margin-top: 3px; }
+/* Inherits the global input skin (rounded 9px, accent focus ring) — the only
+   thing it needs is to fill the rail. No bespoke search chrome. */
+.set-search { width: 100%; margin: 14px 0 10px; }
+.set-groups { display: flex; flex-direction: column; gap: 2px; }
+.set-group {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent; /* reserved so .active's border adds no shift */
+  border-radius: 6px;
+  font-size: var(--t-md);
+  color: var(--fg-2);
+  text-align: left;
+}
+.set-group:hover { background: var(--hover); color: var(--fg); }
+.set-group .ic { color: var(--muted); flex-shrink: 0; }
+.set-group span { flex: 1; }
+/* Same selected treatment as .btn.active — one aesthetic for "this is chosen". */
+.set-group.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--fg);
+  font-weight: 600;
+}
+.set-group.active .ic { color: var(--accent-ink, var(--accent)); }
+
+.set-pane { padding: 22px 24px; min-width: 0; }
+.set-pane-head {
+  display: flex; align-items: flex-start; gap: 14px;
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.set-pane-head .title { font-size: var(--t-3xl); font-weight: 700; letter-spacing: -0.02em; margin-top: 6px; }
+.set-pane-head .sub { color: var(--muted); font-size: var(--t-md); margin-top: 5px; max-width: 62ch; }
+/* House rule: header actions are always right-aligned. */
+.set-pane-head .hbtn { margin-left: auto; flex-shrink: 0; }
+
+.set-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.set-card {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.set-card:hover { border-color: var(--accent); background: var(--hover); }
+.set-card-text { min-width: 0; flex: 1; }
+.set-card-label { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
+.set-card-desc {
+  font-size: var(--t-sm); color: var(--muted); margin-top: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.set-card-chev { color: var(--dim); flex-shrink: 0; }
+.set-card:hover .set-card-chev { color: var(--accent); }
 
 /* ---- Settings home (All Settings landing) ---- */
 .settings-grid {
@@ -2134,6 +2223,17 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 @media (max-width: 1100px) {
   .header .search { display: none; }
   .split, .split.even, .dgrid { grid-template-columns: 1fr; }
+}
+/* Settings workspace: below 900px the 268px rail leaves the pane too narrow
+   for a card, so the rail stacks on top and its groups wrap into a row. */
+@media (max-width: 900px) {
+  .set-wrap { grid-template-columns: 1fr; }
+  .set-rail { border-right: 0; border-bottom: 1px solid var(--border); }
+  .set-groups { flex-direction: row; flex-wrap: wrap; }
+  .set-group { width: auto; }
+  .set-group span { flex: 0 0 auto; }
+  .set-pane { padding: 18px 16px; }
+  .set-pane-head .title { font-size: var(--t-2xl); }
 }
 @media (max-width: 768px) {
   .kanban-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -640,7 +640,7 @@ app.get("/public/pallet/:token", async (req, res) => {
     const inList = (ids) => (ids.length ? ids.join(",") : "0");
 
     const box = (await zcql(
-      `SELECT ROWID, box_number, vehicle, container_number, status, dispatch_date FROM LoadBox WHERE share_token = '${token}' AND deleted_at is null`,
+      `SELECT ROWID, box_number, load_number, vehicle, container_number, status, dispatch_date FROM LoadBox WHERE share_token = '${token}' AND deleted_at is null`,
     ))[0];
     if (!box) return res.status(404).json({ ok: false, error: "This label is invalid or has been revoked." });
 
@@ -704,6 +704,7 @@ app.get("/public/pallet/:token", async (req, res) => {
       ok: true,
       box: {
         boxNumber: Number(box.box_number) || 0,
+        loadNumber: String(box.load_number || ""),
         container: String(box.container_number || ""),
         status: String(box.status || ""),
         dispatchDate: String(box.dispatch_date || ""),
@@ -844,6 +845,7 @@ app.post("/quote-with-items", async (req, res) => {
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
         const doc = docCompute(total, body);
+        const bornStatus = canApprove(req, "Quote") ? "Approved" : "Draft";
         const quoteRow = await ds.table("Quote").insertRow({
           quote_number: body.quote_number || "",
           customer,
@@ -852,9 +854,11 @@ app.post("/quote-with-items", async (req, res) => {
           expiry_date: body.expiry_date || undefined,
           payment_term: paymentTerm,
           port_of_discharge: body.port_of_discharge || "",
-          // Every quote is born Draft — approval is mandatory before Sent,
-          // so a crafted create can't mint a pre-approved quote.
-          status: "Draft",
+          // Born Draft — approval is mandatory before Sent, so a crafted
+          // create can't mint a pre-approved quote. Exception (CR): a user who
+          // can approve quotes (Admin or role approver) skips their own
+          // approval loop — the quote is born Approved.
+          status: bornStatus,
           currency: body.currency || "INR",
           exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
@@ -877,6 +881,11 @@ app.post("/quote-with-items", async (req, res) => {
             : {}),
         });
         const quoteId = quoteRow.ROWID;
+        if (bornStatus === "Approved")
+          await logTransition(catalyst, {
+            entity_type: "Quote", entity_rowid: quoteId, from_status: "", to_status: "Approved",
+            note: "Auto-approved — created by an approver",
+          });
 
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
@@ -932,12 +941,16 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
 
         const doc = docCompute(total, body);
         // Status is never editable here (use /quote-status). Editing content
-        // invalidates a pending/granted approval → back to Draft.
+        // invalidates a pending/granted approval → back to Draft — unless the
+        // editor can approve quotes (CR): their edit lands straight on Approved.
         const cur = rowList(
           await catalyst.zcql().executeZCQLQuery(`SELECT status FROM Quote WHERE ROWID = ${quoteId}`),
         )[0];
         const curStatus = String((cur && cur.status) || "Draft");
-        const nextStatus = curStatus === "PendingApproval" || curStatus === "Approved" ? "Draft" : curStatus;
+        const nextStatus =
+          curStatus === "PendingApproval" || curStatus === "Approved"
+            ? canApprove(req, "Quote") ? "Approved" : "Draft"
+            : curStatus;
         await ds.table("Quote").updateRow({
           ROWID: quoteId,
           quote_number: body.quote_number || "",
@@ -971,7 +984,8 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
         if (nextStatus !== curStatus)
           await logTransition(catalyst, {
             entity_type: "Quote", entity_rowid: quoteId,
-            from_status: curStatus, to_status: nextStatus, note: "edited — approval reset",
+            from_status: curStatus, to_status: nextStatus,
+            note: nextStatus === "Approved" ? "edited by an approver — auto-approved" : "edited — approval reset",
           });
 
         // Replace lines: delete existing QuoteItem rows for this quote, re-insert.
@@ -1106,6 +1120,45 @@ app.post("/quote-status/:rowid", async (req, res) => {
    SalesOrder.status writes) so transitions are validated, logged, and
    notified in one place. body: { status, reason? }
    ---------------------------------------------------------------- */
+/* Auto-enqueue a confirmed SO's items into the production waitlist as
+   editable plan rows. Dedupe on order_item so a re-confirm (Cancelled →
+   Confirmed) never double-inserts. Manual "Record New Production" still
+   works alongside this. Called on the PendingApproval→Confirmed transition
+   AND for SOs born Confirmed (approver bypass at create/convert). */
+async function enqueueSoProduction(catalyst, ds, soId) {
+  const items = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, design, ordered_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+    ),
+  );
+  if (!items.length) return;
+  const existing = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT order_item FROM ProductionLog WHERE entry_type = 'plan' AND sales_order = ${soId} AND deleted_at is null`,
+    ),
+  );
+  const seen = new Set(existing.map((r) => String(r.order_item || "")));
+  const group = `so-${soId}`;
+  for (const it of items) {
+    const oiId = String(it.ROWID);
+    if (seen.has(oiId)) continue;
+    const row = await ds.table("ProductionLog").insertRow({
+      design: String(it.design || "") || null,
+      sales_order: soId,
+      order_item: oiId,
+      qty_requested: Number(it.ordered_qty_boxes) || 0,
+      qty_boxes: 0,
+      status: "Approved",
+      entry_type: "plan",
+      stage: "New",
+      request_group: group,
+    });
+    await logTransition(catalyst, {
+      entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "New",
+    });
+  }
+}
+
 const SO_TRANSITIONS = {
   Draft: ["PendingApproval"],
   PendingApproval: ["Confirmed", "Rejected"], // approver only (approve / reject with reason)
@@ -1163,43 +1216,8 @@ app.post("/so-status/:rowid", async (req, res) => {
         }
 
         // On confirmation, auto-enqueue the order's items into the production
-        // waitlist as editable plan rows. Dedupe on order_item so a re-confirm
-        // (Cancelled → Confirmed) never double-inserts. Manual "Record New
-        // Production" still works alongside this.
-        if (to === "Confirmed") {
-          const items = rowList(
-            await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, design, ordered_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
-            ),
-          );
-          if (items.length) {
-            const existing = rowList(
-              await catalyst.zcql().executeZCQLQuery(
-                `SELECT order_item FROM ProductionLog WHERE entry_type = 'plan' AND sales_order = ${soId} AND deleted_at is null`,
-              ),
-            );
-            const seen = new Set(existing.map((r) => String(r.order_item || "")));
-            const group = `so-${soId}`;
-            for (const it of items) {
-              const oiId = String(it.ROWID);
-              if (seen.has(oiId)) continue;
-              const row = await ds.table("ProductionLog").insertRow({
-                design: String(it.design || "") || null,
-                sales_order: soId,
-                order_item: oiId,
-                qty_requested: Number(it.ordered_qty_boxes) || 0,
-                qty_boxes: 0,
-                status: "Approved",
-                entry_type: "plan",
-                stage: "New",
-                request_group: group,
-              });
-              await logTransition(catalyst, {
-                entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "New",
-              });
-            }
-          }
-        }
+        // waitlist (shared with SOs born Confirmed via the approver bypass).
+        if (to === "Confirmed") await enqueueSoProduction(catalyst, ds, soId);
         return { rowid: soId, data: { ROWID: soId, status: to } };
       },
     );
@@ -1226,10 +1244,21 @@ app.post("/so-with-items", async (req, res) => {
     const pMap = await paymentTermMap(catalyst);
     const sMap = await salesPersonMap(catalyst);
 
+    const bornStatus = canApprove(req, "SalesOrder") ? "Confirmed" : "Draft";
     const result = await withOpLog(
       catalyst,
       { table_name: "SalesOrder", operation: "insert", payload: body },
-      async () => createSalesOrder(ds, body, { dMap, cMap, pMap, sMap, catalyst }),
+      async () => {
+        const so = await createSalesOrder(ds, body, { dMap, cMap, pMap, sMap, catalyst, bornStatus });
+        if (bornStatus === "Confirmed") {
+          await logTransition(catalyst, {
+            entity_type: "SalesOrder", entity_rowid: so.rowid, from_status: "", to_status: "Confirmed",
+            note: "Auto-approved — created by an approver",
+          });
+          await enqueueSoProduction(catalyst, ds, so.rowid);
+        }
+        return so;
+      },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
   } catch (err) {
@@ -1288,9 +1317,13 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
 
         const doc = docCompute(total, body);
         // Editing content invalidates a pending/granted approval → back to
-        // Draft ("Confirmed" is the approved state in SO_TRANSITIONS).
+        // Draft ("Confirmed" is the approved state in SO_TRANSITIONS) —
+        // unless the editor can approve SOs (CR): stays/lands Confirmed.
         const curStatus = String(cur.status || "Draft");
-        const nextStatus = curStatus === "PendingApproval" || curStatus === "Confirmed" ? "Draft" : curStatus;
+        const nextStatus =
+          curStatus === "PendingApproval" || curStatus === "Confirmed"
+            ? canApprove(req, "SalesOrder") ? "Confirmed" : "Draft"
+            : curStatus;
         await ds.table("SalesOrder").updateRow({
           ROWID: soId,
           customer,
@@ -1320,7 +1353,8 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         if (nextStatus !== curStatus)
           await logTransition(catalyst, {
             entity_type: "SalesOrder", entity_rowid: soId,
-            from_status: curStatus, to_status: nextStatus, note: "edited — approval reset",
+            from_status: curStatus, to_status: nextStatus,
+            note: nextStatus === "Confirmed" ? "edited by an approver — auto-approved" : "edited — approval reset",
           });
 
         // Replace lines wholesale — safe because the guard above proved no
@@ -1350,6 +1384,10 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
             final_total: it.sub,
           });
         }
+        // Approver-edit landed a pending SO on Confirmed → run the same
+        // side-effect the approve click would have (after lines are replaced).
+        if (curStatus === "PendingApproval" && nextStatus === "Confirmed")
+          await enqueueSoProduction(catalyst, ds, soId);
         return { rowid: soId, data: { ROWID: soId, order_number: cur.order_number, total_amount: doc.total_amount } };
       },
     );
@@ -1406,11 +1444,11 @@ async function createSalesOrder(ds, body, maps) {
     shipment_date: body.shipment_date || undefined,
     payment_term: paymentTerm,
     port_of_discharge: body.port_of_discharge || "",
-    // Manual SOs start in Draft (approval flow); convert-quote passes
-    // "Confirmed" explicitly — the source quote already passed approval.
-    // Every order is born Draft — approval is mandatory (mirror of quotes),
-    // so a crafted create can't mint a pre-approved order.
-    status: "Draft",
+    // Born Draft — approval is mandatory (mirror of quotes), so a crafted
+    // create can't mint a pre-approved order. Exception (CR): callers pass
+    // bornStatus "Confirmed" when the creating user can approve sales orders
+    // (Admin or role approver) — no approval loop for them.
+    status: maps.bornStatus || "Draft",
     currency: body.currency || "INR",
     exchange_rate: Number(body.exchange_rate) || 1,
     remarks: body.remarks || "",
@@ -1560,8 +1598,17 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             container_plan: q.container_plan || "",
             lines: Array.isArray(body.lines) ? body.lines : [],
           },
-          { dMap, cMap, pMap, sMap, catalyst },
+          // Converter who can approve SOs → the SO is born Confirmed (the
+          // source quote already passed approval; no second loop for them).
+          { dMap, cMap, pMap, sMap, catalyst, bornStatus: canApprove(req, "SalesOrder") ? "Confirmed" : "Draft" },
         );
+        if (canApprove(req, "SalesOrder")) {
+          await logTransition(catalyst, {
+            entity_type: "SalesOrder", entity_rowid: so.rowid, from_status: "", to_status: "Confirmed",
+            note: "Auto-approved — converted by an approver",
+          });
+          await enqueueSoProduction(catalyst, ds, so.rowid);
+        }
 
         // Bump converted_qty_boxes (fill lines in order within a design), then
         // derive Full/Partial from what's actually left — never trust body.mode.
@@ -1927,20 +1974,50 @@ async function nextPalNumber(catalyst) {
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 
-/* Server-assigned production batch number: B/FY/NNN. Minted only when the
-   client didn't supply one (operators may type an existing batch to append
-   output to it). MAX-scan mirrors nextPalNumber; assertUnique is the backstop. */
-async function nextBatchNumber(catalyst) {
+/* Batch-series settings (AppSetting; Settings → Series). Missing rows fall
+   back to the defaults. Values are cleaned for ZCQL (quotes stripped, capped)
+   because the minted prefix goes into a LIKE. */
+async function batchSeriesSettings(catalyst) {
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      "SELECT setting_key, setting_value FROM AppSetting WHERE setting_key IN ('batch_series_prefix','batch_series_separator','batch_series_start') AND deleted_at is null",
+    ),
+  );
+  const get = (k) => String((rows.find((r) => String(r.setting_key) === k) || {}).setting_value || "");
+  const clean = (s) => s.replace(/['%_]/g, "").slice(0, 10);
+  return {
+    prefix: clean(get("batch_series_prefix")) || "B",
+    sep: clean(get("batch_series_separator")) || "/",
+    start: Math.max(1, parseInt(get("batch_series_start"), 10) || 1),
+  };
+}
+
+/* Server-assigned production batch number: <prefix><sep>YYYY-MM<sep>NNN
+   (defaults B/YYYY-MM/001), series per ITEM per calendar month (each item
+   restarts every month at the configured start). Prefix/separator/start are
+   admin-set in Settings → Series. Minted only when the client didn't supply
+   one (operators may type an existing batch to append output to it).
+   assertBatchesAllowed is the backstop for typed batches.
+   ponytail: the design+month WHERE keeps the scan well under ZCQL's 300-row
+   cap (the old unscoped scan silently truncated past 300 rows). Changing the
+   prefix/separator starts a fresh series — old-format batches simply no
+   longer match the LIKE. */
+async function nextBatchNumber(catalyst, designId) {
+  if (!designId) throw badRequest("Batch numbering needs the item");
+  const { prefix: p, sep, start } = await batchSeriesSettings(catalyst);
   const now = new Date();
-  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
-  const prefix = `B/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
-  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT batch_number FROM ProductionLog"));
+  const prefix = `${p}${sep}${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}${sep}`;
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT batch_number FROM ProductionLog WHERE design = ${Number(designId)} AND batch_number LIKE '${prefix}%' AND deleted_at is null`,
+    ),
+  );
   let max = 0;
   for (const r of rows) {
     const n = String(r.batch_number || "");
     if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
   }
-  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+  return `${prefix}${String(Math.max(max + 1, start)).padStart(3, "0")}`;
 }
 
 /* Duplicate-batch guard. Two tiers:
@@ -1986,21 +2063,66 @@ function normalizePlanLines(body) {
   if (!rawLines.length) throw badRequest("At least one plan line is required");
   return rawLines.map((l, i) => {
     if (!l.order_item) throw badRequest(`Line ${i + 1}: order_item is required`);
+    // Pallet is mandatory at palletisation (both UIs already enforce this;
+    // reject crafted API calls too so no line is ever born pallet-less).
+    if (!l.pallet) throw badRequest(`Line ${i + 1}: pallet is required`);
     const boxes = nonNeg(l.boxes, `Line ${i + 1} boxes`);
     if (boxes <= 0) throw badRequest(`Line ${i + 1}: boxes must be > 0`);
     return {
       sales_order: l.sales_order ? String(l.sales_order) : null,
       order_item: String(l.order_item),
       design: l.design ? String(l.design) : null,
-      pallet: l.pallet ? String(l.pallet) : null,
+      pallet: String(l.pallet),
       boxes,
       position: Number(l.position) || i,
       status: "Planning", // every line born Ready for Palletization; advances via /pal-line-status
-      // Carried opaquely: /update-pal-plan replaces all lines from client
-      // input, so dropping this here would wipe batches on every plan edit.
+      // Carried opaquely: /update-pal-plan replaces the Planning lines from
+      // client input, so dropping this here would wipe batches on a plan edit.
       batch_number: l.batch_number ? String(l.batch_number) : "",
+      // User-authored line (create/edit form) — autoEnqueuePalletization never
+      // tops up an item whose plan the user has pinned (CR 2026-09-10).
+      manual_edit: "true",
     };
   });
+}
+
+/* CR 2026-09-10: the one hard cap on planning — total boxes across ALL plan
+   lines for an order item (any status, dispatched included) must not exceed
+   the SO's ordered qty. Splitting across lines/plans is free below that.
+   `excludePlanId`: that plan's Planning lines are about to be replaced by
+   `lines`, so they don't count as existing. */
+async function assertPlanWithinOrdered(catalyst, lines, excludePlanId) {
+  const byItem = new Map();
+  for (const l of lines) {
+    const oi = String(l.order_item || "");
+    if (!/^\d+$/.test(oi)) continue;
+    byItem.set(oi, (byItem.get(oi) || 0) + (Number(l.boxes) || 0));
+  }
+  const ids = [...byItem.keys()];
+  if (!ids.length) return;
+  const zcql = catalyst.zcql();
+  const orderedOf = new Map(
+    rowList(
+      await zcql.executeZCQLQuery(`SELECT ROWID, ordered_qty_boxes FROM OrderItem WHERE ROWID IN (${ids.join(",")})`),
+    ).map((r) => [String(r.ROWID), Number(r.ordered_qty_boxes) || 0]),
+  );
+  const existing = rowList(
+    await zcql.executeZCQLQuery(
+      `SELECT plan, order_item, boxes, status FROM PalletizationPlanLine WHERE order_item IN (${ids.join(",")}) AND deleted_at is null`,
+    ),
+  );
+  const excl = String(excludePlanId || "");
+  for (const [oi, qty] of byItem) {
+    const others = existing
+      .filter((l) => String(l.order_item) === oi && !(excl && String(l.plan) === excl && String(l.status) === "Planning"))
+      .reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+    const ordered = orderedOf.get(oi) || 0;
+    if (ordered && qty + others > ordered)
+      throw badRequest(
+        `Planned boxes exceed the ordered quantity for a line (${qty + others} planned of ${ordered} ordered)`,
+        409,
+      );
+  }
 }
 
 /** Insert a PalletizationPlan header + its lines. Compensates on mid-write failure. */
@@ -2009,6 +2131,7 @@ async function createPalPlan(catalyst, ds, body, sMap) {
   const palNumber = String(body.pal_number || "").trim() || (await nextPalNumber(catalyst));
   await assertUnique(catalyst, "PalletizationPlan", "pal_number", palNumber);
   const lines = normalizePlanLines(body);
+  await assertPlanWithinOrdered(catalyst, lines);
   const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
 
   const planRow = await ds.table("PalletizationPlan").insertRow({
@@ -2061,8 +2184,10 @@ app.post("/pal-plan", async (req, res) => {
    OrderItem.produced_qty_boxes bump: tops the item's queued Planning boxes
    up to produced − palletized on ONE reused open plan per SO (created on
    first need). Idempotent from ground truth — never "add the delta blindly" —
-   so re-records, complete-after-record and manual Planning lines all
-   converge. Lines are always born "Planning" = the board's "Ready for
+   so re-records and complete-after-record converge. EXCEPTION (CR
+   2026-09-10): an item with a user-authored Planning line (manual_edit) is
+   pinned — no top-up; the remainder waits in the work list.
+   Lines are always born "Planning" = the board's "Ready for
    Palletization" column. `palletOverride` is the pallet picked on the Record
    Output form — it wins over the SO line's own spec for the boxes this record
    queues (and corrects the card it merges into). Callers wrap in try/catch: a
@@ -2103,27 +2228,52 @@ async function unqueuedBatches(catalyst, orderItemId, liveLines) {
     .filter((x) => x.available > 0);
 }
 
+/* Default pallet for a design when the SO line never picked one: the Pallet
+   whose size matches the design's size (lowest ROWID = deterministic).
+   ponytail: exact-size match only; container-plan-aware resolution if a size
+   ever grows competing pallet specs. */
+async function defaultPalletForDesign(catalyst, designId) {
+  const did = String(designId || "").replace(/[^0-9]/g, "");
+  if (!did) return null;
+  const d = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT size FROM Design WHERE ROWID = ${did}`),
+  )[0];
+  const sizeId = d && d.size ? String(d.size).replace(/[^0-9]/g, "") : "";
+  if (!sizeId) return null;
+  const p = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID FROM Pallet WHERE size = ${sizeId} AND deleted_at is null`,
+    ),
+  ).sort((a, b) => (BigInt(a.ROWID) < BigInt(b.ROWID) ? -1 : 1))[0];
+  return p ? String(p.ROWID) : null;
+}
+
 async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverride) {
   const oiId = String(orderItemId || "");
   if (!/^\d+$/.test(oiId)) return;
   const zcql = catalyst.zcql();
   const oi = rowList(
     await zcql.executeZCQLQuery(
-      `SELECT ROWID, sales_order, design, pallet, produced_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE ROWID = ${oiId}`,
+      `SELECT ROWID, sales_order, design, pallet, ordered_qty_boxes, produced_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE ROWID = ${oiId}`,
     ),
   )[0];
   const soId = oi ? String(oi.sales_order || "") : "";
   if (!soId) return;
   const pickedPallet = String(palletOverride || "").replace(/[^0-9]/g, "");
-  const palletId = pickedPallet || (oi.pallet ? String(oi.pallet) : null);
-  const available = (Number(oi.produced_qty_boxes) || 0) - (Number(oi.palletized_qty_boxes) || 0);
+  const palletId =
+    pickedPallet || (oi.pallet ? String(oi.pallet) : null) || (await defaultPalletForDesign(catalyst, oi.design));
+  // Production may now exceed the order (CR) — the queue never should: cap
+  // produced at ordered so total planned stays within the SO qty.
+  const ordered = Number(oi.ordered_qty_boxes) || 0;
+  const produced = Number(oi.produced_qty_boxes) || 0;
+  const available = (ordered ? Math.min(produced, ordered) : produced) - (Number(oi.palletized_qty_boxes) || 0);
   if (available <= 0) return;
 
   // All live lines of the SO, restricted to live plans (soft-deleted plans
   // drop out — mirror of recountOrderItems).
   const soLines = rowList(
     await zcql.executeZCQLQuery(
-      `SELECT ROWID, plan, order_item, boxes, status, batch_number FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`,
+      `SELECT ROWID, plan, order_item, boxes, status, batch_number, manual_edit FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`,
     ),
   );
   const planIds = [...new Set(soLines.map((l) => String(l.plan)))].filter(Boolean);
@@ -2146,6 +2296,15 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverrid
     .reduce((s, l) => s + (Number(l.boxes) || 0), 0);
   const topUp = available - queued;
   if (topUp <= 0) return;
+
+  // CR 2026-09-10: a user-authored/edited Planning line PINS the item's queue —
+  // never top it back up (a manual reduction is a decision, not drift). The
+  // un-queued remainder stays visible in the Ready-for-Palletization work list
+  // for the user to queue as a separate line when they choose.
+  const pinned = liveLines.some(
+    (l) => String(l.order_item) === oiId && String(l.status) === "Planning" && String(l.manual_edit || "") === "true",
+  );
+  if (pinned) return;
 
   // Reuse the SO's open plan; mint one when the SO has none in Planning.
   let planId = planIds.find((id) => planStatus.get(id) === "Planning") || "";
@@ -2233,7 +2392,10 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
           ),
         )[0];
         if (!cur) throw badRequest(`Palletization plan not found: ${planId}`, 404);
-        const lines = normalizePlanLines(body);
+        // Empty lines is legal here when advanced (non-Planning) lines remain —
+        // the edit then only rewrites the header / clears the Planning queue.
+        const lines = Array.isArray(body.lines) && body.lines.length ? normalizePlanLines(body) : [];
+        await assertPlanWithinOrdered(catalyst, lines, planId);
         const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
 
         // Header (pal_number + status untouched).
@@ -2245,17 +2407,23 @@ app.post("/update-pal-plan/:rowid", async (req, res) => {
           sales_person: salesPerson || null,
           remarks: body.remarks || "",
         });
-        // Soft-delete old lines, insert the new set.
+        // Replace ONLY the Planning-stage lines (the form edits those alone).
+        // Lines already advanced (Palletizing / ReadyToLoad / in a load box)
+        // survive untouched — an edit used to reset their status and strip
+        // load_box/pallet_group (CR 2026-09-10).
         const old = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, order_item FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
+            `SELECT ROWID, order_item, status FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`,
           ),
         );
         const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
-        for (const r of old) await ds.table("PalletizationPlanLine").updateRow({ ROWID: r.ROWID, deleted_at: stamp });
+        const oldPlanning = old.filter((r) => String(r.status || "Planning") === "Planning");
+        if (!lines.length && oldPlanning.length === old.length)
+          throw badRequest("At least one plan line is required");
+        for (const r of oldPlanning) await ds.table("PalletizationPlanLine").updateRow({ ROWID: r.ROWID, deleted_at: stamp });
         for (const l of lines) await ds.table("PalletizationPlanLine").insertRow({ plan: planId, ...l });
-        // Wholesale line replace can raise OR lower an item's counters — recount both sets.
-        await recountOrderItems(catalyst, ds, [...old.map((r) => r.order_item), ...lines.map((l) => l.order_item)]);
+        // Line replace can raise OR lower an item's counters — recount both sets.
+        await recountOrderItems(catalyst, ds, [...oldPlanning.map((r) => r.order_item), ...lines.map((l) => l.order_item)]);
         return { rowid: planId, data: { ROWID: planId, pal_number: cur.pal_number } };
       },
     );
@@ -2328,7 +2496,10 @@ app.post("/pal-status/:rowid", async (req, res) => {
 });
 
 /* Per-line palletising toggle (Ready for Palletization ↔ Ready for Loading). This is the
-   item-wise move on the kanban — advancing one line never touches its plan or siblings. */
+   item-wise move on the kanban — advancing one line never touches its plan or siblings.
+   Optional body.boxes < line.boxes = PARTIAL move (CR): only that many boxes
+   transition (split off as a new line); the remainder keeps the old status, so a
+   partial palletise never flips the whole line to Ready for Loading. */
 app.post("/pal-line-status/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -2336,29 +2507,64 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
     const lineId = req.params.rowid;
     const to = String((req.body || {}).status || "");
     const pallet = String((req.body || {}).pallet || "");
+    const reqBoxes = Number((req.body || {}).boxes);
 
     const result = await withOpLog(
       catalyst,
-      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to, ...(pallet ? { pallet } : {}) } },
+      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to, ...(pallet ? { pallet } : {}), ...(reqBoxes ? { boxes: reqBoxes } : {}) } },
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, order_item FROM PalletizationPlanLine WHERE ROWID = ${lineId}`,
+            `SELECT ROWID, status, order_item, plan, sales_order, design, pallet, boxes, position, batch_number, pallet_group, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         );
         if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
-        const from = String(rows[0].status || "Planning");
+        const line = rows[0];
+        const from = String(line.status || "Planning");
         // Same-status call = pallet (re)assignment only — e.g. a 2nd-stage line
         // that landed in Palletizing without one; logTransition no-ops on it.
         if (from !== to && !(PAL_LINE_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move palletization line from ${from} to ${to}`, 409);
+
+        const lineBoxes = Number(line.boxes) || 0;
+        const partial = Number.isInteger(reqBoxes) && reqBoxes > 0 && reqBoxes < lineBoxes && from !== to;
+        if (partial) {
+          // Split: insert the moved slice first, then shrink the original — a
+          // mid-write failure deletes the slice (same pattern as /pal-topup).
+          const slice = await ds.table("PalletizationPlanLine").insertRow({
+            plan: line.plan ? String(line.plan) : undefined,
+            sales_order: line.sales_order ? String(line.sales_order) : undefined,
+            order_item: line.order_item ? String(line.order_item) : undefined,
+            design: line.design ? String(line.design) : undefined,
+            pallet: /^\d+$/.test(pallet) ? pallet : line.pallet ? String(line.pallet) : undefined,
+            boxes: reqBoxes,
+            position: Number(line.position) || 0,
+            status: to,
+            batch_number: line.batch_number ? String(line.batch_number) : "",
+            ...(line.pallet_group ? { pallet_group: String(line.pallet_group) } : {}),
+            ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
+          });
+          try {
+            await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: lineBoxes - reqBoxes });
+          } catch (e) {
+            try { await ds.table("PalletizationPlanLine").deleteRow(slice.ROWID); } catch (_) {}
+            throw e;
+          }
+          await logTransition(catalyst, {
+            entity_type: "PalletizationPlanLine", entity_rowid: String(slice.ROWID), from_status: from, to_status: to,
+            note: `partial — ${reqBoxes} of ${lineBoxes} boxes`,
+          });
+          await recountOrderItems(catalyst, ds, [line.order_item]);
+          return { rowid: String(slice.ROWID), data: { ROWID: String(slice.ROWID), status: to, boxes: reqBoxes } };
+        }
+
         await ds.table("PalletizationPlanLine").updateRow({
           ROWID: lineId, status: to, ...(/^\d+$/.test(pallet) ? { pallet } : {}),
         });
         await logTransition(catalyst, {
           entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: to,
         });
-        await recountOrderItems(catalyst, ds, [rows[0].order_item]);
+        await recountOrderItems(catalyst, ds, [line.order_item]);
         return { rowid: lineId, data: { ROWID: lineId, status: to } };
       },
     );
@@ -2627,7 +2833,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
         const pick = async (id) =>
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
+              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
             ),
           )[0];
         const target = await pick(targetId);
@@ -2665,6 +2871,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
             status: "Palletizing",
             batch_number: donor.batch_number ? String(donor.batch_number) : "",
             pallet_group: group,
+            ...(String(donor.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
           });
           try {
             await ds.table("PalletizationPlanLine").updateRow({ ROWID: donorId, boxes: donorBoxes - n });
@@ -2739,10 +2946,28 @@ async function nextBoxNumber(catalyst) {
   return max + 1;
 }
 
+/* Loading series LOAD/FY/NNN — the loading's own identity (boxes predating
+   this column stay numberless; the client label falls back). The LIKE scope
+   keeps the scan under ZCQL's 300-row cap. */
+async function nextLoadNumber(catalyst) {
+  const now = new Date();
+  const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
+  const prefix = `LOAD/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT load_number FROM LoadBox WHERE load_number LIKE '${prefix}%'`),
+  );
+  let max = 0;
+  for (const r of rows) {
+    const n = String(r.load_number || "");
+    if (n.startsWith(prefix)) max = Math.max(max, parseInt(n.slice(prefix.length), 10) || 0);
+  }
+  return `${prefix}${String(max + 1).padStart(3, "0")}`;
+}
+
 async function getBox(catalyst, boxId) {
   const rows = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, box_number, status, vehicle, capacity, dispatch_date, container_number FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
+      `SELECT ROWID, box_number, load_number, status, vehicle, capacity, dispatch_date, container_number FROM LoadBox WHERE ROWID = ${boxId} AND deleted_at is null`,
     ),
   );
   if (!rows.length) throw badRequest(`Container not found: ${boxId}`, 404);
@@ -2794,14 +3019,17 @@ app.post("/load-box", async (req, res) => {
       { table_name: "LoadBox", operation: "insert", payload: body },
       async () => {
         const boxNumber = await nextBoxNumber(catalyst);
+        const loadNumber = await nextLoadNumber(catalyst);
         // Container-first create: the load modal captures the vehicle, container
         // identity and paperwork up front, so the box lands complete in one call.
-        const row = { box_number: boxNumber, status: "Open", capacity };
+        const row = { box_number: boxNumber, load_number: loadNumber, status: "Open", capacity };
         if (String(body.vehicle || "")) row.vehicle = String(body.vehicle);
         if (String(body.dispatch_date || "")) row.dispatch_date = String(body.dispatch_date).slice(0, 10);
+        // Loading-plan JSON (advisory, like Quote/SO container_plan) — capped to the column.
+        if (typeof body.load_plan === "string") row.load_plan = body.load_plan.slice(0, 10000);
         applyLoadBoxFields(row, body);
         const inserted = await ds.table("LoadBox").insertRow(row);
-        return { rowid: inserted.ROWID, data: { ROWID: inserted.ROWID, box_number: boxNumber } };
+        return { rowid: inserted.ROWID, data: { ROWID: inserted.ROWID, box_number: boxNumber, load_number: loadNumber } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2887,6 +3115,8 @@ app.post("/load-box-update/:rowid", async (req, res) => {
         // Planned dispatch date, editable while Open ("" clears it back to
         // auto-stamp-on-dispatch).
         if (body.dispatch_date !== undefined) patch.dispatch_date = String(body.dispatch_date || "").slice(0, 10) || null;
+        // Loading-plan JSON (advisory) — capped to the column; "" clears it.
+        if (typeof body.load_plan === "string") patch.load_plan = body.load_plan.slice(0, 10000);
         applyLoadBoxFields(patch, body);
         await ds.table("LoadBox").updateRow(patch);
         return { rowid: boxId, data: { ROWID: boxId } };
@@ -2984,7 +3214,7 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
             event_type: "dispatched",
             qty_delta: addQty,
             performed_by: "",
-            note: `Container ${box.box_number} dispatched`,
+            note: `${String(box.load_number || "") || `Container ${box.box_number}`} dispatched`,
           });
         }
         await recountOrderItems(catalyst, ds, [...addByOi.keys()]);
@@ -3024,7 +3254,7 @@ app.post("/load-box-dispatch/:rowid", async (req, res) => {
           "dispatched",
           {
             boxes: lines.reduce((s, l) => s + (Number(l.boxes) || 0), 0),
-            container: String(dispatchPatch.container_number || box.container_number || "") || `Container ${box.box_number}`,
+            container: String(dispatchPatch.container_number || box.container_number || "") || String(box.load_number || "") || `Container ${box.box_number}`,
             dispatch_date: dispatchDate,
           },
         );
@@ -3054,6 +3284,7 @@ async function writeLineIntoBox(ds, line, boxRowid, n) {
       position: Number(line.position) || 0,
       status: "ReadyToLoad",
       batch_number: line.batch_number ? String(line.batch_number) : "",
+      ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
     });
     try {
       await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: n, load_box: boxRowid });
@@ -3100,7 +3331,7 @@ app.post("/pal-lines-box", async (req, res) => {
         const byId = new Map(
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
+              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
             ),
           ).map((r) => [String(r.ROWID), r]),
         );
@@ -3158,7 +3389,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
       async () => {
         const line = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         )[0];
         if (!line) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -3316,6 +3547,14 @@ app.post("/send-to-loading", async (req, res) => {
           ).forEach((p) => liveSoPlans.add(String(p.ROWID)));
         }
         const soLines = allSoLines.filter((l) => liveSoPlans.has(String(l.plan)));
+        // Lines must always carry a pallet: SO-line pick, else the size default.
+        const palletByDesign = new Map();
+        const palletFor = async (oi) => {
+          if (oi.pallet) return String(oi.pallet);
+          const did = String(oi.design || "");
+          if (!palletByDesign.has(did)) palletByDesign.set(did, await defaultPalletForDesign(catalyst, did));
+          return palletByDesign.get(did);
+        };
         for (const [oiId, n] of wanted) {
           const oi = byId.get(oiId);
           const chunks = [];
@@ -3334,7 +3573,7 @@ app.post("/send-to-loading", async (req, res) => {
               sales_order: soId,
               order_item: oiId,
               design: oi.design ? String(oi.design) : null,
-              pallet: oi.pallet ? String(oi.pallet) : null,
+              pallet: await palletFor(oi),
               boxes: c.boxes,
               position: pos++,
               status: "ReadyToLoad",
@@ -3367,7 +3606,7 @@ app.post("/send-to-loading", async (req, res) => {
           {
             boxes: [...wanted.values()].reduce((s, n) => s + n, 0),
             items: wanted.size,
-            ...(box ? { container: String(box.container_number || "") || `Container ${box.box_number}` } : {}),
+            ...(box ? { container: String(box.container_number || "") || String(box.load_number || "") || `Container ${box.box_number}` } : {}),
           },
         );
         return { rowid: planId, data: { ROWID: planId, lines: wanted.size } };
@@ -3458,21 +3697,6 @@ app.post("/production-log", async (req, res) => {
               await ds.table("ProductionLog").updateRow({ ROWID: id, deleted_at: stamp });
           }
         }
-        // Boxes already requested against each order_item (every live plan line —
-        // requested always ⊇ produced), so we don't request more than ordered.
-        const inFlight = new Map();
-        if (orderItemIds.length) {
-          const uniq = [...new Set(orderItemIds.map(String))];
-          const rows = rowList(
-            await catalyst.zcql().executeZCQLQuery(
-              `SELECT order_item, qty_requested FROM ProductionLog WHERE entry_type = 'plan' AND deleted_at is null AND order_item IN (${uniq.join(",")})`,
-            ),
-          );
-          for (const r of rows) {
-            const k = String(r.order_item);
-            inFlight.set(k, (inFlight.get(k) || 0) + (Number(r.qty_requested) || 0));
-          }
-        }
         const group = `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const created = [];
         for (const l of lines) {
@@ -3481,13 +3705,8 @@ app.post("/production-log", async (req, res) => {
           if (l.order_item) {
             const oi = oiMap.get(l.order_item);
             if (!oi) throw badRequest(`OrderItem not found: ${l.order_item}`, 404);
-            const ordered = Number(oi.ordered_qty_boxes) || 0;
-            const pending = inFlight.get(l.order_item) || 0;
-            if (pending + l.qty_requested > ordered)
-              throw badRequest(
-                `Requesting ${l.qty_requested} exceeds remaining for this line (${pending} already requested of ${ordered} ordered)`,
-                409,
-              );
+            // No cap vs ordered (CR): production may be requested beyond the
+            // order's remaining — the client hints, the operator decides.
             design = design || String(oi.design || "");
             salesOrder = String(oi.sales_order || "");
           } else if (!design) {
@@ -3731,11 +3950,11 @@ app.post("/production-record/:rowid", async (req, res) => {
             });
         }
 
-        // Blank batch → auto-mint B/FY/NNN; a supplied batch must pass the
-        // duplicate guard (setting-controlled).
+        // Blank batch → auto-mint B/YYYY-MM/NNN (per item per month); a
+        // supplied batch must pass the duplicate guard (setting-controlled).
         const suppliedBatch = String(body.batch_number || "").trim();
         await assertBatchesAllowed(catalyst, [suppliedBatch], pl.design);
-        const batchNumber = suppliedBatch || (await nextBatchNumber(catalyst));
+        const batchNumber = suppliedBatch || (await nextBatchNumber(catalyst, pl.design));
 
         const rec = await ds.table("ProductionLog").insertRow({
           parent_log: rowid,
@@ -3852,7 +4071,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
         try {
           for (const l of lines) {
             // Mint per row; the prior insert is committed so the next scan bumps.
-            const batchNumber = l.batch_number || (await nextBatchNumber(catalyst));
+            const batchNumber = l.batch_number || (await nextBatchNumber(catalyst, pl.design));
             const rec = await ds.table("ProductionLog").insertRow({
               parent_log: rowid,
               entry_type: "record",
@@ -3944,7 +4163,7 @@ app.post("/opening-stock/:designId", async (req, res) => {
 
         const inserted = [];
         for (const l of lines) {
-          const batchNumber = l.batch_number || (await nextBatchNumber(catalyst));
+          const batchNumber = l.batch_number || (await nextBatchNumber(catalyst, designId));
           const rec = await ds.table("ProductionLog").insertRow({
             entry_type: "opening",
             design: designId,
@@ -4070,7 +4289,7 @@ app.post("/production-complete", async (req, res) => {
             }
             // Batch per line (each completed line is one design's run);
             // blank batch → auto-mint.
-            const batchNumber = String((l && l.batch_number) || "").trim() || (await nextBatchNumber(catalyst));
+            const batchNumber = String((l && l.batch_number) || "").trim() || (await nextBatchNumber(catalyst, pl.design));
             await ds.table("ProductionLog").insertRow({
               parent_log: id, entry_type: "record",
               design: pl.design || null, sales_order: pl.sales_order || null,
@@ -4383,6 +4602,69 @@ app.post("/recount-order-items", async (req, res) => {
           if (rows.length < 100) break;
         }
         return { rowid: "", data: { scanned } };
+      },
+    );
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Backfill: fill pallet on existing pallet-less plan lines — OrderItem.pallet
+   first, else the design's size-default pallet (defaultPalletForDesign).
+   Idempotent; unresolved = sizes with no Pallet master row (add one, re-run). */
+app.post("/backfill-line-pallets", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const ds = catalyst.datastore();
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "backfill-pallets", payload: {} },
+      async () => {
+        const zcql = catalyst.zcql();
+        // Collect the full pallet-less set BEFORE updating (offset paging over
+        // a shrinking predicate would skip rows).
+        const lines = [];
+        let offset = 0;
+        for (;;) {
+          const rows = rowList(
+            await zcql.executeZCQLQuery(
+              `SELECT ROWID, order_item, design FROM PalletizationPlanLine WHERE pallet is null AND deleted_at is null LIMIT ${offset}, 100`,
+            ),
+          );
+          lines.push(...rows);
+          if (rows.length < 100) break;
+          offset += 100;
+        }
+        const oiIds = [...new Set(lines.map((l) => String(l.order_item || "")).filter((x) => /^\d+$/.test(x)))];
+        const oiPallet = new Map();
+        for (let i = 0; i < oiIds.length; i += 50) {
+          rowList(
+            await zcql.executeZCQLQuery(
+              `SELECT ROWID, pallet FROM OrderItem WHERE ROWID IN (${oiIds.slice(i, i + 50).join(",")})`,
+            ),
+          ).forEach((r) => oiPallet.set(String(r.ROWID), r.pallet ? String(r.pallet) : null));
+        }
+        const byDesign = new Map();
+        let updated = 0;
+        let unresolved = 0;
+        for (const l of lines) {
+          let pallet = oiPallet.get(String(l.order_item || "")) || null;
+          if (!pallet) {
+            const did = String(l.design || "");
+            if (!byDesign.has(did)) byDesign.set(did, await defaultPalletForDesign(catalyst, did));
+            pallet = byDesign.get(did);
+          }
+          if (!pallet) {
+            unresolved++;
+            continue;
+          }
+          await ds.table("PalletizationPlanLine").updateRow({ ROWID: l.ROWID, pallet });
+          updated++;
+        }
+        return { rowid: "", data: { scanned: lines.length, updated, unresolved } };
       },
     );
     res.json({ ok: true, data: result.data });
@@ -4789,9 +5071,14 @@ app.post("/:table", async (req, res) => {
 /* Size owns per-box packing data (box weight, coverage, pcs); Item + Pallet
    snapshot it. Push a Size edit out to every row referencing that Size so the
    value stays global instead of frozen on the copy each was saved with.
+   Box weight is the one exception (CR 2026-09-10): it's manually overridable
+   on Item/Pallet, so when `oldBw` is known the fan-out only rewrites rows
+   still carrying the old Size default (or blank) — a manual value survives.
+   Without oldBw (insert path, /resync-size-snapshots backfill) it overwrites
+   everything, matching the resync route's documented behaviour.
    ponytail: row-by-row (not atomic) — the re-sync route below is idempotent
    and re-runs fix any partial fan-out. */
-async function propagateSizeSnapshots(catalyst, sizeId) {
+async function propagateSizeSnapshots(catalyst, sizeId, oldBw) {
   const ds = catalyst.datastore();
   const size = rowList(
     await catalyst.zcql().executeZCQLQuery(
@@ -4803,12 +5090,29 @@ async function propagateSizeSnapshots(catalyst, sizeId) {
   const sqm = Number(size.sqm_per_box) || 0;
   const sqft = Number(size.sqft_per_box) || 0;
   const pcs = Number(size.pcs_per_packing) || 0;
-  const designs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Design WHERE size = ${sizeId}`));
+  const keepManualBw = (rowBw) => {
+    if (oldBw === undefined) return false; // no old value known → overwrite all
+    const cur = Number(rowBw) || 0;
+    return cur !== 0 && cur !== oldBw; // a manual override → leave it alone
+  };
+  const designs = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, box_weight_kg FROM Design WHERE size = ${sizeId}`),
+  );
   for (const d of designs)
-    await ds.table("Design").updateRow({ ROWID: d.ROWID, box_weight_kg: bw, coverage_sqm: sqm, coverage_sqft: sqft, pcs_per_box: pcs });
-  const pallets = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Pallet WHERE size = ${sizeId}`));
+    await ds.table("Design").updateRow({
+      ROWID: d.ROWID,
+      ...(keepManualBw(d.box_weight_kg) ? {} : { box_weight_kg: bw }),
+      coverage_sqm: sqm, coverage_sqft: sqft, pcs_per_box: pcs,
+    });
+  const pallets = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, box_weight_kg FROM Pallet WHERE size = ${sizeId}`),
+  );
   for (const p of pallets)
-    await ds.table("Pallet").updateRow({ ROWID: p.ROWID, box_weight_kg: bw, coverage_sqm: sqm, coverage_sqft: sqft });
+    await ds.table("Pallet").updateRow({
+      ROWID: p.ROWID,
+      ...(keepManualBw(p.box_weight_kg) ? {} : { box_weight_kg: bw }),
+      coverage_sqm: sqm, coverage_sqft: sqft,
+    });
   return { designs: designs.length, pallets: pallets.length };
 }
 
@@ -4887,9 +5191,18 @@ app.patch("/:table/:rowid", async (req, res) => {
           )[0];
           transFrom = prev ? String(prev[transCol] || "") : "";
         }
+        // Capture the pre-edit Size box weight so the fan-out below can tell a
+        // row still on the old default apart from a manual override (CR).
+        let oldSizeBw;
+        if (table === "Size" && patch.box_weight_kg !== undefined) {
+          const prev = rowList(
+            await catalyst.zcql().executeZCQLQuery(`SELECT box_weight_kg FROM Size WHERE ROWID = ${rid}`),
+          )[0];
+          oldSizeBw = Number(prev && prev.box_weight_kg) || 0;
+        }
         const row = await ds.table(table).updateRow(patch);
         // Size edits fan out to the Item + Pallet packing-data snapshots.
-        if (table === "Size") await propagateSizeSnapshots(catalyst, rid);
+        if (table === "Size") await propagateSizeSnapshots(catalyst, rid, oldSizeBw);
         if (transCol)
           await logTransition(catalyst, {
             entity_type: table, entity_rowid: rid,

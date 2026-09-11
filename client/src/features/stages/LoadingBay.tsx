@@ -1,21 +1,16 @@
 /* ============================================================
-   Loading (/loading) — the loading & dispatch board, standard list-page kit
-   (2026-08-24 revamp of the two-panel dock; git history holds the old layout).
-   Cards/rows are PalletizationPlanLines moving through Ready for Loading →
-   In Loading → Ready for Dispatch → Dispatch. The stage is DERIVED: no box =
-   Ready; Open box = In Loading; Open box with container no / line seal
-   captured = Ready for Dispatch; Dispatched box = done. "Confirm Load"
-   (VehicleLoadModal) captures vehicle + seals on the Open box; "Dispatch" then
-   just sets the date — the old one-shot dispatch is split in two.
-   Kanban/Sheet toggle, search, advanced filter, ColumnPicker, and the
-   Production-style group-by swimlanes/bands. Loading is CONTAINER-FIRST:
-   both "Load" and "New Loading" open LoadContainerModal, which either picks
-   an open container (with an after-loading fill preview) or captures a new
-   container's details up front — so a box is never nameless. "New Loading"
-   then opens its detail page (/loading/:id), where it can be filled directly
-   (Add Items), independent of palletization.
-   ponytail: no drag-and-drop here — checkbox selection + Load batch covers
-   it; restore b600df5's onDropBox/onDropBay wiring if the crew asks.
+   Loading and Dispatch (/loading) — the loading & dispatch board, standard
+   list-page kit. Cards/rows are BOXED PalletizationPlanLines moving through
+   In Loading → Ready for Dispatch → Dispatched. The stage is DERIVED:
+   Open box = In Loading; Open box with container no / line seal captured =
+   Ready for Dispatch; Dispatched box = done. Un-boxed Ready-for-Loading
+   lines live on /packing since 2026-09-04 — the Load button moved there
+   (useLoadFlow is the shared confirm). "Assign Vehicle" (VehicleLoadModal)
+   captures vehicle + seals on the Open box; "Dispatch" then just sets the
+   date. Kanban/Sheet toggle, search, advanced filter, ColumnPicker, and the
+   Production-style group-by swimlanes/bands. "New Loading" opens
+   NewLoadingModal (SO → container-plan prefill → one container per
+   submit); container/vehicle details are captured via Assign Vehicle.
    ============================================================ */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -27,31 +22,31 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
-import { usePersistedState } from "@/lib/usePersistedState";
+import { parseLoadPlan } from "@/data";
+import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { isoInfo } from "@/features/masters/customersApi";
+import { cachedOrders } from "@/features/orders/ordersApi";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { planProgress } from "@/features/quotes/planProgress";
 import { VehicleLoadModal } from "./VehicleLoadModal";
-import { LoadContainerModal } from "./LoadContainerModal";
+import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
+import { LoadingWorkspace } from "./LoadingWorkspace";
+import { NewLoadingModal } from "./NewLoadingModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
-import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
-import { useContainerPlanBySo } from "./containerPlanPrefill";
+import { useLoadFlow } from "./useLoadFlow";
+import { nextPlanContainer } from "./containerPlanPrefill";
 import {
   boxFill,
   boxLabel,
   cachedLoadBoxes,
   cachedPalPlans,
-  createLoadBox,
   deleteLoadBox,
   dispatchLoadBox,
   invalidatePalPlans,
   lineFrac,
   listPalPlans,
   sealed,
-  sendToLoading,
   setLineBox,
-  setLinesBox,
   updateLoadBox,
   type LoadBox,
   type LoadingCapture,
@@ -62,9 +57,8 @@ import {
 type Entry = { p: PalPlan; l: PalPlanLine };
 
 // Derived loading stage of a line (see the header comment).
-type LoadStage = "Ready" | "InLoading" | "ReadyDispatch" | "Dispatched";
+type LoadStage = "InLoading" | "ReadyDispatch" | "Dispatched";
 const STAGES = [
-  { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
   { key: "InLoading", label: "In Loading", chip: "p-loading" },
   { key: "ReadyDispatch", label: "Ready for Dispatch", chip: "p-palletized" },
   { key: "Dispatched", label: "Dispatched", chip: "p-completed" },
@@ -76,20 +70,13 @@ const STAGE_IDX = new Map(STAGES.map((c, i) => [c.key, i]));
 type Row = { p: PalPlan; l: PalPlanLine; stage: LoadStage; box?: LoadBox };
 
 // Board/sheet grouping dimensions (same mechanism as Production).
-type LoadGroupBy = "customer" | "so" | "container" | "batch" | "item";
+// Customer only for now — 2026-09-10; stale persisted dims filter out on read.
+type LoadGroupBy = "customer";
 const GROUP_DIMS: Array<{ id: LoadGroupBy; label: string }> = [
   { id: "customer", label: "Customer" },
-  { id: "so", label: "Order" },
-  { id: "container", label: "Container" },
-  { id: "batch", label: "Batch" },
-  { id: "item", label: "Item" },
 ];
 const laneKey = (r: Row, d: LoadGroupBy): string =>
-  d === "customer" ? r.l.customerName || "—"
-  : d === "so" ? r.l.soNumber || "No SO"
-  : d === "container" ? (r.box ? boxLabel(r.box) : "—")
-  : d === "batch" ? (r.l.batchNumber ? `Batch ${r.l.batchNumber}` : "No batch")
-  : r.l.designLabel || "—";
+  d === "customer" ? r.l.customerName || "—" : "—";
 
 const daysSince = (iso: string) => {
   const t = Date.parse((iso || "").slice(0, 19).replace(" ", "T"));
@@ -141,7 +128,6 @@ function loadColumns(): ColumnDef<Row>[] {
       label: "Status",
       render: (r) => <span className={`chip palstatus ${stageMeta(r.stage).chip}`} style={{ whiteSpace: "nowrap" }}>{stageMeta(r.stage).label}</span>,
     },
-    { key: "container", label: "Container", className: "nw", render: (r) => (r.box ? boxLabel(r.box) : "—") },
     {
       key: "vehicle",
       label: "Vehicle",
@@ -195,14 +181,13 @@ function loadColumns(): ColumnDef<Row>[] {
 // Sortable value per column key (header-click sorting — grid standard).
 function loadSortVal(r: Row, k: string): string | number {
   switch (k) {
-    case "code": return r.l.itemCode;
+    case "code": return r.box ? boxLabel(r.box) : "";
     case "design": return r.l.designLabel;
     case "customer": return r.l.customerName;
     case "so": return r.l.soNumber || "";
     case "batch": return r.l.batchNumber || "";
     case "boxes": return r.l.boxes;
     case "stage": return STAGE_IDX.get(r.stage) ?? 0;
-    case "container": return r.box ? boxLabel(r.box) : "";
     case "vehicle": return r.box?.vehicleNumber || "";
     case "containerNo": return r.box?.containerNumber || "";
     case "seal": return r.box?.lineSeal || "";
@@ -220,9 +205,9 @@ function loadSortVal(r: Row, k: string): string | number {
 /* Loadings view: one row per LoadBox — the box-level master grid. Status is
    derived exactly like LoadingDetail's chip; aggregates are precomputed so
    renderers and sorting share them. */
-type BoxStatus = "Empty" | "In Loading" | "Ready for Dispatch" | "Dispatched";
-const BOX_STATUS_CHIP: Record<BoxStatus, string> = { Empty: "p-planning", "In Loading": "p-loading", "Ready for Dispatch": "p-palletized", Dispatched: "p-completed" };
-const BOX_STATUS_IDX: Record<BoxStatus, number> = { Empty: 0, "In Loading": 1, "Ready for Dispatch": 2, Dispatched: 3 };
+type BoxStatus = "Empty" | "Planned" | "In Loading" | "Ready for Dispatch" | "Dispatched";
+const BOX_STATUS_CHIP: Record<BoxStatus, string> = { Empty: "p-planning", Planned: "p-planning", "In Loading": "p-loading", "Ready for Dispatch": "p-palletized", Dispatched: "p-completed" };
+const BOX_STATUS_IDX: Record<BoxStatus, number> = { Empty: 0, Planned: 1, "In Loading": 2, "Ready for Dispatch": 3, Dispatched: 4 };
 type BoxRow = {
   box: LoadBox;
   lines: PalPlanLine[];
@@ -342,26 +327,31 @@ export function LoadingBay() {
   // Interaction state.
   const [q, setQ] = usePersistedState("loading.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("loading.criteria", {});
-  const [view, setView] = usePersistedState<"kanban" | "sheet" | "loadings">("loading.view", "kanban");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [rawView, setView] = useViewState<"workspace" | "kanban" | "sheet" | "loadings" | "customer">("loading.view", "sheet", "sheet");
+  // Kanban is disabled here (2026-09-11) — a persisted "kanban" or "board" (the
+  // retired 2026-09-10 queue board) falls back to the Sheet grid; render code kept.
+  const view = (rawView as string) === "board" || rawView === "kanban" ? "sheet" : rawView;
+  const [newOpen, setNewOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
-  // lineId "" = container-only mode ("New Loading" — create the container, then open it).
-  const [picker, setPicker] = useState<{ lineIds: string[] } | null>(null);
+  // Shared load flow — picker state + confirm live in the hook ("New Loading" here).
+  const flow = useLoadFlow({ plans, boxes, onChanged: () => void load() });
   // Post-dispatch printable Dispatch Entry — entries snapshotted pre-refresh.
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
 
   // Grouping: an ordered list of dimensions → nested swimlanes / sheet bands.
+  // Default = grouped by Customer (2026-09-11). Key bumped to .v2 so stored
+  // "[]" from the ungrouped-default era doesn't defeat the new default.
   const [groupBy, setGroupBy] = useState<LoadGroupBy[]>(() => {
     try {
-      const v = JSON.parse(localStorage.getItem("loading.groups") || "[]");
-      return Array.isArray(v) ? v.filter((d) => GROUP_DIMS.some((o) => o.id === d)) : [];
+      const v = JSON.parse(localStorage.getItem("loading.groups.v2") ?? '["customer"]');
+      return Array.isArray(v) ? v.filter((d) => GROUP_DIMS.some((o) => o.id === d)) : ["customer"];
     } catch {
-      return [];
+      return ["customer"];
     }
   });
   useEffect(() => {
-    localStorage.setItem("loading.groups", JSON.stringify(groupBy));
+    localStorage.setItem("loading.groups.v2", JSON.stringify(groupBy));
   }, [groupBy]);
   // Grouping picker (reuses the grid's ColumnPicker: checked = included, row
   // order = nesting order). Checked dims first (in nesting order), rest after.
@@ -378,53 +368,60 @@ export function LoadingBay() {
   const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
 
   // ---- derived ------------------------------------------------
-  const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l })));
+  const { allLines, openBoxes, linesOfBox } = flow;
   const boxById = new Map(boxes.map((b) => [b.id, b]));
-  const linesOfBox = (boxId: string) => allLines.filter(({ l }) => l.loadBoxId === boxId);
   // Fill is fractional vs each line's PALLET capacity — a box holding 50 boxes
   // of a 100-box pallet reads 50%, whatever the LoadBox.capacity says.
   const fillOf = (b: LoadBox) => boxFill(linesOfBox(b.id).map(({ l }) => l));
   const isEmptyBox = (b: LoadBox) => linesOfBox(b.id).length === 0;
-  const openBoxes = boxes.filter((b) => b.status === "Open");
 
-  // Loadings view rows: every box (Empty and Dispatched included — it's the master list).
+  // Plan-only loading (SO-first New Loading): minted with a load_plan but
+  // nothing loaded yet. Summarise SOs/customers from the plan JSON — the SO
+  // ROWIDs resolve via pal-plan lines, then the orders cache (no extra fetch).
+  // The boxes total follows the SO's LATEST container plan (next unsent
+  // container) when it still has one — the minted snapshot is the fallback.
+  const planSummary = (b: LoadBox) => {
+    const pls = parseLoadPlan(b.loadPlan)?.lines ?? [];
+    if (pls.length === 0) return null;
+    const soIds = [...new Set(pls.map((x) => x.so).filter(Boolean))];
+    const slice = soIds.length === 1 ? nextPlanContainer(soIds[0], flow.planBySo, plans, boxes, flow.designIdOf) : null;
+    const heads = soIds.map((id) => {
+      const line = allLines.find(({ l }) => l.salesOrderId === id)?.l;
+      if (line) return { so: line.soNumber, customer: line.customerName };
+      const o = (cachedOrders() ?? []).find((o) => o.salesOrderId === id);
+      return { so: o?.orderNumber || "", customer: o?.party || "" };
+    });
+    return {
+      sos: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", "),
+      customers: [...new Set(heads.map((h) => h.customer).filter(Boolean))].join(", "),
+      boxes: slice
+        ? slice.lines.reduce((s, x) => s + (Number(x.boxes) || 0), 0)
+        : pls.reduce((s, x) => s + (Number(x.boxes) || 0), 0),
+    };
+  };
+
+  // Loadings view rows: every box (Empty and Dispatched included — it's the
+  // master list). A plan-only box reads its aggregates from the plan JSON so
+  // the row (and search) isn't blank before anything is loaded.
   const boxRows: BoxRow[] = boxes.map((b) => {
     const inBox = linesOfBox(b.id).map(({ l }) => l);
+    const plan = inBox.length === 0 ? planSummary(b) : null;
     return {
       box: b,
       lines: inBox,
-      customers: [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", "),
-      sos: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", "),
-      totalBoxes: inBox.reduce((s, l) => s + l.boxes, 0),
+      customers: plan?.customers ?? [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", "),
+      sos: plan?.sos ?? [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", "),
+      totalBoxes: plan?.boxes ?? inBox.reduce((s, l) => s + l.boxes, 0),
       fillPct: Math.round(boxFill(inBox) * 100),
-      status: b.status !== "Open" ? "Dispatched" : sealed(b) ? "Ready for Dispatch" : inBox.length ? "In Loading" : "Empty",
+      status: b.status !== "Open" ? "Dispatched" : sealed(b) ? "Ready for Dispatch" : inBox.length ? "In Loading" : plan ? "Planned" : "Empty",
     };
   });
-
-  // Guide-by-plan: the SO/quote container plan's next unfilled container that
-  // wants this design — shown as a hint (never enforced) in LoadContainerModal.
-  const { planBySo, designIdOf } = useContainerPlanBySo();
-  const planHintFor = (l: PalPlanLine) => {
-    const cp = planBySo.get(l.salesOrderId);
-    if (!cp) return undefined;
-    const prog = planProgress(
-      cp.plan,
-      dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [l.salesOrderId] })),
-      designIdOf,
-    );
-    for (let i = 0; i < cp.plan.containers.length; i++) {
-      if (prog[i].status === "Sent") continue;
-      const ln = cp.plan.containers[i].lines.find((x) => designIdOf(x.design) === l.designId);
-      if (ln) return { docNo: cp.docNo, containerNo: cp.plan.containers[i].no, boxes: ln.boxes, palletName: ln.palletName };
-    }
-    return undefined;
-  };
 
   const stageOf = (l: PalPlanLine): LoadStage | null => {
     const b = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
     if (b?.status === "Dispatched") return "Dispatched";
     if (b) return sealed(b) ? "ReadyDispatch" : "InLoading";
-    return l.status === "ReadyToLoad" ? "Ready" : null; // null = pre-loading, lives on /packing
+    return null; // un-boxed (incl. Ready for Loading) = pre-loading, lives on /packing
   };
   const rows: Row[] = allLines.flatMap(({ p, l }) => {
     const stage = stageOf(l);
@@ -440,12 +437,19 @@ export function LoadingBay() {
       { key: "country", label: "Country", type: "multiselect", options: opts(country), get: country },
       { key: "stage", label: "Status", type: "multiselect", options: STAGES.map((s) => s.label), get: (r) => stageMeta(r.stage).label },
       { key: "batch", label: "Batch", type: "multiselect", options: opts((r) => r.l.batchNumber), get: (r) => r.l.batchNumber },
-      { key: "container", label: "Container", type: "multiselect", options: opts((r) => (r.box ? boxLabel(r.box) : "")), get: (r) => (r.box ? boxLabel(r.box) : "") },
+      { key: "container", label: "Loading", type: "multiselect", options: opts((r) => (r.box ? boxLabel(r.box) : "")), get: (r) => (r.box ? boxLabel(r.box) : "") },
       { key: "boxes", label: "Boxes", type: "numrange", get: (r) => r.l.boxes },
       { key: "dispatchDate", label: "Dispatch Date Between", type: "daterange", get: (r) => r.box?.dispatchDate || "" },
     ];
   })();
   const qLower = q.trim().toLowerCase();
+  // Boxes with no line rows yet (Planned / Empty) — shown as stubs on the
+  // board and sheet so a fresh loading is reachable from every view.
+  const stubBoxes = openBoxes.filter(isEmptyBox).filter((b) => {
+    if (!qLower) return true;
+    const plan = planSummary(b);
+    return `${boxLabel(b)} ${plan?.sos ?? ""} ${plan?.customers ?? ""}`.toLowerCase().includes(qLower);
+  });
   const searched = rows.filter(
     (r) =>
       !qLower ||
@@ -498,16 +502,6 @@ export function LoadingBay() {
   const boxSort = useSortRows(boxSearched, boxSortVal, "created", -1);
   const boxPager = usePagination(boxSearched.length, "loadingBoxPageSize", q);
 
-  // Prune stale selection after a refresh moves lines on.
-  useEffect(() => {
-    setSelected((prev) => {
-      const ids = new Set(allLines.filter(({ l }) => l.status === "ReadyToLoad" && !l.loadBoxId).map(({ l }) => l.id));
-      const next = new Set([...prev].filter((id) => ids.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plans, boxes]);
-
   // ---- mutations (all sequential + one refresh, house pattern) ----
   const after = (ok: boolean, err: string, msg: string) => {
     if (!ok) { toast.error(err); return; }
@@ -524,84 +518,7 @@ export function LoadingBay() {
     after(res.ok, res.error || "Could not unload the item", `${line.itemCode} back to Ready for Loading (${boxLabel(box)})`);
   };
 
-  // Confirm from the load modal. `target` is either an existing container or
-  // the details of a new one to mint first (container-first: the container
-  // lands complete, no follow-up Confirm Load needed). `entries` is what the
-  // modal showed the user — every line, with a `boxes` count only on a partial
-  // (split server-side). One all-or-nothing batch call: a bad line loads
-  // nothing. With no entries (New Loading) we just create the container.
-  const confirmLoad = async (
-    target: { boxId: string } | { details: { vehicle?: string; dispatch_date?: string } & LoadingCapture },
-    entries: Array<{ lineId: string; boxes?: number }>,
-    prodEntries: Array<{ salesOrderId: string; orderItemId: string; boxes: number }> = [],
-  ) => {
-    if (!picker || busy) return; // in-flight guard: a double-confirm must not double-load
-    setBusy(true);
-    let toBox: string;
-    let label: string;
-    if ("boxId" in target) {
-      toBox = target.boxId;
-      label = boxLabel(boxes.find((b) => b.id === target.boxId)!);
-    } else {
-      const created = await createLoadBox(target.details);
-      if (!created.ok || !created.data?.ROWID) {
-        setBusy(false);
-        after(false, created.error || "Could not create the container", "");
-        return;
-      }
-      toBox = String(created.data.ROWID);
-      label = target.details.container_number || `Container ${created.data.box_number ?? ""}`.trim();
-    }
-    // Container-only mode: nothing to allocate, open the new loading.
-    if (entries.length === 0 && prodEntries.length === 0) {
-      setBusy(false);
-      setPicker(null);
-      after(true, "", `${label} created`);
-      navigate(`/loading/${encodeURIComponent(toBox)}`);
-      return;
-    }
-    // Pallet lines first — all-or-nothing, so a failure aborts before any
-    // direct-from-production lines are minted.
-    if (entries.length > 0) {
-      const res = await setLinesBox(toBox, entries);
-      if (!res.ok) {
-        setBusy(false);
-        setPicker(null);
-        after(false, res.error || "Could not load the items", "");
-        return;
-      }
-    }
-    // Direct-from-production picks: /send-to-loading mints ReadyToLoad lines
-    // and lands them in the box in one call. One call per SO, sequential.
-    let prodError = "";
-    const bySo = new Map<string, { order_item: string; boxes: number }[]>();
-    for (const e of prodEntries) bySo.set(e.salesOrderId, [...(bySo.get(e.salesOrderId) ?? []), { order_item: e.orderItemId, boxes: e.boxes }]);
-    for (const [so, soLines] of bySo) {
-      const res = await sendToLoading({ sales_order: so, box: toBox, lines: soLines });
-      if (!res.ok) {
-        prodError = res.error || "Could not add the order items";
-        break;
-      }
-    }
-    setBusy(false);
-    setPicker(null);
-    setSelected(new Set());
-    if (prodError) {
-      // Pallets (if any) are already in — recoverable via Add Items on the loading.
-      toast.error(
-        entries.length > 0
-          ? `Pallets loaded into ${label}, but adding order items failed: ${prodError} — retry via Add Items on the loading`
-          : prodError,
-      );
-      invalidatePalPlans();
-      void load();
-      return;
-    }
-    const total = entries.length + prodEntries.length;
-    after(true, "", `${total} item${total === 1 ? "" : "s"} → ${label}`);
-  };
-
-  // "Confirm Load": capture vehicle + container/seal details on the Open box.
+  // "Assign Vehicle": capture vehicle + container/seal details on the Open box.
   // Once a container no or line seal lands, the box derives Ready for Dispatch.
   const confirmLoadDetails = async (vehicleId: string, capture: LoadingCapture) => {
     const t = vehModal;
@@ -615,7 +532,7 @@ export function LoadingBay() {
     after(res.ok, res.error || "Could not save loading details", t.box.status === "Open" && nowSealed ? `${boxLabel(t.box)} → Ready for Dispatch` : "Loading details saved");
   };
 
-  // "Dispatch": the box is already sealed (Confirm Load) — just confirm + date.
+  // "Dispatch": the box is already sealed (Assign Vehicle) — just confirm + date.
   const dispatchBox = async (box: LoadBox) => {
     if (busy) return;
     const inBox = linesOfBox(box.id);
@@ -671,26 +588,13 @@ export function LoadingBay() {
     if (err) { invalidatePalPlans(); void load(); }
   };
 
-  // ---- selection ----------------------------------------------
-  const selBoxes = allLines.filter(({ l }) => selected.has(l.id)).reduce((s, { l }) => s + l.boxes, 0);
-  const toggleSelect = (l: PalPlanLine) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(l.id)) next.delete(l.id); else next.add(l.id);
-      return next;
-    });
-
-  // A row's Load button acts on the checked items plus the clicked one —
-  // a selection is never silently ignored.
-  const loadTargets = (l: PalPlanLine) => (selected.size ? [...new Set([...selected, l.id])] : [l.id]);
-
   // Per-row container actions (Edit option) by stage.
   const menuFor = (r: Row): { label: string; danger?: boolean; onClick: () => void }[] => {
     const box = r.box;
     if (!box) return [];
     const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
     if (canEdit) {
-      items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Confirm Load" : "Edit load details", onClick: () => setVehModal({ box }) });
+      items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
     }
     if (canEdit && box.status === "Open") {
       items.push({ label: "Unload item", onClick: () => void unload(r.l, box) });
@@ -710,7 +614,7 @@ export function LoadingBay() {
     const { box } = r;
     const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
     if (canEdit) {
-      items.push({ label: box.status === "Open" && !sealed(box) ? "Confirm Load" : "Edit load details", onClick: () => setVehModal({ box }) });
+      items.push({ label: box.status === "Open" && !sealed(box) ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
     }
     if (canEdit && box.status === "Open") {
       if (sealed(box)) items.push({ label: "Dispatch", onClick: () => void dispatchBox(box) });
@@ -727,30 +631,19 @@ export function LoadingBay() {
   // ---- kanban card --------------------------------------------
   const card = (r: Row) => {
     const { p, l, stage, box } = r;
-    const isSel = selected.has(l.id);
     return (
       <div
         key={l.id}
         onClick={() => navigate(box ? `/loading/${encodeURIComponent(box.id)}` : `/packing/${p.id}`)}
         title={box ? `Open ${boxLabel(box)}` : `Open ${p.palNumber}`}
         style={{
-          border: `1px solid ${isSel ? "var(--accent)" : "var(--border)"}`,
+          border: "1px solid var(--border)",
           borderRadius: 8, padding: 10,
-          background: isSel ? "var(--accent-soft)" : "var(--bg)",
+          background: "var(--bg)",
           cursor: "pointer",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {canEdit && stage === "Ready" && (
-            <input
-              type="checkbox"
-              checked={isSel}
-              onClick={(ev) => ev.stopPropagation()}
-              onChange={() => toggleSelect(l)}
-              title="Select to load together"
-              style={{ margin: 0, flex: "0 0 auto" }}
-            />
-          )}
           <button
             type="button"
             className="linkish mono"
@@ -806,18 +699,6 @@ export function LoadingBay() {
             )}
           </div>
         )}
-        {canEdit && stage === "Ready" && (
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); setPicker({ lineIds: loadTargets(l) }); }}
-            title={loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container"}
-          >
-            <Icon name="truck" size={11} /> Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
-          </button>
-        )}
         {canEdit && stage === "InLoading" && box && (
           <button
             type="button"
@@ -827,7 +708,7 @@ export function LoadingBay() {
             onClick={(ev) => { ev.stopPropagation(); setVehModal({ box }); }}
             title={`Capture vehicle + seals for ${boxLabel(box)}`}
           >
-            Confirm Load
+            Assign Vehicle
           </button>
         )}
         {canEdit && stage === "ReadyDispatch" && box && (
@@ -846,41 +727,40 @@ export function LoadingBay() {
     );
   };
 
-  // Empty Open loadings have no line rows, so without a card they'd be
-  // unreachable from the board — show them in In Loading as dashed stubs.
-  const emptyBoxCard = (b: LoadBox) => (
-    <div
-      key={`empty-${b.id}`}
-      onClick={() => navigate(`/loading/${encodeURIComponent(b.id)}`)}
-      title={`Open ${boxLabel(b)}`}
-      style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 10, background: "var(--bg)", cursor: "pointer" }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <Icon name="truck" size={12} />
-        <span className="mono" style={{ fontWeight: 600 }}>{boxLabel(b)}</span>
-        <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>Empty</span>
+  // Planned/Empty Open loadings have no line rows, so without a card they'd
+  // be unreachable from the board — show them in In Loading as dashed stubs.
+  const emptyBoxCard = (b: LoadBox) => {
+    const plan = planSummary(b);
+    return (
+      <div
+        key={`empty-${b.id}`}
+        onClick={() => navigate(`/loading/${encodeURIComponent(b.id)}`)}
+        title={`Open ${boxLabel(b)}`}
+        style={{ border: "1px dashed var(--border)", borderRadius: 8, padding: 10, background: "var(--bg)", cursor: "pointer" }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <Icon name="truck" size={12} />
+          <span className="mono" style={{ fontWeight: 600 }}>{boxLabel(b)}</span>
+          <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{plan ? "Planned" : "Empty"}</span>
+        </div>
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {plan
+            ? [plan.customers, plan.sos, `${fmt(plan.boxes)} bx planned`].filter(Boolean).join("  ·  ")
+            : "No items yet — open to add items"}
+        </div>
       </div>
-      <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>No items yet — open to add items</div>
-    </div>
-  );
+    );
+  };
 
   // ---- kanban: stage columns + nested swimlanes ---------------
-  // ponytail: empty loadings render on the ungrouped board only — inside
-  // group lanes they'd duplicate per lane; the sheet stays line-rows only.
-  const PANELS: { title: string; keys: LoadStage[] }[] = [
-    { title: "Ready for Loading", keys: ["Ready"] },
-    { title: "Loading & Dispatch", keys: ["InLoading", "ReadyDispatch", "Dispatched"] },
-  ];
+  // ponytail: on the grouped board the stubs render once in a strip above the
+  // lanes (renderLevel) — inside group lanes they'd duplicate per lane.
   const stageGrid = (laneRows: Row[], showEmpties = false) => (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 12, alignItems: "start", overflowX: "auto" }}>
-      {PANELS.map((panel) => (
-        <div key={panel.title} className="form-section" style={{ padding: 10 }}>
-          <div className="form-section-title">{panel.title}</div>
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${panel.keys.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start" }}>
-            {STAGES.filter((s) => panel.keys.includes(s.key)).map((col) => {
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${STAGES.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
+      {STAGES.map((col) => {
         const cards = laneRows.filter((r) => r.stage === col.key);
         const totalBoxes = cards.reduce((s, r) => s + r.l.boxes, 0);
-        const empties = showEmpties && col.key === "InLoading" ? openBoxes.filter(isEmptyBox) : [];
+        const empties = showEmpties && col.key === "InLoading" ? stubBoxes : [];
         return (
           <div key={col.key} className="card" style={{ padding: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
@@ -897,9 +777,6 @@ export function LoadingBay() {
           </div>
         );
       })}
-          </div>
-        </div>
-      ))}
     </div>
   );
 
@@ -916,6 +793,17 @@ export function LoadingBay() {
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: depth === 0 ? 0 : 16 }}>
+        {depth === 0 && stubBoxes.length > 0 && (
+          <div className="form-section">
+            <div className="form-section-title">
+              <span style={{ flex: 1 }}>Planned / empty loadings</span>
+              <span className="muted" style={{ fontSize: 14, fontWeight: 400, letterSpacing: 0 }}>{stubBoxes.length}</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
+              {stubBoxes.map(emptyBoxCard)}
+            </div>
+          </div>
+        )}
         {[...by.entries()]
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([k, sub]) => (
@@ -939,7 +827,7 @@ export function LoadingBay() {
   };
 
   // ---- render -------------------------------------------------
-  const viewBtn = (v: "kanban" | "sheet" | "loadings", icon: "kanban" | "orders" | "truck", label: string) => (
+  const viewBtn = (v: "workspace" | "kanban" | "sheet" | "loadings" | "customer", icon: "package" | "kanban" | "orders" | "truck" | "user", label: string) => (
     <button
       onClick={() => setView(v)}
       title={label}
@@ -959,18 +847,21 @@ export function LoadingBay() {
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar" style={{ marginBottom: 12 }}>
-        <span className="gsearch">
-          <Icon name="search" size={13} />
-          <input type="text" placeholder="Search item, SO, customer, batch, container…" value={q} onChange={(e) => setQ(e.target.value)} />
-        </span>
+        {view !== "customer" && view !== "workspace" && (
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input type="text" placeholder="Search item, SO, customer, batch, container…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </span>
+        )}
         <div style={{ flex: 1 }} />
-        {view !== "loadings" && <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
+        {view === "sheet" && <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
         <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
-          {viewBtn("kanban", "kanban", "Kanban")}
+          {viewBtn("workspace", "package", "Workspace")}
           {viewBtn("sheet", "orders", "Sheet")}
           {viewBtn("loadings", "truck", "Loadings")}
+          {viewBtn("customer", "user", "Customer Sheet")}
         </span>
-        {view !== "loadings" && (
+        {view === "sheet" && (
           <ColumnPicker
             columns={groupCols}
             hidden={groupHidden}
@@ -985,34 +876,21 @@ export function LoadingBay() {
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={busy} onClick={() => setPicker({ lineIds: [] })}>
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => setNewOpen(true)}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
         )}
       </div>
 
-      {/* Selection bar — load several Ready items into one container. */}
-      {canEdit && selected.size > 0 && (
-        <div className="fbar" style={{ marginBottom: 12, borderLeft: "3px solid var(--accent)" }}>
-          <span className="mono" style={{ color: "var(--accent)" }}>{selected.size} selected · {fmt(selBoxes)} boxes</span>
-          <button
-            className="hbtn primary"
-            style={{ height: 26, padding: "0 12px", borderRadius: 5 }}
-            disabled={busy}
-            onClick={() => setPicker({ lineIds: [...selected] })}
-          >
-            <Icon name="truck" size={12} /> Load selected ({selected.size})
-          </button>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setSelected(new Set())}>Clear</button>
-        </div>
-      )}
-
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
-      ) : view === "kanban" ? (
-        renderLevel(filtered, groupBy, 0)
+      ) : view === "workspace" ? (
+        // SO-centric workspace — owns its own customer/SO pickers.
+        <LoadingWorkspace plans={plans} boxes={boxes} sheetRows={rows} canEdit={canEdit} onChanged={() => void load()} />
+      ) : view === "customer" ? (
+        // The sheet owns its own customer filter — global search/filters skipped.
+        <LoadingCustomerSheet rows={rows} canEdit={canEdit} onSaved={() => void load()} />
       ) : view === "loadings" ? (
         <div className="card">
           <div style={{ overflow: "auto" }}>
@@ -1034,7 +912,15 @@ export function LoadingBay() {
                     title={`Open ${boxLabel(r.box)}`}
                     style={{ cursor: "pointer" }}
                   >
-                    <td className="mono nw" style={{ fontWeight: 600 }}>{boxLabel(r.box)}</td>
+                    <td className="mono nw" style={{ fontWeight: 600 }}>
+                      {boxLabel(r.box)}
+                      {(() => {
+                        const grp = parseLoadPlan(r.box.loadPlan)?.group;
+                        return grp && grp.of > 1
+                          ? <span className="chip" style={{ marginLeft: 8, fontSize: "var(--t-xs)" }} title="Part of a multi-container loading plan">C{grp.no}/{grp.of}</span>
+                          : null;
+                      })()}
+                    </td>
                     {boxCols.visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
@@ -1059,17 +945,15 @@ export function LoadingBay() {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {PANELS.map((panel) => {
-            const rows = sheetRows.filter((r) => panel.keys.includes(r.stage));
+          {(() => {
+            const rows = sheetRows;
             return (
-        <div key={panel.title} className="form-section" style={{ padding: 10 }}>
-          <div className="form-section-title">{panel.title}</div>
           <div className="card">
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortTh id="code" label="Pallet" sort={sort} />
+                  <SortTh id="code" label="Loading" sort={sort} />
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
@@ -1080,6 +964,31 @@ export function LoadingBay() {
                 {(() => {
                   const out: ReactNode[] = [];
                   const span = visible.length + 1 + (canEdit ? 1 : 0);
+                  // Planned/Empty loadings first — no line rows yet, one
+                  // summary row per box (click opens the loading).
+                  for (const b of stubBoxes) {
+                    const plan = planSummary(b);
+                    out.push(
+                      <tr
+                        key={`box-${b.id}`}
+                        onClick={() => navigate(`/loading/${encodeURIComponent(b.id)}`)}
+                        title={`Open ${boxLabel(b)}`}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <td className="mono nw" style={{ fontWeight: 600 }}>
+                          <Icon name="truck" size={12} /> {boxLabel(b)}
+                        </td>
+                        <td colSpan={span - 1}>
+                          <span className={`chip palstatus ${BOX_STATUS_CHIP[plan ? "Planned" : "Empty"]}`} style={{ whiteSpace: "nowrap" }}>{plan ? "Planned" : "Empty"}</span>
+                          <span className="dim" style={{ fontSize: "var(--t-sm)", marginLeft: 10 }}>
+                            {plan
+                              ? [plan.customers, plan.sos, `${fmt(plan.boxes)} bx planned`].filter(Boolean).join("  ·  ")
+                              : "No items yet — open to add items"}
+                          </span>
+                        </td>
+                      </tr>,
+                    );
+                  }
                   let prevKey: string | null = null;
                   for (const r of rows) {
                     if (groupBy.length) {
@@ -1098,29 +1007,15 @@ export function LoadingBay() {
                       }
                     }
                     const { p, l, stage, box } = r;
-                    const isSel = selected.has(l.id);
                     out.push(
                       <tr
                         key={l.id}
                         onClick={() => navigate(box ? `/loading/${encodeURIComponent(box.id)}` : `/packing/${p.id}`)}
                         title={box ? `Open ${boxLabel(box)}` : `Open ${p.palNumber}`}
-                        style={{ cursor: "pointer", background: isSel ? "var(--accent-soft)" : undefined }}
+                        style={{ cursor: "pointer" }}
                       >
-                        <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            {canEdit && stage === "Ready" && (
-                              <input
-                                type="checkbox"
-                                checked={isSel}
-                                onClick={(ev) => ev.stopPropagation()}
-                                onChange={() => toggleSelect(l)}
-                                title="Select to load together"
-                                style={{ margin: 0 }}
-                              />
-                            )}
-                            {l.itemCode}
-                          </span>
-                        </td>
+                        {/* Grouped rows indent under their customer band. */}
+                        <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap", paddingLeft: groupBy.length ? 26 : undefined }}>{box ? boxLabel(box) : "—"}</td>
                         {visible.map((c) => (
                           <td key={c.key} className={c.className} style={c.style}>
                             {c.render!(r)}
@@ -1128,14 +1023,9 @@ export function LoadingBay() {
                         ))}
                         {canEdit && (
                           <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                            {stage === "Ready" && (
-                              <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setPicker({ lineIds: loadTargets(l) })}>
-                                Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
-                              </button>
-                            )}
                             {stage === "InLoading" && box && (
                               <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setVehModal({ box })}>
-                                Confirm Load
+                                Assign Vehicle
                               </button>
                             )}
                             {stage === "ReadyDispatch" && box && (
@@ -1149,7 +1039,7 @@ export function LoadingBay() {
                       </tr>,
                     );
                   }
-                  if (!loading && rows.length === 0) {
+                  if (!loading && out.length === 0) {
                     out.push(
                       <tr key="empty">
                         <td colSpan={span} className="dim" style={{ fontSize: "var(--t-sm)" }}>—</td>
@@ -1162,38 +1052,19 @@ export function LoadingBay() {
             </table>
           </div>
           </div>
-        </div>
             );
-          })}
-          {!loading && filtered.length === 0 && <EmptyState title="No matching results" hint="Try a different filter" />}
+          })()}
+          {!loading && filtered.length === 0 && stubBoxes.length === 0 && <EmptyState title="No matching results" hint="Try a different filter" />}
           {!(loading && plans.length === 0) && <GridFooter {...pager} />}
         </div>
       )}
 
-      {picker && (() => {
-        const lines = picker.lineIds
-          .map((id) => allLines.find(({ l }) => l.id === id)?.l)
-          .filter((l): l is PalPlanLine => !!l);
-        // No lineIds = "New Loading": the same modal in container-only mode.
-        if (picker.lineIds.length && !lines.length) return null;
-        return (
-          <LoadContainerModal
-            lines={lines}
-            availableLines={allLines.filter(({ l }) => l.status === "ReadyToLoad" && !l.loadBoxId).map(({ l }) => l)}
-            boxes={openBoxes}
-            linesOfBox={linesOfBox}
-            busy={busy}
-            planHint={lines.length === 1 ? planHintFor(lines[0]) : undefined}
-            onConfirm={(target, entries, prodEntries) => void confirmLoad(target, entries, prodEntries)}
-            onClose={() => setPicker(null)}
-          />
-        );
-      })()}
+      {newOpen && <NewLoadingModal onDone={() => void load()} onClose={() => setNewOpen(false)} />}
 
       {vehModal && (
         <VehicleLoadModal
           palNumber={boxLabel(vehModal.box)}
-          title={vehModal.box.status === "Open" && !sealed(vehModal.box) ? "Confirm Load" : "Edit Load Details"}
+          title={vehModal.box.status === "Open" && !sealed(vehModal.box) ? "Assign Vehicle" : "Edit Load Details"}
           busy={busy}
           initialVehicleId={vehModal.box.vehicleId}
           initialCapture={{

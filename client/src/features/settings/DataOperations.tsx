@@ -2,8 +2,8 @@
    Data Operations — Settings landing for bulk data actions.
    Menu only for now (Export placeholder); operations wired later.
    ============================================================ */
-import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 
 interface OpItem {
   label: string;
@@ -16,14 +16,11 @@ const OPS: OpItem[] = [
 ];
 
 export function DataOperations() {
-  const navigate = useNavigate();
   return (
     <div>
       <div className="page-head">
         <div className="row" style={{ gap: 10, alignItems: "center" }}>
-          <button className="hbtn" onClick={() => navigate("/settings")} title="Back to settings">
-            <Icon name="chev-l" size={13} />
-          </button>
+          <BackToSettings />
           <div>
             <div className="title">Data Operations</div>
             <div className="sub">Bulk import / export and data maintenance</div>

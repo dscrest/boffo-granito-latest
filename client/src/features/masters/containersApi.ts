@@ -13,7 +13,7 @@ import { createListCache } from "@/lib/cache";
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-export const CONTAINER_TYPES = ["20ft", "40ft", "40HQ"] as const;
+export const CONTAINER_TYPES = ["28ft", "30ft"] as const;
 export const CONTAINER_STATUSES = ["planned", "loading", "sealed", "dispatched"] as const;
 export type ContainerStatus = (typeof CONTAINER_STATUSES)[number];
 

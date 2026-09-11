@@ -10,18 +10,25 @@
 import type { InputHTMLAttributes } from "react";
 
 // Keep digits + one dot; drop everything else, collapse extra dots.
-export function sanitizeNumeric(v: string): string {
-  return v.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+// maxDecimals truncates the fraction (typing past the cap is a no-op).
+export function sanitizeNumeric(v: string, maxDecimals?: number): string {
+  const clean = v.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+  if (maxDecimals == null) return clean;
+  const dot = clean.indexOf(".");
+  return dot === -1 ? clean : clean.slice(0, dot + 1 + maxDecimals);
 }
 
-export function NumberInput(props: InputHTMLAttributes<HTMLInputElement>) {
+export function NumberInput({
+  maxDecimals,
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & { maxDecimals?: number }) {
   return (
     <input
       inputMode="decimal"
       {...props}
       type="text"
       onChange={(e) => {
-        const clean = sanitizeNumeric(e.target.value);
+        const clean = sanitizeNumeric(e.target.value, maxDecimals);
         if (clean !== e.target.value) e.target.value = clean;
         props.onChange?.(e);
       }}
@@ -34,4 +41,6 @@ if (import.meta.env?.DEV) {
   console.assert(sanitizeNumeric("1e-2a.3.4") === "12.34", "NumberInput: strips e/-/letters, one dot");
   console.assert(sanitizeNumeric("-5") === "5", "NumberInput: no negatives");
   console.assert(sanitizeNumeric("0.50") === "0.50", "NumberInput: keeps trailing decimals");
+  console.assert(sanitizeNumeric("12.345", 2) === "12.34", "NumberInput: caps decimals");
+  console.assert(sanitizeNumeric("12.", 2) === "12.", "NumberInput: cap keeps bare dot");
 }

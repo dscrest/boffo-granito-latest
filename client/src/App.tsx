@@ -11,15 +11,11 @@ import { ToastHost } from "@/ui/Toast";
 import { ConfirmHost } from "@/ui/ConfirmDialog";
 import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
-import { STAGES, type Order } from "@/data";
 import { canApprove, checkSession, hasFeature, type SessionUser } from "@/lib/auth";
 import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
 import boffoLogo from "@/assets/boffo-logo.png";
-import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
-import { cachedOrders, subscribeOrders } from "@/features/orders/ordersApi";
-import { cachedCustomers, subscribeCustomers } from "@/features/masters/customersApi";
-import { cachedDesigns, subscribeDesigns } from "@/features/masters/designsApi";
 import { GlobalSearch } from "@/features/search/GlobalSearch";
+import { loadDefaultView } from "@/features/settings/settingsApi";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard").then((m) => ({ default: m.Dashboard })));
@@ -75,19 +71,6 @@ const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m
 const SettingsHome = lazy(() => import("@/features/settings/SettingsHome").then((m) => ({ default: m.SettingsHome })));
 const DataOperations = lazy(() => import("@/features/settings/DataOperations").then((m) => ({ default: m.DataOperations })));
 
-const TWEAK_DEFAULTS = {
-  // BOFFO brand orange (#EF7F1A) — must match --accent in styles.css.
-  accent: "oklch(0.71 0.17 55)",
-  density: "compact" as "compact" | "spacious",
-};
-
-function applyAccent(color: string) {
-  const r = document.documentElement;
-  r.style.setProperty("--accent", color);
-  const soft = color.startsWith("oklch(") ? color.replace(/\)$/, " / 0.12)") : color;
-  r.style.setProperty("--accent-soft", soft);
-}
-
 /* Sidebar is a nested tree: a node is a leaf (has `id` → route) or a
    collapsible parent (has `children`). Parents accordion open/close on click;
    the branch holding the active route auto-expands. */
@@ -115,10 +98,7 @@ function navTree(): NavNode[] {
         // Stock Details — batch-wise on-hand (produced − loaded), derived
         // in batchStockApi; also surfaced as the item detail Stock tab.
         { id: "stock", label: "Stock Details", icon: "tile" },
-        // Size Master owns per-box packing data (dims, pcs/box, coverage,
-        // box weight). Items and Pallet Master snapshot it — they never ask
-        // the operator for it twice. Moved here from Settings ▸ Masters.
-        { id: "sizes", label: "Size Master", icon: "tile" },
+        // Size Master lives under Settings ▸ Product Masters (admin-only).
         // Pallet Master = the master of pallet formats (an Items master).
         // Palletization (Sales, id "packing") is the process that consumes it.
         { id: "pallets", label: "Pallet Master", icon: "palette" },
@@ -131,9 +111,9 @@ function navTree(): NavNode[] {
       children: [
         { id: "parties", label: "Customers", icon: "users" },
         { id: "quotes", label: "Quotes", icon: "quote" },
-        // Approval inbox — visible to any role that may approve quotes, sales
-        // orders or production (Role.matrix approve list; Admin always qualifies).
-        ...(canApprove("Quote") || canApprove("SalesOrder") || canApprove("Production")
+        // Approval inbox — visible to any role that may approve quotes or sales
+        // orders (Role.matrix approve list; Admin always qualifies).
+        ...(canApprove("Quote") || canApprove("SalesOrder")
           ? [{ id: "approvals", label: "Approvals", icon: "shield-check" }]
           : []),
         // Single "Sales Order" leaf — the List | Kanban toggle at the top of
@@ -141,20 +121,20 @@ function navTree(): NavNode[] {
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
         { id: "packing", label: "Palletization", icon: "palette" },
-        { id: "loading", label: "Loading", icon: "truck" },
-        // Panel Craft — showcase panels the reps show retailers: the panel
-        // master + the panel-order cutting-job board (cut-piece stock).
-        {
-          label: "Panel Craft",
-          icon: "tile",
-          children: [
-            // Workflow order: stock entered first, panels assembled from it,
-            // then orders dispatch against it.
-            { id: "cut-stock", label: "Cut Stock", icon: "tile" },
-            { id: "panels", label: "Panels", icon: "tile" },
-            { id: "panel-orders", label: "Panel Orders", icon: "orders" },
-          ],
-        },
+        { id: "loading", label: "Loading and Dispatch", icon: "truck" },
+      ],
+    },
+    // Panel Craft — showcase panels the reps show retailers: the panel
+    // master + the panel-order cutting-job board (cut-piece stock).
+    {
+      label: "Panel Craft",
+      icon: "tile",
+      children: [
+        // Workflow order: stock entered first, panels assembled from it,
+        // then orders dispatch against it.
+        { id: "cut-stock", label: "Cut Stock", icon: "tile" },
+        { id: "panels", label: "Panels", icon: "tile" },
+        { id: "panel-orders", label: "Panel Orders", icon: "orders" },
       ],
     },
     // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
@@ -207,25 +187,22 @@ function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] =
 interface NavNodeRowProps {
   node: NavNode;
   depth: number;
-  counts: Record<string, number | string>;
   openGroups: Record<string, boolean>;
   onToggle: (label: string) => void;
 }
 
 /* Renders one tree node: a NavLink leaf, or a collapsible parent that
    recurses into its children when open. `depth` drives the indent.
-   Memoized: count-badge updates (e.g. live quote count) re-render only
-   rows whose props changed, not the whole tree. */
-const NavNodeRow = memo(function NavNodeRow({ node, depth, counts, openGroups, onToggle }: NavNodeRowProps) {
+   Record counts were removed from the rail 2026-09-04 (with their
+   live-count subscriptions and boot-time quote fetch). */
+const NavNodeRow = memo(function NavNodeRow({ node, depth, openGroups, onToggle }: NavNodeRowProps) {
   const pad = { paddingLeft: 8 + depth * 14 } as const;
 
   if (!node.children) {
-    const c = counts[node.id!];
     return (
       <NavLink to={node.path ?? `/${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
         <Icon name={node.icon} size={14} className="ic" />
         <span>{node.label}</span>
-        {c != null && c !== "" && <span className="count">{c}</span>}
       </NavLink>
     );
   }
@@ -251,7 +228,6 @@ const NavNodeRow = memo(function NavNodeRow({ node, depth, counts, openGroups, o
               key={child.label}
               node={child}
               depth={depth + 1}
-              counts={counts}
               openGroups={openGroups}
               onToggle={onToggle}
             />
@@ -272,6 +248,9 @@ export default function App() {
   const [user, setUser] = useState<SessionUser | null>(null);
   useEffect(() => {
     void checkSession().then(setUser);
+    // Refresh the Default view preference so boards opened later this session
+    // (and the next cold tab, via the mirror) seed from the current setting.
+    void loadDefaultView();
   }, []);
   const isAdmin = user?.role === "Admin";
   const navigate = useNavigate();
@@ -310,66 +289,8 @@ export default function App() {
     [],
   );
 
-  useEffect(() => {
-    applyAccent(TWEAK_DEFAULTS.accent);
-    // ponytail: text size is flat 12.5px in styles.css now; density no longer overrides it.
-  }, []);
-
-  // Live quote count for the sidebar badge — seed length is only the fallback
-  // until the Data Store cache hydrates. Stays in sync with creates/deletes
-  // via the quotesApi subscription.
-  const [liveQuoteCount, setLiveQuoteCount] = useState<number | null>(() => cachedQuotes()?.length ?? null);
-  useEffect(() => {
-    const sync = () => setLiveQuoteCount(cachedQuotes()?.length ?? null);
-    const unsub = subscribeQuotes(sync);
-    void listQuotes(); // warm the cache so the badge is live before visiting Quotes
-    return unsub;
-  }, []);
-
-  // Live order counts: subscribe-only (no warm fetch — the first orders
-  // screen visited hydrates the cache); mock seeds until then.
-  const [liveOrders, setLiveOrders] = useState<Order[] | null>(() => cachedOrders());
-  useEffect(
-    () =>
-      subscribeOrders(() => {
-        const c = cachedOrders();
-        if (c) setLiveOrders(c);
-      }),
-    [],
-  );
-
-  // Live master counts: subscribe-only (no warm fetch — the first masters
-  // screen or form visited hydrates the caches); mock seeds until then.
-  const [masterCounts, setMasterCounts] = useState<{ parties: number | null; designs: number | null }>(() => ({
-    parties: cachedCustomers()?.length ?? null,
-    designs: cachedDesigns()?.length ?? null,
-  }));
-  useEffect(() => {
-    const sync = () =>
-      setMasterCounts({
-        parties: cachedCustomers()?.length ?? null,
-        designs: cachedDesigns()?.length ?? null,
-      });
-    const unsubC = subscribeCustomers(sync);
-    const unsubD = subscribeDesigns(sync);
-    return () => {
-      unsubC();
-      unsubD();
-    };
-  }, []);
-
-  const counts = useMemo<Record<string, number | string>>(() => {
-    // Live-only: before the caches hydrate the badges show 0, never mock seeds.
-    const ords = liveOrders ?? [];
-    const c: Record<string, number | string> = { dashboard: "", quotes: liveQuoteCount ?? 0, kanban: ords.length, orders: ords.length };
-    const distinctSOs = new Set<string>();
-    ords.forEach((o) => distinctSOs.add(o.salesOrderId || `${o.poNumber}__${o.partyCode}`));
-    c.byorder = distinctSOs.size;
-    STAGES.forEach((s) => (c[s.id] = ords.filter((o) => o.stage === s.id).length));
-    c.design = masterCounts.designs ?? 0;
-    c.parties = masterCounts.parties ?? 0;
-    return c;
-  }, [liveQuoteCount, liveOrders, masterCounts]);
+  // 2026-09-04: the runtime accent override is gone — the accent now comes
+  // from the theme.css :root tokens (indigo); a JS write here would beat them.
 
   return (
     <div className={`app ${collapsed ? "collapsed" : ""}`}>
@@ -399,7 +320,6 @@ export default function App() {
               key={n.label}
               node={n}
               depth={0}
-              counts={counts}
               openGroups={openGroups}
               onToggle={toggleGroup}
             />

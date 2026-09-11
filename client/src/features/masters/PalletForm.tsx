@@ -75,11 +75,13 @@ export function PalletForm({
   const picked = sizeOptions.find((o) => o.id === v.size);
   const sizeLabel = picked?.label || initial?.pallet_size_label || "";
 
-  // Coverage + box weight are owned by the Size master. Once a Size is picked
-  // they mirror it; until then a legacy row keeps the values it was saved with.
+  // Coverage is owned by the Size master. Once a Size is picked it mirrors it;
+  // until then a legacy row keeps the values it was saved with.
   const coverageSqm = picked ? picked.sqmPerBox : v.coverage_sqm;
   const coverageSqft = picked ? picked.sqftPerBox : v.coverage_sqft;
-  const boxWeightKg = picked ? picked.boxWeightKg : v.box_weight_kg;
+  // Box weight: the Size value is only the DEFAULT — manually editable here
+  // (CR 2026-09-10); picking a size re-fills it (see the Combobox onChange).
+  const boxWeightKg = v.box_weight_kg || (picked ? picked.boxWeightKg : 0);
 
   // Packing detail is formula-owned → "[30 * 18] = 540" from the arrangement.
   const packing = useMemo(() => {
@@ -176,7 +178,12 @@ export function PalletForm({
                   <Combobox
                     value={v.size}
                     options={sizeOptions.map((s) => ({ value: s.id, label: s.label }))}
-                    onChange={(val) => setStr("size", val)}
+                    onChange={(val) => {
+                      // Explicit size pick re-fills the box weight from that size
+                      // (the operator can still type over it afterwards).
+                      const opt = sizeOptions.find((o) => o.id === val);
+                      setV((p) => ({ ...p, size: val, box_weight_kg: opt?.boxWeightKg || 0 }));
+                    }}
                     placeholder="Search size…"
                   />
                 )}
@@ -249,12 +256,11 @@ export function PalletForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Box Weight (kg)</span>
-                <input
-                  value={boxWeightKg > 0 ? String(r2(boxWeightKg)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Box Weight, from the selected Size"
+                <NumberInput
+                  value={v.box_weight_kg || ""}
+                  onChange={(e) => setNum("box_weight_kg", e.target.value)}
+                  placeholder={picked?.boxWeightKg ? String(r2(picked.boxWeightKg)) : "0"}
+                  title="Defaults from the selected Size — type to override for this pallet"
                 />
               </label>
             </div>

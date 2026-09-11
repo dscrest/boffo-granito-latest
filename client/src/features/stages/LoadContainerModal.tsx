@@ -6,15 +6,15 @@
    Confirm Load.
 
    `ContainerPicker` is the shared half — LOAD INTO + the after-loading
-   preview + the new-container form — and is mounted by all three entry
-   points: the board's Load button (pallet mode), "New Loading"
-   (container-only mode) and Add Items on a loading detail page.
+   preview + the new-container form — and is mounted by the board's Load
+   button (pallet mode) and Add Items on a loading detail page.
+   "New Loading" on /loading is NewLoadingModal, not this.
 
    Vehicle/driver stay on the Vehicle master: the typed registration is
    find-or-created (formatVehicleNumber match), so LoadBox.vehicle keeps
    pointing at a real Vehicle row.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
@@ -61,7 +61,7 @@ export interface ContainerDraft {
 
 export const newContainerDraft = (): ContainerDraft => ({
   container_number: "",
-  container_size: CONTAINER_TYPES[1], // 40ft — the common export box
+  container_size: CONTAINER_TYPES[0], // 28ft — the standard vehicle
   vehicle_number: "",
   electronic_seal: "",
   driver_name: "",
@@ -185,7 +185,9 @@ export function ContainerPicker({
       ) : selected === NO_CONTAINER ? null : (
         <div className="form-section">
           <div className="form-section-title">New container details</div>
-          <div className="form-grid">
+          {/* Locked to 2 columns: the panel widens for the multi-item table and
+              auto-fit would silently reflow the form to 3 columns. */}
+          <div className="form-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
             <label className="form-field">
               <span className="lbl">Container No.<span className="req"> *</span></span>
               <input
@@ -326,7 +328,7 @@ export function LoadContainerModal({
   onConfirm,
   onClose,
 }: {
-  /** The pallets being loaded. Empty for container-only mode ("New Loading"). */
+  /** The pallets being loaded. */
   lines?: PalPlanLine[];
   /** Every Ready (unboxed) line on the board — the "Add item" pallet pool. */
   availableLines?: PalPlanLine[];
@@ -347,9 +349,7 @@ export function LoadContainerModal({
   onClose: () => void;
 }) {
   const panelRef = useModalA11y(onClose);
-  // Loading pallets defaults to the first open container; "New Loading"
-  // (no lines) always starts a fresh container.
-  const [sel, setSel] = useState<string>(lines.length ? (boxes[0]?.id ?? NEW_CONTAINER) : NEW_CONTAINER);
+  const [sel, setSel] = useState<string>(boxes[0]?.id ?? NEW_CONTAINER);
   const [draft, setDraft] = useState<ContainerDraft>(newContainerDraft);
   const [showErrors, setShowErrors] = useState(false);
   const [partial, setPartial] = useState(false);
@@ -402,8 +402,7 @@ export function LoadContainerModal({
 
   const newContainer = !selBox;
   const invalid = newContainer && draftMissing(draft);
-  const blocked =
-    busy || saving || invalid || ((lines.length > 0 || totalItems > 0) && entries.length === 0 && prodEntries.length === 0);
+  const blocked = busy || saving || invalid || (entries.length === 0 && prodEntries.length === 0);
 
   const submit = async () => {
     if (busy || saving) return;
@@ -487,11 +486,7 @@ export function LoadContainerModal({
       : setRemoved((prev) => new Set(prev).add(id));
 
   const target = selBox ? (selBox.containerNumber || boxLabel(selBox)) : draft.container_number.trim() || "the new container";
-  const hint = invalid
-    ? "Fill container no., vehicle no., driver, e-seal"
-    : totalItems
-      ? `Loading into ${target}`
-      : `Creating ${target}`;
+  const hint = invalid ? "Fill container no., vehicle no., driver, e-seal" : `Loading into ${target}`;
 
   return (
     <div className="modal-backdrop">
@@ -500,7 +495,7 @@ export function LoadContainerModal({
           <div className="ico"><Icon name="truck" size={18} /></div>
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600 }}>
-              {single ? "Load pallet" : totalItems ? `Load ${totalItems} item${totalItems === 1 ? "" : "s"}` : "New Loading"}
+              {single ? "Load pallet" : `Load ${totalItems} item${totalItems === 1 ? "" : "s"}`}
             </div>
             {single ? (
               <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
@@ -525,7 +520,6 @@ export function LoadContainerModal({
             onDraft={setDraft}
             showErrors={showErrors}
             adding={adding}
-            onlyNew={lines.length === 0}
           />
 
           {!single && totalItems > 0 && (
@@ -706,11 +700,7 @@ export function LoadContainerModal({
           <button className="btn" onClick={onClose} disabled={busy || saving}>Cancel</button>
           <button className="hbtn primary" disabled={blocked} onClick={() => void submit()}>
             <Icon name="check" size={13} />
-            {busy || saving
-              ? "Saving…"
-              : totalItems
-                ? `Load ${fmt(adding)} boxes`
-                : "Create container"}
+            {busy || saving ? "Saving…" : `Load ${fmt(adding)} boxes`}
           </button>
         </div>
       </div>

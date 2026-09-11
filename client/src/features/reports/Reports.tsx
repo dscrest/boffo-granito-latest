@@ -686,7 +686,7 @@ const loadStageOf = (r: LineRow): string => {
   if (r.box?.status === "Dispatched") return "Dispatched";
   if (r.box) return sealed(r.box) ? "Ready for Dispatch" : "In Loading";
   if (r.line.status === "ReadyToLoad") return "Ready for Loading";
-  return r.line.status === "Palletizing" ? "Palletizing" : "Ready for Palletization";
+  return r.line.status === "Palletizing" ? "In Palletization" : "Ready for Palletization";
 };
 
 /* ─────────────────────────── Ready pallets ─────────────────────────── */

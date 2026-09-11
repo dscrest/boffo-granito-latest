@@ -62,7 +62,7 @@
 | ProductionLog | 69851000000068024 (live) | Production entries (order jobs + independent stock + batch opening rows) — added 2026-07-15 |
 | Vehicle | (live) | Truck master (number + driver + mobile) — added 2026-07-23 |
 | PalletizationPlan | (live) | Vehicle-load plan header `PAL/FY/NNN` — added 2026-07-21 |
-| PalletizationPlanLine | (live) | Order items pulled onto a plan — added 2026-07-21 |
+| PalletizationPlanLine | 69851000000077368 (live) | Order items pulled onto a plan — added 2026-07-21 |
 | LoadBox | 69851000000089442 (live) | Cross-plan vehicle slots on the Loading board — added 2026-07-27 |
 | AppSetting | (live) | Key/value app settings store — added 2026-08-11 |
 | Panel | 69851000000189422 (live) | Panel Craft — showcase-panel master header — added 2026-08-26 |
@@ -288,6 +288,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | port_of_discharge | varchar(255) | |
 | active | boolean | |
 | payment_term | FK → PaymentTerm | SET-NULL |
+| box_brand | FK → Brand | SET-NULL · default carton brand for the Customer Sheet (per-line override on PalletizationPlanLine) — added 2026-09-10; repointed BoxBrand→Brand 2026-09-11 (BoxBrand table deleted, Brand master relabeled "Box Brand") |
 | contact_salutation | varchar(12) | |
 | contact_first_name | varchar(60) | |
 | contact_last_name | varchar(60) | |
@@ -314,6 +315,10 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | main_party_name | varchar(255) | parent/group party (Party List master, 2026-07-02) |
 | working_status | varchar(100) | Party List master, 2026-07-02 |
 | handling_person | bigint | **logical FK** → SalesPerson ROWID (2026-07-02; plain bigint, same MCP int64 limitation as SalesPerson.app_user) |
+| company_name | varchar(255) | Books-parity company name (was live but undocumented; doc'd 2026-09-10) |
+| customer_type | varchar(20) | "business" \| "individual", lowercase (was live but undocumented; doc'd 2026-09-10) |
+| overseas | varchar(10) | "true" \| "" — overseas customer indicator (checkbox on the form) — added 2026-09-10 |
+| additional_addresses | text(10000) | JSON array of extra ExtraAddress entries |
 
 ### Design (76673000000052723) — keys on `unique_name` / `design_name`
 | Column | Type | Notes |
@@ -506,7 +511,7 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | design | bigint | Design ROWID (logical FK) |
 | sales_order | bigint | SalesOrder ROWID — null on independent (logical FK) |
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
-| batch_number | varchar(40) | production batch `B/FY/NNN`, on `record` rows; blank on save → server auto-mints (`nextBatchNumber`, MAX-scan) — added 2026-08-07 |
+| batch_number | varchar(40) | production batch `<prefix><sep>YYYY-MM<sep>NNN` (defaults `B/YYYY-MM/NNN`; prefix/separator/start admin-set via AppSetting `batch_series_*`) — series per ITEM per calendar month, on `record` rows; blank on save → server auto-mints (`nextBatchNumber(catalyst, designId)`, design+month-scoped MAX-scan) — format changed 2026-09-04, configurable 2026-09-08; added 2026-08-07 |
 | shade | varchar(60) | RETIRED 2026-08-29 (batch is the only tracked dimension; never populated in live data). Column kept, nothing reads or writes it — added 2026-08-07 |
 | second_stage | boolean | **RETIRED 2026-08-25** — no longer read or written. Was: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` instead of `Planning`. Removed because it silently kept production output out of "Ready for Palletization" (the flag was sticky per batch). Column left in place; old rows keep their value. |
 
@@ -560,7 +565,7 @@ Not in the column table but used throughout the sagas: `entry_type` (`plan`|`rec
 | Column | Type | Notes |
 |---|---|---|
 | container_number | varchar(50) | |
-| container_type | varchar(20) | 20/40/40HQ |
+| container_type | varchar(20) | picker offers 28ft/30ft since 2026-09-10 (legacy rows: 20/40/40HQ) |
 | capacity_boxes | int | |
 | capacity_pallets | int | |
 | vessel_name | varchar(255) | |
@@ -600,14 +605,16 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | sales_order | FK → SalesOrder | SET-NULL (multi-SO grouping) |
 | order_item | FK → OrderItem | SET-NULL (source line) |
 | design | FK → Design | SET-NULL (denormalized for display/PDF) |
-| pallet | FK → Pallet | SET-NULL (drives vehicle-fill capacity) |
+| pallet | FK → Pallet | SET-NULL (drives vehicle-fill capacity). Never born null since 2026-09-11: `/pal-plan` + `/update-pal-plan` reject pallet-less lines, and `autoEnqueuePalletization` / `/send-to-loading` fall back to `defaultPalletForDesign()` (the Pallet whose `size` matches the design's size, lowest ROWID) when the OrderItem has no pallet. Legacy nulls: `POST /backfill-line-pallets` (admin) — OrderItem.pallet else size default; returns `{scanned, updated, unresolved}` |
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
-| status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call); `Palletizing` added 2026-08-17 |
+| status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call; optional `boxes` < the line's boxes = PARTIAL move — the line splits and only the slice transitions, added 2026-09-10); `Palletizing` added 2026-08-17 |
 | batch_number | varchar(40) | production batch these boxes come from (`""` = unattributed legacy aggregate). Set by `autoEnqueuePalletization`, `/pal-plan`, `/pal-topup` and `/send-to-loading` via the shared `unqueuedBatches()` FIFO split; preserved when `/pal-line-box` splits a line for a partial load. **The batch trail from ProductionLog to dispatch runs through this column** — batch-wise stock and the batch reports read it |
 | pallet_group | varchar(60) | shared physical pallet group (`""` = none) — legacy mixed pallets |
+| manual_edit | varchar(10) | `"true"` = user-authored line (`/pal-plan` + `/update-pal-plan` stamp it; splits carry it) — `autoEnqueuePalletization` skips top-up for an item whose open plan has a manual Planning line (CR 2026-09-10) |
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
 | load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box). Optional `boxes` in the body = partial load: the line SPLITS (loaded part + a Ready remainder line) |
+| box_brand | FK → Brand | SET-NULL · per-line carton-brand override on the /loading Customer Sheet (`""`/null = inherit Customer.box_brand); written via generic PUT; NOT carried through `/pal-line-box` partial splits (overrides are set post-boxing) — added 2026-09-10; repointed BoxBrand→Brand 2026-09-11 |
 | deleted_at | datetime | soft delete |
 
 ### LoadBox (69851000000089442) — added 2026-07-27 (cross-plan vehicle slots)
@@ -622,6 +629,7 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | Column | Type | Notes |
 |---|---|---|
 | box_number | int | display "Box N" — server-minted (MAX-scan) |
+| load_number | varchar(50) | the loading's identity `LOAD/FY/NNN` — server-minted on `/load-box` create (`nextLoadNumber`, prefix-scoped MAX-scan); boxes predating the column stay blank (`boxLabel` falls back to vehicle / "Container N") — added 2026-09-04 |
 | vehicle | FK → Vehicle | SET-NULL; required before dispatch |
 | capacity | int | advisory boxes-per-vehicle (default 1000) |
 | status | varchar(20) | Open / Dispatched |
@@ -630,11 +638,12 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | line_seal | varchar(50) | loading capture — added 2026-08-07 |
 | electronic_seal | varchar(50) | loading capture — added 2026-08-07 |
 | loading_supervisor | varchar(120) | loading capture — added 2026-08-07 |
-| container_size | varchar(10) | 20ft / 40ft / 40HQ — captured on the container-first load form — added 2026-08-25 |
+| container_size | varchar(10) | 28ft / 30ft (default 28ft) since 2026-09-10; legacy rows may hold 20ft/40ft/40HQ — captured on the load form — added 2026-08-25 |
 | transporter | varchar(120) | carrier company — added 2026-08-25 |
 | lr_number | varchar(60) | LR / docket number — added 2026-08-25 |
 | destination | varchar(120) | destination port / city — added 2026-08-25 |
 | share_token | varchar(64) | public pallet-label QR — minted by `POST /load-box-share/:rowid`; tokenless `GET /public/pallet/:token` feeds the scanner page (`#/share/box/<token>`, no login) — added 2026-08-11 |
+| load_plan | text(10000) | loading-plan JSON (items + batches from ANY SOs/customers, `parseLoadPlan` in data.ts); advisory, written via `/load-box` and `/load-box-update` with `.slice(0, 10000)`; written by `NewLoadingModal` on create (single slice, no `group`). A multi-container plan stores one slice per box plus a `group: {id, no, of}` key pointing at the primary box's ROWID (siblings found client-side; server never reads the JSON) — added 2026-09-04 |
 | deleted_at | datetime | soft delete |
 
 ### Vehicle — added 2026-07-23

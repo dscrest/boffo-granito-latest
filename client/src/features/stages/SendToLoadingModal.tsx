@@ -27,6 +27,7 @@ import {
   type ContainerDraft,
 } from "./LoadContainerModal";
 import {
+  boxLabel,
   cachedLoadBoxes,
   cachedPalPlans,
   createLoadBox,
@@ -142,10 +143,10 @@ export function SendToLoadingModal({
         return;
       }
       box = String(created.data.ROWID);
-      label = draft.container_number.trim() || `Container ${created.data.box_number ?? ""}`.trim();
+      label = created.data.load_number || draft.container_number.trim() || `Container ${created.data.box_number ?? ""}`.trim();
     } else if (box && !label) {
       const b = loadBoxes.find((x) => x.id === box);
-      label = b ? b.containerNumber || `Container ${b.boxNumber}` : "the loading";
+      label = b ? boxLabel(b) : "the loading";
     }
     const res = await sendToLoading({
       sales_order: soId,

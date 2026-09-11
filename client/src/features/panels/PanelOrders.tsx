@@ -14,9 +14,12 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ErrorCard, SkeletonRows, EmptyState } from "@/ui/States";
+import { Chip } from "@/ui/Chip";
+import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { can } from "@/lib/auth";
-import { usePersistedState } from "@/lib/usePersistedState";
+import { usePersistedState, useViewState } from "@/lib/usePersistedState";
+import { FilterSelect, IconBtn, ORDER_STATUS_TONE } from "./pcBits";
 import { PanelOrderForm } from "./PanelOrderForm";
 import { CutStockForm } from "./CutStockForm";
 import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
@@ -37,15 +40,17 @@ import {
   type PanelOrderStatus,
 } from "./panelOrdersApi";
 
+/* Stage dots match the status-chip tones (pcBits ORDER_STATUS_TONE). */
 const STAGE_COLOR: Record<PanelOrderStatus, string> = {
-  Received: "var(--c-blue)",
-  InCutting: "var(--c-amber)",
-  Ready: "var(--c-green)",
-  Dispatched: "var(--c-green)",
+  Received: "var(--warn)",
+  InCutting: "var(--blue)",
+  Ready: "#0d9488",
+  Dispatched: "var(--ok)",
 };
 
 export function PanelOrders() {
-  const [view, setView] = usePersistedState<"kanban" | "sheet">("panelOrders.view", "kanban");
+  // Opens on whatever Settings → Default view says.
+  const [view, setView] = useViewState("panelOrders.view", "sheet" as const, "kanban" as const);
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
@@ -54,6 +59,8 @@ export function PanelOrders() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showStock, setShowStock] = useState(false);
+  const [query, setQuery] = usePersistedState("panelOrders.query", "");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const load = async () => {
     const [o, p, s] = await Promise.all([listPanelOrders(), listPanels(), listCutStock()]);
@@ -73,6 +80,16 @@ export function PanelOrders() {
   }, []);
 
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
+
+  // Search + status filter apply to both views.
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return orders.filter(
+      (o) =>
+        (!statusFilter || PANEL_ORDER_STATUS_LABEL[o.status] === statusFilter) &&
+        (!q || o.panelCode.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q)),
+    );
+  }, [orders, query, statusFilter]);
 
   const onCreate = async (input: PanelOrderInput) => {
     const res = await createPanelOrder(input);
@@ -119,7 +136,21 @@ export function PanelOrders() {
     await load();
   };
 
-  const canEdit = can("stages", "edit");
+  const canEdit = can("panel_craft", "edit");
+
+  const sort = useSortRows(
+    shown,
+    (o, k) =>
+      k === "qty" ? o.qty
+      : k === "customer" ? o.customerName
+      : k === "date" ? o.orderDate
+      : k === "sales" ? o.salesperson
+      : k === "status" ? o.status
+      : o.panelCode,
+    "",
+  );
+  const pager = usePagination(sort.sorted.length, "panelOrdersPageSize", `${query}|${statusFilter}`);
+  const pageRows = pager.slice(sort.sorted);
 
   /** The stage action for one order card/row (Received branches on stock). */
   const actionFor = (o: PanelOrderRow): { label: string; to: PanelOrderStatus } | null => {
@@ -136,19 +167,19 @@ export function PanelOrders() {
     const action = actionFor(o);
     const done = o.status === "Dispatched";
     return (
-      <div key={o.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "var(--bg)" }}>
+      <div key={o.id} className="pc-job-card">
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {!done && (
             <span
               title={shortages.length ? `Short: ${shortages.map((s) => `${s.designName} ${s.cutSizeName} (${fmt(s.have)}/${fmt(s.need)})`).join(", ")}` : "Cut-piece stock covers this order"}
-              style={{ width: 8, height: 8, borderRadius: "50%", background: shortages.length ? "var(--c-red)" : "var(--c-green)", flexShrink: 0 }}
+              style={{ width: 8, height: 8, borderRadius: "50%", background: shortages.length ? "var(--danger)" : "var(--ok)", flexShrink: 0 }}
             />
           )}
           <Link className="linkish mono" style={{ fontWeight: 600 }} to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel">
             {o.panelCode}
           </Link>
           <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{fmt(o.qty)} panel{o.qty === 1 ? "" : "s"}</span>
-          {o.status === "Received" && can("stages", "delete") && (
+          {o.status === "Received" && can("panel_craft", "delete") && (
             <button
               type="button"
               className="btn x"
@@ -175,9 +206,9 @@ export function PanelOrders() {
   };
 
   const board = (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${PANEL_ORDER_STATUSES.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${PANEL_ORDER_STATUSES.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto", marginTop: 12 }}>
       {PANEL_ORDER_STATUSES.map((stage) => {
-        const cards = orders.filter((o) => o.status === stage);
+        const cards = shown.filter((o) => o.status === stage);
         return (
           <div key={stage} className="card" style={{ padding: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
@@ -201,17 +232,17 @@ export function PanelOrders() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Panel</th>
-              <th>Customer</th>
-              <th className="num" style={{ textAlign: "right" }}>Qty</th>
-              <th>Order Date</th>
-              <th>Sales Person</th>
-              <th>Status</th>
+              <SortTh id="panel" label="Panel" sort={sort} />
+              <SortTh id="customer" label="Customer" sort={sort} />
+              <SortTh id="qty" label="Qty" sort={sort} className="num" style={{ textAlign: "right" }} />
+              <SortTh id="date" label="Order Date" sort={sort} />
+              <SortTh id="sales" label="Sales Person" sort={sort} />
+              <SortTh id="status" label="Status" sort={sort} />
               <th />
             </tr>
           </thead>
           <tbody>
-            {orders.map((o) => {
+            {pageRows.map((o) => {
               const action = actionFor(o);
               return (
                 <tr key={o.id}>
@@ -222,43 +253,40 @@ export function PanelOrders() {
                   <td className="num mono">{fmt(o.qty)}</td>
                   <td className="mono muted">{o.orderDate || "—"}</td>
                   <td>{o.salesperson || "—"}</td>
-                  <td>{PANEL_ORDER_STATUS_LABEL[o.status]}</td>
+                  <td>
+                    <Chip tone={ORDER_STATUS_TONE[o.status]} label={PANEL_ORDER_STATUS_LABEL[o.status]} />
+                  </td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {action && (
                       <button className="btn" disabled={busyId === o.id} onClick={() => void onMove(o, action.to)}>
                         {busyId === o.id ? "Saving…" : action.label}
                       </button>
                     )}
+                    {o.status === "Received" && can("panel_craft", "delete") && (
+                      <span className="row-actions" style={{ marginLeft: 4 }}>
+                        <IconBtn icon="trash" title="Delete order" danger onClick={() => void onDelete(o)} />
+                      </span>
+                    )}
                   </td>
                 </tr>
               );
             })}
-            {orders.length === 0 && (
+            {shown.length === 0 && (
               <tr>
                 <td colSpan={7}>
-                  <EmptyState title="No panel orders yet" hint="Record the first one with New Order" />
+                  {orders.length > 0 ? (
+                    <EmptyState title="No matching results" hint="Try a different filter" />
+                  ) : (
+                    <EmptyState title="No panel orders yet" hint="Record the first one with New Order" />
+                  )}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      <GridFooter {...pager} />
     </div>
-  );
-
-  const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
-    <button
-      onClick={() => setView(v)}
-      title={label}
-      aria-label={`${label} view`}
-      style={{
-        background: view === v ? "var(--accent-soft)" : "transparent",
-        color: view === v ? "var(--fg)" : "var(--muted)",
-        border: 0, padding: "5px 12px", cursor: "pointer", display: "inline-flex", alignItems: "center",
-      }}
-    >
-      <Icon name={icon} size={14} />
-    </button>
   );
 
   return (
@@ -268,20 +296,32 @@ export function PanelOrders() {
 
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
-      <div className="fbar" style={{ marginBottom: 12 }}>
-        <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
+      <div className="fbar">
+        <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
+        <span className="muted">{loading ? "Loading…" : null}</span>
         <div style={{ flex: 1 }} />
-        <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
-          {viewBtn("kanban", "kanban", "Kanban")}
-          {viewBtn("sheet", "orders", "Sheet")}
+        <span role="group" aria-label="Board view" title="Switch view" style={{ display: "inline-flex", gap: 4 }}>
+          <IconBtn icon="kanban" title="Kanban view" active={view === "kanban"} onClick={() => setView("kanban")} />
+          <IconBtn icon="orders" title="Sheet view" active={view === "sheet"} onClick={() => setView("sheet")} />
         </span>
-        {can("stages", "edit") && (
-          <button className="btn" style={{ height: 26 }} onClick={() => setShowStock(true)}>
+        <span className="pc-divider" />
+        <FilterSelect
+          label="Status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={PANEL_ORDER_STATUSES.map((s) => PANEL_ORDER_STATUS_LABEL[s])}
+        />
+        <span className="gsearch">
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search panel or customer…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </span>
+        {can("panel_craft", "edit") && (
+          <button className="btn" onClick={() => setShowStock(true)}>
             Update Stock
           </button>
         )}
-        {can("stages", "create") && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+        {can("panel_craft", "create") && (
+          <button className="hbtn primary" onClick={() => setShowNew(true)}>
             <Icon name="plus" size={13} />
             New Order
           </button>

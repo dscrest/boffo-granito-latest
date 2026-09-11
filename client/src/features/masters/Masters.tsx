@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
@@ -85,7 +86,7 @@ const MASTERS: MasterDef[] = [
   },
   {
     key: "brand",
-    label: "Brand",
+    label: "Box Brand",
     icon: "flag",
     table: "Brand",
     lead: "name",
@@ -440,10 +441,13 @@ export function Masters() {
   return (
     <div>
       <div className="page-head">
-        <div>
-          <div className="title">Masters</div>
-          <div className="sub">
-            Lookup data entry · {MASTERS.length} tables
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <BackToSettings />
+          <div>
+            <div className="title">Masters</div>
+            <div className="sub">
+              Lookup data entry · {MASTERS.length} tables
+            </div>
           </div>
         </div>
       </div>

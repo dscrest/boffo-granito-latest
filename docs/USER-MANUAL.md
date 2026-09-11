@@ -4,8 +4,11 @@
 
 > ⚠️ **Sections 5.5 and 6 are stale (last updated 2026-07-23).** They describe "Loading" and
 > "Final Loading" as separate stages and predate the Palletization board redesign,
-> container-first loading, batch-wise stock and Panel Craft. For the current behaviour see
-> [`SYSTEM.md` §5](SYSTEM.md#5--the-order-to-dispatch-flow). Sections 1–4, 7–8 and the §9
+> container-first loading, batch-wise stock and Panel Craft — and the 2026-09-04 revamp:
+> two-step palletise (Palletise → In Palletization, then Mark Palletised → Ready for
+> Loading), the Load button on the Palletization board, the "Loading and Dispatch" menu
+> (boxed containers only) and the per-loading Plan Loading screen. For the current behaviour
+> see [`SYSTEM.md` §5](SYSTEM.md#5--the-order-to-dispatch-flow). Sections 1–4, 7–8 and the §9
 > formula reference are still accurate.
 
 This manual is written for the people who use BOFFO every day — sales staff, production and QC coordinators, logistics and loading staff, and administrators. No technical knowledge is needed. Keep it open beside you while you learn the app.

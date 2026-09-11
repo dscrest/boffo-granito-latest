@@ -7,6 +7,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { FilterSelect, IconBtn } from "./pcBits";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -35,7 +36,7 @@ const STOCK_COLUMNS: ColumnDef<StockGridRow>[] = [
     label: "On Hand",
     className: "num mono",
     style: { textAlign: "right" },
-    render: (r) => <span style={r.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(r.qty)}</span>,
+    render: (r) => <span style={r.qty === 0 ? { color: "var(--danger)" } : undefined}>{fmt(r.qty)}</span>,
   },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];
@@ -47,6 +48,7 @@ export function CutStock() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("cutStock.query", "");
+  const [designFilter, setDesignFilter] = useState("");
   // null = closed; {} = blank Adjust; ids = prefilled from a row click.
   const [adjust, setAdjust] = useState<{ design?: string; cutSize?: string } | null>(null);
   const { ordered, visible, hidden, toggle, move } = useColumns("cutStockColumns", STOCK_COLUMNS, ["modified"]);
@@ -81,16 +83,21 @@ export function CutStock() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return grid;
-    return grid.filter((r) => r.designName.toLowerCase().includes(q) || r.cutSizeName.toLowerCase().includes(q));
-  }, [grid, query]);
+    return grid.filter(
+      (r) =>
+        (!designFilter || r.designName === designFilter) &&
+        (!q || r.designName.toLowerCase().includes(q) || r.cutSizeName.toLowerCase().includes(q)),
+    );
+  }, [grid, query, designFilter]);
+
+  const designOptions = useMemo(() => [...new Set(grid.map((r) => r.designName).filter(Boolean))].sort(), [grid]);
 
   const sort = useSortRows(
     filtered,
     (r, k) => (k === "qty" ? r.qty : k === "cutSize" ? r.cutSizeName : k === "modified" ? r.modifiedTime : r.designName),
     "design",
   );
-  const pager = usePagination(sort.sorted.length, "cutStockPageSize", query);
+  const pager = usePagination(sort.sorted.length, "cutStockPageSize", `${query}|${designFilter}`);
   const pageRows = pager.slice(sort.sorted);
 
   const onAdjust = async (design: string, cutSize: string, qty: number) => {
@@ -104,7 +111,7 @@ export function CutStock() {
     await load();
   };
 
-  const canAdjust = can("stages", "edit");
+  const canAdjust = can("panel_craft", "edit");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
@@ -120,15 +127,17 @@ export function CutStock() {
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar">
-        <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
+        <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
+        <span className="muted">{loading ? "Loading…" : null}</span>
         <div style={{ flex: 1 }} />
+        <FilterSelect label="Design" value={designFilter} onChange={setDesignFilter} options={designOptions} />
         <span className="gsearch">
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search design or cut size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         {canAdjust && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setAdjust({})}>
+          <button className="hbtn primary" onClick={() => setAdjust({})}>
             <Icon name="plus" size={13} />
             Update Stock
           </button>
@@ -146,30 +155,29 @@ export function CutStock() {
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
+                  {canAdjust && <th style={{ width: 40 }} />}
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((r) => (
-                  <tr
-                    key={r.id}
-                    tabIndex={0}
-                    onClick={canAdjust ? () => setAdjust({ design: r.designId, cutSize: r.cutSizeId }) : undefined}
-                    onKeyDown={(e) => {
-                      if (canAdjust && e.key === "Enter" && e.target === e.currentTarget) setAdjust({ design: r.designId, cutSize: r.cutSizeId });
-                    }}
-                    style={canAdjust ? { cursor: "pointer" } : undefined}
-                    title={canAdjust ? "Update this stock" : undefined}
-                  >
+                  <tr key={r.id}>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
                       </td>
                     ))}
+                    {canAdjust && (
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <span className="row-actions">
+                          <IconBtn icon="edit" title="Update this stock" onClick={() => setAdjust({ design: r.designId, cutSize: r.cutSizeId })} />
+                        </span>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length}>
+                    <td colSpan={visible.length + (canAdjust ? 1 : 0)}>
                       {rows.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (

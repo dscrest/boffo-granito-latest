@@ -43,9 +43,11 @@ import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "
 import { update } from "@/lib/dataOps";
 import { useMasters } from "@/features/masters/useMasters";
 import { listPallets, cachedPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listBatchStock, cachedBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import type { DesignRow } from "@/features/masters/designsApi";
 import { cachedOrders, invalidateOrders, listOrders, soStatusLabel, SO_STATUS_CHIP } from "@/features/orders/ordersApi";
 import { STATUS_CHIP, STATUS_LABEL, quoteToInput } from "./QuotesTable";
+import { cellsOfSegs, emptyCells, packItemWise } from "./containerPack";
 import {
   cachedQuotes,
   invalidateQuotes,
@@ -63,6 +65,42 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 // Leading dimension of a size string ("300x600 - GVT…" → "300") — same
 // matcher as PalPlanForm's per-line pallet-size filtering.
 const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
+
+/** Reopen a saved plan as editable row groups (design → one entry per row):
+ *  each plan line starts a new group, except an auto-overflow continuation —
+ *  previous container is single-line, full, same design + pallet, and the line
+ *  opens its container — which merges back into the previous group. So a
+ *  deliberate clone split (300+200, first container partial) survives reopen,
+ *  while a plain overflow (400 filling C1 + 100) reseeds as one row. */
+// ponytail: a split whose first part exactly fills a container merges back to one row — it repacks to the identical plan, only the visual row split is lost
+function planRowGroups(plan: ContainerPlan | null) {
+  const groups = new Map<string, { qty: number; palletId: string }[]>();
+  const containers = plan?.containers ?? [];
+  containers.forEach((c, i) => {
+    c.lines.forEach((ln, j) => {
+      const list = groups.get(ln.design) ?? [];
+      const prev = i > 0 ? containers[i - 1] : undefined;
+      const overflow =
+        j === 0 && prev?.lines.length === 1 && prev.fillPct >= 100 &&
+        prev.lines[0].design === ln.design && (prev.lines[0].palletId || "") === (ln.palletId || "");
+      if (overflow && list.length) list[list.length - 1].qty += ln.boxes;
+      else list.push({ qty: ln.boxes, palletId: ln.palletId || "" });
+      groups.set(ln.design, list);
+    });
+  });
+  return groups;
+}
+
+/** Collapse draft rows to one line per item — mirrors what the quote save persists. */
+function mergeByItem(valid: DraftLine[]) {
+  const merged = new Map<string, { item: string; qty: number; rate: number; discount: number; description: string }>();
+  for (const l of valid) {
+    const m = merged.get(l.item);
+    if (m) m.qty += l.qty;
+    else merged.set(l.item, { item: l.item, qty: l.qty, rate: l.rate, discount: l.discount || 0, description: l.description || "" });
+  }
+  return [...merged.values()];
+}
 
 /** An editable plan line (the local source of truth; seeded from the quote). */
 interface DraftLine {
@@ -128,6 +166,8 @@ interface PlannerProps {
   subtitleExtras: string[];
   /** Where the ✕ close button navigates. */
   closeTo: string;
+  /** Embedded in another page (LoadingDetail tab): hide the ✕ close button. */
+  embedded?: boolean;
   /** Seed lines (keys assigned internally); re-seeded when seedKey changes. */
   seedLines: Omit<DraftLine, "key">[];
   seedKey: string;
@@ -143,7 +183,7 @@ interface PlannerProps {
 }
 
 function ContainerisePlanner({
-  docNo, statusChip, customer, partyCode, subtitleExtras, closeTo,
+  docNo, statusChip, customer, partyCode, subtitleExtras, closeTo, embedded,
   seedLines, seedKey, savedPlan, pallets, canSave, saving, saveTitle, linesDirty, onSave,
 }: PlannerProps) {
   const navigate = useNavigate();
@@ -165,6 +205,23 @@ function ContainerisePlanner({
 
   const keySeq = useRef(0);
   const nextKey = () => `L${keySeq.current++}`;
+
+  // Batch stock per item — shown under the Item picker (same source as
+  // Stock Details / the item Stock tab; cached + deduped app-wide).
+  const [batchStock, setBatchStock] = useState<BatchStockRow[]>(() => cachedBatchStock() ?? []);
+  useEffect(() => {
+    void listBatchStock().then((r) => r.ok && setBatchStock(r.rows));
+  }, []);
+  const batchesByItem = useMemo(() => {
+    const m = new Map<string, BatchStockRow[]>();
+    for (const b of batchStock) {
+      if (!b.batchNumber || b.current <= 0) continue;
+      const list = m.get(b.designName) ?? [];
+      list.push(b);
+      m.set(b.designName, list);
+    }
+    return m;
+  }, [batchStock]);
 
   // Re-seed editable lines + ton capacity whenever the underlying document changes.
   useEffect(() => {
@@ -287,17 +344,10 @@ function ContainerisePlanner({
       }, 0);
 
     // Baseline: strictly item-wise, line order.
-    let list: { segs: Seg[] }[] = [];
-    for (const l of lines) {
-      let left = l.qty;
-      while (left > 0) {
-        const capBoxes = lineCapIn(l, list.length);
-        if (capBoxes < 1) break;
-        const take = Math.min(left, capBoxes);
-        list.push({ segs: [{ idx: l.idx, boxes: take }] });
-        left -= take;
-      }
-    }
+    let list: { segs: Seg[] }[] = packItemWise(lines, (idx, pos) => {
+      const l = byIdx(idx);
+      return l ? lineCapIn(l, pos) : 0;
+    }).map((segs) => ({ segs }));
 
     // Layer manual moves on top. Positions refer to the compacted list the
     // user saw when the move was made, so compact after every application.
@@ -331,9 +381,13 @@ function ContainerisePlanner({
     });
   }, [lines, mode, tonCapacity, capByIdx, moves]);
 
-  // Remaining to plan per line — ordered boxes not yet moved into the Boxes
-  // (plan) column: max(0, ordered − qty). New lines (no ordered) contribute 0.
-  const totalRemaining = rows.reduce((s, l) => s + (l.ordered == null ? 0 : Math.max(0, l.ordered - l.qty)), 0);
+  // Remaining to plan per ITEM — ordered boxes not yet in the Boxes (plan)
+  // column across all rows of that item (a cloned split mustn't double-count).
+  // Only the row carrying `ordered` shows it; clones show "—".
+  const qtyByItem = rows.reduce((m, l) => m.set(l.item, (m.get(l.item) ?? 0) + l.qty), new Map<string, number>());
+  const remainingOf = (l: { item: string; ordered?: number }) =>
+    l.ordered == null ? null : Math.max(0, l.ordered - (qtyByItem.get(l.item) ?? 0));
+  const totalRemaining = rows.reduce((s, l) => s + (remainingOf(l) ?? 0), 0);
 
   const totalBoxes = lines.reduce((s, l) => s + l.qty, 0);
   const totalPalletsCount = lines.reduce((s, l) => s + l.pallets, 0);
@@ -428,29 +482,37 @@ function ContainerisePlanner({
   }, [containers, lines, mode, tonCapacity]);
 
   /** Colored pallet cells of a container (single item): ceil(boxes / box-per-pallet). */
-  const cellsOf = (c: PackedContainer) => {
-    const cells: { color: string; item: string }[] = [];
-    for (const s of c.segs) {
-      const l = lineOf(s.idx);
-      if (!l) continue;
-      const n = Math.max(1, Math.ceil(s.boxes / l.boxesPerPallet));
-      for (let k = 0; k < n; k++) cells.push({ color: l.color, item: l.item });
-    }
-    return cells;
-  };
+  const cellsOf = (c: PackedContainer) =>
+    cellsOfSegs(c.segs.filter((s) => lineOf(s.idx)), (idx) => lineOf(idx)?.boxesPerPallet ?? 1).map((idx) => {
+      const l = lineOf(idx)!;
+      return { color: l.color, item: l.item };
+    });
   /** Empty (hatched) cells = the container's box-capacity, in pallet units, minus used. */
   const emptyCellsOf = (c: PackedContainer, used: number) => {
-    if (c.fill >= 1 - EPS) return 0;
     const l = lineOf(c.segs[0]?.idx);
     if (!l) return 0;
-    const capCells = Math.max(used, mode === "boxes" ? l.palletsPerContainer : Math.ceil(c.capBoxes / l.boxesPerPallet));
-    return Math.max(0, capCells - used);
+    const capCells = mode === "boxes" ? l.palletsPerContainer : Math.ceil(c.capBoxes / l.boxesPerPallet);
+    return emptyCells(c.fill, capCells, used);
   };
 
   /* ---- line editing ---- */
   const setLine = (key: string, patch: Partial<DraftLine>) =>
     setDraftLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  const removeLine = (key: string) => setDraftLines((ls) => ls.filter((l) => l.key !== key));
+  const removeLine = (key: string) =>
+    setDraftLines((ls) => {
+      const gone = ls.find((l) => l.key === key);
+      const rest = ls.filter((l) => l.key !== key);
+      // Removing the row that carries Ordered hands it to a surviving clone —
+      // deleting the original must not blank Ordered/Remaining for the item.
+      if (gone?.ordered != null) {
+        const heir = rest.find((l) => l.item === gone.item && l.ordered == null);
+        if (heir) return rest.map((l) => (l === heir ? { ...l, ordered: gone.ordered } : l));
+      }
+      return rest;
+    });
+  // Clone = same item on a fresh row (qty 0, no Ordered) to split across containers.
+  const cloneLine = (key: string) =>
+    setDraftLines((ls) => ls.flatMap((l) => (l.key === key ? [l, { ...l, key: nextKey(), ordered: undefined, qty: 0 }] : [l])));
   const addLine = () =>
     setDraftLines((ls) => [...ls, { key: nextKey(), item: "", qty: 1, rate: 0, discount: 0, description: "", palletId: "" }]);
   const setQtyByIdx = (idx: number, raw: string) => {
@@ -534,6 +596,11 @@ function ContainerisePlanner({
       toast.error("Add at least one item");
       return;
     }
+    // container_plan is text(10000); a truncated slice stores invalid JSON that never parses back.
+    if (planJson.length > 10000) {
+      toast.error("Plan too large to save — reduce containers or lines");
+      return;
+    }
     await onSave(planJson, valid);
   };
 
@@ -559,9 +626,11 @@ function ContainerisePlanner({
               <Icon name="check" size={13} /> {saving ? "Saving…" : dirty ? "Save" : "Saved"}
             </button>
           )}
-          <button className="btn x" onClick={() => navigate(closeTo)} title="Close">
-            <Icon name="x" size={13} />
-          </button>
+          {!embedded && (
+            <button className="btn x" onClick={() => navigate(closeTo)} title="Close">
+              <Icon name="x" size={13} />
+            </button>
+          )}
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
           <Link className="linkish" to={`/parties/${encodeURIComponent(partyCode)}`} title="Open customer">
@@ -573,7 +642,7 @@ function ContainerisePlanner({
         </div>
       </div>
 
-      {/* Items — edit item / quantity / rate / pallet; add or remove lines. */}
+      {/* Items — edit item / quantity / pallet; add or remove lines. */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ overflow: "auto" }}>
           <table className="tbl">
@@ -584,10 +653,10 @@ function ContainerisePlanner({
                 <th className="num" style={{ textAlign: "right", width: 120 }}>Boxes</th>
                 <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                 <th className="num" style={{ textAlign: "right" }}>Tonnes</th>
-                <th className="num" style={{ textAlign: "right", width: 110 }}>Rate</th>
+                {/* Rate stays in DraftLine state + quote save; only the column is hidden (CR). */}
                 <th style={{ minWidth: 220 }}>Pallet Type</th>
-                <th className="num" style={{ textAlign: "right" }}>Ready Pallets</th>
-                <th style={{ width: 34 }} />
+                <th className="num" style={{ textAlign: "right" }}>Pallets</th>
+                <th style={{ width: 64 }} />
               </tr>
             </thead>
             <tbody>
@@ -605,6 +674,11 @@ function ContainerisePlanner({
                           ariaLabel="Item"
                         />
                         {l.sku && <div className="mono dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }}>{l.sku}</div>}
+                        {(batchesByItem.get(l.item)?.length ?? 0) > 0 && (
+                          <div className="mono dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }} title="Batches in stock (boxes on hand)">
+                            {batchesByItem.get(l.item)!.map((b) => `${b.batchNumber} ×${fmt(b.current)}`).join(" · ")}
+                          </div>
+                        )}
                         {!l.packable && l.reason && (
                           <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: 2, color: "var(--c-amber)" }}>
                             ⚠ {l.reason}
@@ -630,18 +704,8 @@ function ContainerisePlanner({
                       aria-label={`${l.item || "item"} boxes`}
                     />
                   </td>
-                  <td className="num mono dim">{l.ordered == null ? "—" : fmt(Math.max(0, l.ordered - l.qty))}</td>
+                  <td className="num mono dim">{l.ordered == null ? "—" : fmt(remainingOf(l) ?? 0)}</td>
                   <td className="num mono" style={{ fontWeight: 600 }}>{l.boxWeightKg > 0 ? `${round1(l.tonnes).toFixed(1)} t` : "—"}</td>
-                  <td className="num">
-                    <NumberInput
-                      value={l.rate}
-                      onChange={(e) => setLine(l.key, { rate: Math.max(0, Number(e.target.value) || 0) })}
-                      disabled={!canSave}
-                      placeholder="0"
-                      style={{ width: 100, textAlign: "right" }}
-                      aria-label={`${l.item || "item"} rate`}
-                    />
-                  </td>
                   <td>
                     <Combobox
                       value={l.palletId}
@@ -664,14 +728,17 @@ function ContainerisePlanner({
                   >
                     {l.capacityBoxes ? fmt(l.pallets) : "—"}
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn ord-rm" onClick={() => cloneLine(l.key)} title="Clone line — split this item across containers" disabled={!canSave} tabIndex={-1}>
+                      <Icon name="copy" size={12} />
+                    </button>{" "}
                     <button className="btn ord-rm" onClick={() => removeLine(l.key)} title="Remove line" disabled={!canSave} tabIndex={-1}>✕</button>
                   </td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>No items yet — add one below.</td>
+                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>No items yet — add one below.</td>
                 </tr>
               )}
             </tbody>
@@ -682,7 +749,7 @@ function ContainerisePlanner({
                 <td className="num mono">{fmt(totalBoxes)}</td>
                 <td className="num mono dim">{fmt(totalRemaining)}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>{round1(totalTonnes).toFixed(1)} t</td>
-                <td /><td />
+                <td />
                 <td className="num mono" style={{ fontWeight: 600 }}>{fmt(totalPalletsCount)} pallets</td>
                 <td />
               </tr>
@@ -1049,32 +1116,41 @@ export function PlanContainerisation() {
       partyCode={quote.partyCode}
       subtitleExtras={[quote.quoteDate || "", quote.portOfDischarge || ""]}
       closeTo={`/quotes/${quote.id}`}
-      seedLines={quote.lines.map((l) => ({
-        item: l.item,
-        qty: l.qty,
-        rate: l.rate,
-        discount: l.discount,
-        description: l.description || "",
-        palletId: "",
-        ordered: l.qty,
-      }))}
+      seedLines={(() => {
+        // Reopen on the saved plan's row groups (boxes + pallet per group) so a
+        // cloned split (300+200) survives re-seed; Ordered rides the first row.
+        const groups = planRowGroups(parseContainerPlan(quote.containerPlan));
+        return quote.lines.flatMap((l) => {
+          const base = { item: l.item, rate: l.rate, discount: l.discount, description: l.description || "" };
+          const gs = groups.get(l.item);
+          if (!gs?.length) return [{ ...base, qty: l.qty, palletId: "", ordered: l.qty }];
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, ordered: k === 0 ? l.qty : undefined }));
+        });
+      })()}
       seedKey={`${quote.id}:${quote.modifiedTime}`}
       savedPlan={quote.containerPlan || ""}
       pallets={pallets}
       canSave={can("quotes", "edit")}
       saving={saving}
       saveTitle="Save the items and plan to the quote"
-      linesDirty={(draft) =>
-        draft.length !== quote.lines.length ||
-        draft.some((l, i) => {
-          const o = quote.lines[i];
-          return !o || o.item !== l.item || o.qty !== l.qty || o.rate !== l.rate || (o.discount || 0) !== (l.discount || 0);
-        })
-      }
+      linesDirty={(draft) => {
+        // Compare what save would persist (rows merged by item) — a reseeded
+        // multi-row split merges back to quote.lines exactly, so it's clean.
+        const merged = mergeByItem(draft.filter((l) => l.item && l.qty > 0));
+        return (
+          merged.length !== quote.lines.length ||
+          merged.some((l, i) => {
+            const o = quote.lines[i];
+            return !o || o.item !== l.item || o.qty !== l.qty || o.rate !== l.rate || (o.discount || 0) !== (l.discount || 0);
+          })
+        );
+      }}
       onSave={async (planJson, valid) => {
         setSaving(true);
         const input = quoteToInput(quote);
-        input.lines = valid.map((l) => ({ item: l.item, qty: l.qty, rate: l.rate, discount: l.discount || 0, description: l.description || "" }));
+        // Merge by item: a design split across pallets/containers (400+100) stays
+        // ONE quote line (500) — the split lives only in the container plan JSON.
+        input.lines = mergeByItem(valid);
         input.container_plan = planJson; // publish the plan for SO detail + dispatch board
         const res = await updateQuoteWithItems(quote.id, input);
         setSaving(false);
@@ -1094,8 +1170,9 @@ export function PlanContainerisation() {
    seed from the SO's OrderItems (edits are session-local packing inputs; the
    Ordered/Remaining columns keep them honest) and Save persists ONLY the
    plan JSON onto the SalesOrder — lines and status are never rewritten. ---- */
-export function PlanSoContainerisation() {
-  const { id = "" } = useParams();
+export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embedded?: boolean } = {}) {
+  const { id: routeId = "" } = useParams();
+  const id = soId || routeId;
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
@@ -1146,15 +1223,32 @@ export function PlanSoContainerisation() {
       partyCode={head.partyCode}
       subtitleExtras={[head.orderDate || "", head.portOfDischarge || ""]}
       closeTo={`/orders/${id}`}
-      seedLines={items.map((o) => ({
-        item: o.designName,
-        qty: o.orderQty,
-        rate: o.rate || 0,
-        discount: o.discount || 0,
-        description: o.description || "",
-        palletId: o.palletId || "",
-        ordered: o.orderQty,
-      }))}
+      embedded={embedded}
+      seedLines={(() => {
+        // Reopen on the saved plan's row groups (boxes + pallet per group), not
+        // the raw OrderItems — otherwise every mount/save re-seed reverts the
+        // user's plan edits and collapses a cloned split back into one row.
+        // ponytail: manual box moves aren't restored — a moved plan repacks item-wise and may show "Save" once
+        const plan = parseContainerPlan(head.containerPlan);
+        const groups = planRowGroups(plan);
+        const emitted = new Set<string>();
+        const out = items.flatMap((o) => {
+          const item = o.design || o.designName; // o.design hydrates as unique_name || design_name — must match itemOptions keys
+          const base = { item, rate: o.rate || 0, discount: o.discount || 0, description: o.description || "" };
+          const gs = groups.get(item);
+          if (!gs?.length) return [{ ...base, qty: plan ? 0 : o.orderQty, palletId: o.palletId || "", ordered: o.orderQty }];
+          if (emitted.has(item)) return [];
+          emitted.add(item);
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId || o.palletId || "", ordered: k === 0 ? o.orderQty : undefined }));
+        });
+        // Planner-added designs that live only in the plan (no OrderItem) used
+        // to drop silently on reopen — seed them as reference-less rows.
+        for (const [design, gs] of groups) {
+          if (emitted.has(design)) continue;
+          for (const g of gs) out.push({ item: design, qty: g.qty, rate: 0, discount: 0, description: "", palletId: g.palletId, ordered: undefined });
+        }
+        return out;
+      })()}
       seedKey={`${id}:${head.modifiedTime}`}
       savedPlan={head.containerPlan || ""}
       pallets={pallets}
@@ -1163,7 +1257,7 @@ export function PlanSoContainerisation() {
       saveTitle="Save the container plan to the sales order"
       onSave={async (planJson) => {
         setSaving(true);
-        const res = await update("SalesOrder", id, { container_plan: planJson.slice(0, 10000) });
+        const res = await update("SalesOrder", id, { container_plan: planJson });
         setSaving(false);
         if (!res.ok) {
           toast.error(res.error || "Save failed");

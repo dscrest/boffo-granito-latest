@@ -8,6 +8,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -182,9 +183,12 @@ export function CurrenciesAdmin() {
   return (
     <div>
       <div className="page-head">
-        <div>
-          <div className="title">Currencies</div>
-          <div className="sub">{loading ? "Loading…" : "Base INR · rates auto-refresh daily (frankfurter.dev)"}</div>
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <BackToSettings />
+          <div>
+            <div className="title">Currencies</div>
+            <div className="sub">{loading ? "Loading…" : "Base INR · rates auto-refresh daily (frankfurter.dev)"}</div>
+          </div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void onRefreshRates()} disabled={refreshing} title="Fetch live rates now">

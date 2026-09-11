@@ -72,6 +72,9 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "x": return <svg {...common}><path d="M6 6l12 12M18 6 6 18"/></svg>;
     case "chart": return <svg {...common}><path d="M3 3v18h18"/><path d="M7 15l3-4 3 3 5-7"/></svg>;
     case "log-out": return <svg {...common}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>;
+    case "trash": return <svg {...common}><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14"/><path d="M10 11v6M14 11v6"/></svg>;
+    case "copy": return <svg {...common}><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
+    case "refresh": return <svg {...common}><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>;
     default: return null;
   }
 }
