@@ -22,6 +22,7 @@ import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansA
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
+import { NewLoadingModal } from "@/features/stages/NewLoadingModal";
 import { invalidateProductionLogs, listProductionLogs, requestProduction, stageChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
 
@@ -84,7 +85,6 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
               <th>Status</th>
               <th className="num" style={{ textAlign: "right" }}>Requested</th>
               <th className="num" style={{ textAlign: "right" }}>Produced</th>
-              <th className="num" style={{ textAlign: "right" }}>Remaining</th>
               <th>By</th>
               <th>Note</th>
             </tr>
@@ -96,7 +96,6 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
               const date = e.productionDate || lastRec?.productionDate || e.createdTime.slice(0, 10);
               const batches = [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))];
               if (!batches.length && e.batchNumber) batches.push(e.batchNumber);
-              const remaining = Math.max(0, e.qtyRequested - e.producedSoFar);
               return (
                 <tr key={e.id}>
                   <td className="mono muted nw">{date || "—"}</td>
@@ -110,7 +109,6 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
                   <td className="nw"><span className="chip" style={{ color: s.color }} title={s.label}>{codeOf(s.label)}</span></td>
                   <td className="num mono">{fmt(e.qtyRequested)}</td>
                   <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
-                  <td className="num mono">{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
                   <td className="muted nw">{e.performedBy || lastRec?.performedBy || "—"}</td>
                   <td className="muted" style={{ maxWidth: 240 }}><span className="clip" title={e.note}>{e.note || "—"}</span></td>
                 </tr>
@@ -118,7 +116,7 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   No production requested against this order yet.
                 </td>
               </tr>
@@ -140,6 +138,7 @@ type SoPalRow = {
   planId: string; // "" for legacy rows (no detail page)
   date: string;
   design: string;
+  batch: string; // production batch ("" = legacy aggregate) — CR-180
   pallet: string; // pallet format name (tooltip)
   pallets: number | null; // boxes ÷ boxes-per-pallet, fractional (null = unknown format)
   boxes: number;
@@ -173,6 +172,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
               planId: p.id,
               date: p.plannedDate || p.createdTime.slice(0, 10),
               design: l.designLabel,
+              batch: l.batchNumber,
               pallet: l.palletName,
               pallets: l.boxesPerPallet > 0 ? l.boxes / l.boxesPerPallet : null,
               boxes: l.boxes,
@@ -181,7 +181,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
           }),
       );
       const legacyRows: SoPalRow[] = (legacy.ok ? legacy.rows : []).map((b) => ({
-        key: `batch-${b.batchId}`, pal: "", planId: "", date: b.date, design: b.design, pallet: b.pallet, pallets: null, boxes: b.boxes, status: b.status,
+        key: `batch-${b.batchId}`, pal: "", planId: "", date: b.date, design: b.design, batch: b.batchNumber, pallet: b.pallet, pallets: null, boxes: b.boxes, status: b.status,
       }));
       setRows([...planRows, ...legacyRows]);
     });
@@ -200,6 +200,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
           <thead>
             <tr>
               <th>Design</th>
+              <th>Batch</th>
               <th>Palletization Date</th>
               <th className="num" style={{ textAlign: "right" }}>Pallets</th>
               <th className="num" style={{ textAlign: "right" }}>Boxes</th>
@@ -217,6 +218,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
                 onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && b.planId && navigate(`/packing/${encodeURIComponent(b.planId)}`)}
               >
                 <td><span className="design-name">{b.design}</span></td>
+                <td className="nw">{b.batch ? <span className="chip mono">{b.batch}</span> : <span className="dim">—</span>}</td>
                 <td className="mono muted">{b.date}</td>
                 <td className="num mono">{b.pallets == null ? <span className="dim">—</span> : fmtPallets(b.pallets)}</td>
                 <td className="num mono">{fmt(b.boxes)}</td>
@@ -225,13 +227,13 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   Nothing palletised against this order yet.
                 </td>
               </tr>
             ) : (
               <tr>
-                <td colSpan={2} style={{ fontWeight: 500 }}>Total</td>
+                <td colSpan={3} style={{ fontWeight: 500 }}>Total</td>
                 <td className="num mono" style={{ fontWeight: 500 }}>{fmtPallets(totalPallets)}</td>
                 <td className="num mono" style={{ fontWeight: 500 }}>{fmt(totalBoxes)}</td>
                 <td />
@@ -290,6 +292,7 @@ export function OrderDetail() {
   const [prod, setProd] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [sendLoad, setSendLoad] = useState(false);
+  const [newLoad, setNewLoad] = useState(false); // CR-175: New Loading from palletised stock
   const [listQ, setListQ] = useState("");
   const { customers } = useMasters();
 
@@ -567,6 +570,11 @@ export function OrderDetail() {
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
                 ? [{ label: "Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
                 : []),
+              // New Loading (CR-175): this SO's palletised stock into a container —
+              // same modal as /loading's New Loading, SO preset.
+              ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
+                ? [{ label: "New Loading", onClick: () => setNewLoad(true) }]
+                : []),
               // Always offered post-approval — production may be logged even on a
               // fully-produced order (CR); the form's hint columns show coverage.
               ...(!["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
@@ -660,6 +668,17 @@ export function OrderDetail() {
                 Send to Loading
               </button>
             )}
+            {/* New Loading (CR-175) — the palletised route; mirrors the header More entry. */}
+            {can("stages", "edit") && !["Draft", "PendingApproval"].includes(status) && (
+              <button
+                className="btn"
+                disabled={!head.salesOrderId}
+                onClick={() => setNewLoad(true)}
+                title="Start a loading from this order's palletised stock"
+              >
+                New Loading
+              </button>
+            )}
           </div>
         </div>
         <div style={{ overflow: "auto" }}>
@@ -737,6 +756,13 @@ export function OrderDetail() {
             void load();
           }}
           onClose={() => setSendLoad(false)}
+        />
+      )}
+      {newLoad && head.salesOrderId && (
+        <NewLoadingModal
+          presetSalesOrderId={head.salesOrderId}
+          onDone={() => { setNewLoad(false); void load(); }}
+          onClose={() => setNewLoad(false)}
         />
       )}
     </RecordDetail>

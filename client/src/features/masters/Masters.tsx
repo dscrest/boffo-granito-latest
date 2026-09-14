@@ -13,13 +13,16 @@ import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
+import { ImageUploader } from "@/ui/ImageUploader";
+import { designImageUrl } from "@/lib/api";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
 import { formatVehicleNumber } from "./vehiclesApi";
 
-type FieldType = "text" | "number" | "select";
+/** "image" = one File Store file id (design_images folder), uploaded via ImageUploader. */
+type FieldType = "text" | "number" | "select" | "image";
 
 interface Field {
   key: string;
@@ -93,6 +96,7 @@ const MASTERS: MasterDef[] = [
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "internal_or_external", label: "Type", type: "select", options: ["Internal", "External"] },
+      { key: "logo", label: "Image", type: "image" }, // CR-181: shown on the Quote/SO/Customer Box Brand pickers
       { key: "seq_code", label: "Seq", auto: true },
     ],
   },
@@ -198,6 +202,12 @@ function MasterEditor({
                 options={[{ value: "", label: "" }, ...f.options!.map((o) => ({ value: o, label: o }))]}
                 onChange={(val) => set(f.key, val)}
                 placeholder={`Search ${f.label.toLowerCase()}…`}
+              />
+            ) : f.type === "image" ? (
+              <ImageUploader
+                max={1}
+                value={vals[f.key] ? [{ id: vals[f.key], name: "" }] : []}
+                onChange={(next) => set(f.key, next[0]?.id ?? "")}
               />
             ) : (
               <input
@@ -412,6 +422,8 @@ function MasterTable({ def }: { def: MasterDef }) {
                     <td key={f.key} className={f.type === "number" ? "num" : ""}>
                       {f.key === def.lead && r[f.key] ? (
                         <span className="chip">{r[f.key]}</span>
+                      ) : f.type === "image" && r[f.key] ? (
+                        <img src={designImageUrl(r[f.key])} alt="" style={{ width: 28, height: 28, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", display: "block" }} />
                       ) : r[f.key] ? (
                         r[f.key]
                       ) : (

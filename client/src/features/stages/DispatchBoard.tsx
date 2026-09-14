@@ -30,6 +30,7 @@ import {
   loadableLineIds,
   oiProgressOf,
   PAL_LINE_STATUS_LABEL,
+  palletsOf,
   palTopUp,
   setPalLineStatus,
   type LoadBox,
@@ -173,6 +174,11 @@ export function DispatchBoard({
         style: { fontSize: "var(--t-sm)" },
         render: ({ l }) => {
           const prog = oiProgress.get(l.orderItemId);
+          // CR-176: per-ROW chip. A recorded slice held back by the batch gate
+          // reads "Recorded"; only the not-yet-recorded rows read "Partial"
+          // (same rule as PalPlanDetail's status column).
+          const done = l.status === "ReadyToLoad" || !!l.loadBoxId;
+          const partialItem = !!prog && prog.done > 0 && prog.done < prog.total;
           return (
             <>
               {l.batchNumber || "—"}
@@ -181,8 +187,13 @@ export function DispatchBoard({
                   Mix Batch
                 </span>
               )}
-              {prog && prog.done > 0 && prog.done < prog.total && (
-                <span className="chip palstatus p-palletized" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Part of this order item is still not palletised">
+              {partialItem && done && (
+                <span className="chip palstatus p-ready" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Palletised — waiting for the rest of this batch before loading">
+                  Recorded
+                </span>
+              )}
+              {partialItem && !done && (
+                <span className="chip palstatus p-palletized" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Still to be palletised — Complete Palletisation records it">
                   Partial
                 </span>
               )}
@@ -330,6 +341,31 @@ export function DispatchBoard({
     if (view !== "sheet") { setDraft({}); setEditMode(false); }
   }, [view]);
 
+  // Record = the exact call confirmPalletise makes: a partial qty splits
+  // the line server-side, the remainder stays in its stage. Per-row only —
+  // a Mix Batch row does NOT pull its pallet_group siblings here (the +
+  // menu's Complete still records the whole physical pallet together).
+  const commitRow = (l: PalPlanLine, ops: PalSheetOps) =>
+    ops.record
+      ? setPalLineStatus(l.id, "ReadyToLoad", l.palletId, ops.record.boxes)
+      : palTopUp(l.id, ops.topUp!.donorId, ops.topUp!.boxes);
+
+  // Per-row ✓ (CR-169): commit ONE row, keep edit mode + the other drafts.
+  const saveRow = async (l: PalPlanLine) => {
+    const row = editRows.find((r) => r.l.id === l.id);
+    if (!row || savingEdits) return;
+    setSavingEdits(true);
+    const res = await commitRow(l, row.ops);
+    setSavingEdits(false);
+    if (!res.ok) { toast.error(`${l.itemCode}: ${res.error || "Save failed"}`); return; }
+    dropDraft(l.id);
+    toast.success(`${l.itemCode} saved`);
+    invalidatePalPlans();
+    onChanged();
+  };
+  const dropDraft = (id: string) =>
+    setDraft((m) => { const { [id]: _gone, ...rest } = m; return rest; });
+
   const saveEdits = async () => {
     if (!editRows.length || editBad || savingEdits) return;
     setSavingEdits(true);
@@ -338,13 +374,7 @@ export function DispatchBoard({
     // ponytail: sequential + non-atomic, one request per row (house pattern —
     // same as the Production sheet and confirmPalletise's loop).
     for (const { l, ops } of editRows) {
-      // Record = the exact call confirmPalletise makes: a partial qty splits
-      // the line server-side, the remainder stays in its stage. Per-row only —
-      // a Mix Batch row does NOT pull its pallet_group siblings here (the +
-      // menu's Complete still records the whole physical pallet together).
-      const res = ops.record
-        ? await setPalLineStatus(l.id, "ReadyToLoad", l.palletId, ops.record.boxes)
-        : await palTopUp(l.id, ops.topUp!.donorId, ops.topUp!.boxes);
+      const res = await commitRow(l, ops);
       if (res.ok) done += 1;
       else {
         failed[l.id] = draft[l.id];
@@ -426,8 +456,12 @@ export function DispatchBoard({
     return a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
   });
   // Sheet column count — band/empty rows span it: checkbox + visible defs
-  // (+ Palletise + Top Up From in edit mode) + the "+" menu cell.
-  const nCols = 1 + sheetCols.visible.length + (editMode ? 2 : 0) + 1;
+  // (+ Palletise + Top Up From + ✓/✗ in edit mode) + the "+" menu cell.
+  const nCols = 1 + sheetCols.visible.length + (editMode ? 3 : 0) + 1;
+  // Grand totals over what's on screen (CR-171).
+  const sheetLines = sheetRows.map(({ l }) => l);
+  const totalBoxes = sheetLines.reduce((s, l) => s + l.boxes, 0);
+  const totalPallets = palletsOf(sheetLines);
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -818,39 +852,26 @@ export function DispatchBoard({
                     ))}
                     {editMode && <th className="num" style={{ textAlign: "right" }}>Palletise</th>}
                     {editMode && <th>Top Up From</th>}
+                    {editMode && <th aria-label="Save or discard row" />}
                     <th aria-label="Action" />
                   </tr>
                 </thead>
                 <tbody>
                   {/* ponytail: band rows duplicated across the boards (see ProductionTable) —
-                      grouping keys differ per board, a shared helper would outweigh them. */}
+                      grouping keys differ per board, a shared helper would outweigh them.
+                      CR-171: no stage band — each page is one stage; totals sit in the footer. */}
                   {sheetRows.map(({ p, l }, i) => {
                     const stage = stageOf(p, l);
-                    const col = COLUMNS.find((c) => c.key === stage)!;
                     const isSel = selected.has(l.id);
                     const key = groupBy.length ? groupKeyOf({ p, l }) : "";
-                    const stageChanged = i === 0 || stageOf(sheetRows[i - 1].p, sheetRows[i - 1].l) !== stage;
-                    const stageBand = stageChanged ? (
-                      <tr key={`s-${stage}`} style={{ background: "var(--panel-2)", borderTop: "2px solid var(--border)" }}>
-                        <td colSpan={nCols} style={{ padding: "8px 10px" }}>
-                          <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{col.label}</span>
-                          <span className="mono dim" style={{ marginLeft: 10 }}>
-                            {(() => {
-                              const sub = sheetRows.filter((e) => stageOf(e.p, e.l) === stage);
-                              return `${sub.length} item${sub.length === 1 ? "" : "s"} · ${fmt(sub.reduce((s, e) => s + e.l.boxes, 0))} bx`;
-                            })()}
-                          </span>
-                        </td>
-                      </tr>
-                    ) : null;
                     const band =
-                      groupBy.length && (stageChanged || groupKeyOf(sheetRows[i - 1]) !== key) ? (
+                      groupBy.length && (i === 0 || groupKeyOf(sheetRows[i - 1]) !== key) ? (
                         <tr key={`h-${stage}-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
                           <td colSpan={nCols} style={{ paddingLeft: 20 }}>
                             {key}
                             <span className="mono" style={{ fontWeight: 400, marginLeft: 10 }}>
                               {(() => {
-                                const sub = sheetRows.filter((e) => groupKeyOf(e) === key && stageOf(e.p, e.l) === stage);
+                                const sub = sheetRows.filter((e) => groupKeyOf(e) === key);
                                 return `${sub.length} item${sub.length === 1 ? "" : "s"} · ${fmt(sub.reduce((s, e) => s + e.l.boxes, 0))} bx`;
                               })()}
                             </span>
@@ -859,7 +880,6 @@ export function DispatchBoard({
                       ) : null;
                     return (
                       <Fragment key={l.id}>
-                      {stageBand}
                       {band}
                       <tr
                         key={l.id}
@@ -921,6 +941,35 @@ export function DispatchBoard({
                                   <span className="dim" title="Top-up needs an In-Palletization line with a same-design batch waiting">—</span>
                                 )}
                               </td>
+                              {/* Per-row ✓ / ✗ (CR-169) — visible once the row has a draft. */}
+                              <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
+                                {d && (
+                                  <span style={{ display: "inline-flex", gap: 4 }}>
+                                    <button
+                                      type="button"
+                                      className="hbtn primary"
+                                      style={{ height: 24, width: 26, padding: 0, borderRadius: 5, justifyContent: "center" }}
+                                      disabled={savingEdits || !!rowErr || !editRows.some((r) => r.l.id === l.id)}
+                                      title={rowErr || "Save this row"}
+                                      aria-label="Save this row"
+                                      onClick={() => void saveRow(l)}
+                                    >
+                                      <Icon name="check" size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="hbtn"
+                                      style={{ height: 24, width: 26, padding: 0, borderRadius: 5, justifyContent: "center" }}
+                                      disabled={savingEdits}
+                                      title="Discard this row's edits"
+                                      aria-label="Discard this row's edits"
+                                      onClick={() => dropDraft(l.id)}
+                                    >
+                                      <Icon name="x" size={13} />
+                                    </button>
+                                  </span>
+                                )}
+                              </td>
                             </>
                           );
                         })()}
@@ -941,13 +990,15 @@ export function DispatchBoard({
             </div>
           )}
 
-          {/* Selection bar. */}
-          {canEdit && (
+          {/* Totals + selection bar (CR-178): idle = grand total of what's on
+              screen (both views; replaces the sheet's tfoot row), selected =
+              the selection's count + actions. Always shown; selection itself
+              needs canEdit. */}
             <div data-tour="pal-selbar" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? "var(--accent-soft)" : "var(--panel-2)" }}>
-              <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? "var(--fg)" : "var(--muted)" }}>
+              <span className={selected.size ? undefined : "mono"} style={{ fontSize: "var(--t-md)", fontWeight: 600, color: "var(--fg)" }}>
                 {selected.size
                   ? `${selected.size} selected · ${fmt(selBoxes)} boxes`
-                  : "Tick items to palletise or load several together"}
+                  : `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes`}
               </span>
               <span style={{ flex: 1 }} />
               {selected.size > 0 && (
@@ -1002,7 +1053,6 @@ export function DispatchBoard({
                 </>
               )}
             </div>
-          )}
 
           {/* Stage summary — kanban only; the sheet already shows a Stage column. */}
           {view === "kanban" && (

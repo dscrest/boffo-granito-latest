@@ -169,6 +169,7 @@ items view, reports view+export, no delete, no approve). Live seeds: `catalyst-m
 |---|---|---|
 | name | varchar(255) | key column |
 | internal_or_external | varchar(50) | |
+| logo | varchar(255) | File Store file id (`design_images` folder) — the Box Brand image; created on LIVE 2026-09-14 (CR-181), column 69851000000278304 |
 
 ### Grade (76673000000048008) — `seq_code` varchar(10) added 2026-07-04 (SKU segment, live project)
 | Column | Type | Notes |

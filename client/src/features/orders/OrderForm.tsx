@@ -15,7 +15,7 @@ import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
-import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
+import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { NumberInput } from "../../ui/NumberInput";
@@ -179,13 +179,8 @@ export function OrderForm({
   const stockFor = useStockLookup();
   // Quote lines converted here now carry uniqueName; design_name fallback for the SO picker's own values.
   const findDesign = (s: string) => designs.find((x) => x.uniqueName === s || x.name === s);
-  // Box Brand options — DB-sourced from the Brand master (same as PartyForm).
-  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
-  useEffect(() => {
-    void listMaster("Brand", ["name"]).then((r) => {
-      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
-    });
-  }, []);
+  // Box Brand options — DB-sourced from the Brand master, with logos (CR-181; same hook as PartyForm / QuoteForm).
+  const boxBrands = useBoxBrands();
 
   // Pallet specs for the required per-line pallet picker (size-filtered by design).
   const [pallets, setPallets] = useState<PalletRow[]>([]);
@@ -349,13 +344,17 @@ export function OrderForm({
                         options={salesPersonOptions(salesPersons)}
                       />
                     ) : f.key === "box_brand" ? (
-                      <Combobox
-                        value={h.box_brand}
-                        onChange={(v) => setHead("box_brand", v)}
-                        placeholder="Search box brand…"
-                        options={boxBrands.map((b) => ({ value: b._id, label: b.name }))}
-                        clearable
-                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Combobox
+                          className="grow"
+                          value={h.box_brand}
+                          onChange={(v) => setHead("box_brand", v)}
+                          placeholder="Search box brand…"
+                          options={boxBrands.options}
+                          clearable
+                        />
+                        <BoxBrandPreview src={boxBrands.logoUrlOf(h.box_brand)} />
+                      </div>
                     ) : f.kind === "select" ? (
                       <select
                         className={err ? "error" : ""}

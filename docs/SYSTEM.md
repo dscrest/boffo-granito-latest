@@ -342,12 +342,19 @@ deliberately **not** stock-adjusted.
 
 **Two sidebar pages over one board since 2026-09-14 (CR-160)**: `/packing` **Ready for
 Palletization** (the Planning queue only) and `/palletizing` **In Palletization** (the Palletizing
-stage + Ready for Loading, both visible by default, a Sections picker hides either). Same
+stage only since CR-170 — a `ReadyToLoad` line whose whole batch is palletised leaves for the
+**Ready for Loading** section of `/loading`; a gated slice stays here wearing a **Recorded** chip,
+CR-176, while the unrecorded rows of a partially palletised item read **Partial**). Same
 `PalPlans` component scoped by a `stages` prop; both nav leaves share feature id `packing`.
 Kanban/Sheet toggle, Group, Today's Report and New Palletization Plan sit on both. The Sheet is
 ColumnDef-driven (CR-161: Customer, Item, Order, Batch, Boxes, Ordered, Completed, Remaining, Age,
-**PAL** last and hideable; checkbox / edit inputs / "+" cell fixed). Every row incl. Ready for
-Loading carries the one "+" menu (Load lives in it, CR-168).
+**PAL** last and hideable; checkbox / edit inputs / "+" cell fixed) and has **no stage band**.
+Under the grid (both views) sits the **totals / selection bar** (CR-178): idle it reads
+**Total · N pallets · N boxes** for what is on screen (`palletsOf`; it replaced the CR-171 tfoot
+row and the "Tick items…" hint), with rows ticked it reads *N selected · N boxes* + actions. Every row
+carries the one "+" menu (CR-168). Sheet **Edit** mode (CR-153) stages Palletise qty / Top Up
+donor per row; **✓ / ✗ per row** commit or discard that row alone, the header Save (N) commits
+all (CR-169).
 Plans are `PAL/FY/NNN` and may span sales orders. Plan detail (`/packing/:id`) is Edit + More + ✕
 only — the legacy plan-level Begin Dispatch / Mark Dispatched / Assign Vehicle buttons went in
 CR-163; dispatch is per LoadBox and the plan status follows.
@@ -424,10 +431,23 @@ boxes per order item across all lines/plans are capped at the SO ordered qty
 
 ### 5.5 Loading and Dispatch
 
-Screen `/loading` (Workspace + kanban + sheet + Loadings grid + Customer Sheet), detail at
-`/loading/:id`. Nav label renamed **"Loading and Dispatch"** 2026-09-04.
+Screen `/loading` (Sheet + Loadings grid + Customer Sheet; Workspace and kanban hidden, code
+kept), detail at `/loading/:id`. Nav label renamed **"Loading and Dispatch"** 2026-09-04.
 
-**Workspace (CR-145, 2026-09-11).** Default (5th) `/loading` view, from the Claude Design
+**Ready for Loading lives here since CR-170 (2026-09-14).** The Sheet's first stage is *Ready
+for Loading*: un-boxed `ReadyToLoad` lines that pass `loadableLineIds` (whole batch palletised).
+Their "+" menu has one item, **Load**, which opens `LoadContainerModal` through `useLoadFlow`
+(the same flow the palletization board used until CR-170). Then *In Loading* → *Ready for
+Dispatch* → *Dispatched* as before. The Sheet and the Loadings grid end in a **Total · N pallets /
+Σ boxes** footer (CR-171). **Sheet Edit mode (CR-173):** per Open-box line a *Loaded* qty (fewer
+→ remainder back to Ready for Loading) and a *Container* Combobox (another Open loading, or
+Unload); pure resolver [`loadSheetEdit.ts`](../client/src/features/stages/loadSheetEdit.ts),
+commits via `/pal-line-box`; per-row ✓ / ✗ or the header Save (CR-169). **Loadings grid
+customers/orders** fall back per field from loaded lines → plan JSON → live order heads (CR-174).
+**New Loading** also starts from the Sales Order detail (More → New Loading / Items-card button,
+CR-175) with the SO preset.
+
+**Workspace (CR-145, 2026-09-11; hidden since CR-172, 2026-09-14).** Was the default `/loading` view, from the Claude Design
 "Loading Sheet" spec — structure/UX from the design, house skin. Pick Customer + Sales Order
 (Comboboxes; SO options newest-first from the orders cache), then an SO summary strip (ordered /
 planned / palletised / balance boxes, planned %) and three tabs:
@@ -456,7 +476,10 @@ in place since CR-145** (no Edit toggle, rows don't navigate): the load-detail c
 per-line **Box Brand** override (Brand master, relabeled "Box Brand" 2026-09-11 — the short-lived
 separate BoxBrand table was merged into it; **Quote and SalesOrder carry `box_brand` too since
 2026-09-14 (CR-162)** — a Box Brand Combobox on both forms, DB-sourced from the Brand master,
-prefilled from the customer's default, carried by `/convert-quote`; the free-text
+prefilled from the customer's default, carried by `/convert-quote`; **the master carries an
+image since CR-181** (`Brand.logo` = File Store file id, uploaded on the Box Brand master form via
+`ImageUploader`, shown as a thumbnail in the Combobox popup and as a preview beside the field on
+the Quote, SO and Customer forms — `useBoxBrands()` in `masters/boxBrands.tsx`); the free-text
 `SalesOrder.box_branding` is retired (read-only on old orders). Sheet precedence is line
 override → SO brand → customer default; customer default on `Customer.box_brand`,
 override on `PalletizationPlanLine.box_brand`) stage into drafts — Save/Cancel appear once
@@ -745,8 +768,8 @@ Every detail page's More menu carries **Clone**, which seeds the
 create form from the record and saves as new, never copying auto-generated identity fields.
 The left sibling-list rail is extracted as [`DetailRail`](../client/src/features/common/DetailRail.tsx)
 (CR-154, 2026-09-12) — PalPlan and Loading detail use it (Loading detail gained the rail then;
-the other detail pages still carry the inline copy) and both show the **customer name under
-the PAL/LOAD code** in the row subtitle.
+the other detail pages still carry the inline copy) and both rows read **customer · status
+above, the PAL/LOAD code (mono) below** (CR-179, 2026-09-14 — swapped from code-first).
 
 **After create or clone, navigate to that new record** using the id the API returned — never to
 a selected or arbitrary row.

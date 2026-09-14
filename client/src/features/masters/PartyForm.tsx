@@ -15,7 +15,7 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { storedAuth } from "@/lib/auth";
 import { useMasters } from "./useMasters";
-import { listMaster, type MasterRow } from "./mastersApi";
+import { BoxBrandPreview, useBoxBrands } from "./boxBrands";
 import { currencyCodes } from "./currenciesApi";
 import {
   composeAddress,
@@ -224,14 +224,9 @@ export function PartyForm({
     }
     return base;
   });
-  // Box Brand options (DB-sourced pick list; the saved id keeps working
-  // even while options load — the select just shows blank briefly).
-  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
-  useEffect(() => {
-    void listMaster("Brand", ["name"]).then((r) => {
-      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
-    });
-  }, []);
+  // Box Brand options (DB-sourced pick list with logos, CR-181; the saved id
+  // keeps working even while options load — the Combobox just shows blank briefly).
+  const boxBrands = useBoxBrands();
   const [workPhone, setWorkPhone] = useState(() => splitPhone((initial?.contact_work_phone as string) ?? ""));
   const [mobile, setMobile] = useState(() => splitPhone((initial?.contact_mobile as string) ?? ""));
   // Books-style tab strip below the always-visible Customer section. All
@@ -585,14 +580,17 @@ export function PartyForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Default Box Brand</span>
-                <select value={v.box_brand} onChange={(e) => set("box_brand", e.target.value)}>
-                  <option value=""></option>
-                  {boxBrands.map((b) => (
-                    <option key={b._id} value={b._id}>
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Combobox
+                    className="grow"
+                    value={v.box_brand}
+                    onChange={(val) => set("box_brand", val)}
+                    placeholder="Search box brand…"
+                    options={boxBrands.options}
+                    clearable
+                  />
+                  <BoxBrandPreview src={boxBrands.logoUrlOf(v.box_brand)} />
+                </div>
               </label>
               <label className="form-field">
                 <span className="lbl">Sales Person</span>

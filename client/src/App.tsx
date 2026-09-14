@@ -386,7 +386,8 @@ export default function App() {
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
-            <Route path="/palletizing" element={<PalPlans stages={["Palletizing", "Ready"]} sectionsKey="palplans.stages.wip" />} />
+            {/* CR-170: Ready for Loading renders on /loading, not here. */}
+            <Route path="/palletizing" element={<PalPlans stages={["Palletizing"]} />} />
             <Route path="/packing/:id" element={<PalPlanDetail />} />
             <Route path="/loading" element={<LoadingBay />} />
             <Route path="/loading/:id" element={<LoadingDetail />} />

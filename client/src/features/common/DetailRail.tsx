@@ -1,8 +1,9 @@
 /* ============================================================
    DetailRail — the sticky, resizable left-panel sibling list shared by
    detail pages (extracted from PalPlanDetail; same design as Quote/Order
-   detail rails). Search + rows of mono title over a dim subtitle; the
-   current record is highlighted.
+   detail rails). Search + rows of a dim subtitle (customer · status) over the
+   mono code (CR-179: swapped so the customer reads first); the current record
+   is highlighted.
    ============================================================ */
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -50,10 +51,10 @@ export function DetailRail({ placeholder, currentId, items }: { placeholder: str
               }}
               title={x.title}
             >
-              <div className="mono" style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.title}</div>
-              <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={x.subtitle}>
+              <div className="dim" style={{ fontSize: "var(--t-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={x.subtitle}>
                 {x.subtitle}
               </div>
+              <div className="mono" style={{ fontWeight: 500, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.title}</div>
             </Link>
           );
         })}

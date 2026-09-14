@@ -14,6 +14,8 @@ export interface MasterRow {
 
 /** Field keys that are numeric columns — coerced to Number on save. */
 const NUMERIC = new Set(["width_mm", "length_mm"]);
+/** Optional columns a blank must CLEAR (sent as null) rather than leave untouched — e.g. a removed Box Brand image. */
+const NULLABLE = new Set(["logo"]);
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -38,7 +40,10 @@ function toPayload(vals: Record<string, string>): Record<string, unknown> {
   const p: Record<string, unknown> = {};
   for (const [k, raw] of Object.entries(vals)) {
     const v = (raw ?? "").trim();
-    if (v === "") continue;
+    if (v === "") {
+      if (NULLABLE.has(k)) p[k] = null;
+      continue;
+    }
     p[k] = NUMERIC.has(k) ? Number(v) || 0 : v;
   }
   return p;

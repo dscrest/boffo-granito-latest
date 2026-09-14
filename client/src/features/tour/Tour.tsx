@@ -133,7 +133,7 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/packing",
       waitMs: 5000,
       title: "Views and stages",
-      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress + Ready for Loading). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
+      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress — fully palletised batches move on to Ready for Loading on the Loading and Dispatch page). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",
@@ -157,7 +157,7 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/palletizing",
       title: "On to loading",
-      body: "Started pallets move to the In Palletization page. When a line reaches Ready for Loading there, its + menu's Load puts it into a container. A batch can only be loaded once it is fully palletised — a partly palletised batch stays back in In Palletization.",
+      body: "Started pallets move to the In Palletization page. Complete Palletisation records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows Recorded here and waits. Edit lets you type quantities across rows and save each with ✓.",
     },
   ],
 
@@ -165,14 +165,14 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/loading",
       title: "Loading and Dispatch",
-      body: "The last stage: pallets go into containers, the vehicle is assigned, goods dispatch. Only loaded (boxed) lines live here — loading starts from Palletization's Load button, or from New Loading on this page.",
+      body: "The last stage: pallets go into containers, the vehicle is assigned, goods dispatch. Fully palletised stock arrives here as Ready for Loading — its + menu's Load puts it into a container, or start from New Loading here or on the sales order.",
     },
     {
       anchor: "load-view-toggle",
       route: "/loading",
       waitMs: 5000,
-      title: "Four views",
-      body: "Workspace plans one sales order end-to-end; Sheet lists every loaded line; Loadings lists the containers; Customer Sheet groups by customer with edit-in-place.",
+      title: "Three views",
+      body: "Sheet lists ready and loaded lines (Edit changes loaded boxes or moves items between containers); Loadings lists the containers; Customer Sheet groups by customer with edit-in-place.",
     },
     {
       anchor: "load-new",
@@ -184,7 +184,7 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/loading",
       title: "Partial loading",
-      body: "You never have to load everything at once. In Workspace → Items, tick items, choose a container and Assign to Loading — then edit each Load quantity; what's left stays in Ready for Loading for the next container. Loading from Palletization can likewise take part of a pallet (\"N of M — rest stays in Ready\").",
+      body: "You never have to load everything at once. Load takes part of a pallet (\"N of M — rest stays in Ready\"), and the Sheet's Edit can lower a loaded quantity later — what's left returns to Ready for Loading for the next container.",
     },
     {
       route: "/loading",

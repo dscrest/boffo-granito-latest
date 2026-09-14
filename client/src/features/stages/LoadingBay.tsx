@@ -1,16 +1,18 @@
 /* ============================================================
    Loading and Dispatch (/loading) — the loading & dispatch board, standard
-   list-page kit. Cards/rows are BOXED PalletizationPlanLines moving through
-   In Loading → Ready for Dispatch → Dispatched. The stage is DERIVED:
-   Open box = In Loading; Open box with container no / line seal captured =
-   Ready for Dispatch; Dispatched box = done. Un-boxed Ready-for-Loading
-   lines live on /packing since 2026-09-04 — the Load button moved there
-   (useLoadFlow is the shared confirm). "Assign Vehicle" (VehicleLoadModal)
-   captures vehicle + seals on the Open box; "Dispatch" then just sets the
-   date. Kanban/Sheet toggle, search, advanced filter, ColumnPicker, and the
-   Production-style group-by swimlanes/bands. "New Loading" opens
-   NewLoadingModal (SO → container-plan prefill → one container per
-   submit); container/vehicle details are captured via Assign Vehicle.
+   list-page kit. Rows are PalletizationPlanLines moving through
+   Ready for Loading → In Loading → Ready for Dispatch → Dispatched. The
+   stage is DERIVED: un-boxed + loadable (batch fully palletised) = Ready
+   for Loading (CR-170, 2026-09-14 — back from /palletizing; its "+" menu
+   Load opens LoadContainerModal via useLoadFlow); Open box = In Loading;
+   Open box with container no / line seal captured = Ready for Dispatch;
+   Dispatched box = done. "Assign Vehicle" (VehicleLoadModal) captures
+   vehicle + seals on the Open box; "Dispatch" then just sets the date.
+   Sheet / Loadings / Customer Sheet views (Workspace + Kanban hidden, code
+   kept), search, advanced filter, ColumnPicker, Production-style group-by
+   bands, and a Sheet edit mode (CR-173: Loaded boxes + Container per row,
+   per-row ✓/✗ or one Save). "New Loading" opens NewLoadingModal (SO →
+   container-plan prefill → one container per submit).
    ============================================================ */
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -26,16 +28,21 @@ import { can } from "@/lib/auth";
 import { parseLoadPlan } from "@/data";
 import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
+import { NumberInput } from "@/ui/NumberInput";
+import { Combobox } from "@/ui/Combobox";
 import { isoInfo } from "@/features/masters/customersApi";
-import { cachedOrders } from "@/features/orders/ordersApi";
+import { useOrders } from "@/features/orders/useOrders";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { TotalsRow } from "@/features/reports/ReportShell";
 import { VehicleLoadModal } from "./VehicleLoadModal";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { LoadingWorkspace } from "./LoadingWorkspace";
 import { NewLoadingModal } from "./NewLoadingModal";
+import { LoadContainerModal } from "./LoadContainerModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { useLoadFlow } from "./useLoadFlow";
 import { nextPlanContainer } from "./containerPlanPrefill";
+import { hasLoadOps, resolveLoadSheetEdit, UNLOAD, type LoadSheetDraft, type LoadSheetOps } from "./loadSheetEdit";
 import {
   boxFill,
   boxLabel,
@@ -48,6 +55,8 @@ import {
   invalidatePalPlans,
   lineFrac,
   listPalPlans,
+  loadableLineIds,
+  palletsOf,
   sealed,
   setLineBox,
   updateLoadBox,
@@ -60,8 +69,9 @@ import {
 type Entry = { p: PalPlan; l: PalPlanLine };
 
 // Derived loading stage of a line (see the header comment).
-type LoadStage = "InLoading" | "ReadyDispatch" | "Dispatched";
+type LoadStage = "Ready" | "InLoading" | "ReadyDispatch" | "Dispatched";
 const STAGES = [
+  { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
   { key: "InLoading", label: "In Loading", chip: "p-loading" },
   { key: "ReadyDispatch", label: "Ready for Dispatch", chip: "p-palletized" },
   { key: "Dispatched", label: "Dispatched", chip: "p-completed" },
@@ -351,14 +361,20 @@ export function LoadingBay() {
   const [q, setQ] = usePersistedState("loading.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("loading.criteria", {});
   const [rawView, setView] = useViewState<"workspace" | "kanban" | "sheet" | "loadings" | "customer">("loading.view", "sheet", "sheet");
-  // Kanban is disabled here (2026-09-11) — a persisted "kanban" or "board" (the
-  // retired 2026-09-10 queue board) falls back to the Sheet grid; render code kept.
-  const view = (rawView as string) === "board" || rawView === "kanban" ? "sheet" : rawView;
+  // Kanban (2026-09-11) and Workspace (CR-172, 2026-09-14) are hidden here — a
+  // persisted "kanban"/"board"/"workspace" falls back to the Sheet; render code kept.
+  const view = ["board", "kanban", "workspace"].includes(rawView as string) ? "sheet" : rawView;
   const [newOpen, setNewOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
-  // Shared load flow — picker state + confirm live in the hook ("New Loading" here).
+  // Shared load flow — picker state + confirm live in the hook (Ready rows' "+ → Load").
   const flow = useLoadFlow({ plans, boxes, onChanged: () => void load() });
+  // Live order heads — the plan-JSON fallback for customers/SOs (CR-174).
+  const { orders } = useOrders();
+  // Sheet edit mode (CR-173): staged Loaded qty / Container per line.
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<Record<string, LoadSheetDraft>>({});
+  const [savingEdits, setSavingEdits] = useState(false);
   // Post-dispatch printable Dispatch Entry — entries snapshotted pre-refresh.
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
 
@@ -411,9 +427,9 @@ export function LoadingBay() {
     const soIds = [...new Set(pls.map((x) => x.so).filter(Boolean))];
     const slice = soIds.length === 1 ? nextPlanContainer(soIds[0], flow.planBySo, plans, boxes, flow.designIdOf) : null;
     const heads = soIds.map((id) => {
-      const line = allLines.find(({ l }) => l.salesOrderId === id)?.l;
+      const line = allLines.find(({ l }) => l.salesOrderId === id && l.customerName)?.l;
       if (line) return { so: line.soNumber, customer: line.customerName };
-      const o = (cachedOrders() ?? []).find((o) => o.salesOrderId === id);
+      const o = orders.find((o) => o.salesOrderId === id);
       return { so: o?.orderNumber || "", customer: o?.party || "" };
     });
     return {
@@ -426,27 +442,32 @@ export function LoadingBay() {
   };
 
   // Loadings view rows: every box (Empty and Dispatched included — it's the
-  // master list). A plan-only box reads its aggregates from the plan JSON so
-  // the row (and search) isn't blank before anything is loaded.
+  // master list). Customers/SOs come from the loaded lines, else the plan
+  // JSON (CR-174: per field, so a box whose lines can't name a customer
+  // still shows the planned one, like /loading/:id does).
   const boxRows: BoxRow[] = boxes.map((b) => {
     const inBox = linesOfBox(b.id).map(({ l }) => l);
-    const plan = inBox.length === 0 ? planSummary(b) : null;
+    const plan = planSummary(b);
     return {
       box: b,
       lines: inBox,
-      customers: plan?.customers ?? [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", "),
-      sos: plan?.sos ?? [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", "),
-      totalBoxes: plan?.boxes ?? inBox.reduce((s, l) => s + l.boxes, 0),
+      customers: [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", ") || plan?.customers || "",
+      sos: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", ") || plan?.sos || "",
+      totalBoxes: inBox.length ? inBox.reduce((s, l) => s + l.boxes, 0) : plan?.boxes ?? 0,
       fillPct: Math.round(boxFill(inBox) * 100),
       status: b.status !== "Open" ? "Dispatched" : sealed(b) ? "Ready for Dispatch" : inBox.length ? "In Loading" : plan ? "Planned" : "Empty",
     };
   });
 
+  // Batch-complete gate (CR-151): an un-boxed ReadyToLoad line is Ready for
+  // Loading here only when its whole batch is palletised; otherwise it stays
+  // on /palletizing.
+  const loadable = useMemo(() => loadableLineIds(allLines.map(({ l }) => l)), [plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const stageOf = (l: PalPlanLine): LoadStage | null => {
     const b = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
     if (b?.status === "Dispatched") return "Dispatched";
     if (b) return sealed(b) ? "ReadyDispatch" : "InLoading";
-    return null; // un-boxed (incl. Ready for Loading) = pre-loading, lives on /packing
+    return loadable.has(l.id) ? "Ready" : null; // un-boxed: loadable = Ready for Loading, else /palletizing
   };
   const rows: Row[] = allLines.flatMap(({ p, l }) => {
     const stage = stageOf(l);
@@ -610,10 +631,76 @@ export function LoadingBay() {
     if (err) { invalidatePalPlans(); void load(); }
   };
 
+  // ---- sheet edit mode (CR-173) — mirrors DispatchBoard's ----
+  const setCell = (id: string, k: keyof LoadSheetDraft, v: string) =>
+    setDraft((m) => ({ ...m, [id]: { ...m[id], [k]: v } }));
+  const dropDraft = (id: string) =>
+    setDraft((m) => { const { [id]: _gone, ...rest } = m; return rest; });
+  const editRows: Array<{ r: Row; ops: LoadSheetOps }> = [];
+  let editBad = false;
+  if (editMode) {
+    for (const r of rows) {
+      if (!draft[r.l.id]) continue;
+      const { ops, error } = resolveLoadSheetEdit(r.l, r.box, openBoxes, draft[r.l.id]);
+      if (error) editBad = true;
+      else if (hasLoadOps(ops)) editRows.push({ r, ops });
+    }
+  }
+  const editDirty = editRows.length > 0 || editBad;
+  const leaveEdit = async () => {
+    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+    setDraft({});
+    setEditMode(false);
+  };
+  useEffect(() => {
+    if (view !== "sheet") { setDraft({}); setEditMode(false); }
+  }, [view]);
+  // /pal-line-box moves a boxed line between Open containers and splits a
+  // Ready remainder when fewer boxes are kept; "" unloads it.
+  const commitRow = (l: PalPlanLine, ops: LoadSheetOps) =>
+    ops.unload ? setLineBox(l.id, "") : setLineBox(l.id, ops.move!.box, ops.move!.boxes);
+  const saveRow = async (l: PalPlanLine) => {
+    const row = editRows.find((x) => x.r.l.id === l.id);
+    if (!row || savingEdits) return;
+    setSavingEdits(true);
+    const res = await commitRow(l, row.ops);
+    setSavingEdits(false);
+    if (!res.ok) { toast.error(`${l.itemCode}: ${res.error || "Save failed"}`); return; }
+    dropDraft(l.id);
+    toast.success(`${l.itemCode} saved`);
+    invalidatePalPlans();
+    void load();
+  };
+  const saveEdits = async () => {
+    if (!editRows.length || editBad || savingEdits) return;
+    setSavingEdits(true);
+    const failed: Record<string, LoadSheetDraft> = {};
+    let done = 0;
+    // ponytail: sequential + non-atomic, one request per row (house pattern).
+    for (const { r, ops } of editRows) {
+      const res = await commitRow(r.l, ops);
+      if (res.ok) done += 1;
+      else { failed[r.l.id] = draft[r.l.id]; toast.error(`${r.l.itemCode}: ${res.error || "Save failed"}`); }
+    }
+    setSavingEdits(false);
+    setDraft(failed);
+    if (done) toast.success(`${done} line${done === 1 ? "" : "s"} saved`);
+    if (!Object.keys(failed).length) setEditMode(false);
+    invalidatePalPlans();
+    void load();
+  };
+  const containerOpts = [
+    ...openBoxes.map((b) => ({ value: b.id, label: boxLabel(b), hint: b.vehicleNumber || undefined })),
+    { value: UNLOAD, label: "Unload", hint: "Back to Ready for Loading" },
+  ];
+
   // Per-row container actions (Edit option) by stage.
   const menuFor = (r: Row): MenuItem[] => {
     const box = r.box;
-    if (!box) return [];
+    // Ready for Loading (CR-170): the one action is Load → LoadContainerModal.
+    if (!box) return r.stage === "Ready"
+      ? [{ label: "Load", disabled: flow.busy, title: "Load into a container", onClick: () => flow.setPicker({ lineIds: [r.l.id] }) }]
+      : [];
     const items: MenuItem[] = [];
     if (canEdit) {
       items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
@@ -859,7 +946,7 @@ export function LoadingBay() {
         <div style={{ flex: 1 }} />
         {view === "sheet" && <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
         <span data-tour="load-view-toggle" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
-          {viewBtn("workspace", "package", "Workspace")}
+          {/* Workspace hidden (CR-172) — viewBtn("workspace", "package", "Workspace") */}
           {viewBtn("sheet", "orders", "Sheet")}
           {viewBtn("loadings", "truck", "Loadings")}
           {viewBtn("customer", "user", "Customer Sheet")}
@@ -877,6 +964,31 @@ export function LoadingBay() {
           />
         )}
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
+        {/* Sheet edit mode (CR-173): Loaded qty + Container go editable per row;
+            ✓ commits one row, Save commits every drafted row. */}
+        {view === "sheet" && canEdit && (
+          editMode ? (
+            <>
+              <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+                Cancel
+              </button>
+              <button
+                className="hbtn primary"
+                style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                disabled={!editRows.length || editBad || savingEdits}
+                onClick={() => void saveEdits()}
+                title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
+              >
+                {savingEdits ? "Saving…" : `Save${editRows.length ? ` (${editRows.length})` : ""}`}
+              </button>
+            </>
+          ) : (
+            <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setEditMode(true)} title="Change loaded boxes or move items between containers, then Save">
+              <Icon name="edit" size={13} />
+              Edit
+            </button>
+          )
+        )}
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
         {canEdit && (
           <button className="hbtn primary" data-tour="load-new" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => setNewOpen(true)}>
@@ -932,6 +1044,22 @@ export function LoadingBay() {
                   </tr>
                 )}
               </tbody>
+              {boxSearched.length > 0 && (() => {
+                // Grand totals over the whole searched set (CR-171).
+                const pallets = palletsOf(boxSearched.flatMap((r) => r.lines));
+                const items = boxSearched.reduce((s, r) => s + r.lines.length, 0);
+                const bx = boxSearched.reduce((s, r) => s + r.totalBoxes, 0);
+                return (
+                  <TotalsRow>
+                    {boxCols.visible.map((c, ci) => (
+                      <td key={c.key} className={c.className?.includes("num") ? "num mono" : undefined} style={c.style}>
+                        {ci === 0 ? `Total · ${fmt(pallets)} pallet${pallets === 1 ? "" : "s"}` : c.key === "items" ? fmt(items) : c.key === "boxes" ? fmt(bx) : ""}
+                      </td>
+                    ))}
+                    <td />
+                  </TotalsRow>
+                );
+              })()}
             </table>
           </div>
           <GridFooter {...boxPager} />
@@ -949,13 +1077,16 @@ export function LoadingBay() {
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
+                  {editMode && <th className="num" style={{ textAlign: "right" }}>Loaded</th>}
+                  {editMode && <th>Container</th>}
+                  {editMode && <th aria-label="Save or discard row" />}
                   {canEdit && <th style={{ width: 50 }} aria-label="Action" />}
                 </tr>
               </thead>
               <tbody>
                 {(() => {
                   const out: ReactNode[] = [];
-                  const span = visible.length + (canEdit ? 1 : 0);
+                  const span = visible.length + (editMode ? 3 : 0) + (canEdit ? 1 : 0);
                   // Planned/Empty loadings first — no line rows yet, one
                   // summary row per box (click opens the loading).
                   for (const b of stubBoxes) {
@@ -1012,9 +1143,60 @@ export function LoadingBay() {
                             {c.render!(r)}
                           </td>
                         ))}
+                        {editMode && (() => {
+                          const d = draft[l.id];
+                          const editable = box?.status === "Open";
+                          const rowErr = d ? resolveLoadSheetEdit(l, box, openBoxes, d).error : null;
+                          const bad = rowErr ? { borderColor: "var(--c-red)" } : undefined;
+                          const canSave = !!d && !rowErr && editRows.some((x) => x.r.l.id === l.id);
+                          return (
+                            <>
+                              <td className="num" style={{ textAlign: "right" }} onClick={(ev) => ev.stopPropagation()}>
+                                {editable ? (
+                                  <NumberInput
+                                    value={d?.qty ?? ""}
+                                    placeholder={String(l.boxes)}
+                                    onChange={(ev) => setCell(l.id, "qty", ev.target.value)}
+                                    style={{ width: 90, textAlign: "right", ...bad }}
+                                    title={rowErr || `Boxes kept in this container — less than ${fmt(l.boxes)} sends the rest back to Ready for Loading`}
+                                  />
+                                ) : (
+                                  <span className="dim" title={stage === "Ready" ? "Load it first — use the + menu" : "Dispatched — no changes"}>—</span>
+                                )}
+                              </td>
+                              <td onClick={(ev) => ev.stopPropagation()} style={{ minWidth: 160 }}>
+                                {editable ? (
+                                  <Combobox
+                                    value={d?.boxId ?? ""}
+                                    onChange={(v) => setCell(l.id, "boxId", v)}
+                                    placeholder={box ? boxLabel(box) : ""}
+                                    ariaLabel="Container"
+                                    options={containerOpts}
+                                  />
+                                ) : (
+                                  <span className="dim">—</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
+                                {d && (
+                                  <span style={{ display: "inline-flex", gap: 4 }}>
+                                    <button type="button" className="hbtn primary" style={{ height: 24, width: 26, padding: 0, borderRadius: 5, justifyContent: "center" }}
+                                            disabled={savingEdits || !canSave} title={rowErr || "Save this row"} aria-label="Save this row" onClick={() => void saveRow(l)}>
+                                      <Icon name="check" size={13} />
+                                    </button>
+                                    <button type="button" className="hbtn" style={{ height: 24, width: 26, padding: 0, borderRadius: 5, justifyContent: "center" }}
+                                            disabled={savingEdits} title="Discard this row's edits" aria-label="Discard this row's edits" onClick={() => dropDraft(l.id)}>
+                                      <Icon name="x" size={13} />
+                                    </button>
+                                  </span>
+                                )}
+                              </td>
+                            </>
+                          );
+                        })()}
                         {canEdit && (
                           <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                            {box && <span style={{ display: "inline-flex", verticalAlign: "middle" }}><MoreMenu kebab icon="plus" title="Loading actions" items={menuFor(r)} /></span>}
+                            {(box || stage === "Ready") && <span style={{ display: "inline-flex", verticalAlign: "middle" }}><MoreMenu kebab icon="plus" title="Loading actions" items={menuFor(r)} /></span>}
                           </td>
                         )}
                       </tr>,
@@ -1030,6 +1212,23 @@ export function LoadingBay() {
                   return out;
                 })()}
               </tbody>
+              {sheetSorted.length > 0 && (() => {
+                // Grand totals over the WHOLE filtered set, not just the page (CR-171).
+                const lines = sheetSorted.map((r) => r.l);
+                const pallets = palletsOf(lines);
+                const bx = lines.reduce((s, l) => s + l.boxes, 0);
+                return (
+                  <TotalsRow>
+                    {visible.map((c, ci) => (
+                      <td key={c.key} className={c.className?.includes("num") ? "num mono" : undefined} style={c.style}>
+                        {ci === 0 ? `Total · ${fmt(pallets)} pallet${pallets === 1 ? "" : "s"}` : c.key === "boxes" ? fmt(bx) : ""}
+                      </td>
+                    ))}
+                    {editMode && <td colSpan={3} />}
+                    {canEdit && <td />}
+                  </TotalsRow>
+                );
+              })()}
             </table>
           </div>
           </div>
@@ -1041,6 +1240,26 @@ export function LoadingBay() {
       )}
 
       {newOpen && <NewLoadingModal onDone={() => void load()} onClose={() => setNewOpen(false)} />}
+
+      {flow.picker && (() => {
+        // Ready-for-Loading "+ → Load" (CR-170) — same mount as the palletization board's.
+        const lines = flow.picker.lineIds
+          .map((id) => allLines.find(({ l }) => l.id === id)?.l)
+          .filter((l): l is PalPlanLine => !!l);
+        if (!lines.length) return null;
+        return (
+          <LoadContainerModal
+            lines={lines}
+            availableLines={allLines.filter(({ l }) => loadable.has(l.id)).map(({ l }) => l)}
+            boxes={openBoxes}
+            linesOfBox={linesOfBox}
+            busy={flow.busy}
+            planHint={lines.length === 1 ? flow.planHintFor(lines[0].salesOrderId, lines[0].designId) : undefined}
+            onConfirm={(target, entries, prodEntries) => void flow.confirmLoad(target, entries, prodEntries)}
+            onClose={() => flow.setPicker(null)}
+          />
+        );
+      })()}
 
       {vehModal && (
         <VehicleLoadModal

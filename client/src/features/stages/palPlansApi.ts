@@ -216,6 +216,10 @@ export function lineFrac(l: PalPlanLine): number {
 export function boxFill(lines: PalPlanLine[]): number {
   return lines.reduce((s, l) => s + lineFrac(l), 0);
 }
+/** Physical pallets = Σ ceil(boxes / boxes-per-pallet) per line (grid footers). */
+export function palletsOf(lines: PalPlanLine[]): number {
+  return lines.reduce((s, l) => s + (l.boxesPerPallet > 0 && l.boxes > 0 ? Math.ceil(l.boxes / l.boxesPerPallet) : 0), 0);
+}
 /** The one pallet capacity shared by all lines, or 0 when mixed/unknown —
     lets the UI show absolute "X boxes short" only when that number is meaningful. */
 export function sharedCapacity(lines: PalPlanLine[]): number {

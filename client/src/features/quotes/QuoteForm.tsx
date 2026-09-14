@@ -19,7 +19,7 @@ import {
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
-import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
+import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
@@ -174,13 +174,8 @@ export function QuoteForm({
     });
   };
 
-  // Box Brand options — DB-sourced from the Brand master (same as PartyForm / OrderForm).
-  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
-  useEffect(() => {
-    void listMaster("Brand", ["name"]).then((r) => {
-      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
-    });
-  }, []);
+  // Box Brand options — DB-sourced from the Brand master, with logos (CR-181; same hook as PartyForm / OrderForm).
+  const boxBrands = useBoxBrands();
 
   // Pick-list of the selected customer's addresses of one kind. The current
   // value stays selectable even when it's not on the master (legacy quotes /
@@ -310,13 +305,17 @@ export function QuoteForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Box Brand</span>
-                <Combobox
-                  value={h.boxBrandId}
-                  onChange={(v) => setHead("boxBrandId", v)}
-                  placeholder="Search box brand…"
-                  options={boxBrands.map((b) => ({ value: b._id, label: b.name }))}
-                  clearable
-                />
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Combobox
+                    className="grow"
+                    value={h.boxBrandId}
+                    onChange={(v) => setHead("boxBrandId", v)}
+                    placeholder="Search box brand…"
+                    options={boxBrands.options}
+                    clearable
+                  />
+                  <BoxBrandPreview src={boxBrands.logoUrlOf(h.boxBrandId)} />
+                </div>
               </label>
               <label className="form-field">
                 <span className="lbl">Payment Term</span>

@@ -41,6 +41,7 @@ const byCreated = (a: PalPlanLine, b: PalPlanLine) => a.createdTime.localeCompar
 export function NewLoadingModal({
   boxId,
   boxName,
+  presetSalesOrderId,
   onDone,
   onClose,
 }: {
@@ -48,6 +49,8 @@ export function NewLoadingModal({
   boxId?: string;
   /** Display label of the scoped loading (header identity). */
   boxName?: string;
+  /** Sales Order detail's "New Loading" (CR-175): SO fixed, pickers hidden. */
+  presetSalesOrderId?: string;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -56,7 +59,7 @@ export function NewLoadingModal({
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
   const [boxes, setBoxes] = useState<LoadBox[]>([]);
   const [customerId, setCustomerId] = useState("");
-  const [soId, setSoId] = useState("");
+  const [soId, setSoId] = useState(presetSalesOrderId || "");
   const [size, setSize] = useState<string>(CONTAINER_TYPES[0]);
   // Plan view: qty per plan row ("ci:li"). Flat view: checked lines + qty per line.
   const [planQty, setPlanQty] = useState<Map<string, number>>(new Map());
@@ -268,33 +271,42 @@ export function NewLoadingModal({
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 600 }}>{boxId ? "Add Pallets" : "New Loading"}</div>
             {boxId && boxName && <div className="dim mono" style={{ fontSize: "var(--t-sm)" }}>{boxName}</div>}
+            {presetSalesOrderId && (() => {
+              // Record identity under the title: SO number · customer.
+              const l = readyPool.find((x) => x.salesOrderId === presetSalesOrderId);
+              return <div className="dim mono" style={{ fontSize: "var(--t-sm)" }}>{[l?.soNumber || presetSalesOrderId, l?.customerName].filter(Boolean).join("  ·  ")}</div>;
+            })()}
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
 
         <div className="df-body">
-          <div className="form-grid" style={{ gridTemplateColumns: boxId ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))", marginBottom: 10 }}>
-            <label className="form-field">
-              <span className="lbl">Customer</span>
-              <Combobox
-                value={customerId}
-                options={customerOpts}
-                onChange={(v) => { setCustomerId(v); if (v && soId && !readyPool.some((l) => l.salesOrderId === soId && l.customerId === v)) pickSo(""); }}
-                placeholder="All customers"
-                ariaLabel="Customer"
-              />
-            </label>
-            <label className="form-field">
-              <span className="lbl">Sales Order<span className="req"> *</span></span>
-              <Combobox
-                value={soId}
-                options={soOpts}
-                onChange={pickSo}
-                placeholder="Pick a sales order…"
-                clearable={false}
-                ariaLabel="Sales Order"
-              />
-            </label>
+          <div className="form-grid" style={{ gridTemplateColumns: presetSalesOrderId ? "minmax(0, 1fr)" : boxId ? "repeat(2, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))", marginBottom: 10 }}>
+            {!presetSalesOrderId && (
+              <>
+                <label className="form-field">
+                  <span className="lbl">Customer</span>
+                  <Combobox
+                    value={customerId}
+                    options={customerOpts}
+                    onChange={(v) => { setCustomerId(v); if (v && soId && !readyPool.some((l) => l.salesOrderId === soId && l.customerId === v)) pickSo(""); }}
+                    placeholder="All customers"
+                    ariaLabel="Customer"
+                  />
+                </label>
+                <label className="form-field">
+                  <span className="lbl">Sales Order<span className="req"> *</span></span>
+                  <Combobox
+                    value={soId}
+                    options={soOpts}
+                    onChange={pickSo}
+                    placeholder="Pick a sales order…"
+                    clearable={false}
+                    ariaLabel="Sales Order"
+                  />
+                </label>
+              </>
+            )}
             {!boxId && (
               <label className="form-field">
                 <span className="lbl">Container Size</span>
@@ -309,6 +321,11 @@ export function NewLoadingModal({
             )}
           </div>
 
+          {soId && cp && soLines.length === 0 && (
+            <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "0 0 8px" }}>
+              No palletised stock ready for this order — a batch loads only once it is fully palletised.
+            </div>
+          )}
           {soId && cp && (
             // Plan propagation: the SO's containerisation plan, container by
             // container, quantities editable against ready stock.

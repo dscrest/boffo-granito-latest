@@ -3,6 +3,22 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-09-14 (evening) — SO tab trims, totals bar, rail order, batch on SO Palletization, Box Brand image (CR-177…182)
+
+**DEPLOYED LIVE 2026-09-14 (LIVE column + client), commit pending.**
+
+- **SO Production tab** (CR-177): Remaining column removed.
+- **Totals bar** (CR-178): on /packing and /palletizing the bar under the grid reads
+  *Total · N pallets · N boxes* when nothing is ticked (both views, every viewer); the
+  "Tick items…" hint and the Sheet's tfoot Total row are gone on these pages.
+- **Rails** (CR-179): `/packing/:id` and `/loading/:id` sibling rows read *customer · status*
+  above and the PAL/LOAD code below.
+- **SO Palletization tab** (CR-180): Batch column (mono chip) after Design.
+- **Box Brand image** (CR-181): `Brand.logo` (File Store id) created on LIVE; Image upload on the
+  Box Brand master; thumbnails in the Box Brand Combobox popup + preview beside the field on the
+  Quote, SO and Customer forms (`useBoxBrands()`); Combobox options accept `icon`.
+- **Held** (CR-182): Completed / Remaining boxes on the SO Palletization tab — user paused it.
+
 ## 2026-09-14 — Two Palletization pages, column pickers, Box Brand, SO tabs, Dispatch always reachable, Edit + More everywhere (CR-160…168)
 
 **DEPLOYED LIVE 2026-09-14 (data-ops + client), committed 3e672e8; manual drive pending.**

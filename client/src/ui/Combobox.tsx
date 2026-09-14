@@ -23,6 +23,8 @@ export interface ComboOption {
   hint?: string;
   /** Small pill after the label (e.g. "2 of 5 items left"). Display-only, not filtered. */
   badge?: string;
+  /** Image URL shown as a 20px thumbnail before the label in the popup (e.g. a Box Brand logo). */
+  icon?: string;
 }
 
 export function Combobox({
@@ -267,6 +269,7 @@ export function Combobox({
               }}
             >
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {o.icon && <img src={o.icon} alt="" width={20} height={20} style={{ objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }} />}
                 {o.label}
                 {o.badge && <span className="chip qstatus q-partial">{o.badge}</span>}
               </span>
