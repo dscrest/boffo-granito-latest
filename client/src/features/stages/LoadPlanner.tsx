@@ -9,6 +9,7 @@
    3. The existing LoadBoard for drag-drop rebalancing.
    Read-only page; all writes stay in Palletization / Loading.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "@/ui/Toast";
@@ -108,7 +109,7 @@ export function LoadPlanner() {
                   <td className="mono">{c.containerNumber}</td>
                   <td><span className="chip">{c.containerType || "—"}</span></td>
                   <td>
-                    <span className="chip" style={{ color: STATUS_COLOR[c.status] || "var(--dim)" }}>{c.status}</span>
+                    <span className="chip" style={{ color: STATUS_COLOR[c.status] || "var(--dim)" }} title={c.status}>{codeOf(c.status)}</span>
                   </td>
                   <td>{c.portOfDischarge || "—"}</td>
                   <td className="num mono">{c.capacityBoxes > 0 ? fmt(c.capacityBoxes) : "—"}</td>

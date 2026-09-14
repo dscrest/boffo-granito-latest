@@ -7,6 +7,7 @@
 
    More menu: Clone (seed a new plan), Print Palletization slip (PDF), Delete.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -16,6 +17,7 @@ import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
+import { DetailRail } from "@/features/common/DetailRail";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
 import { PalPlanForm } from "./PalPlanForm";
 import { DispatchTab } from "./DispatchTab";
@@ -66,7 +68,6 @@ export function PalPlanDetail() {
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [assigning, setAssigning] = useState(false); // "Assign vehicle" modal (while In Loading)
-  const [listQ, setListQ] = useState("");
   const [tab, setTab] = useState<DetailTab>("items");
 
   const load = async () => {
@@ -207,10 +208,6 @@ export function PalPlanDetail() {
   }
 
   const advance = ADVANCE[plan.status];
-  const needle = listQ.trim().toLowerCase();
-  const listed = needle
-    ? plans.filter((x) => `${x.palNumber} ${x.vehicleNumber} ${x.soNumbers.join(" ")}`.toLowerCase().includes(needle))
-    : plans;
 
   const moreItems = [
     ...(can("stages", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
@@ -233,42 +230,17 @@ export function PalPlanDetail() {
       )}
 
       {/* Plan list — sticky, resizable, own scroll (mirrors Quote detail). */}
-      <div
-        className="card"
-        style={{
-          width: 300, minWidth: 220, maxWidth: 420, flexShrink: 0, padding: 0,
-          resize: "horizontal", overflow: "hidden", display: "flex", flexDirection: "column",
-          height: "calc(100vh - var(--header-h) - 46px)", position: "sticky", top: 0,
-        }}
-      >
-        <div className="lp-search">
-          <Icon name="search" size={13} />
-          <input type="text" placeholder="Search plans…" value={listQ} onChange={(e) => setListQ(e.target.value)} />
-        </div>
-        <div style={{ overflowY: "auto", flex: 1, overscrollBehavior: "contain" }}>
-          {listed.map((x) => {
-            const cur = x.id === id;
-            return (
-              <Link
-                key={x.id}
-                to={`/packing/${x.id}`}
-                style={{
-                  display: "block", width: "100%", textAlign: "left", padding: "9px 12px", border: "none",
-                  borderBottom: "1px solid var(--border)", background: cur ? "var(--accent-soft)" : "transparent",
-                  cursor: "pointer", font: "inherit", color: "inherit", textDecoration: "none",
-                }}
-                title={x.palNumber}
-              >
-                <div className="mono" style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.palNumber}</div>
-                <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[x.vehicleNumber, PAL_STATUS_LABEL[x.status]].filter(Boolean).join("  ·  ")}
-                </div>
-              </Link>
-            );
-          })}
-          {listed.length === 0 && <div className="dim" style={{ padding: 12 }}>No matching plans</div>}
-        </div>
-      </div>
+      <DetailRail
+        placeholder="Search plans…"
+        currentId={id}
+        items={plans.map((x) => ({
+          id: x.id,
+          to: `/packing/${x.id}`,
+          title: x.palNumber,
+          subtitle: [x.customerNames.join(", "), x.vehicleNumber, PAL_STATUS_LABEL[x.status]].filter(Boolean).join("  ·  "),
+          searchText: x.soNumbers.join(" "),
+        }))}
+      />
 
       {/* Detail panel */}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -358,8 +330,8 @@ export function PalPlanDetail() {
                               <td className="muted mono">{l.sizeCode || "—"}</td>
                               <td className="muted">{l.palletName}</td>
                               <td>
-                                <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`}>
-                                  {partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status]}
+                                <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`} title={partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status]}>
+                                  {codeOf(partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status])}
                                 </span>
                               </td>
                               <td className="muted">

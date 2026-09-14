@@ -15,6 +15,7 @@ import { canApprove, checkSession, hasFeature, type SessionUser } from "@/lib/au
 import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
 import boffoLogo from "@/assets/boffo-logo.png";
 import { GlobalSearch } from "@/features/search/GlobalSearch";
+import { TourHost } from "@/features/tour/Tour";
 import { loadDefaultView } from "@/features/settings/settingsApi";
 
 /* Lazy page chunks (named exports → default-wrapped for React.lazy). */
@@ -200,7 +201,7 @@ const NavNodeRow = memo(function NavNodeRow({ node, depth, openGroups, onToggle 
 
   if (!node.children) {
     return (
-      <NavLink to={node.path ?? `/${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
+      <NavLink to={node.path ?? `/${node.id}`} data-tour={`nav-${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
         <Icon name={node.icon} size={14} className="ic" />
         <span>{node.label}</span>
       </NavLink>
@@ -338,7 +339,7 @@ export default function App() {
         {/* Breadcrumbs removed 2026-07-06 — the sidebar shows location; search leads the header. */}
         <GlobalSearch />
         {isAdmin && (
-          <button className="hbtn" title="Settings" aria-label="Settings" onClick={() => navigate("/settings")}>
+          <button className="hbtn" title="Settings" aria-label="Settings" data-tour="settings" onClick={() => navigate("/settings")}>
             <Icon name="settings" size={13} />
           </button>
         )}
@@ -412,6 +413,11 @@ export default function App() {
       </main>
       <ToastHost />
       <ConfirmHost />
+      <TourHost
+        userReady={user !== null}
+        expandSidebar={() => setCollapsed(false)}
+        openGroup={(label) => setOpenGroups((p) => ({ ...p, [label]: true }))}
+      />
     </div>
   );
 }

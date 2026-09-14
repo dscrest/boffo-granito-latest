@@ -4,6 +4,7 @@
    the master-page UI convention: row-click opens the editor.
    Roles control feature visibility + update/delete rights.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { BackToSettings } from "@/ui/primitives";
@@ -59,9 +60,9 @@ const USER_COLUMNS: ColumnDef<UserRow>[] = [
     label: "Status",
     render: (u) =>
       u.active ? (
-        <span className="chip" style={{ color: "var(--c-green)" }}>active</span>
+        <span className="chip" style={{ color: "var(--c-green)" }} title="active">{codeOf("active")}</span>
       ) : (
-        <span className="chip" style={{ color: "var(--dim)" }}>disabled</span>
+        <span className="chip" style={{ color: "var(--dim)" }} title="disabled">{codeOf("disabled")}</span>
       ),
   },
   { key: "created", label: "Created", className: "muted mono", render: (u) => fmtDateTime(u.createdTime) },

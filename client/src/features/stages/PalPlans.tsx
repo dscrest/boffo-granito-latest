@@ -9,11 +9,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
-import { ColumnPicker, type ColumnDef } from "@/ui/ColumnPicker";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { can } from "@/lib/auth";
 import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { PalPlanForm } from "./PalPlanForm";
-import { DispatchBoard, DISPATCH_GROUP_DIMS, type DispatchGroupBy } from "./DispatchBoard";
+import { COLUMNS, DispatchBoard, DISPATCH_GROUP_DIMS, type DispatchGroupBy } from "./DispatchBoard";
 import {
   cachedLoadBoxes,
   cachedPalPlans,
@@ -32,6 +32,9 @@ export const STATUS_CHIP: Record<PalStatus, string> = {
   Loading: "p-loading",
   Completed: "p-completed",
 };
+
+// Sections picker defs — the board's 3 stage columns.
+const STAGE_DEFS: ColumnDef[] = COLUMNS.map((c) => ({ key: c.key, label: c.label }));
 
 // Completed (dispatched) plans left this board — they live on /loading.
 const TABS: Array<{ id: string; label: string }> = [
@@ -68,6 +71,9 @@ export function PalPlans() {
   const toggleGroup = (key: string) =>
     setGroupBy((prev) => (prev.includes(key as DispatchGroupBy) ? prev.filter((d) => d !== key) : [...prev, key as DispatchGroupBy]));
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as DispatchGroupBy)) as DispatchGroupBy[]);
+  // Stage sections show/hide (kanban lanes + sheet rows) — Ready for Loading
+  // starts hidden; per-browser like every other column pref.
+  const stageCols = useColumns("palplans.stages", STAGE_DEFS, ["Ready"]);
   const [showForm, setShowForm] = useState(false);
   // "Send to Palletization" lands here as /packing?fromOrder=<soId> → open a
   // preset New-plan form scoped to that Sales Order.
@@ -163,6 +169,7 @@ export function PalPlans() {
         <div style={{ flex: 1 }} />
         <button
           className="hbtn"
+          data-tour="pal-report"
           style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
           title="Print the pallet packing report for everything palletised today"
           onClick={() =>
@@ -176,7 +183,7 @@ export function PalPlans() {
         >
           <Icon name="printer" size={13} /> Today's Report
         </button>
-        <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
+        <span data-tour="pal-view-toggle" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("kanban", "kanban", "Kanban")}
           {viewBtn("sheet", "orders", "Sheet")}
         </span>
@@ -190,6 +197,15 @@ export function PalPlans() {
           icon="menu"
           title="Group into sections — check dimensions, drag to set order"
         />
+        <ColumnPicker
+          columns={stageCols.ordered}
+          hidden={stageCols.hidden}
+          onToggle={stageCols.toggle}
+          onMove={stageCols.move}
+          label="Sections"
+          icon="columns"
+          title="Show or hide board sections"
+        />
         {can("stages", "create") && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
@@ -201,7 +217,7 @@ export function PalPlans() {
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} onChanged={() => void load()} />
+        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={stageCols.visible.map((c) => c.key)} onChanged={() => void load()} />
       )}
     </div>
   );

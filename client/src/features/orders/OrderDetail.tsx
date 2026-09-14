@@ -1,6 +1,7 @@
 /* Sales Order detail — header + all line items of the order.
    "Send to Palletization" (inline button or the header More menu) opens the
    PalPlan screen scoped to this order (/packing?fromOrder=). */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
@@ -8,8 +9,9 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, type Order } from "@/data";
+import { STAGES, type Order, type Quote } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
+import { QuotePrint } from "@/features/quotes/QuotePrint";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, shippingStage, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
@@ -107,7 +109,7 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
                       ? batches.map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>)
                       : <span className="dim">—</span>}
                   </td>
-                  <td className="nw"><span className="chip" style={{ color: s.color }}>{s.label}</span></td>
+                  <td className="nw"><span className="chip" style={{ color: s.color }} title={s.label}>{codeOf(s.label)}</span></td>
                   <td className="num mono">{fmt(e.qtyRequested)}</td>
                   <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
                   <td className="num mono">{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
@@ -197,7 +199,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
                 <td><span className="design-name">{b.design}</span></td>
                 <td>{b.pallet}</td>
                 <td className="num mono">{fmt(b.boxes)}</td>
-                <td><span className="chip">{b.status}</span></td>
+                <td><span className="chip" title={b.status}>{codeOf(b.status)}</span></td>
               </tr>
             ))}
             {rows.length === 0 && (
@@ -258,11 +260,12 @@ export function OrderDetail() {
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [prod, setProd] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [sendLoad, setSendLoad] = useState(false);
   const [listQ, setListQ] = useState("");
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
-  const { designRows } = useMasters();
+  const { designRows, customers } = useMasters();
 
   const load = async () => {
     const res = await listOrders();
@@ -558,6 +561,7 @@ export function OrderDetail() {
               ...(head.salesOrderId && can("orders", "edit")
                 ? [{ label: "Plan Containerisation", onClick: () => navigate(`/orders/${head.salesOrderId}/containerise`) }]
                 : []),
+              { label: "Print Order", onClick: () => setPrinting(true) },
               ...((status === "Confirmed" || status === "InProgress") && can("orders", "edit")
                 ? [{ label: "Cancel Order", danger: true, onClick: () => void changeStatus("Cancelled", "Order cancelled") }]
                 : []),
@@ -679,6 +683,37 @@ export function OrderDetail() {
       </div>
 
 
+      {/* SO print — the quotation sheet with Sales Order labels; the SO's
+          header + lines are mapped into the Quote shape the template reads. */}
+      {printing && (
+        <QuotePrint
+          doc={{ title: "SALES ORDER", eyebrow: "Sales Order For", noLabel: "SO NO.", validLabel: "DUE DATE" }}
+          quote={{
+            id: head.salesOrderId || head.id,
+            quoteNo: head.orderNumber || head.poNumber,
+            customer: head.party,
+            partyCode: head.partyCode,
+            address: customers.find((c) => c.code === head.partyCode)?.address || "",
+            quoteDate: head.orderDate,
+            expiryDate: head.dueDate,
+            paymentTerm: head.paymentTerm || "",
+            portOfDischarge: head.portOfDischarge || "",
+            status: "Draft",
+            currency: head.currency || "INR",
+            remarks: head.remarks || "",
+            salesperson: head.salesperson,
+            customerNotes: head.customerNotes,
+            terms: head.terms,
+            docDiscount: head.docDiscount,
+            adjustment: head.adjustment,
+            taxType: head.taxType,
+            taxPct: head.taxPct,
+            lines: items.map((o) => ({ item: o.design, qty: o.orderQty, rate: o.rate || 0, discount: o.discount || 0, description: o.description })),
+            soNumber: null,
+          } satisfies Quote}
+          onClose={() => setPrinting(false)}
+        />
+      )}
       {ipBreak && (() => {
         const s = stockOf(ipBreak);
         return <InProductionModal label={ipBreak.design} total={s.inProduction} orders={s.inProductionOrders} onClose={() => setIpBreak(null)} />;

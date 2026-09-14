@@ -17,27 +17,36 @@ import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { confirmDialog } from "@/ui/ConfirmDialog";
+import { NumberInput } from "@/ui/NumberInput";
+import { Combobox } from "@/ui/Combobox";
 import { fmt } from "@/lib/format";
 import { type ContainerPlan } from "@/data";
 import { isoInfo } from "@/features/masters/customersApi";
 import {
   invalidatePalPlans,
   lineFrac,
+  loadableLineIds,
   oiProgressOf,
   PAL_LINE_STATUS_LABEL,
+  palTopUp,
   setPalLineStatus,
   type LoadBox,
   type PalPlan,
   type PalPlanLine,
   type PalLineStatus,
 } from "./palPlansApi";
+import { MoreMenu } from "@/features/common/DetailBits";
+import { hasOps, resolvePalSheetEdit, type PalSheetDraft, type PalSheetOps } from "./palSheetEdit";
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { PalletiseModal, type PalletiseEntry } from "./PalletiseModal";
+import { TopUpModal } from "./TopUpModal";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { useLoadFlow } from "./useLoadFlow";
 
-// Board columns — all hold ITEM cards (a PalPlanLine each).
-const COLUMNS = [
+// Board columns — all hold ITEM cards (a PalPlanLine each). Exported so
+// PalPlans' Sections picker builds its defs from the same list.
+export const COLUMNS = [
   { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
   { key: "Palletizing", label: "In Palletization", chip: "p-palletized" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
@@ -63,6 +72,7 @@ export function DispatchBoard({
   view,
   canEdit,
   groupBy,
+  visibleStages,
   onChanged,
 }: {
   plans: PalPlan[];
@@ -70,8 +80,15 @@ export function DispatchBoard({
   view: "kanban" | "sheet";
   canEdit: boolean;
   groupBy: DispatchGroupBy[];
+  visibleStages?: string[]; // ordered stage keys from the Sections picker; empty/undefined = all
   onChanged: () => void;
 }) {
+  // Stage sections the board renders (kanban lanes + sheet rows + footer chips).
+  // All-hidden falls back to all-visible so the board can never render blank.
+  const picked = (visibleStages ?? [])
+    .map((k) => COLUMNS.find((c) => c.key === k))
+    .filter((c): c is (typeof COLUMNS)[number] => !!c);
+  const cols = picked.length ? picked : [...COLUMNS];
   const navigate = useNavigate();
   // Board filters (session-scoped is overkill — the outer PalPlans search persists already).
   const [q, setQ] = useState("");
@@ -87,6 +104,13 @@ export function DispatchBoard({
   // Lines being palletised through the dialog (checkbox selection, column drop,
   // or a drag to the transient Palletization column — `to` is where they land).
   const [palletise, setPalletise] = useState<{ lines: PalPlanLine[]; to: "Palletizing" | "ReadyToLoad" } | null>(null);
+  // In-Palletization line whose open pallet is being topped up (Mix Batch).
+  const [topUp, setTopUp] = useState<PalPlanLine | null>(null);
+  // Sheet edit mode: staged qty/donor per line, committed on Save (mirrors
+  // the Production sheet edit — nothing is written until Save).
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<Record<string, PalSheetDraft>>({});
+  const [savingEdits, setSavingEdits] = useState(false);
 
   // Container plans keyed by SalesOrder ROWID — feeds the card subtitle and
   // the palletise-time pallet prefill.
@@ -106,6 +130,9 @@ export function DispatchBoard({
   // Partial-palletise progress across ALL lines (boxed + Completed included,
   // or split siblings would deflate the totals).
   const oiProgress = oiProgressOf(plans.flatMap((p) => p.lines));
+  // Batch-complete gate: a ReadyToLoad slice of a partially palletised batch
+  // stays in "In Palletization" and out of the loading pools.
+  const loadable = loadableLineIds(plans.flatMap((p) => p.lines));
   // Age = days since the LINE was created (auto-enqueue creates it right after
   // production; plans are reused per SO so the plan date is the wrong anchor).
   // Catalyst stamps "YYYY-MM-DD HH:mm:ss:SSS" — colon before the millis breaks
@@ -115,7 +142,7 @@ export function DispatchBoard({
     return Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : 0;
   };
   const stageOf = (_p: PalPlan, l: PalPlanLine): ColKey => {
-    if (l.status === "ReadyToLoad") return "Ready";
+    if (l.status === "ReadyToLoad") return loadable.has(l.id) ? "Ready" : "Palletizing";
     return l.status === "Palletizing" ? "Palletizing" : "Planning";
   };
 
@@ -147,13 +174,6 @@ export function DispatchBoard({
       const res = await setPalLineStatus(id, to);
       if (res.ok) ok++; else err = res.error || "Move failed";
     }
-    // Palletised without the dialog (already-palleted lines dropped on Ready):
-    // print the packing report for what moved.
-    if (to === "ReadyToLoad" && ok > 0) {
-      const pool = plans.flatMap((p) => p.lines);
-      const moved = pool.filter((l) => ids.includes(l.id)).map((l) => ({ ...l, status: "ReadyToLoad" as const }));
-      void import("./packingReportPdf").then((m) => m.downloadPackingReportForLines(moved, pool));
-    }
     setBusy(false);
     // Batch failure mid-way: report + refresh anyway so the board resyncs.
     after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${PAL_LINE_STATUS_LABEL[to]}`);
@@ -162,30 +182,100 @@ export function DispatchBoard({
 
   // Palletise-dialog confirm: every target moves to `to` with its pallet in
   // one call (`to` = Palletizing from the Palletise button, ReadyToLoad from
-  // a pallet-less Mark Palletised / drop on Ready — a line never reaches
-  // Ready for Loading without a pallet on record).
+  // Record Palletised / "+" / pallet-less drop on Ready — a line never
+  // reaches Ready for Loading without a pallet on record). A partial qty
+  // splits the line server-side; the remainder stays in its stage.
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
     if (busy || entries.length === 0 || !palletise) return;
     const to = palletise.to;
-    const src = palletise.lines;
     setBusy(true);
     let ok = 0, err = "";
     for (const e of entries) {
       const res = await setPalLineStatus(e.lineId, to, e.palletId, e.boxes);
       if (res.ok) ok++; else err = res.error || "Move failed";
     }
-    // Packing report only when items become PALLETISED (reach Ready), not when
-    // palletization merely starts — pre-refresh `plans` still holds the
-    // pre-split boxes the remaining-box math needs.
-    if (to === "ReadyToLoad" && ok > 0) {
-      void import("./packingReportPdf").then((m) =>
-        m.downloadPackingReportForEntries(entries, src, plans.flatMap((p) => p.lines)));
-    }
+    // No auto-print here: slips print on demand (line/detail buttons) after
+    // the user verifies the palletisation.
     setBusy(false);
     setPalletise(null);
     setSelected(new Set());
     after(!err, err, `${ok} item${ok === 1 ? "" : "s"} → ${PAL_LINE_STATUS_LABEL[to]}`);
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
+  };
+
+  // Same-item queue lines that can top up an In-Palletization pallet
+  // (usually another batch — that's the Mix Batch flow).
+  const topUpDonors = (l: PalPlanLine) =>
+    allLines
+      .filter(({ l: d }) => d.status === "Planning" && !!l.designId && d.designId === l.designId && d.id !== l.id)
+      .map(({ l: d }) => d);
+
+  const confirmTopUp = async (donorLineId: string, boxes: number) => {
+    if (busy || !topUp) return;
+    setBusy(true);
+    const res = await palTopUp(topUp.id, donorLineId, boxes);
+    setBusy(false);
+    setTopUp(null);
+    after(res.ok, res.ok ? "" : res.error || "Top up failed", `Topped up with ${fmt(boxes)} boxes — Mix Batch pallet`);
+  };
+
+  // ---- sheet edit mode ----------------------------------------
+  const setCell = (id: string, k: keyof PalSheetDraft, v: string) =>
+    setDraft((m) => ({ ...m, [id]: { ...m[id], [k]: v } }));
+
+  // Resolve every drafted row once: what Save must do, and whether anything is
+  // invalid (a bad row disables Save rather than firing a doomed request).
+  const editRows: Array<{ l: PalPlanLine; ops: PalSheetOps }> = [];
+  let editBad = false;
+  if (editMode) {
+    for (const { l } of allLines) {
+      if (!draft[l.id]) continue;
+      const { ops, error } = resolvePalSheetEdit(l, topUpDonors(l), draft[l.id]);
+      if (error) editBad = true;
+      else if (hasOps(ops)) editRows.push({ l, ops });
+    }
+  }
+  const editDirty = editRows.length > 0 || editBad;
+
+  const leaveEdit = async () => {
+    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+    setDraft({});
+    setEditMode(false);
+  };
+
+  // ponytail: the Kanban/Sheet toggle lives in PalPlans, so leaving the sheet
+  // drops staged edits silently — lift an onBeforeViewChange if that bites.
+  useEffect(() => {
+    if (view !== "sheet") { setDraft({}); setEditMode(false); }
+  }, [view]);
+
+  const saveEdits = async () => {
+    if (!editRows.length || editBad || savingEdits) return;
+    setSavingEdits(true);
+    const failed: Record<string, PalSheetDraft> = {};
+    let done = 0;
+    // ponytail: sequential + non-atomic, one request per row (house pattern —
+    // same as the Production sheet and confirmPalletise's loop).
+    for (const { l, ops } of editRows) {
+      // Record = the exact call confirmPalletise makes: a partial qty splits
+      // the line server-side, the remainder stays in its stage. Per-row only —
+      // a Mix Batch row does NOT pull its pallet_group siblings here (the +
+      // menu's Complete still records the whole physical pallet together).
+      const res = ops.record
+        ? await setPalLineStatus(l.id, "ReadyToLoad", l.palletId, ops.record.boxes)
+        : await palTopUp(l.id, ops.topUp!.donorId, ops.topUp!.boxes);
+      if (res.ok) done += 1;
+      else {
+        failed[l.id] = draft[l.id];
+        toast.error(`${l.itemCode}: ${res.error || "Save failed"}`);
+      }
+    }
+    setSavingEdits(false);
+    setDraft(failed);
+    if (done) toast.success(`${done} line${done === 1 ? "" : "s"} saved`);
+    if (!Object.keys(failed).length) setEditMode(false);
+    invalidatePalPlans();
+    onChanged();
   };
 
   // ---- drag & drop --------------------------------------------
@@ -242,9 +332,10 @@ export function DispatchBoard({
     : d === "batch" ? (e.l.batchNumber ? `Batch ${e.l.batchNumber}` : "No batch")
     : e.l.designLabel || "—";
   const groupKeyOf = (e: Entry) => groupBy.map((d) => laneKeyOf(e, d)).join("  ›  ");
-  // Sheet rows: stage sections first, group bands nested inside, then pallet code.
-  const stageIdx = new Map(COLUMNS.map((c, i) => [c.key, i]));
-  const sheetRows = [...visible].sort((a, b) => {
+  // Sheet rows: stage sections first, group bands nested inside, then pallet
+  // code. Hidden sections drop their rows here too — one consistent setting.
+  const stageIdx = new Map(cols.map((c, i) => [c.key, i]));
+  const sheetRows = visible.filter((e) => stageIdx.has(stageOf(e.p, e.l))).sort((a, b) => {
     const d = (stageIdx.get(stageOf(a.p, a.l)) ?? 0) - (stageIdx.get(stageOf(b.p, b.l)) ?? 0);
     if (d !== 0) return d;
     if (groupBy.length) {
@@ -253,6 +344,8 @@ export function DispatchBoard({
     }
     return a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
   });
+  // Sheet column count — band/empty rows span it (edit mode adds Palletise + Top Up From).
+  const nCols = editMode ? 12 : 10;
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -276,6 +369,45 @@ export function DispatchBoard({
     selected.size ? [...selPlanning.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
   const loadTargets = (l: PalPlanLine) =>
     selected.size ? [...new Set([...selReady.map(({ l: sl }) => sl.id), l.id])] : [l.id];
+  // Record Palletised acts on the whole PHYSICAL pallet: a topped-up
+  // (pallet_group) line brings its group siblings into the dialog, so the
+  // mixed pallet is recorded together (one combined slip when printed).
+  const recordTargets = (l: PalPlanLine) =>
+    l.palletGroup
+      ? allLines.filter(({ l: d }) => d.status === "Palletizing" && d.palletGroup === l.palletGroup).map(({ l: d }) => d)
+      : [l];
+
+  // The one "+" menu on Planning / In-Palletization cards & rows — all three
+  // options always listed, inapplicable ones greyed out. Complete on a
+  // Planning line is the skip-a-stage shortcut (dialog still forces a pallet).
+  const plusMenuItems = (l: PalPlanLine, stage: ColKey) => [
+    {
+      label: `Start Palletisation${stage === "Planning" && palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}`,
+      disabled: stage !== "Planning",
+      title: stage !== "Planning" ? "Already in palletization" : "Moves to In Palletization",
+      onClick: () => openPalletise(palletiseTargets(l), "Palletizing"),
+    },
+    {
+      label: "Top Up Batch",
+      disabled: stage !== "Palletizing" || !l.palletId || topUpDonors(l).length === 0,
+      title: stage !== "Palletizing"
+        ? "Start palletisation first"
+        : !l.palletId || topUpDonors(l).length === 0
+          ? "No same-design batch waiting to top up from"
+          : "Top up this pallet from another batch of the same design (Mix Batch)",
+      onClick: () => setTopUp(l),
+    },
+    {
+      label: "Complete Palletisation",
+      // A ReadyToLoad slice held back by the batch gate is already recorded —
+      // it moves on when the rest of its batch is palletised.
+      disabled: l.status === "ReadyToLoad",
+      title: l.status === "ReadyToLoad"
+        ? "Recorded — waiting for the rest of this batch to be palletised"
+        : "Record palletised boxes — they move to Ready for Loading",
+      onClick: () => openPalletise(stage === "Palletizing" ? recordTargets(l) : palletiseTargets(l), "ReadyToLoad"),
+    },
+  ];
 
   // ---- item card ----------------------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
@@ -376,34 +508,15 @@ export function DispatchBoard({
             </div>
           ) : null;
         })()}
-        {canEdit && stage === "Planning" && (
-          <button
-            type="button"
-            className="hbtn primary"
-            style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); openPalletise(palletiseTargets(l), "Palletizing"); }}
-            title={palletiseTargets(l).length > 1 ? `Palletise the ${palletiseTargets(l).length} selected items` : "Palletise this item — moves to In Palletization"}
+        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+          // MoreMenu doesn't stop propagation and the card is draggable +
+          // click-navigates, so the wrapper span eats the events.
+          <span
+            style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}
+            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); }}
           >
-            Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
-          </button>
-        )}
-        {canEdit && stage === "Palletizing" && (
-          <button
-            type="button"
-            className="hbtn primary"
-            style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            disabled={busy}
-            onClick={(ev) => {
-              ev.stopPropagation(); ev.preventDefault();
-              // Pallet already picked at Palletise — move direct; legacy
-              // pallet-less lines detour through the dialog (same as drop-on-Ready).
-              if (l.palletId) void moveLines([l.id], "ReadyToLoad");
-              else openPalletise([l], "ReadyToLoad");
-            }}
-            title="Palletisation done — moves to Ready for Loading"
-          >
-            Mark Palletised
-          </button>
+            <MoreMenu kebab icon="plus" title="Palletisation actions" items={plusMenuItems(l, stage)} />
+          </span>
         )}
         {canEdit && stage === "Ready" && (
           <button
@@ -427,11 +540,11 @@ export function DispatchBoard({
     <div
       style={
         fillHeight
-          ? { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: `repeat(${COLUMNS.length}, minmax(210px, 1fr))`, gap: 10, padding: 10, overflowX: "auto" }
-          : { display: "grid", gridTemplateColumns: `repeat(${COLUMNS.length}, minmax(210px, 1fr))`, gap: 10, alignItems: "start", overflowX: "auto" }
+          ? { flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(210px, 1fr))`, gap: 10, padding: 10, overflowX: "auto" }
+          : { display: "grid", gridTemplateColumns: `repeat(${cols.length}, minmax(210px, 1fr))`, gap: 10, alignItems: "start", overflowX: "auto" }
       }
     >
-      {COLUMNS.map((col) => {
+      {cols.map((col) => {
         const entries = list.filter((e) => stageOf(e.p, e.l) === col.key);
         const totalBoxes = entries.reduce((s, { l }) => s + l.boxes, 0);
         const accepts = canEdit && !!drag;
@@ -559,16 +672,47 @@ export function DispatchBoard({
               <option value="">All sizes</option>
               {opts.sizes.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
-            {anyFilter && (
-              <button
-                type="button"
-                className="btn"
-                style={{ marginLeft: "auto", flex: "0 0 auto" }}
-                onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); }}
-              >
-                Clear filters
-              </button>
-            )}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flex: "0 0 auto" }}>
+              {anyFilter && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); }}
+                >
+                  Clear filters
+                </button>
+              )}
+              {/* Sheet edit mode: Palletise qty + Top Up donor go editable across
+                  every row; nothing is written until Save. */}
+              {view === "sheet" && canEdit && (
+                editMode ? (
+                  <>
+                    <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+                      Cancel
+                    </button>
+                    <button
+                      className="hbtn primary"
+                      style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                      disabled={!editRows.length || editBad || savingEdits}
+                      onClick={() => void saveEdits()}
+                      title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
+                    >
+                      {savingEdits ? "Saving…" : `Save${editRows.length ? ` (${editRows.length})` : ""}`}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="hbtn"
+                    style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                    onClick={() => setEditMode(true)}
+                    title="Record palletised boxes or a batch top-up across rows, then Save"
+                  >
+                    <Icon name="edit" size={13} />
+                    Edit
+                  </button>
+                )
+              )}
+            </div>
           </div>
 
           {view === "kanban" ? (
@@ -588,7 +732,12 @@ export function DispatchBoard({
                     <th>Item</th>
                     <th>Customer · SO</th>
                     <th>Batch</th>
-                    <th>Stage</th>
+                    <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+                    <th className="num" style={{ textAlign: "right" }} title="Total boxes sent to palletization for this order item">Ordered</th>
+                    <th className="num" style={{ textAlign: "right" }} title="Boxes palletised (Ready or loaded)">Completed</th>
+                    <th className="num" style={{ textAlign: "right" }}>Remaining</th>
+                    {editMode && <th className="num" style={{ textAlign: "right" }}>Palletise</th>}
+                    {editMode && <th>Top Up From</th>}
                     <th>Age</th>
                     <th aria-label="Action" />
                   </tr>
@@ -604,7 +753,7 @@ export function DispatchBoard({
                     const stageChanged = i === 0 || stageOf(sheetRows[i - 1].p, sheetRows[i - 1].l) !== stage;
                     const stageBand = stageChanged ? (
                       <tr key={`s-${stage}`} style={{ background: "var(--panel-2)", borderTop: "2px solid var(--border)" }}>
-                        <td colSpan={7} style={{ padding: "8px 10px" }}>
+                        <td colSpan={nCols} style={{ padding: "8px 10px" }}>
                           <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{col.label}</span>
                           <span className="mono dim" style={{ marginLeft: 10 }}>
                             {(() => {
@@ -618,7 +767,7 @@ export function DispatchBoard({
                     const band =
                       groupBy.length && (stageChanged || groupKeyOf(sheetRows[i - 1]) !== key) ? (
                         <tr key={`h-${stage}-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
-                          <td colSpan={7} style={{ paddingLeft: 20 }}>
+                          <td colSpan={nCols} style={{ paddingLeft: 20 }}>
                             {key}
                             <span className="mono" style={{ fontWeight: 400, marginLeft: 10 }}>
                               {(() => {
@@ -668,42 +817,76 @@ export function DispatchBoard({
                               Mix Batch
                             </span>
                           )}
-                        </td>
-                        <td>
-                          <span className={`chip palstatus ${col.chip}`} style={{ whiteSpace: "nowrap" }}>{col.label}</span>
                           {(() => {
                             const prog = oiProgress.get(l.orderItemId);
                             return prog && prog.done > 0 && prog.done < prog.total ? (
-                              <div className="chip palstatus p-palletized" style={{ marginTop: 2, whiteSpace: "nowrap" }}
-                                   title="Part of this order item is still not palletised">
-                                Partially palletised
-                              </div>
+                              <span className="chip palstatus p-palletized" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }}
+                                    title="Part of this order item is still not palletised">
+                                Partial
+                              </span>
                             ) : null;
                           })()}
                         </td>
+                        <td className="num mono" style={{ textAlign: "right" }}>{fmt(l.boxes)}</td>
+                        {(() => {
+                          const prog = oiProgress.get(l.orderItemId);
+                          const total = prog?.total ?? 0;
+                          const done = prog?.done ?? 0;
+                          return (
+                            <>
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(total)}</td>
+                              <td className="num mono" style={{ textAlign: "right" }}>
+                                {done ? <span style={{ color: "var(--c-green)" }}>{fmt(done)}</span> : <span className="dim">—</span>}
+                              </td>
+                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, total - done))}</td>
+                            </>
+                          );
+                        })()}
+                        {editMode && (() => {
+                          const d = draft[l.id];
+                          const donors = topUpDonors(l);
+                          const rowErr = d ? resolvePalSheetEdit(l, donors, d).error : null;
+                          const bad = rowErr ? { borderColor: "var(--c-red)" } : undefined;
+                          const topUpOk = l.status === "Palletizing" && !!l.palletId && donors.length > 0;
+                          return (
+                            <>
+                              <td className="num" style={{ textAlign: "right" }} onClick={(ev) => ev.stopPropagation()}>
+                                {l.status === "ReadyToLoad" ? (
+                                  <span className="dim" title="Recorded — waiting for the rest of this batch to be palletised">—</span>
+                                ) : (
+                                  <NumberInput
+                                    value={d?.qty ?? ""}
+                                    placeholder="0"
+                                    onChange={(ev) => setCell(l.id, "qty", ev.target.value)}
+                                    style={{ width: 90, textAlign: "right", ...bad }}
+                                    title={rowErr || (d?.donorId ? `Boxes moved from the picked batch onto this pallet` : `Boxes palletised now — less than ${fmt(l.boxes)} splits the line`)}
+                                  />
+                                )}
+                              </td>
+                              <td onClick={(ev) => ev.stopPropagation()} style={{ minWidth: 160 }}>
+                                {topUpOk ? (
+                                  <Combobox
+                                    value={d?.donorId ?? ""}
+                                    onChange={(v) => setCell(l.id, "donorId", v)}
+                                    placeholder="Same-design batch…"
+                                    ariaLabel="Top up from batch"
+                                    options={donors.map((x) => ({
+                                      value: x.id,
+                                      label: x.batchNumber ? `Batch ${x.batchNumber}` : x.itemCode,
+                                      hint: `${fmt(x.boxes)} bx · ${x.itemCode}`,
+                                    }))}
+                                  />
+                                ) : (
+                                  <span className="dim" title="Top-up needs an In-Palletization line with a same-design batch waiting">—</span>
+                                )}
+                              </td>
+                            </>
+                          );
+                        })()}
                         <td className="dim">{ageDays(p, l)}d</td>
                         <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                          {canEdit && stage === "Planning" && (
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
-                              disabled={busy}
-                              onClick={() => openPalletise(palletiseTargets(l), "Palletizing")}
-                            >
-                              Palletise{palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}
-                            </button>
-                          )}
-                          {canEdit && stage === "Palletizing" && (
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
-                              disabled={busy}
-                              onClick={() => { if (l.palletId) void moveLines([l.id], "ReadyToLoad"); else openPalletise([l], "ReadyToLoad"); }}
-                            >
-                              Mark Palletised
-                            </button>
+                          {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+                            <MoreMenu kebab icon="plus" title="Palletisation actions" items={plusMenuItems(l, stage)} />
                           )}
                           {canEdit && stage === "Ready" && (
                             <button
@@ -722,7 +905,7 @@ export function DispatchBoard({
                     );
                   })}
                   {sheetRows.length === 0 && (
-                    <tr><td colSpan={7} className="dim" style={{ textAlign: "center", padding: 24 }}>Nothing here</td></tr>
+                    <tr><td colSpan={nCols} className="dim" style={{ textAlign: "center", padding: 24 }}>Nothing here</td></tr>
                   )}
                 </tbody>
               </table>
@@ -731,7 +914,7 @@ export function DispatchBoard({
 
           {/* Selection bar. */}
           {canEdit && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? "var(--accent-soft)" : "var(--panel-2)" }}>
+            <div data-tour="pal-selbar" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderTop: "1px solid var(--border)", background: selected.size ? "var(--accent-soft)" : "var(--panel-2)" }}>
               <span style={{ fontSize: "var(--t-md)", fontWeight: selected.size ? 600 : 400, color: selected.size ? "var(--fg)" : "var(--muted)" }}>
                 {selected.size
                   ? `${selected.size} selected · ${fmt(selBoxes)} boxes`
@@ -765,6 +948,16 @@ export function DispatchBoard({
                       </button>
                       <button
                         type="button"
+                        className="hbtn"
+                        style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
+                        title="Print per-pallet slips for the selected palletised items"
+                        onClick={() => void import("./packingReportPdf").then((m) =>
+                          m.downloadPalletSlipsForLines(selReady.map(({ l }) => l)))}
+                      >
+                        <Icon name="printer" size={12} /> Pallet Slips ({selReady.length})
+                      </button>
+                      <button
+                        type="button"
                         className="hbtn primary"
                         style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
                         disabled={flow.busy}
@@ -785,14 +978,14 @@ export function DispatchBoard({
           {/* Stage summary — kanban only; the sheet already shows a Stage column. */}
           {view === "kanban" && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "8px 10px", borderTop: "1px solid var(--border)" }}>
-            {COLUMNS.map((col, i) => {
+            {cols.map((col, i) => {
               const n = allLines.filter((e) => stageOf(e.p, e.l) === col.key).length;
               return (
                 <span key={col.key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <span className={`chip palstatus ${col.chip}`} title={`${n} item${n === 1 ? "" : "s"}`}>
                     {col.label} <span className="mono">{n}</span>
                   </span>
-                  {i < COLUMNS.length - 1 && <span className="dim" aria-hidden="true">→</span>}
+                  {i < cols.length - 1 && <span className="dim" aria-hidden="true">→</span>}
                 </span>
               );
             })}
@@ -812,6 +1005,16 @@ export function DispatchBoard({
         />
       )}
 
+      {topUp && (
+        <TopUpModal
+          target={topUp}
+          donors={topUpDonors(topUp)}
+          busy={busy}
+          onConfirm={(donorLineId, boxes) => void confirmTopUp(donorLineId, boxes)}
+          onClose={() => setTopUp(null)}
+        />
+      )}
+
       {flow.picker && (() => {
         // Use the hook's UNfiltered lines for box previews — this board's own
         // list excludes boxed lines, the modal's fill preview must not.
@@ -822,7 +1025,7 @@ export function DispatchBoard({
         return (
           <LoadContainerModal
             lines={lines}
-            availableLines={flow.allLines.filter(({ l }) => l.status === "ReadyToLoad" && !l.loadBoxId).map(({ l }) => l)}
+            availableLines={flow.allLines.filter(({ l }) => loadable.has(l.id)).map(({ l }) => l)}
             boxes={flow.openBoxes}
             linesOfBox={flow.linesOfBox}
             busy={flow.busy}

@@ -3,6 +3,7 @@
    container). Generation runs the data-ops saga, which numbers the
    invoice from TransactionSeries and totals the loaded batch lines.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
@@ -39,7 +40,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceRow>[] = [
       </>
     ),
   },
-  { key: "status", label: "Status", render: (r) => <span className="chip">{r.status}</span> },
+  { key: "status", label: "Status", render: (r) => <span className="chip" title={r.status}>{codeOf(r.status)}</span> },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];

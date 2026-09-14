@@ -7,6 +7,7 @@
    (Received → In Cutting → Ready → Dispatched) — the order IS the
    "sent panel" record once dispatched.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fmt } from "@/lib/format";
@@ -122,7 +123,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
                 <td className="num mono">{fmt(o.qty)}</td>
                 <td className="mono muted">{o.orderDate || "—"}</td>
                 <td>{o.salesperson || "—"}</td>
-                <td>{PANEL_ORDER_STATUS_LABEL[o.status]}</td>
+                <td><span title={PANEL_ORDER_STATUS_LABEL[o.status]}>{codeOf(PANEL_ORDER_STATUS_LABEL[o.status])}</span></td>
               </tr>
             ))}
           </tbody>

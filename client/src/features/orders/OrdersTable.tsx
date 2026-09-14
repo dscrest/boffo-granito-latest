@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -105,8 +106,8 @@ function soColumns(): ColumnDef<SORow>[] {
       render: (r) => {
         const s = r.head.status || "Confirmed";
         return (
-          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined}>
-            {soStatusLabel(s)}
+          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : soStatusLabel(s)}>
+            {codeOf(soStatusLabel(s))}
           </span>
         );
       },
@@ -118,7 +119,7 @@ function soColumns(): ColumnDef<SORow>[] {
       label: "Shipping Stage",
       render: (r) => {
         const st = shippingStage(r.items);
-        return st ? <span className={`chip qstatus ${st.cls}`}>{st.label}</span> : "—";
+        return st ? <span className={`chip qstatus ${st.cls}`} title={st.label}>{codeOf(st.label)}</span> : "—";
       },
     },
     { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },

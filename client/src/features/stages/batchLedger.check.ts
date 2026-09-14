@@ -5,6 +5,7 @@
    ponytail: one self-check for the batch/stock path; no vitest dep introduced. */
 import assert from "node:assert";
 import { batchLedger } from "./batchLedger.ts";
+import { loadableLineIds } from "./palLoadGate.ts";
 
 const stockRow = (over: Record<string, unknown> = {}) =>
   ({
@@ -86,6 +87,19 @@ const sum = (rows: { boxes: number }[]) => rows.reduce((s, r) => s + r.boxes, 0)
   assert.strictEqual(sum(rows), 100, "opening counts toward the batch total");
   assert.strictEqual(rows[0].batchTotal, 100, "batchTotal = produced + opening");
   assert.strictEqual(rows[0].dispatchDate, "2026-08-20", "dispatch date comes off the box");
+}
+
+// 4. Batch-complete loading gate: a partially palletised batch never loads.
+{
+  // Split pair, same batch: 40 ReadyToLoad + 60 still Planning → nothing loadable.
+  const partial = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning" })] as never);
+  assert.strictEqual(partial.size, 0, "partially palletised batch → not loadable");
+  // Whole batch ReadyToLoad → both slices loadable.
+  const full = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60 })] as never);
+  assert.deepStrictEqual([...full].sort(), ["L1", "L2"], "complete batch → all lines loadable");
+  // A boxed sibling counts as done — the remaining slice may load.
+  const boxed = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning", loadBoxId: "BX1" })] as never);
+  assert.deepStrictEqual([...boxed], ["L1"], "boxed sibling counts as palletised");
 }
 
 console.log("batch ledger check: OK");

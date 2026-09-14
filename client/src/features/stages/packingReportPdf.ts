@@ -176,6 +176,178 @@ export async function downloadTodaysPackingReport(plans: PalPlan[]): Promise<num
   return lines.length;
 }
 
+/* ---------------- per-pallet slips (Record Palletised) ----------------
+   One A4 page per PHYSICAL pallet, batch number on each — the print that
+   fires when palletised boxes are recorded. A line of N boxes on a pallet
+   of capacity C makes ceil(N/C) slips (last one partial); lines sharing a
+   pallet_group are ONE mixed pallet → one slip listing every batch. */
+
+interface SlipMember {
+  designLabel: string;
+  sizeCode: string;
+  finish: string;
+  batchNumber: string; // "" = legacy unattributed → "—"
+  boxes: number;
+}
+
+interface PalletSlip {
+  // itemCode is a client-side position ordinal that renumbers after later
+  // splits — the batch number is the stable trace ID on the slip.
+  docNo: string;
+  customerName: string;
+  soNumber: string;
+  palletName: string;
+  members: SlipMember[];
+  boxes: number;
+  index: number;
+  count: number;
+}
+
+function slipPage(s: PalletSlip, dateISO: string, first: boolean): Content {
+  return {
+    stack: [
+      pdfHeader("Pallet Slip", s.docNo),
+      metaLines([
+        ["Customer", s.customerName || "—"],
+        ["Sales Order", s.soNumber || "—"],
+        ["Pallet", s.palletName || "—"],
+        ["Date", prettyDate(dateISO)],
+      ]),
+      { text: "", margin: [0, 8, 0, 0] },
+      {
+        table: {
+          headerRows: 1,
+          widths: ["*", "auto", "auto", "auto", "auto"],
+          body: [
+            [
+              { text: "Design", style: "th" },
+              { text: "Size", style: "th" },
+              { text: "Finish", style: "th" },
+              { text: "Batch", style: "th" },
+              { text: "Boxes", style: "th", alignment: "right" },
+            ],
+            ...s.members.map((m) => [
+              { text: m.designLabel || "—", style: "td" },
+              { text: m.sizeCode || "—", style: "td" },
+              { text: m.finish || "—", style: "td" },
+              { text: m.batchNumber || "—", style: "td" },
+              { text: nfmt(m.boxes), style: "tdNum" },
+            ]),
+          ] as Content[][],
+        },
+        layout: "lightHorizontalLines",
+      },
+      {
+        text: [{ text: "Boxes on this pallet:  ", fontSize: 12 }, { text: nfmt(s.boxes), fontSize: 26, bold: true }],
+        margin: [0, 20, 0, 0],
+      },
+      { text: `Pallet ${s.index} of ${s.count}`, style: "meta", margin: [0, 4, 0, 0] },
+      ...(s.members.length > 1
+        ? [{ text: "Mixed batches on one pallet", style: "meta", color: "#b45309", margin: [0, 6, 0, 0] } as Content]
+        : []),
+    ],
+    ...(first ? {} : { pageBreak: "before" as const }),
+  };
+}
+
+/** Slips right after a Record Palletised confirm — `lines` are the modal's
+    source lines (pre-split), `entries` the recorded boxes per line. All
+    pallets land in ONE multi-page PDF (N downloads would hit the popup
+    blocker), mixed-pallet groups first, then batch-sequential. */
+export async function downloadPalletSlipsForEntries(entries: PalletiseEntry[], lines: PalPlanLine[]): Promise<void> {
+  const r = await listPallets(); // cached — the Palletise modal already fetched it
+  const palletById = new Map((r.ok ? r.pallets : []).map((p) => [p.id, p]));
+  const byId = new Map(lines.map((l) => [l.id, l]));
+  const live: Array<{ e: PalletiseEntry; l: PalPlanLine }> = [];
+  for (const e of entries) {
+    const l = byId.get(e.lineId);
+    if (l && e.boxes > 0) live.push({ e, l });
+  }
+
+  const slips: PalletSlip[] = [];
+
+  // Mixed physical pallets: the group IS the pallet — one slip, no slicing.
+  const groups = new Map<string, typeof live>();
+  const singles: typeof live = [];
+  for (const x of live) {
+    if (x.l.palletGroup) {
+      const g = groups.get(x.l.palletGroup) || [];
+      g.push(x);
+      groups.set(x.l.palletGroup, g);
+    } else singles.push(x);
+  }
+  for (const g of groups.values()) {
+    const head = g[0];
+    slips.push({
+      docNo: [...new Set(g.map((x) => x.l.itemCode))].join(" · "),
+      customerName: head.l.customerName,
+      soNumber: [...new Set(g.map((x) => x.l.soNumber).filter(Boolean))].join(" · "),
+      palletName: palletById.get(head.e.palletId)?.name || head.l.palletName || "",
+      members: g.map((x) => ({
+        designLabel: x.l.designLabel,
+        sizeCode: x.l.sizeCode,
+        finish: x.l.finish,
+        batchNumber: x.l.batchNumber,
+        boxes: x.e.boxes,
+      })),
+      boxes: g.reduce((s, x) => s + x.e.boxes, 0),
+      index: 1,
+      count: 1,
+    });
+  }
+
+  // Batch-sequential singles, one slip per physical pallet.
+  singles.sort(
+    (a, b) =>
+      (a.l.batchNumber || "").localeCompare(b.l.batchNumber || "") || a.l.itemCode.localeCompare(b.l.itemCode),
+  );
+  for (const { e, l } of singles) {
+    const p = palletById.get(e.palletId);
+    const cap = p?.boxesPerPallet || 0;
+    const count = cap > 0 ? Math.ceil(e.boxes / cap) : 1;
+    let left = e.boxes;
+    for (let i = 1; i <= count; i++) {
+      const on = cap > 0 ? Math.min(cap, left) : left;
+      left -= on;
+      slips.push({
+        docNo: l.itemCode,
+        customerName: l.customerName,
+        soNumber: l.soNumber,
+        palletName: p?.name || l.palletName || "",
+        members: [{ designLabel: l.designLabel, sizeCode: l.sizeCode, finish: l.finish, batchNumber: l.batchNumber, boxes: on }],
+        boxes: on,
+        index: i,
+        count,
+      });
+    }
+  }
+
+  if (slips.length === 0) return;
+  const date = todayISO();
+  const doc: TDocumentDefinitions = {
+    pageSize: "A4",
+    pageMargins: [36, 36, 36, 44],
+    styles: PDF_STYLES,
+    content: slips.map((s, i) => slipPage(s, date, i === 0)),
+    footer: (page: number, count: number) => ({
+      text: `Pallet slips · ${prettyDate(date)} · page ${page} of ${count}`,
+      style: "fine",
+      alignment: "center",
+      margin: [0, 12, 0, 0],
+    }),
+  };
+  return downloadPdf(doc, `pallet-slips-${date}.pdf`);
+}
+
+/** Slips for already-palletised lines (direct drag-drop moves to Ready). */
+export function downloadPalletSlipsForLines(lines: PalPlanLine[]): Promise<void> {
+  const target = lines.filter(isPalletised);
+  return downloadPalletSlipsForEntries(
+    target.map((l) => ({ lineId: l.id, palletId: l.palletId, boxes: l.boxes })),
+    target,
+  );
+}
+
 /** Trigger (b): PalPlanDetail — every palletised line of the plan. */
 export async function downloadPackingReportForPlan(plan: PalPlan): Promise<void> {
   const caps = await capsByPalletId();

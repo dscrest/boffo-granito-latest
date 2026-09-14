@@ -203,6 +203,23 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 Tokens are unguessable, minted on demand by `POST /load-box-share/:rowid` and
 `POST /production-record-share/:rowid`. They expose one record only.
 
+### Onboarding tours (CR-158, CR-159)
+
+First login (per user per browser, `localStorage["tour.seen.v1.<rowid>"]`) shows a welcome
+modal offering a guided tour; Next/Back/Skip coach marks then walk the business flow in
+sidebar order, navigating to each page and spotlighting its menu item. Role-hidden pages
+auto-skip; replay lives under the user menu ("Take a tour"). All logic and step copy in
+[`Tour.tsx`](../client/src/features/tour/Tour.tsx) (`TourHost` mounted beside `ConfirmHost`);
+anchors are `data-tour` attributes (`nav-<id>` on every sidebar leaf, plus `search`,
+`settings`, `usermenu`).
+
+**Page tours** (CR-159): `/packing` and `/loading` each have a process guide that auto-starts
+on a user's first visit (`tour.seen.<id>.v1.<rowid>`) and replays via user menu → "Page
+guide". Steps may omit `anchor` (centered explainer card) and set `waitMs` (anchor lookup
+retries while the lazy page/data loads); `AUTO_TOURS` maps route → tour id. Adding a tour for
+another page = a `TOURS` entry + an `AUTO_TOURS` row + `data-tour` attributes on stable
+toolbar controls.
+
 ---
 
 ## 5 · The order-to-dispatch flow
@@ -328,12 +345,43 @@ Plans are `PAL/FY/NNN` and may span sales orders.
 
 **Three columns**: *Ready for Palletization* (grouped by SO) → *In Palletization*
 → *Ready for Loading*. **Two-step flow since 2026-09-04** (reverses the 2026-08-27 one-hop):
-**Palletise** confirms the pallet (`PalletiseModal`) and moves the line to *In Palletization*
-(`Palletizing`); **Mark Palletised** then moves it to *Ready for Loading* (`ReadyToLoad`) —
-direct when the pallet is on record, via the dialog when a legacy line lacks one.
+All per-card/row actions live in **one "+" menu** (CR-150; shared `MoreMenu`, three options
+always listed, inapplicable ones greyed): **Start Palletisation** confirms the pallet
+(`PalletiseModal`) and moves the line to *In Palletization* (`Palletizing`); **Top Up Batch**
+is the CR-149 Mix Batch flow; **Complete Palletisation** (CR-148, was "Record Palletised")
+records the finished boxes to *Ready for Loading* (`ReadyToLoad`) — always through the dialog,
+pallet and full qty prefilled. On a queue line, Complete records straight to Ready for
+Loading, skipping In Palletization (the old "+" shortcut).
 **Partial palletise (CR-132, 2026-09-10):** the dialog takes a per-line Boxes qty; less than
 the full line splits it via `/pal-line-status` `boxes` — only the slice transitions, the
 remainder keeps its column, so a partial never lands the whole line in Ready for Loading.
+This is the recording mechanic behind CR-148: 700 today, 300 tomorrow, batch identity riding
+each slice.
+**Batch-complete loading gate (CR-151, 2026-09-12):** a `ReadyToLoad` slice is *loadable* only
+when its whole batch group (order item + `batch_number`; blank batch = whole order item) is
+fully palletised — every sibling line `ReadyToLoad` or already boxed. Until then the slice
+stays in the *In Palletization* column (its "+" menu's Complete greyed as already recorded)
+and is absent from every loading pool: the board's Load/`LoadContainerModal`, the
+LoadingWorkspace Items tab, and the New Loading modal. Client predicate `loadableLineIds`
+([`palLoadGate.ts`](../client/src/features/stages/palLoadGate.ts), re-exported from
+`palPlansApi`); server backstop `assertBatchesComplete` rejects `/pal-lines-box` and
+`/pal-line-box` with 409 for incomplete groups.
+**Pallet Slips (CR-148):** printed **on demand only** (auto-fires removed 2026-09-12 — the
+user verifies first): **one slip per physical pallet** (`packingReportPdf.ts`
+`downloadPalletSlipsForEntries`) — batch-sequential, batch number on every page,
+`pallet_group` mixed pallets as one slip listing every batch. The tabular Pallet Packing
+Report and Pallet Slips both sit on the board's selection bar (plus PalPlanDetail, Today's
+Report).
+**Sheet edit mode (CR-153, 2026-09-12):** the Sheet gained an always-on **Boxes** column and
+an **Edit** button (same pattern as the /prod sheet): Edit adds a **Palletise** qty cell
+(record palletised boxes inline — a partial qty splits the line, same `/pal-line-status`
+call as the dialog) and a **Top Up From** donor-batch Combobox (donor + qty = the CR-149
+Mix Batch top-up via `/pal-topup`). Nothing writes until **Save**; per-row validation lives
+in the pure [`palSheetEdit.ts`](../client/src/features/stages/palSheetEdit.ts)
+(`resolvePalSheetEdit`, self-checked by `palSheetEdit.test.ts`) so a bad cell red-borders
+and disables Save. Recording is **per row** — a Mix Batch row does not pull its
+`pallet_group` siblings here; the "+" menu's Complete still records the whole physical
+pallet together.
 
 **Loading starts on this board (2026-09-04).** Ready-for-Loading cards/rows carry the **Load**
 button (and load-together checkboxes): it opens `LoadContainerModal` through the shared
@@ -346,8 +394,11 @@ button (and load-together checkboxes): it opens `LoadContainerModal` through the
 - Pallet details prefill from the SO's container plan
   ([`containerPlanPrefill.ts`](../client/src/features/stages/containerPlanPrefill.ts)); the
   pallet picker on Record Output is hidden.
-- **Mix Batch top-up** — `POST /pal-topup/:rowid` tops a pallet up from another batch via
-  `pallet_group`.
+- **Mix Batch top-up (CR-149)** — "Top Up Batch" in the "+" menu on In-Palletization
+  cards/rows (`TopUpModal`) moves boxes from a same-design queue line (donor list is
+  same-design only) onto the open pallet via `POST /pal-topup/:rowid`, stamping
+  `pallet_group` on both ends. Complete Palletisation then records the whole group together
+  and the pallet slip prints it as one page listing every batch.
 - **One batch per customer** is the target: plan lines are per-batch, and a mixed-batch pallet
   raises a warning rather than a block.
 - Pallet QR labels (`palletQrPdf.ts`), batch QR slips (`batchQrPdf.ts`), pallet slips
@@ -664,6 +715,10 @@ defaults to today** (`todayISO`), never blank; Sales Person defaults to the logg
 **Detail pages** — one shared design, copied from Quotes / Item master. Header actions are
 **always right-aligned**. Every detail page's More menu carries **Clone**, which seeds the
 create form from the record and saves as new, never copying auto-generated identity fields.
+The left sibling-list rail is extracted as [`DetailRail`](../client/src/features/common/DetailRail.tsx)
+(CR-154, 2026-09-12) — PalPlan and Loading detail use it (Loading detail gained the rail then;
+the other detail pages still carry the inline copy) and both show the **customer name under
+the PAL/LOAD code** in the row subtitle.
 
 **After create or clone, navigate to that new record** using the id the API returned — never to
 a selected or arbitrary row.

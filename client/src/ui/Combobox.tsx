@@ -11,6 +11,11 @@ import { createPortal } from "react-dom";
 /** Max options rendered in the popup; the rest hide behind "keep typing". */
 const MAX_VISIBLE = 50;
 
+/** Popup never narrower than this — a combobox squeezed into a tight cell
+    (e.g. sheet-edit "Same-design batch") still opens a readable search
+    surface; wide controls keep a flush-width popup as before. */
+const MIN_POP_WIDTH = 320;
+
 export interface ComboOption {
   value: string;
   label: string;
@@ -75,7 +80,12 @@ export function Combobox({
     if (!open) return;
     const update = () => {
       const r = ref.current?.getBoundingClientRect();
-      if (r) setRect({ left: r.left, top: r.bottom + 4, width: r.width });
+      if (!r) return;
+      // Widen past a narrow control so options + hints read, then clamp the
+      // left edge so the popup never runs off the right of the viewport.
+      const width = Math.max(r.width, Math.min(MIN_POP_WIDTH, window.innerWidth - 16));
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      setRect({ left, top: r.bottom + 4, width });
     };
     update();
     window.addEventListener("scroll", update, true);

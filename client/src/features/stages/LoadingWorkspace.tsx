@@ -14,6 +14,7 @@
    Structure/UX from the design; skin is the house one. Direct loading
    (no SO) and palletise-here were deliberately left out.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -32,12 +33,14 @@ import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { allocateFifo } from "./allocateFifo";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
+import { MoreMenu } from "@/features/common/DetailBits";
 import {
   boxFill,
   boxLabel,
   createLoadBox,
   deleteLoadBox,
   invalidatePalPlans,
+  loadableLineIds,
   sealed,
   setLineBox,
   setLinesBox,
@@ -119,6 +122,8 @@ export function LoadingWorkspace({
 
   // ---- per-item derivation -----------------------------------
   const allLines = useMemo(() => plans.flatMap((p) => p.lines), [plans]);
+  // Batch-complete gate: a partially palletised batch never becomes loadable.
+  const loadable = useMemo(() => loadableLineIds(allLines), [allLines]);
   const boxById = useMemo(() => new Map(boxes.map((b) => [b.id, b])), [boxes]);
   const soLines = useMemo(() => allLines.filter((l) => l.salesOrderId === soId), [allLines, soId]);
   const soItemRows = useMemo(() => (soId ? soOrders.filter((o) => o.salesOrderId === soId) : []), [soOrders, soId]);
@@ -128,7 +133,7 @@ export function LoadingWorkspace({
     for (const l of soLines) byOi.set(l.orderItemId, [...(byOi.get(l.orderItemId) ?? []), l]);
     return soItemRows.map((o) => {
       const lines = byOi.get(o.id) ?? [];
-      const readyLines = lines.filter((l) => l.status === "ReadyToLoad" && !l.loadBoxId).sort(byCreated);
+      const readyLines = lines.filter((l) => loadable.has(l.id)).sort(byCreated);
       const planned = lines.filter((l) => l.loadBoxId).reduce((s, l) => s + l.boxes, 0);
       const ready = readyLines.reduce((s, l) => s + l.boxes, 0);
       const whereMap = new Map<string, number>();
@@ -147,7 +152,7 @@ export function LoadingWorkspace({
         where,
       };
     });
-  }, [soItemRows, soLines, boxById, designById, designIdOf]);
+  }, [soItemRows, soLines, boxById, designById, designIdOf, loadable]);
 
   const readyItems = items.filter((i) => i.ready > 0 || i.planned > 0);
   const wipItems = items.filter((i) => i.o.orderQty > i.o.palletizedQty);
@@ -275,7 +280,7 @@ export function LoadingWorkspace({
           : hasLines
             ? ["In Loading", "p-loading"]
             : ["Planned", "p-planning"];
-    return <span className={`chip palstatus ${cls}`}>{label}</span>;
+    return <span className={`chip palstatus ${cls}`} title={label}>{codeOf(label)}</span>;
   };
 
   const num = (v: number) => <span className="mono">{fmt(v)}</span>;
@@ -389,9 +394,23 @@ export function LoadingWorkspace({
                     </div>
                     <div style={{ flex: 1 }} />
                     {boxChip(b, inBox.length > 0)}
-                    {editable && inBox.length === 0 && (
-                      <button className="btn x" title="Delete loading" disabled={busy} onClick={() => void removeBox(b)}>✕</button>
-                    )}
+                    <MoreMenu
+                      kebab
+                      icon="plus"
+                      title="Loading actions"
+                      items={[
+                        { label: "Loading details", onClick: () => navigate(`/loading/${encodeURIComponent(b.id)}`) },
+                        ...(editable
+                          ? [{
+                              label: "Delete loading",
+                              danger: true,
+                              disabled: busy || inBox.length > 0,
+                              title: inBox.length > 0 ? "Empty the container first" : undefined,
+                              onClick: () => void removeBox(b),
+                            }]
+                          : []),
+                      ]}
+                    />
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: "var(--t-sm)" }}>
                     <div style={{ flex: 1, height: 6, background: "var(--accent-soft)", borderRadius: 3 }}>
@@ -482,14 +501,17 @@ export function LoadingWorkspace({
                       ariaLabel="Target container"
                     />
                   </div>
-                  <button
-                    className="hbtn primary"
-                    style={{ height: 26, padding: "0 10px" }}
-                    disabled={busy || sel.size === 0}
-                    onClick={() => openAssign(target ? boxById.get(target) ?? null : null)}
-                  >
-                    Assign to Loading <Icon name="arrow-r" size={13} />
-                  </button>
+                  <MoreMenu
+                    kebab
+                    icon="plus"
+                    title="Loading actions"
+                    items={[{
+                      label: `Assign to Loading${sel.size ? ` (${sel.size})` : ""}`,
+                      disabled: busy || sel.size === 0,
+                      title: sel.size === 0 ? "Select items first" : undefined,
+                      onClick: () => openAssign(target ? boxById.get(target) ?? null : null),
+                    }]}
+                  />
                 </>
               )}
             </div>
@@ -567,9 +589,12 @@ export function LoadingWorkspace({
               <span className="dim mono" style={{ fontSize: "var(--t-sm)" }}>{wipItems.length} item{wipItems.length === 1 ? "" : "s"}</span>
               <div style={{ flex: 1 }} />
               {canEdit && wipItems.length > 0 && (
-                <button className="hbtn" style={{ height: 26, padding: "0 10px" }} onClick={() => navigate("/packing")} title="Palletise on the Palletization board">
-                  Palletise <Icon name="arrow-r" size={13} />
-                </button>
+                <MoreMenu
+                  kebab
+                  icon="plus"
+                  title="Loading actions"
+                  items={[{ label: "Palletise →", title: "Palletise on the Palletization board", onClick: () => navigate("/packing") }]}
+                />
               )}
             </div>
             <div style={{ overflow: "auto" }}>

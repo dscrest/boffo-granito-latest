@@ -15,6 +15,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { ErrorCard, SkeletonRows, EmptyState } from "@/ui/States";
 import { Chip } from "@/ui/Chip";
+import { codeOf } from "@/ui/statusCode";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { can } from "@/lib/auth";
@@ -254,7 +255,7 @@ export function PanelOrders() {
                   <td className="mono muted">{o.orderDate || "—"}</td>
                   <td>{o.salesperson || "—"}</td>
                   <td>
-                    <Chip tone={ORDER_STATUS_TONE[o.status]} label={PANEL_ORDER_STATUS_LABEL[o.status]} />
+                    <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {action && (

@@ -8,6 +8,7 @@
    • NO inline row actions — row-click opens the edit form.
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
@@ -66,7 +67,7 @@ const CONTAINER_COLUMNS: ColumnDef<ContainerRow>[] = [
   {
     key: "status",
     label: "Status",
-    render: (r) => <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }}>{r.status}</span>,
+    render: (r) => <span className="chip" style={{ color: STATUS_COLOR[r.status] || "var(--dim)" }} title={r.status}>{codeOf(r.status)}</span>,
   },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },

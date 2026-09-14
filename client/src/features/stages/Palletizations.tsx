@@ -8,6 +8,7 @@
    opens the parent Sales Order (its Palletization tab shows the batches).
    "New Palletization" (and "Send to Palletization" via ?fromOrder) open the
    shared Palletise form, which commits real PalletisedBatches. */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -39,7 +40,7 @@ function columns(): ColumnDef<PalletisationRow>[] {
       key: "status",
       label: "Status",
       render: (r) => (
-        <span className={`chip palstatus ${r.loaded ? "p-loading" : "p-palletized"}`}>{statusLabel(r)}</span>
+        <span className={`chip palstatus ${r.loaded ? "p-loading" : "p-palletized"}`} title={statusLabel(r)}>{codeOf(statusLabel(r))}</span>
       ),
     },
     { key: "date", label: "Palletization Date", className: "mono muted", render: (r) => r.date },

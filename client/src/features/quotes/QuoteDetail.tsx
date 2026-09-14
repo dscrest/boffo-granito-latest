@@ -14,6 +14,7 @@
    shared OrderForm in convert mode) and
    the quotesApi cache — no new backend.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -32,7 +33,7 @@ import { ContainerPlanCard } from "./ContainerPlanCard";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
 import { listPalPlans } from "@/features/stages/palPlansApi";
 import { OrderForm, type OrderDraft } from "@/features/orders/OrderForm";
-import { invalidateOrders } from "@/features/orders/ordersApi";
+import { invalidateOrders, soStatusLabel } from "@/features/orders/ordersApi";
 import {
   STATUS_CHIP,
   STATUS_LABEL,
@@ -802,7 +803,7 @@ export function QuoteDetail() {
                       )}
                     </td>
                     <td className="mono muted">{so.date || "—"}</td>
-                    <td>{so.status || "—"}</td>
+                    <td>{so.status ? <span title={soStatusLabel(so.status)}>{codeOf(soStatusLabel(so.status))}</span> : "—"}</td>
                     <td className="num mono">{quote.currency} {fmt(so.total)}</td>
                   </tr>
                 ))}

@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -68,8 +69,8 @@ function quoteColumns(): ColumnDef<Quote>[] {
       key: "status",
       label: "Status",
       render: (q) => (
-        <span className={`chip qstatus ${STATUS_CHIP[q.status]}`} title={q.status === "Rejected" && q.rejectReason ? `Rejected: ${q.rejectReason}` : undefined}>
-          {STATUS_LABEL[q.status]}
+        <span className={`chip qstatus ${STATUS_CHIP[q.status]}`} title={q.status === "Rejected" && q.rejectReason ? `Rejected: ${q.rejectReason}` : STATUS_LABEL[q.status]}>
+          {codeOf(STATUS_LABEL[q.status])}
         </span>
       ),
     },

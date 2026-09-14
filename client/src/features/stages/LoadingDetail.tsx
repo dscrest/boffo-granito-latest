@@ -10,7 +10,6 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
@@ -18,6 +17,7 @@ import { fmt } from "@/lib/format";
 import { parseLoadPlan, type Order } from "@/data";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { DetailRail, type DetailRailItem } from "@/features/common/DetailRail";
 import { PlanSoContainerisation } from "@/features/quotes/PlanContainerisation";
 import { useMasters } from "@/features/masters/useMasters";
 import { useOrders } from "@/features/orders/useOrders";
@@ -128,6 +128,35 @@ export function LoadingDetail() {
       .filter((x): x is { soId: string; head: Order } => !!x.head);
   }, [orders, entries, box?.loadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Left rail — every loading, newest first, customer under the LOAD code.
+  // ponytail: customers/status re-derived here (~12 lines) instead of sharing
+  // LoadingBay's boxRows — their row shapes differ.
+  const railItems: DetailRailItem[] = useMemo(
+    () =>
+      [...boxes]
+        .sort((a, b) => (b.createdTime || "").localeCompare(a.createdTime || ""))
+        .map((b) => {
+          const inBox = plans.flatMap((p) => p.lines.filter((l) => l.loadBoxId === b.id));
+          const bPlan = parseLoadPlan(b.loadPlan);
+          const customers =
+            [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", ") ||
+            [...new Set((bPlan?.lines ?? []).map((x) => orders.find((o) => o.salesOrderId === x.so)?.party).filter(Boolean))].join(", ");
+          const status =
+            b.status !== "Open" ? "Dispatched"
+              : sealed(b) ? "Ready for Dispatch"
+                : inBox.length ? "In Loading"
+                  : bPlan ? "Planned" : "Empty";
+          return {
+            id: b.id,
+            to: `/loading/${encodeURIComponent(b.id)}`,
+            title: boxLabel(b),
+            subtitle: [customers, b.vehicleNumber, status].filter(Boolean).join("  ·  "),
+            searchText: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(" "),
+          };
+        }),
+    [boxes, plans, orders],
+  );
+
   if (loading && !box) {
     return <div className="muted mono" style={{ padding: 24 }}>Loading…</div>;
   }
@@ -231,7 +260,10 @@ export function LoadingDetail() {
   ];
 
   return (
-    <>
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {/* Loading list — sticky, resizable, own scroll (mirrors PalPlan detail). */}
+      <DetailRail placeholder="Search loadings…" currentId={boxId} items={railItems} />
+      <div style={{ flex: 1, minWidth: 0 }}>
       <RecordDetail
         backTo="/loading"
         title={boxLabel(box)}
@@ -242,37 +274,35 @@ export function LoadingDetail() {
             : `${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`
         }
         actions={
-          <>
-            {canEdit && open && (
-              <button className="hbtn" disabled={busy} onClick={() => setAddPallets(true)} title="Load more palletised stock into this container">
-                <Icon name="kanban" size={13} /> Add Pallets
-              </button>
-            )}
-            {canEdit && open && (
-              <button className="hbtn" disabled={busy} onClick={() => setAddItems(true)} title="Send order items into this loading — no palletization step">
-                <Icon name="plus" size={13} /> Add Items
-              </button>
-            )}
-            {canEdit && (
-              <button className="hbtn primary" disabled={busy} onClick={() => setVehModal(true)} title="Capture vehicle + container/seal details">
-                {open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details"}
-              </button>
-            )}
-            {canEdit && open && sealed(box) && (
-              <button className="hbtn primary" disabled={busy || entries.length === 0} onClick={() => void onDispatch()} title="Dispatch — the Dispatch Entry opens after">
-                <Icon name="check" size={13} /> Dispatch
-              </button>
-            )}
-            <MoreMenu
-              items={[
-                { label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries)) },
-                { label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries)) },
-                ...(canEdit && open
-                  ? [{ label: "Delete Loading", danger: true, onClick: () => void onDelete() }]
-                  : []),
-              ]}
-            />
-          </>
+          <MoreMenu
+            kebab
+            icon="plus"
+            title="Loading actions"
+            items={[
+              ...(canEdit && open
+                ? [
+                    { label: "Add Pallets", disabled: busy, title: "Load more palletised stock into this container", onClick: () => setAddPallets(true) },
+                    { label: "Add Items", disabled: busy, title: "Send order items into this loading — no palletization step", onClick: () => setAddItems(true) },
+                  ]
+                : []),
+              ...(canEdit
+                ? [{ label: open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details", disabled: busy, title: "Capture vehicle + container/seal details", onClick: () => setVehModal(true) }]
+                : []),
+              ...(canEdit && open && sealed(box)
+                ? [{
+                    label: "Dispatch",
+                    disabled: busy || entries.length === 0,
+                    title: entries.length === 0 ? "Load at least one item first" : "Dispatch — the Dispatch Entry opens after",
+                    onClick: () => void onDispatch(),
+                  }]
+                : []),
+              { label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries)) },
+              { label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries)) },
+              ...(canEdit && open
+                ? [{ label: "Delete Loading", danger: true, onClick: () => void onDelete() }]
+                : []),
+            ]}
+          />
         }
         fields={fields}
         hiddenStorageKey="loadingDetailFields"
@@ -435,14 +465,6 @@ export function LoadingDetail() {
             </div>
           )}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-          <button className="hbtn" onClick={() => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries))}>
-            Print QR Label
-          </button>
-          <button className="hbtn" onClick={() => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries))}>
-            Dispatch Copy
-          </button>
-        </div>
       </RecordDetail>
 
       {vehModal && (
@@ -494,6 +516,7 @@ export function LoadingDetail() {
           onClose={() => setEntryOverlay(null)}
         />
       )}
-    </>
+      </div>
+    </div>
   );
 }

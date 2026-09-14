@@ -29,6 +29,7 @@ import {
   createLoadBox,
   invalidatePalPlans,
   listPalPlans,
+  loadableLineIds,
   setLinesBox,
   type LoadBox,
   type PalPlan,
@@ -74,11 +75,12 @@ export function NewLoadingModal({
     });
   }, []);
 
-  // Palletised stock that can start loading right now.
-  const readyPool = useMemo(
-    () => plans.flatMap((p) => p.lines).filter((l) => l.status === "ReadyToLoad" && !l.loadBoxId),
-    [plans],
-  );
+  // Palletised stock that can start loading right now (whole batch palletised).
+  const readyPool = useMemo(() => {
+    const all = plans.flatMap((p) => p.lines);
+    const loadable = loadableLineIds(all);
+    return all.filter((l) => loadable.has(l.id));
+  }, [plans]);
 
   const customerOpts = useMemo(() => {
     const seen = new Map<string, { value: string; label: string }>();

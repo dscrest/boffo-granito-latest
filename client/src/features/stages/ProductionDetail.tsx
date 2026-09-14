@@ -9,6 +9,7 @@
    per-line Record-output action + order progress) and Activity (status
    timeline + OperationLog per line). Reuses productionApi — no new backend.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -459,7 +460,7 @@ export function ProductionDetail() {
                             </div>
                           </td>
                           <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
-                          <td><span className="chip" style={{ color: lineState.color }}>{lineState.label}</span></td>
+                          <td><span className="chip" style={{ color: lineState.color }} title={lineState.label}>{codeOf(lineState.label)}</span></td>
                           <td className="num mono">{fmt(e.qtyRequested)}</td>
                           <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
                           <td className="num mono">{done ? <span className="dim">—</span> : fmt(e.qtyRequested - e.producedSoFar)}</td>

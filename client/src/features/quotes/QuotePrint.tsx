@@ -15,7 +15,17 @@ import { useMasters } from "@/features/masters/useMasters";
 import boffoLogo from "@/assets/boffo-logo.png";
 import { BANK, COMPANY, amountInWords, groupQuoteLines, itemSuffix, moneyFor, prettyDate, termsList } from "./quoteTemplate";
 
-export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+/** Doc-type labels — defaults render the quotation; OrderDetail passes the
+    Sales Order set and reuses the whole sheet unchanged. */
+export interface PrintDocLabels {
+  title: string;
+  eyebrow: string;
+  noLabel: string;
+  validLabel: string;
+}
+const QUOTE_LABELS: PrintDocLabels = { title: "QUOTATION", eyebrow: "Quotation For", noLabel: "QUOTE NO.", validLabel: "VALID UNTIL" };
+
+export function QuotePrint({ quote, onClose, doc = QUOTE_LABELS }: { quote: Quote; onClose: () => void; doc?: PrintDocLabels }) {
   const { designs } = useMasters();
   const findDesign = (item: string) => designs.find((x) => x.uniqueName === item || x.name === item);
   const groups = groupQuoteLines(quote.lines, (i) => findDesign(i)?.name);
@@ -54,21 +64,21 @@ export function QuotePrint({ quote, onClose }: { quote: Quote; onClose: () => vo
         <header className="qp-head">
           <img src={boffoLogo} alt="Boffo Granito — Adorable Surfaces" />
           <div className="qp-doctitle">
-            <div className="qp-doc">QUOTATION</div>
+            <div className="qp-doc">{doc.title}</div>
             <div className="qp-doc-rule" />
           </div>
         </header>
 
         <section className="qp-parties">
           <div>
-            <div className="qp-eyebrow">Quotation For</div>
+            <div className="qp-eyebrow">{doc.eyebrow}</div>
             <div className="qp-cust">{quote.customer}</div>
             <div className="qp-addr">{quote.address || "—"}</div>
           </div>
           <div className="qp-meta">
-            <div className="row"><span className="k">QUOTE NO.</span><span className="v">{quote.quoteNo}</span></div>
+            <div className="row"><span className="k">{doc.noLabel}</span><span className="v">{quote.quoteNo}</span></div>
             <div className="row"><span className="k">DATE</span><span className="v">{prettyDate(quote.quoteDate)}</span></div>
-            <div className="row"><span className="k">VALID UNTIL</span><span className="v accent">{prettyDate(quote.expiryDate)}</span></div>
+            <div className="row"><span className="k">{doc.validLabel}</span><span className="v accent">{prettyDate(quote.expiryDate)}</span></div>
             <div className="row"><span className="k">SALES REP</span><span className="v">{quote.salesperson || "—"}</span></div>
           </div>
         </section>

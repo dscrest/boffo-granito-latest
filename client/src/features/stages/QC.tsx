@@ -6,6 +6,7 @@
    Each line item runs a QC checklist template (pass/fail/pending);
    results held in local state (frontend-only). Reuses tbl/kpi CSS.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { KPI, StageBadge } from "@/ui/primitives";
@@ -93,8 +94,8 @@ function QCSection({
                     );
                   })}
                   <td>
-                    <span className={`chip qc-verdict ${verdict}`}>
-                      {verdict === "pass" ? "Passed" : verdict === "fail" ? "Failed" : "Pending"}
+                    <span className={`chip qc-verdict ${verdict}`} title={verdict === "pass" ? "Passed" : verdict === "fail" ? "Failed" : "Pending"}>
+                      {codeOf(verdict === "pass" ? "Passed" : verdict === "fail" ? "Failed" : "Pending")}
                     </span>
                   </td>
                 </tr>

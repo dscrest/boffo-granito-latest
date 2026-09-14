@@ -157,16 +157,15 @@ export interface PalPlanInput {
   }[];
 }
 
+// Batch-complete loading gate + progress grouping live in palLoadGate.ts
+// (pure module, keeps the self-check runnable under plain node).
+export { groupProgressOf, loadableLineIds } from "./palLoadGate";
+import { groupProgressOf as _groupProgressOf } from "./palLoadGate";
+
 /** Palletised progress per order item (partial palletise splits a line, both
     halves keep the same orderItemId) — done = boxes ReadyToLoad or in a box. */
 export function oiProgressOf(lines: PalPlanLine[]): Map<string, { done: number; total: number }> {
-  const m = new Map<string, { done: number; total: number }>();
-  for (const l of lines) {
-    const g = m.get(l.orderItemId) ?? m.set(l.orderItemId, { done: 0, total: 0 }).get(l.orderItemId)!;
-    g.total += l.boxes;
-    if (l.status === "ReadyToLoad" || l.loadBoxId) g.done += l.boxes;
-  }
-  return m;
+  return _groupProgressOf(lines, (l) => l.orderItemId);
 }
 
 /* ---- Fractional fill (box % is measured against each line's PALLET capacity,
@@ -423,6 +422,19 @@ export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?:
       status,
       ...(pallet ? { pallet } : {}),
       ...(boxes && boxes > 0 ? { boxes } : {}),
+    }),
+  );
+}
+
+/** Mix-batch top-up: move `boxes` from a Ready-for-Palletization donor line
+    onto an In-Palletization target's physical pallet. The server splits the
+    donor when partial and stamps `pallet_group` on both ends — the lines are
+    then ONE physical pallet (Mix Batch chip, single combined pallet slip). */
+export function palTopUp(targetLineId: string, donorLineId: string, boxes: number) {
+  return bust(
+    op<{ ROWID: string; pallet_group: string }>(`pal-topup/${targetLineId}`, {
+      donor_line: donorLineId,
+      boxes,
     }),
   );
 }

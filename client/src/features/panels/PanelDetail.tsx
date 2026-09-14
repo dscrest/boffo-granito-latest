@@ -7,6 +7,7 @@
    Like Pallet there is no dedicated edit *page*, so Edit opens the
    shared PanelForm modal in place.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -304,7 +305,7 @@ export function PanelDetail() {
                         <td className="num mono">{fmt(o.qty)}</td>
                         <td className="mono muted">{o.orderDate || "—"}</td>
                         <td>
-                          <Chip tone={ORDER_STATUS_TONE[o.status]} label={PANEL_ORDER_STATUS_LABEL[o.status]} />
+                          <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />
                         </td>
                       </tr>
                     ))}

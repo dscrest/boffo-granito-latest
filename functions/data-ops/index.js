@@ -3311,6 +3311,27 @@ async function promotePlansToLoading(catalyst, ds, planIds) {
   }
 }
 
+/* Batch-group gate: a ReadyToLoad line may load only when EVERY sibling line
+   of the same order_item + batch_number is ReadyToLoad or already boxed —
+   a partially palletised batch never reaches loading. Blank batch_number =
+   legacy aggregate: those group per order item. */
+async function assertBatchesComplete(catalyst, lines) {
+  const oiIds = [...new Set(lines.map((l) => String(l.order_item || "")).filter(Boolean))];
+  if (!oiIds.length) return;
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT order_item, batch_number, status, load_box FROM PalletizationPlanLine WHERE order_item IN (${oiIds.join(",")}) AND deleted_at is null`,
+    ),
+  );
+  const incomplete = new Set();
+  for (const r of rows)
+    if (String(r.status) !== "ReadyToLoad" && !String(r.load_box || ""))
+      incomplete.add(`${String(r.order_item)}|${String(r.batch_number || "")}`);
+  for (const l of lines)
+    if (incomplete.has(`${String(l.order_item)}|${String(l.batch_number || "")}`))
+      throw badRequest("This item's batch is only partially palletised — record the remaining boxes first", 409);
+}
+
 /* Batch allocate: several Ready lines into ONE Open box in one call.
    body: { box, lines: [{ id, boxes? }] }. Validates the box and EVERY line
    before any write — one bad line rejects the whole batch. */
@@ -3350,6 +3371,7 @@ app.post("/pal-lines-box", async (req, res) => {
           }
           return { line, n };
         });
+        await assertBatchesComplete(catalyst, jobs.map(({ line }) => line));
         for (const { line, n } of jobs) await writeLineIntoBox(ds, line, String(box.ROWID), n);
         await promotePlansToLoading(catalyst, ds, [...new Set(jobs.map(({ line }) => String(line.plan || "")))]);
         await recountOrderItems(catalyst, ds, [...new Set(jobs.map(({ line }) => line.order_item))]);
@@ -3402,6 +3424,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
         if (toBox) {
           if (String(line.status) !== "ReadyToLoad")
             throw badRequest("Only a Ready-for-Loading item can be loaded into a container", 409);
+          await assertBatchesComplete(catalyst, [line]);
           const box = await getBox(catalyst, boxIdParam(toBox));
           if (String(box.status) !== "Open") throw badRequest("That container is already dispatched", 409);
           const lineBoxes = Number(line.boxes) || 0;

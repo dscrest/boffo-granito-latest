@@ -147,7 +147,7 @@ export function GlobalSearch() {
   const showDrop = open && q.trim().length > 0;
 
   return (
-    <div className="search">
+    <div className="search" data-tour="search">
       <Icon name="search" size={13} className="icon" />
       <input
         ref={inputRef}

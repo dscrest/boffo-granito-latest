@@ -11,6 +11,7 @@
    backend. The REPORTS registry below is the single source of truth
    for both the landing cards and the route dispatcher.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import { Link, useParams, Navigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -36,10 +37,12 @@ import {
   cachedLoadBoxes,
   cachedPalPlans,
   listPalPlans,
+  PAL_STATUS_LABEL,
   sealed,
   type LoadBox,
   type PalPlan,
   type PalPlanLine,
+  type PalStatus,
 } from "@/features/stages/palPlansApi";
 import { listAll, type DSRow } from "@/lib/dataOps";
 import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
@@ -920,7 +923,7 @@ function AgingReport() {
                     <Link className="linkish" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()} title="Open quote">{q.quoteNo}</Link>
                   </td>
                   <td>{q.customer}</td>
-                  <td><span className={`chip qstatus ${STATUS_CHIP[q.status]}`}>{STATUS_LABEL[q.status]}</span></td>
+                  <td><span className={`chip qstatus ${STATUS_CHIP[q.status]}`} title={STATUS_LABEL[q.status]}>{codeOf(STATUS_LABEL[q.status])}</span></td>
                   <td className="muted">{fmtLocalDateTime(since)}</td>
                   <td className="num mono">{fmtDuration(ms)}</td>
                 </tr>
@@ -1474,7 +1477,7 @@ function BatchMovementReport() {
                   <tr key={r.key}>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.batchNumber || <span className="dim">—</span>}</td>
                     <td className="nw"><span className="clip" title={r.itemLabel}>{r.itemLabel}</span></td>
-                    <td><span className={`chip ${MOVE_CHIP[r.stage] || ""}`}>{r.stage}</span></td>
+                    <td><span className={`chip ${MOVE_CHIP[r.stage] || ""}`} title={r.stage}>{codeOf(r.stage)}</span></td>
                     <td className="nw"><span className="clip" title={r.customerName}>{r.customerName || <span className="dim">—</span>}</span></td>
                     <td className="mono muted">{r.soNumber || "—"}</td>
                     <td className="nw muted">
@@ -1653,7 +1656,7 @@ function PalStatusReport() {
                 {pageRows.map((r) => (
                   <tr key={r.key}>
                     <td className="mono"><Link className="linkish" to={`/packing/${r.key}`}>{r.pal || "—"}</Link></td>
-                    <td><span className="chip">{r.status}</span></td>
+                    <td><span className="chip" title={PAL_STATUS_LABEL[r.status as PalStatus] || r.status}>{codeOf(PAL_STATUS_LABEL[r.status as PalStatus] || r.status)}</span></td>
                     <td className="nw"><span className="clip" title={r.customer}>{r.customer}</span></td>
                     <td className="nw mono muted"><span className="clip" title={r.so}>{r.so}</span></td>
                     <td className="mono muted">{r.planned || "—"}</td>
@@ -1847,7 +1850,7 @@ function LoadingStatusReport() {
                     <td className="mono muted">{r.lr || "—"}</td>
                     <td className="nw muted"><span className="clip" title={r.destination}>{r.destination || "—"}</span></td>
                     <td className="nw"><span className="clip" title={r.customers}>{r.customers}</span></td>
-                    <td><span className={`chip ${LOAD_CHIP[r.stage] || ""}`}>{r.stage}</span></td>
+                    <td><span className={`chip ${LOAD_CHIP[r.stage] || ""}`} title={r.stage}>{codeOf(r.stage)}</span></td>
                     <td className="mono muted">{r.dispatchDate || "—"}</td>
                     <td className="num mono">{r.fillPct}%</td>
                     <td className="num mono">{fmt(r.boxes)}</td>

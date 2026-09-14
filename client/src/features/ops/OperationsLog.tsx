@@ -4,6 +4,7 @@
    function records its outcome here (success / failed + error +
    duration), so operation status can be checked from the UI.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -24,7 +25,7 @@ const OPS_COLUMNS: ColumnDef<DSRow>[] = [
     label: "Status",
     render: (r) => {
       const status = str(r.status);
-      return <span className={`chip qstatus ${status === "success" ? "q-converted" : "q-rejected"}`}>{status || "—"}</span>;
+      return <span className={`chip qstatus ${status === "success" ? "q-converted" : "q-rejected"}`} title={status || undefined}>{status ? codeOf(status) : "—"}</span>;
     },
   },
   { key: "ms", label: "ms", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(Number(r.duration_ms) || 0) },

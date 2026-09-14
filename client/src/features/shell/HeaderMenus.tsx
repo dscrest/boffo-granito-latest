@@ -7,7 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { list } from "@/lib/dataOps";
 import { actorName, describeChange, parseDbTime } from "@/lib/format";
+import { useLocation } from "react-router-dom";
 import { signOut, storedAuth, type SessionUser } from "@/lib/auth";
+import { AUTO_TOURS, startTour } from "@/features/tour/Tour";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -215,6 +217,8 @@ export function UserMenu({ user }: { user: SessionUser | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   useDismiss(ref, open, () => setOpen(false));
+  // Page tours replay from here too — only offered on a page that has one.
+  const pageTour = AUTO_TOURS[useLocation().pathname];
 
   const initials = (user?.name || "BG")
     .split(/\s+/)
@@ -224,7 +228,7 @@ export function UserMenu({ user }: { user: SessionUser | null }) {
     .toUpperCase();
 
   return (
-    <div className="hdr-pop" ref={ref}>
+    <div className="hdr-pop" ref={ref} data-tour="usermenu">
       <div
         className="avatar"
         role="button"
@@ -245,6 +249,28 @@ export function UserMenu({ user }: { user: SessionUser | null }) {
             <div className="hdr-menu-user-sub">{user?.email || ""}</div>
             <div className="hdr-menu-user-sub">{user?.role || "no role"}</div>
           </div>
+          <button
+            className="hdr-menu-item"
+            onClick={() => {
+              setOpen(false);
+              startTour();
+            }}
+          >
+            <Icon name="flag" size={13} />
+            Take a tour
+          </button>
+          {pageTour && (
+            <button
+              className="hdr-menu-item"
+              onClick={() => {
+                setOpen(false);
+                startTour(pageTour);
+              }}
+            >
+              <Icon name="flag" size={13} />
+              Page guide
+            </button>
+          )}
           <button className="hdr-menu-item" onClick={() => signOut()}>
             <Icon name="log-out" size={13} />
             Sign out

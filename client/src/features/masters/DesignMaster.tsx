@@ -9,6 +9,7 @@
    Data is live from the Catalyst Data Store via designsApi. "New design"
    opens the create modal; edits happen on the edit page.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -74,7 +75,7 @@ const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
     label: "Glaze",
     render: (d) => (d.glazeLabel ? <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span> : dash),
   },
-  { key: "status", label: "Status", className: "muted", render: (d) => d.status || dash },
+  { key: "status", label: "Status", className: "muted", render: (d) => (d.status ? <span title={d.status}>{codeOf(d.status)}</span> : dash) },
   { key: "sku", label: "SKU", className: "muted mono", render: (d) => d.sku || dash },
   { key: "created", label: "Created", className: "muted mono", render: (d) => fmtDateTime(d.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (d) => fmtDateTime(d.modifiedTime) },

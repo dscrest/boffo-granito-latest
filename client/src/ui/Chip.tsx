@@ -16,12 +16,12 @@ const TONE: Record<ChipTone, string> = {
   red: "#b91c1c",
 };
 
-export function Chip({ tone = "gray", label }: { tone?: ChipTone; label?: string | null }) {
+export function Chip({ tone = "gray", label, title }: { tone?: ChipTone; label?: string | null; title?: string }) {
   if (!label) return null; // no empty/placeholder chips
   const text = label.replace(/([a-z])([A-Z])/g, "$1 $2"); // CamelCase → spaced
   const c = TONE[tone];
   return (
-    <span className="nd-chip" style={{ color: c, background: c + "18" }}>
+    <span className="nd-chip" style={{ color: c, background: c + "18" }} title={title}>
       {text}
     </span>
   );

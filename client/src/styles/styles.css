@@ -2344,3 +2344,29 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .form-field select.error:focus,
 .form-field textarea.error:focus { box-shadow: 0 0 0 3px oklch(0.58 0.2 25 / 0.12); }
 .field-err { color: var(--c-red); font-size: var(--t-sm); margin-top: 2px; }
+
+/* ---------- onboarding tour (Tour.tsx) ---------- */
+/* Single cutout: the giant box-shadow is the dim backdrop; the div is the hole.
+   pointer-events:none so the spotlighted control stays clickable mid-tour. */
+.tour-spotlight {
+  position: fixed; z-index: 1100; pointer-events: none;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.55);
+  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.tour-card {
+  position: fixed; z-index: 1101; width: 300px;
+  background: var(--bg-card); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); padding: 16px; font-family: var(--font);
+}
+.tour-card h3 { margin: 0 0 6px; font-family: var(--font-display); font-size: 15px; color: var(--text-primary); }
+.tour-card p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.tour-card .tour-foot { display: flex; align-items: center; gap: 8px; }
+.tour-card .tour-count { font-size: 12px; color: var(--text-secondary); margin-right: auto; }
+.tour-skip { background: none; border: 0; padding: 0; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.tour-skip:hover { color: var(--text-primary); text-decoration: underline; }
+/* Anchor-less concept step: centered card, dimmed page, no spotlight hole. */
+.tour-card.center {
+  left: 50%; top: 28%; transform: translateX(-50%); width: 360px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.55), var(--shadow-lg);
+}

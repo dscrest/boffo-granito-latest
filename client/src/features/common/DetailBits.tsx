@@ -4,7 +4,8 @@
    the same label/value row, the same "More ▾" actions menu, and
    the same related-record list.
    ============================================================ */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
 import { SkeletonRows } from "@/ui/States";
 import type { PalletOrder, PalletRow } from "@/features/masters/palletsApi";
@@ -19,15 +20,27 @@ export function DetailRow({ label, value, dim }: { label: string; value: string;
 }
 
 /** "More ▾" actions dropdown (Zoho-style) — reuses the .hdr-menu styles.
-    `kebab` swaps the trigger for a compact icon-only ⋮ button (row menus). */
-export function MoreMenu({ items, kebab, label }: { items: { label: string; danger?: boolean; onClick: () => void }[]; kebab?: boolean; label?: string }) {
+    `kebab` swaps the trigger for a compact icon-only ⋮ button (row menus);
+    `icon` swaps that glyph (e.g. "plus"). Disabled items stay visible but dim. */
+export function MoreMenu({ items, kebab, label, icon, title }: {
+  items: { label: string; danger?: boolean; disabled?: boolean; title?: string; onClick: () => void }[];
+  kebab?: boolean;
+  label?: string;
+  icon?: string;
+  title?: string;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const width = kebab ? (icon ? 200 : 140) : 210;
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -38,18 +51,54 @@ export function MoreMenu({ items, kebab, label }: { items: { label: string; dang
     };
   }, [open]);
 
+  /* Portaled + fixed so no overflow:auto table wrapper can clip the menu;
+     right-aligned to the trigger, flipped above it when the bottom is tight. */
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const h = menuRef.current?.offsetHeight ?? 0;
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      const top = r.bottom + 8 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 8) : r.bottom + 8;
+      setPos({ left, top });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, width]);
+
   if (items.length === 0) return null;
   return (
     <div className="hdr-pop" ref={ref}>
-      <button className={kebab ? "btn x" : "hbtn"} onClick={() => setOpen((v) => !v)} title="More actions">
-        {kebab ? <Icon name="more-v" size={14} /> : <>{label ?? "More"} <Icon name="more" size={13} /></>}
+      <button className={kebab ? "btn x" : "hbtn"} onClick={() => setOpen((v) => !v)} title={title ?? "More actions"}>
+        {kebab ? <Icon name={icon ?? "more-v"} size={14} /> : <>{label ?? "More"} <Icon name="more" size={13} /></>}
       </button>
-      {open && (
-        <div className="hdr-menu" style={{ right: 0, width: kebab ? 140 : 210, padding: 6 }}>
+      {open && createPortal(
+        <div
+          className="hdr-menu"
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            left: pos?.left ?? -9999,
+            top: pos?.top ?? -9999,
+            width,
+            padding: 6,
+            zIndex: 1000,
+            visibility: pos ? "visible" : "hidden",
+          }}
+        >
           {items.map((it) => (
             <button
               key={it.label}
+              disabled={it.disabled}
+              title={it.title}
               onClick={() => {
+                if (it.disabled) return;
                 setOpen(false);
                 it.onClick();
               }}
@@ -61,17 +110,19 @@ export function MoreMenu({ items, kebab, label }: { items: { label: string; dang
                 border: "none",
                 background: "transparent",
                 borderRadius: 6,
-                cursor: "pointer",
-                color: it.danger ? "var(--c-red)" : "inherit",
+                cursor: it.disabled ? "default" : "pointer",
+                color: it.disabled ? "var(--muted)" : it.danger ? "var(--c-red)" : "inherit",
+                opacity: it.disabled ? 0.6 : 1,
                 font: "inherit",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-soft)")}
+              onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = "var(--accent-soft)"; }}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               {it.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

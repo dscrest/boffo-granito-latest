@@ -12,6 +12,7 @@
    NewLoadingModal (SO → container-plan prefill → one container per
    submit); container/vehicle details are captured via Assign Vehicle.
    ============================================================ */
+import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -126,7 +127,7 @@ function loadColumns(): ColumnDef<Row>[] {
     {
       key: "stage",
       label: "Status",
-      render: (r) => <span className={`chip palstatus ${stageMeta(r.stage).chip}`} style={{ whiteSpace: "nowrap" }}>{stageMeta(r.stage).label}</span>,
+      render: (r) => <span className={`chip palstatus ${stageMeta(r.stage).chip}`} style={{ whiteSpace: "nowrap" }} title={stageMeta(r.stage).label}>{codeOf(stageMeta(r.stage).label)}</span>,
     },
     {
       key: "vehicle",
@@ -238,7 +239,7 @@ function boxColumns(): ColumnDef<BoxRow>[] {
     {
       key: "status",
       label: "Status",
-      render: (r) => <span className={`chip palstatus ${BOX_STATUS_CHIP[r.status]}`} style={{ whiteSpace: "nowrap" }}>{r.status}</span>,
+      render: (r) => <span className={`chip palstatus ${BOX_STATUS_CHIP[r.status]}`} style={{ whiteSpace: "nowrap" }} title={r.status}>{codeOf(r.status)}</span>,
     },
     { key: "containerNo", label: "Container No.", className: "mono nw", render: (r) => r.box.containerNumber || "—" },
     {
@@ -596,6 +597,9 @@ export function LoadingBay() {
     if (canEdit) {
       items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
     }
+    if (canEdit && box.status === "Open" && sealed(box)) {
+      items.push({ label: "Dispatch", onClick: () => void dispatchBox(box) });
+    }
     if (canEdit && box.status === "Open") {
       items.push({ label: "Unload item", onClick: () => void unload(r.l, box) });
       items.push({ label: "Empty container", danger: true, onClick: () => void emptyBox(box) });
@@ -662,7 +666,7 @@ export function LoadingBay() {
           </span>
           {box && (
             <span onClick={(ev) => ev.stopPropagation()} style={{ flex: "0 0 auto", display: "inline-flex" }}>
-              <MoreMenu kebab items={menuFor(r)} />
+              <MoreMenu kebab icon="plus" title="Loading actions" items={menuFor(r)} />
             </span>
           )}
         </div>
@@ -698,30 +702,6 @@ export function LoadingBay() {
               <span className="chip mono" style={{ fontSize: 13 }} title="Dispatch date">{box.dispatchDate}</span>
             )}
           </div>
-        )}
-        {canEdit && stage === "InLoading" && box && (
-          <button
-            type="button"
-            className="hbtn primary"
-            disabled={busy}
-            style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); setVehModal({ box }); }}
-            title={`Capture vehicle + seals for ${boxLabel(box)}`}
-          >
-            Assign Vehicle
-          </button>
-        )}
-        {canEdit && stage === "ReadyDispatch" && box && (
-          <button
-            type="button"
-            className="hbtn primary"
-            disabled={busy}
-            style={{ width: "100%", marginTop: 8, height: 26, borderRadius: 5, justifyContent: "center", fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); void dispatchBox(box); }}
-            title={`Dispatch ${boxLabel(box)} — the Dispatch Entry opens after`}
-          >
-            <Icon name="check" size={11} /> Dispatch
-          </button>
         )}
       </div>
     );
@@ -855,7 +835,7 @@ export function LoadingBay() {
         )}
         <div style={{ flex: 1 }} />
         {view === "sheet" && <AdvancedFilterButton title="Loading" fields={filterFields} criteria={criteria} onChange={setCriteria} />}
-        <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
+        <span data-tour="load-view-toggle" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
           {viewBtn("workspace", "package", "Workspace")}
           {viewBtn("sheet", "orders", "Sheet")}
           {viewBtn("loadings", "truck", "Loadings")}
@@ -876,7 +856,7 @@ export function LoadingBay() {
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => setNewOpen(true)}>
+          <button className="hbtn primary" data-tour="load-new" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => setNewOpen(true)}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
@@ -892,7 +872,7 @@ export function LoadingBay() {
         // The sheet owns its own customer filter — global search/filters skipped.
         <LoadingCustomerSheet rows={rows} canEdit={canEdit} onSaved={() => void load()} />
       ) : view === "loadings" ? (
-        <div className="card">
+        <div className="card" style={{ minHeight: "calc(100vh - 172px)" }}>
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
               <thead>
@@ -927,7 +907,7 @@ export function LoadingBay() {
                       </td>
                     ))}
                     <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                      <MoreMenu kebab items={boxMenuFor(r)} />
+                      <MoreMenu kebab icon="plus" title="Loading actions" items={boxMenuFor(r)} />
                     </td>
                   </tr>
                 ))}
@@ -948,7 +928,7 @@ export function LoadingBay() {
           {(() => {
             const rows = sheetRows;
             return (
-          <div className="card">
+          <div className="card" style={{ minHeight: "calc(100vh - 172px)" }}>
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
               <thead>
@@ -957,7 +937,7 @@ export function LoadingBay() {
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
-                  {canEdit && <th style={{ width: 130 }} aria-label="Action" />}
+                  {canEdit && <th style={{ width: 50 }} aria-label="Action" />}
                 </tr>
               </thead>
               <tbody>
@@ -1023,17 +1003,7 @@ export function LoadingBay() {
                         ))}
                         {canEdit && (
                           <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                            {stage === "InLoading" && box && (
-                              <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => setVehModal({ box })}>
-                                Assign Vehicle
-                              </button>
-                            )}
-                            {stage === "ReadyDispatch" && box && (
-                              <button type="button" className="btn" disabled={busy} style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }} onClick={() => void dispatchBox(box)}>
-                                Dispatch
-                              </button>
-                            )}
-                            {box && <span style={{ display: "inline-flex", verticalAlign: "middle", marginLeft: 6 }}><MoreMenu kebab items={menuFor(r)} /></span>}
+                            {box && <span style={{ display: "inline-flex", verticalAlign: "middle" }}><MoreMenu kebab icon="plus" title="Loading actions" items={menuFor(r)} /></span>}
                           </td>
                         )}
                       </tr>,

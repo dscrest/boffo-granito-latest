@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -91,7 +92,7 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
       className: "nw",
       render: (g) => {
         const s = stageChip(g.stage);
-        return <span className="chip" style={{ color: s.color }}>{s.label}</span>;
+        return <span className="chip" style={{ color: s.color }} title={s.label}>{codeOf(s.label)}</span>;
       },
     },
     { key: "requested", label: "Requested", className: "num mono", style: { textAlign: "right" }, render: (g) => fmt(g.totalRequested) },
@@ -736,7 +737,7 @@ export function ProductionTable() {
                                 ))}
                               </select>
                             ) : (
-                              stageChip(e.stage).label
+                              <span className="chip" style={{ color: stageChip(e.stage).color }} title={stageChip(e.stage).label}>{codeOf(stageChip(e.stage).label)}</span>
                             )}
                           </td>
                           {canEdit && (
