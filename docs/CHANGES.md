@@ -5,7 +5,7 @@
 
 ## 2026-09-14 — Two Palletization pages, column pickers, Box Brand, SO tabs, Dispatch always reachable, Edit + More everywhere (CR-160…168)
 
-**DEPLOYED LIVE 2026-09-14 (data-ops + client), uncommitted; manual drive pending.**
+**DEPLOYED LIVE 2026-09-14 (data-ops + client), committed 3e672e8; manual drive pending.**
 
 - **Palletization is two sidebar pages** (CR-160): `/packing` Ready for Palletization (queue) and
   `/palletizing` In Palletization (+ Ready for Loading, where the Load handoff sits). Same board,
