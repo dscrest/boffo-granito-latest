@@ -64,7 +64,7 @@ export function listQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
 async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: string }> {
   // listAll pages past ZCQL's 300-row cap; lookups project only the
   // columns this join actually reads (ROWID is always included).
-  const [q, items, customers, terms, designs, sos, salesPersons] = await Promise.all([
+  const [q, items, customers, terms, designs, sos, salesPersons, brands] = await Promise.all([
     listAll("Quote", { order: "ROWID desc" }),
     listAll("QuoteItem"),
     listAll("Customer", { columns: ["name", "code"] }),
@@ -72,6 +72,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
     listAll("Design", { columns: ["design_name", "unique_name"] }),
     listAll("SalesOrder", { columns: ["quote", "order_number", "order_date", "total_amount", "status"] }),
     list("SalesPerson", { limit: 300, columns: ["name"] }),
+    list("Brand", { limit: 300, columns: ["name"] }),
   ]);
   if (!q.ok) return { ok: false, quotes: [], error: q.error };
 
@@ -81,6 +82,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
   const designName = buildMap(designs.rows, "design_name");
   const designUnique = buildMap(designs.rows, "unique_name");
   const salesPersonName = buildMap(salesPersons.rows, "name");
+  const brandName = buildMap(brands.rows, "name");
 
   // QuoteItem rows grouped by parent quote ROWID → UI QuoteLine[].
   const linesByQuote = new Map<string, QuoteLine[]>();
@@ -131,6 +133,8 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       exchangeRate: num(r.exchange_rate) || 1,
       remarks: str(r.remarks),
       salesperson: salesPersonName.get(str(r.sales_person)) || "",
+      boxBrandId: str(r.box_brand),
+      boxBrandLabel: brandName.get(str(r.box_brand)) || "",
       referenceNo: str(r.reference_no),
       customerNotes: str(r.customer_notes),
       terms: str(r.terms),
@@ -169,6 +173,8 @@ export interface NewQuoteInput {
   address: string;
   shipping_address: string;
   salesperson: string;
+  /** Brand ROWID from the Box Brand master ("" = none). */
+  box_brand: string;
   reference_no: string;
   customer_notes: string;
   terms: string;
@@ -232,7 +238,7 @@ export function convertQuote(
     order_number?: string;
     po_number?: string;
     payment_term?: string;
-    box_branding?: string;
+    box_brand?: string;
     order_date?: string;
     shipment_date?: string;
     salesperson?: string;

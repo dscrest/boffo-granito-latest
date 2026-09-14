@@ -13,9 +13,10 @@
    Lines allocated to a load box (and legacy Completed plans) leave this
    board entirely — they live on the Loading and Dispatch page (/loading).
    ============================================================ */
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
+import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { NumberInput } from "@/ui/NumberInput";
@@ -145,6 +146,86 @@ export function DispatchBoard({
     if (l.status === "ReadyToLoad") return loadable.has(l.id) ? "Ready" : "Palletizing";
     return l.status === "Palletizing" ? "Palletizing" : "Planning";
   };
+
+  // Sheet columns (grid standard, CR-161): data-driven, show/hide + reorder
+  // via the ColumnPicker. Customer then Item lead; the PAL line code sits
+  // LAST and is hideable. The checkbox, edit-mode inputs and the "+" menu
+  // stay fixed outside the picker.
+  const SHEET_COLS = useMemo<ColumnDef<Entry>[]>(
+    () => [
+      {
+        key: "customer",
+        label: "Customer",
+        className: "nw",
+        render: ({ l }) => <span className="clip" style={{ maxWidth: 180 }} title={l.customerName}>{l.customerName || "—"}</span>,
+      },
+      {
+        key: "item",
+        label: "Item",
+        className: "nw",
+        render: ({ l }) => <span className="clip" style={{ maxWidth: 260 }} title={l.designLabel}>{l.designLabel}</span>,
+      },
+      { key: "so", label: "Order", className: "mono nw", render: ({ l }) => l.soNumber || "—" },
+      {
+        key: "batch",
+        label: "Batch",
+        className: "mono nw",
+        style: { fontSize: "var(--t-sm)" },
+        render: ({ l }) => {
+          const prog = oiProgress.get(l.orderItemId);
+          return (
+            <>
+              {l.batchNumber || "—"}
+              {l.palletGroup && (
+                <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
+                  Mix Batch
+                </span>
+              )}
+              {prog && prog.done > 0 && prog.done < prog.total && (
+                <span className="chip palstatus p-palletized" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Part of this order item is still not palletised">
+                  Partial
+                </span>
+              )}
+            </>
+          );
+        },
+      },
+      { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
+      {
+        key: "ordered",
+        label: "Ordered",
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => fmt(oiProgress.get(l.orderItemId)?.total ?? 0),
+      },
+      {
+        key: "completed",
+        label: "Completed",
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => {
+          const done = oiProgress.get(l.orderItemId)?.done ?? 0;
+          return done ? <span style={{ color: "var(--c-green)" }}>{fmt(done)}</span> : <span className="dim">—</span>;
+        },
+      },
+      {
+        key: "remaining",
+        label: "Remaining",
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => {
+          const prog = oiProgress.get(l.orderItemId);
+          return fmt(Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0)));
+        },
+      },
+      { key: "age", label: "Age", className: "dim nw", render: ({ p, l }) => `${ageDays(p, l)}d` },
+      { key: "pal", label: "PAL", className: "mono nw", style: { fontWeight: 600 }, render: ({ l }) => l.itemCode },
+    ],
+    // oiProgress/ageDays are re-derived from plans each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plans],
+  );
+  const sheetCols = useColumns("packingSheetColumns", SHEET_COLS);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -344,8 +425,9 @@ export function DispatchBoard({
     }
     return a.l.itemCode.localeCompare(b.l.itemCode, undefined, { numeric: true });
   });
-  // Sheet column count — band/empty rows span it (edit mode adds Palletise + Top Up From).
-  const nCols = editMode ? 12 : 10;
+  // Sheet column count — band/empty rows span it: checkbox + visible defs
+  // (+ Palletise + Top Up From in edit mode) + the "+" menu cell.
+  const nCols = 1 + sheetCols.visible.length + (editMode ? 2 : 0) + 1;
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -377,10 +459,18 @@ export function DispatchBoard({
       ? allLines.filter(({ l: d }) => d.status === "Palletizing" && d.palletGroup === l.palletGroup).map(({ l: d }) => d)
       : [l];
 
-  // The one "+" menu on Planning / In-Palletization cards & rows — all three
-  // options always listed, inapplicable ones greyed out. Complete on a
+  // The one "+" menu on every card & row (CR-168: Ready rows too — their loose
+  // Load button folded in). Planning / In-Palletization list all three
+  // palletisation options, inapplicable ones greyed out; Complete on a
   // Planning line is the skip-a-stage shortcut (dialog still forces a pallet).
-  const plusMenuItems = (l: PalPlanLine, stage: ColKey) => [
+  const plusMenuItems = (l: PalPlanLine, stage: ColKey) => stage === "Ready" ? [
+    {
+      label: `Load${loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}`,
+      disabled: flow.busy,
+      title: loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container",
+      onClick: () => flow.setPicker({ lineIds: loadTargets(l) }),
+    },
+  ] : [
     {
       label: `Start Palletisation${stage === "Planning" && palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}`,
       disabled: stage !== "Planning",
@@ -508,27 +598,15 @@ export function DispatchBoard({
             </div>
           ) : null;
         })()}
-        {canEdit && (stage === "Planning" || stage === "Palletizing") && (
+        {canEdit && (
           // MoreMenu doesn't stop propagation and the card is draggable +
           // click-navigates, so the wrapper span eats the events.
           <span
             style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}
             onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); }}
           >
-            <MoreMenu kebab icon="plus" title="Palletisation actions" items={plusMenuItems(l, stage)} />
+            <MoreMenu kebab icon="plus" title={stage === "Ready" ? "Loading actions" : "Palletisation actions"} items={plusMenuItems(l, stage)} />
           </span>
-        )}
-        {canEdit && stage === "Ready" && (
-          <button
-            type="button"
-            className="btn"
-            disabled={flow.busy}
-            style={{ width: "100%", marginTop: 8, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: "var(--t-sm)" }}
-            onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); flow.setPicker({ lineIds: loadTargets(l) }); }}
-            title={loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container"}
-          >
-            <Icon name="truck" size={11} /> Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
-          </button>
         )}
       </div>
     );
@@ -682,6 +760,9 @@ export function DispatchBoard({
                   Clear filters
                 </button>
               )}
+              {view === "sheet" && (
+                <ColumnPicker columns={sheetCols.ordered} hidden={sheetCols.hidden} onToggle={sheetCols.toggle} onMove={sheetCols.move} />
+              )}
               {/* Sheet edit mode: Palletise qty + Top Up donor go editable across
                   every row; nothing is written until Save. */}
               {view === "sheet" && canEdit && (
@@ -728,17 +809,15 @@ export function DispatchBoard({
               <table className="tbl" style={{ width: "100%" }}>
                 <thead>
                   <tr>
-                    <th>Pallet</th>
-                    <th>Item</th>
-                    <th>Customer · SO</th>
-                    <th>Batch</th>
-                    <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                    <th className="num" style={{ textAlign: "right" }} title="Total boxes sent to palletization for this order item">Ordered</th>
-                    <th className="num" style={{ textAlign: "right" }} title="Boxes palletised (Ready or loaded)">Completed</th>
-                    <th className="num" style={{ textAlign: "right" }}>Remaining</th>
+                    <th style={{ width: 34 }} aria-label="Select" />
+                    {sheetCols.visible.map((c) => (
+                      <th key={c.key} className={c.className?.includes("num") ? "num" : undefined} style={c.style}
+                          title={c.key === "ordered" ? "Total boxes sent to palletization for this order item" : c.key === "completed" ? "Boxes palletised (Ready or loaded)" : undefined}>
+                        {c.label}
+                      </th>
+                    ))}
                     {editMode && <th className="num" style={{ textAlign: "right" }}>Palletise</th>}
                     {editMode && <th>Top Up From</th>}
-                    <th>Age</th>
                     <th aria-label="Action" />
                   </tr>
                 </thead>
@@ -788,60 +867,22 @@ export function DispatchBoard({
                         title={`Open ${p.palNumber}`}
                         style={{ cursor: "pointer", background: isSel ? "var(--accent-soft)" : undefined }}
                       >
-                        <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            {canEdit && (stage === "Planning" || stage === "Ready") && (
-                              <input
-                                type="checkbox"
-                                checked={isSel}
-                                onClick={(ev) => ev.stopPropagation()}
-                                onChange={() => toggleSelect(l)}
-                                title={stage === "Planning" ? "Select to palletise together" : "Select to load together"}
-                                style={{ margin: 0 }}
-                              />
-                            )}
-                            {l.itemCode}
-                          </span>
-                        </td>
-                        <td className="nw">
-                          <span className="clip" style={{ maxWidth: 260 }} title={l.designLabel}>{l.designLabel}</span>
-                        </td>
-                        <td className="nw">
-                          <span className="clip" style={{ maxWidth: 180 }} title={l.customerName}>{l.customerName || "—"}</span>
-                          <div className="dim mono" style={{ fontSize: "var(--t-xs)" }}>{l.soNumber || "—"}</div>
-                        </td>
-                        <td className="mono" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>
-                          {l.batchNumber || "—"}
-                          {l.palletGroup && (
-                            <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
-                              Mix Batch
-                            </span>
+                        <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
+                          {canEdit && (stage === "Planning" || stage === "Ready") && (
+                            <input
+                              type="checkbox"
+                              checked={isSel}
+                              onChange={() => toggleSelect(l)}
+                              title={stage === "Planning" ? "Select to palletise together" : "Select to load together"}
+                              style={{ margin: 0 }}
+                            />
                           )}
-                          {(() => {
-                            const prog = oiProgress.get(l.orderItemId);
-                            return prog && prog.done > 0 && prog.done < prog.total ? (
-                              <span className="chip palstatus p-palletized" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }}
-                                    title="Part of this order item is still not palletised">
-                                Partial
-                              </span>
-                            ) : null;
-                          })()}
                         </td>
-                        <td className="num mono" style={{ textAlign: "right" }}>{fmt(l.boxes)}</td>
-                        {(() => {
-                          const prog = oiProgress.get(l.orderItemId);
-                          const total = prog?.total ?? 0;
-                          const done = prog?.done ?? 0;
-                          return (
-                            <>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(total)}</td>
-                              <td className="num mono" style={{ textAlign: "right" }}>
-                                {done ? <span style={{ color: "var(--c-green)" }}>{fmt(done)}</span> : <span className="dim">—</span>}
-                              </td>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, total - done))}</td>
-                            </>
-                          );
-                        })()}
+                        {sheetCols.visible.map((c) => (
+                          <td key={c.key} className={c.className} style={c.style}>
+                            {c.render!({ p, l })}
+                          </td>
+                        ))}
                         {editMode && (() => {
                           const d = draft[l.id];
                           const donors = topUpDonors(l);
@@ -883,21 +924,9 @@ export function DispatchBoard({
                             </>
                           );
                         })()}
-                        <td className="dim">{ageDays(p, l)}d</td>
                         <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                          {canEdit && (stage === "Planning" || stage === "Palletizing") && (
-                            <MoreMenu kebab icon="plus" title="Palletisation actions" items={plusMenuItems(l, stage)} />
-                          )}
-                          {canEdit && stage === "Ready" && (
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ height: 24, padding: "0 10px", fontSize: "var(--t-sm)" }}
-                              disabled={flow.busy}
-                              onClick={() => flow.setPicker({ lineIds: loadTargets(l) })}
-                            >
-                              Load{loadTargets(l).length > 1 ? ` (${loadTargets(l).length})` : ""}
-                            </button>
+                          {canEdit && (
+                            <MoreMenu kebab icon="plus" title={stage === "Ready" ? "Loading actions" : "Palletisation actions"} items={plusMenuItems(l, stage)} />
                           )}
                         </td>
                       </tr>

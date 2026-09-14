@@ -166,6 +166,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       portOfDischarge: so ? str(so.port_of_discharge) : "",
       salesperson: so ? salesPersonName.get(str(so.sales_person)) || "" : "",
       boxBranding: so ? str(so.box_branding) : "",
+      boxBrandId: so ? str(so.box_brand) : "",
+      boxBrandLabel: so ? brandName.get(str(so.box_brand)) || "" : "",
       shipmentDate: so ? str(so.shipment_date) : "",
       customerNotes: so ? str(so.customer_notes) : "",
       terms: so ? str(so.terms) : "",
@@ -199,7 +201,8 @@ export interface NewSalesOrderInput {
   /** Omit to leave the stored address untouched (the SO form doesn't edit it). */
   address?: string;
   salesperson: string;
-  box_branding: string;
+  /** Brand ROWID from the Box Brand master ("" = none). */
+  box_brand: string;
   customer_notes: string;
   terms: string;
   discount: number;

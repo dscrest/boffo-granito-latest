@@ -865,6 +865,8 @@ app.post("/quote-with-items", async (req, res) => {
           address: body.address || "",
           shipping_address: body.shipping_address || "",
           sales_person: salesPerson || undefined,
+          // Box Brand master pick (Brand FK, CR-162) — null clears; "" is rejected by the FK column.
+          box_brand: body.box_brand || null,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -966,6 +968,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           address: body.address || "",
           shipping_address: body.shipping_address || "",
           sales_person: salesPerson || undefined,
+          box_brand: body.box_brand || null,
           reference_no: body.reference_no || "",
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -1339,7 +1342,9 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           // Address isn't on the SO form — omit it when unsent so editing an
           // order can't blank the address carried over from its quote.
           ...(typeof body.address === "string" ? { address: body.address } : {}),
-          box_branding: body.box_branding || "",
+          // Box Brand master pick (Brand FK, CR-162). The legacy free-text
+          // box_branding column is left untouched (read-only history).
+          box_brand: body.box_brand || null,
           sales_person: salesPerson || undefined,
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -1454,8 +1459,8 @@ async function createSalesOrder(ds, body, maps) {
     remarks: body.remarks || "",
     address: body.address || "",
     manual_so_number: body.manual_so_number || "",
-    // Branding printed on the boxes: our Brand name or the customer's own.
-    box_branding: body.box_branding || "",
+    // Box Brand master pick (Brand FK, CR-162) — replaces the free-text box_branding.
+    box_brand: body.box_brand || null,
     sales_person: salesPerson || undefined,
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
@@ -1585,7 +1590,8 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             // FK (sales_person_rowid); a name override resolves in createSalesOrder.
             sales_person_rowid: q.sales_person || null,
             salesperson: body.salesperson || "",
-            box_branding: body.box_branding || "",
+            // Box Brand carries from the quote unless the convert form overrides it.
+            box_brand: body.box_brand || q.box_brand || null,
             customer_notes: body.customer_notes || q.customer_notes || "",
             terms: body.terms || q.terms || "",
             // Doc-level charges: inherit from the source quote unless overridden.

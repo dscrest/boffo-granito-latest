@@ -236,7 +236,7 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
           <Spec l="Shipment Date" v={order.shipmentDate || "—"} mono />
           <Spec l="Priority" v={order.priority.toUpperCase()} />
           <Spec l="Brand" v={order.brand || "—"} />
-          <Spec l="Box Branding" v={order.boxBranding || "—"} />
+          <Spec l="Box Brand" v={order.boxBrandLabel || order.boxBranding || "—"} />
           <Spec l="Salesperson" v={order.salesperson || "—"} />
           <Spec l="Boxes / Pallet" v={order.boxesPerPallet} />
           <Spec l="Currency Total" v={order.totalAmount ? fmt(order.totalAmount) : "—"} mono />

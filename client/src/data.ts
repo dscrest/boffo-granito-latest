@@ -79,8 +79,11 @@ export interface Order {
   remarks?: string;
   portOfDischarge?: string;
   salesperson?: string;
-  /** Branding printed on the boxes — our brand or the customer's own. */
+  /** Legacy free-text box branding (read-only since CR-162; see boxBrandId). */
   boxBranding?: string;
+  /** SalesOrder.box_brand → Brand ROWID ("" = none) — the Box Brand master pick (CR-162). */
+  boxBrandId?: string;
+  boxBrandLabel?: string;
   shipmentDate?: string;
   customerNotes?: string;
   terms?: string;
@@ -186,6 +189,9 @@ export interface Quote {
   remarks: string;
   /** Salesperson owning the quote. */
   salesperson?: string;
+  /** Quote.box_brand → Brand ROWID ("" = none) — Box Brand master pick, carried to the SO on convert (CR-162). */
+  boxBrandId?: string;
+  boxBrandLabel?: string;
   /** Customer-facing reference / PO ref. */
   referenceNo?: string;
   /** Notes shown to the customer (on print). */

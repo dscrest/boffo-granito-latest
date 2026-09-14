@@ -264,8 +264,6 @@ export function ProductionDetail() {
     ...(!group.independent && group.salesOrderId && producedBoxes > 0
       ? [{ label: "Send to Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(group.salesOrderId)}`) }]
       : []),
-    // Editing requested qty is only safe before any output is recorded.
-    ...(can("stages", "edit") && !recorded ? [{ label: "Edit", onClick: () => setEditing(true) }] : []),
     ...(can("stages", "edit") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     ...(can("stages", "delete") && !palletised ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
@@ -373,6 +371,13 @@ export function ProductionDetail() {
                   <option key={s} value={s}>{PRODUCTION_STAGE_META[s].label}</option>
                 ))}
               </select>
+            )}
+            {/* Edit is always visible (detail-page standard); editing the
+                requested qty is only safe before any output is recorded. */}
+            {can("stages", "edit") && (
+              <button className="hbtn" disabled={recorded} onClick={() => setEditing(true)} title={recorded ? "Output already recorded — quantities are locked" : "Edit production"}>
+                <Icon name="edit" size={13} /> Edit
+              </button>
             )}
             <MoreMenu items={moreItems} />
             <button className="btn x" onClick={() => navigate("/prod")} title="Close">

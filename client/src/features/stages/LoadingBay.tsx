@@ -42,6 +42,8 @@ import {
   cachedLoadBoxes,
   cachedPalPlans,
   deleteLoadBox,
+  dispatchConfirmMessage,
+  dispatchGate,
   dispatchLoadBox,
   invalidatePalPlans,
   lineFrac,
@@ -69,6 +71,7 @@ const STAGE_IDX = new Map(STAGES.map((c, i) => [c.key, i]));
 
 // A row = one line + its derived stage (box resolved once).
 type Row = { p: PalPlan; l: PalPlanLine; stage: LoadStage; box?: LoadBox };
+type MenuItem = { label: string; danger?: boolean; disabled?: boolean; title?: string; onClick: () => void };
 
 // Board/sheet grouping dimensions (same mechanism as Production).
 // Customer only for now — 2026-09-10; stale persisted dims filter out on read.
@@ -86,25 +89,26 @@ const daysSince = (iso: string) => {
 // Age = days since the LINE was created (same rule as the Palletization board).
 const ageDays = (p: PalPlan, l: PalPlanLine) => daysSince(l.createdTime || p.createdTime || "");
 
-/* Data-driven sheet columns (item code pinned outside as the row identity).
-   Every cell is one line: `nw` on short values, a `clip` span with its own
-   max-width on the long ones (see the .clip note in styles.css). */
+/* Data-driven sheet columns. Customer then Design lead (the team matches by
+   customer + design, CR-161); the LOAD code sits LAST and is hideable like
+   any other column. Every cell is one line: `nw` on short values, a `clip`
+   span with its own max-width on the long ones (see the .clip note in styles.css). */
 function loadColumns(): ColumnDef<Row>[] {
   return [
-    {
-      key: "design",
-      label: "Design",
-      className: "nw",
-      render: (r) => (
-        <span className="design-name clip" style={{ maxWidth: 260 }} title={r.l.designLabel}>{r.l.designLabel}</span>
-      ),
-    },
     {
       key: "customer",
       label: "Customer",
       className: "nw",
       render: (r) => (
         <span className="clip" style={{ maxWidth: 170 }} title={r.l.customerName}>{r.l.customerName || "—"}</span>
+      ),
+    },
+    {
+      key: "design",
+      label: "Design",
+      className: "nw",
+      render: (r) => (
+        <span className="design-name clip" style={{ maxWidth: 260 }} title={r.l.designLabel}>{r.l.designLabel}</span>
       ),
     },
     { key: "so", label: "Order", className: "mono nw", render: (r) => r.l.soNumber || "—" },
@@ -176,6 +180,7 @@ function loadColumns(): ColumnDef<Row>[] {
     },
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box?.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted nw", render: (r) => `${ageDays(r.p, r.l)}d` },
+    { key: "code", label: "Loading", className: "mono nw", style: { fontWeight: 600 }, render: (r) => (r.box ? boxLabel(r.box) : "—") },
   ];
 }
 
@@ -274,6 +279,23 @@ function boxColumns(): ColumnDef<BoxRow>[] {
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted nw", render: (r) => `${daysSince(r.box.createdTime)}d` },
     { key: "created", label: "Created", className: "mono muted nw", render: (r) => fmtDateTime(r.box.createdTime) },
+    {
+      key: "label",
+      label: "Loading",
+      className: "mono nw",
+      style: { fontWeight: 600 },
+      render: (r) => {
+        const grp = parseLoadPlan(r.box.loadPlan)?.group;
+        return (
+          <>
+            {boxLabel(r.box)}
+            {grp && grp.of > 1 && (
+              <span className="chip" style={{ marginLeft: 8, fontSize: "var(--t-xs)" }} title="Part of a multi-container loading plan">C{grp.no}/{grp.of}</span>
+            )}
+          </>
+        );
+      },
+    },
   ];
 }
 
@@ -366,7 +388,9 @@ export function LoadingBay() {
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as LoadGroupBy)) as LoadGroupBy[]);
 
   const COLS = useMemo(() => loadColumns(), []);
-  const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
+  // Key bumped to .v2 (CR-161) so the Customer→Design default order and the
+  // now-hideable Loading column apply everywhere; the old prefs are dead.
+  const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns.v2", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
 
   // ---- derived ------------------------------------------------
   const { allLines, openBoxes, linesOfBox } = flow;
@@ -490,7 +514,7 @@ export function LoadingBay() {
 
   // ---- loadings view: box-level grid state --------------------
   const BOX_COLS = useMemo(() => boxColumns(), []);
-  const boxCols = useColumns("loadingBoxColumns", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created"]);
+  const boxCols = useColumns("loadingBoxColumns.v2", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created"]);
   // Plain search only — the advanced-filter criteria and group dims are
   // line-shaped and would silently half-apply to box rows.
   const boxSearched = boxRows.filter(
@@ -533,14 +557,11 @@ export function LoadingBay() {
     after(res.ok, res.error || "Could not save loading details", t.box.status === "Open" && nowSealed ? `${boxLabel(t.box)} → Ready for Dispatch` : "Loading details saved");
   };
 
-  // "Dispatch": the box is already sealed (Assign Vehicle) — just confirm + date.
+  // "Dispatch": confirm (warning about blank load details) + date.
   const dispatchBox = async (box: LoadBox) => {
     if (busy) return;
     const inBox = linesOfBox(box.id);
-    const ok = await confirmDialog({
-      title: "Dispatch",
-      message: `Dispatch ${boxLabel(box)}? ${inBox.length} item${inBox.length === 1 ? "" : "s"} leave with it.`,
-    });
+    const ok = await confirmDialog({ title: "Dispatch", message: dispatchConfirmMessage(box, inBox.length) });
     if (!ok) return;
     // Snapshot the loaded lines BEFORE the refetch moves them to Dispatched.
     setBusy(true);
@@ -590,15 +611,16 @@ export function LoadingBay() {
   };
 
   // Per-row container actions (Edit option) by stage.
-  const menuFor = (r: Row): { label: string; danger?: boolean; onClick: () => void }[] => {
+  const menuFor = (r: Row): MenuItem[] => {
     const box = r.box;
     if (!box) return [];
-    const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
+    const items: MenuItem[] = [];
     if (canEdit) {
       items.push({ label: box.status === "Open" && r.stage !== "ReadyDispatch" ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
     }
-    if (canEdit && box.status === "Open" && sealed(box)) {
-      items.push({ label: "Dispatch", onClick: () => void dispatchBox(box) });
+    if (canEdit && box.status === "Open") {
+      const gate = dispatchGate(box, linesOfBox(box.id).length);
+      items.push({ label: "Dispatch", disabled: !!gate, title: gate || undefined, onClick: () => void dispatchBox(box) });
     }
     if (canEdit && box.status === "Open") {
       items.push({ label: "Unload item", onClick: () => void unload(r.l, box) });
@@ -614,14 +636,15 @@ export function LoadingBay() {
   };
 
   // Box-scoped actions for the Loadings grid (row click opens the detail).
-  const boxMenuFor = (r: BoxRow): { label: string; danger?: boolean; onClick: () => void }[] => {
+  const boxMenuFor = (r: BoxRow): MenuItem[] => {
     const { box } = r;
-    const items: { label: string; danger?: boolean; onClick: () => void }[] = [];
+    const items: MenuItem[] = [];
     if (canEdit) {
       items.push({ label: box.status === "Open" && !sealed(box) ? "Assign Vehicle" : "Edit load details", onClick: () => setVehModal({ box }) });
     }
     if (canEdit && box.status === "Open") {
-      if (sealed(box)) items.push({ label: "Dispatch", onClick: () => void dispatchBox(box) });
+      const gate = dispatchGate(box, r.lines.length);
+      items.push({ label: "Dispatch", disabled: !!gate, title: gate || undefined, onClick: () => void dispatchBox(box) });
       if (r.lines.length > 0) items.push({ label: "Empty container", danger: true, onClick: () => void emptyBox(box) });
     }
     items.push({ label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, linesOfBox(box.id))) });
@@ -877,7 +900,6 @@ export function LoadingBay() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortTh id="label" label="Loading" sort={boxSort} />
                   {boxCols.visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={boxSort} style={c.style} />
                   ))}
@@ -892,15 +914,6 @@ export function LoadingBay() {
                     title={`Open ${boxLabel(r.box)}`}
                     style={{ cursor: "pointer" }}
                   >
-                    <td className="mono nw" style={{ fontWeight: 600 }}>
-                      {boxLabel(r.box)}
-                      {(() => {
-                        const grp = parseLoadPlan(r.box.loadPlan)?.group;
-                        return grp && grp.of > 1
-                          ? <span className="chip" style={{ marginLeft: 8, fontSize: "var(--t-xs)" }} title="Part of a multi-container loading plan">C{grp.no}/{grp.of}</span>
-                          : null;
-                      })()}
-                    </td>
                     {boxCols.visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
@@ -913,7 +926,7 @@ export function LoadingBay() {
                 ))}
                 {!loading && boxSearched.length === 0 && (
                   <tr>
-                    <td colSpan={boxCols.visible.length + 2}>
+                    <td colSpan={boxCols.visible.length + 1}>
                       <EmptyState title="No loadings yet" hint="New Loading creates the first container" />
                     </td>
                   </tr>
@@ -933,7 +946,6 @@ export function LoadingBay() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortTh id="code" label="Loading" sort={sort} />
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
@@ -943,7 +955,7 @@ export function LoadingBay() {
               <tbody>
                 {(() => {
                   const out: ReactNode[] = [];
-                  const span = visible.length + 1 + (canEdit ? 1 : 0);
+                  const span = visible.length + (canEdit ? 1 : 0);
                   // Planned/Empty loadings first — no line rows yet, one
                   // summary row per box (click opens the loading).
                   for (const b of stubBoxes) {
@@ -994,10 +1006,9 @@ export function LoadingBay() {
                         title={box ? `Open ${boxLabel(box)}` : `Open ${p.palNumber}`}
                         style={{ cursor: "pointer" }}
                       >
-                        {/* Grouped rows indent under their customer band. */}
-                        <td className="mono" style={{ fontWeight: 600, whiteSpace: "nowrap", paddingLeft: groupBy.length ? 26 : undefined }}>{box ? boxLabel(box) : "—"}</td>
-                        {visible.map((c) => (
-                          <td key={c.key} className={c.className} style={c.style}>
+                        {/* Grouped rows indent their first cell under the customer band. */}
+                        {visible.map((c, ci) => (
+                          <td key={c.key} className={c.className} style={ci === 0 && groupBy.length ? { ...c.style, paddingLeft: 26 } : c.style}>
                             {c.render!(r)}
                           </td>
                         ))}

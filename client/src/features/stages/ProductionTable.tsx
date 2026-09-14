@@ -65,11 +65,12 @@ const GROUP_DIMS: Array<{ id: ProductionGroupBy; label: string }> = [
   { id: "size", label: "Size" },
 ];
 
-/* Data-driven columns (Production ID pinned outside the map as the row
-   identity). Order matches the agreed default: Design, Order, Customer, Date,
-   Status, Requested, Produced, Order Progress, Requested by. */
+/* Data-driven columns. Default order (CR-161): Customer, Design, Order, Date,
+   Status, Requested, Produced, Remaining, Order Progress, Requested by …
+   Production ID LAST and hideable like every other column. */
 function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
   return [
+    { key: "customer", label: "Customer", className: "nw", render: (g) => g.customer || (g.independent ? "—" : "") },
     { key: "design", label: "Design", className: "nw", render: (g) => <span className="design-name">{g.designSummary}</span> },
     {
       key: "order",
@@ -84,7 +85,6 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
           </Link>
         ),
     },
-    { key: "customer", label: "Customer", className: "nw", render: (g) => g.customer || (g.independent ? "—" : "") },
     { key: "date", label: "Date", className: "mono muted nw", render: (g) => (g.date || "").slice(0, 10) || "—" },
     {
       key: "stage",
@@ -127,6 +127,16 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (g) => g.lineCount },
     { key: "created", label: "Created", className: "muted mono", render: (g) => fmtDateTime(g.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (g) => fmtDateTime(g.modifiedTime) },
+    {
+      key: "code",
+      label: "Production ID",
+      className: "mono nw",
+      render: (g) => (
+        <Link className="linkish" to={`/prod/${encodeURIComponent(productionDetailKey(g.entries[0]))}`} onClick={(ev) => ev.stopPropagation()} title="View production">
+          {g.code}
+        </Link>
+      ),
+    },
   ];
 }
 
@@ -207,7 +217,8 @@ export function ProductionTable() {
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
-  const { ordered, visible, hidden, toggle, move } = useColumns("productionGroupColumns", COLS, ["items", "created", "modified"]);
+  // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID.
+  const { ordered, visible, hidden, toggle, move } = useColumns("productionGroupColumns.v2", COLS, ["items", "created", "modified"]);
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -787,7 +798,6 @@ export function ProductionTable() {
                   <th style={{ width: 34, textAlign: "center" }}>
                     <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
                   </th>
-                  <SortTh id="code" label="Production ID" sort={sort} />
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
@@ -807,11 +817,6 @@ export function ProductionTable() {
                     <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />
                     </td>
-                    <td className="mono">
-                      <Link className="linkish" to={detail} onClick={(ev) => ev.stopPropagation()} title="View production">
-                        {g.code}
-                      </Link>
-                    </td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(g)}
@@ -822,7 +827,7 @@ export function ProductionTable() {
                 })}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 2}>
+                    <td colSpan={visible.length + 1}>
                       {groups.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (

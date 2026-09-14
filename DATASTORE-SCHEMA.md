@@ -390,6 +390,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | status | varchar(50) | |
 | currency | varchar(10) | |
 | exchange_rate | double(4dp) | INR per 1 unit of `currency` (added 2026-07-13); SO/Invoice get one when conversion needs it |
+| box_brand | FK → Brand | SET-NULL · Box Brand master pick on the quote form, prefilled from `Customer.box_brand`; `/convert-quote` carries it onto `SalesOrder.box_brand` — added 2026-09-14 (CR-162) |
 | remarks | text(10000) | |
 | public_link_token | varchar(100) | legacy/unused? see share_token |
 | conversion_flag | varchar(20) | Full / Partial |
@@ -451,7 +452,8 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | tax_pct | double | |
 | tax_amount | double | |
 | tax_type | varchar(10) | |
-| box_branding | varchar(120) | customer-selectable box print |
+| box_branding | varchar(120) | LEGACY free-text box print — no longer written since 2026-09-14 (CR-162); shown read-only on old orders |
+| box_brand | FK → Brand | SET-NULL · Box Brand master pick (replaces `box_branding`), prefilled from `Customer.box_brand` / carried from the quote; the Customer Sheet's brand fallback is line override → **SO** → customer default — added 2026-09-14 (CR-162) |
 | reject_reason | text(10000) | reason written on reject (status→Rejected); shown on the status hover |
 
 ### OrderItem (76673000000051730)

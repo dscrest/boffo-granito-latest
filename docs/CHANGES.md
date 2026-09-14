@@ -3,6 +3,26 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-09-14 — Two Palletization pages, column pickers, Box Brand, SO tabs, Dispatch always reachable, Edit + More everywhere (CR-160…168)
+
+**DEPLOYED LIVE 2026-09-14 (data-ops + client), uncommitted; manual drive pending.**
+
+- **Palletization is two sidebar pages** (CR-160): `/packing` Ready for Palletization (queue) and
+  `/palletizing` In Palletization (+ Ready for Loading, where the Load handoff sits). Same board,
+  scoped by a `stages` prop.
+- **Column pickers** (CR-161): the /packing Sheet is ColumnDef-driven; on /packing, /loading and
+  /prod the ID column (PAL / Loading / Production ID) is last and hideable, and Customer → Design
+  lead the default order. Storage keys bumped to `.v2`.
+- **Box Brand on Quote + SO** (CR-162): FK `box_brand` → Brand on both tables (LIVE columns
+  created), Combobox from the Brand master, prefilled from the customer, carried on convert;
+  the free-text Box Branding input is retired. Customer Sheet brand fallback = line → SO → customer.
+- **Plan detail** (CR-163): Begin Dispatch / Mark Dispatched / Assign Vehicle removed.
+- **SO detail** (CR-164/165): Items table drops In Production + Available; Palletization tab =
+  Design · Date · Pallets (fractional, 1 dp) · Boxes · Status + Total, PAL column gone.
+- **Dispatch always listed** (CR-166): greyed with the reason until a vehicle is assigned and items
+  are loaded; blank seals/transporter/etc. warn in the confirm and in a standing note on `/loading/:id`.
+- **Edit + More on every detail page** (CR-167) and **"+" menu on every grid row** (CR-168).
+
 ## 2026-09-10 — CR-143 undone: New Loading is a modal form (CR-144)
 
 **DEPLOYED LIVE 2026-09-10 (client only), uncommitted.** The same-day queue board + pallet-first workspace

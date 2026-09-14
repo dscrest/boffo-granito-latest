@@ -1,9 +1,11 @@
 /* ============================================================
    Palletization Plan detail — split view (same design as Quote/Order detail).
    Route: /packing/:id. Left: searchable list of plans. Right: header card
-   (PAL number + status chip + lifecycle transition buttons + Edit + More +
-   ✕), then the "Associated SO(s)" grouped section (the plan's order items,
-   grouped by Sales Order), plan meta fields, and the Activity timeline.
+   (PAL number + status chip + Edit + More + ✕), then the "Associated SO(s)"
+   grouped section (the plan's order items, grouped by Sales Order), plan
+   meta fields, and the Activity timeline. Loading/dispatch happen per
+   LoadBox on /loading (CR-163 removed the legacy plan-level Begin Dispatch /
+   Mark Dispatched / Assign Vehicle buttons); the plan status follows.
 
    More menu: Clone (seed a new plan), Print Palletization slip (PDF), Delete.
    ============================================================ */
@@ -21,7 +23,6 @@ import { DetailRail } from "@/features/common/DetailRail";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
 import { PalPlanForm } from "./PalPlanForm";
 import { DispatchTab } from "./DispatchTab";
-import { VehicleLoadModal } from "./VehicleLoadModal";
 import { STATUS_CHIP } from "./PalPlans";
 import {
   cachedLoadBoxes,
@@ -33,22 +34,12 @@ import {
   PAL_STATUS_LABEL,
   oiProgressOf,
   planToInput,
-  setPalStatus,
-  setPalVehicle,
   updatePalPlan,
   PAL_LINE_STATUS_LABEL,
   type LoadBox,
   type PalPlan,
   type PalPlanInput,
-  type PalStatus,
 } from "./palPlansApi";
-
-// The single plan-level "advance" action offered from each state. Palletising is
-// per-line (on the board); the plan flow is Planning → Loading → Completed.
-const ADVANCE: Partial<Record<PalStatus, { to: PalStatus; label: string }>> = {
-  Planning: { to: "Loading", label: "Begin Dispatch" },
-  Loading: { to: "Completed", label: "Mark Dispatched" },
-};
 
 type DetailTab = "items" | "dispatch" | "timeline" | "activity";
 const tabStyle = (active: boolean): CSSProperties => ({
@@ -64,10 +55,8 @@ export function PalPlanDetail() {
   const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
-  const [assigning, setAssigning] = useState(false); // "Assign vehicle" modal (while In Loading)
   const [tab, setTab] = useState<DetailTab>("items");
 
   const load = async () => {
@@ -88,9 +77,6 @@ export function PalPlanDetail() {
 
   const plan = useMemo(() => plans.find((p) => p.id === id) || null, [plans, id]);
   const boxById = useMemo(() => new Map(boxes.map((b) => [b.id, b])), [boxes]);
-  // Box flow owns the lifecycle once any line sits in a load box — the manual
-  // advance/assign-vehicle actions then disappear (dispatch happens per box).
-  const hasBoxedLines = !!plan?.lines.some((l) => l.loadBoxId);
 
   // Group the plan's lines by Sales Order for the "Associated SO(s)" section.
   const bySo = useMemo(() => {
@@ -103,43 +89,6 @@ export function PalPlanDetail() {
   }, [plan]);
 
   const oiProgress = useMemo(() => oiProgressOf(plan?.lines || []), [plan]);
-
-  const changeStatus = async (to: PalStatus, msg: string) => {
-    if (!plan) return;
-    setBusy(true);
-    const res = await setPalStatus(plan.id, to);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Status change failed");
-      return;
-    }
-    toast.success(msg);
-    invalidatePalPlans();
-    await load();
-  };
-
-  // Vehicle is assigned while the plan is In Loading (not on entry) and is
-  // required before dispatch — every stage step is now a plain status change.
-  const onAdvance = (to: PalStatus) => void changeStatus(to, `Moved to ${PAL_STATUS_LABEL[to]}`);
-
-  const assignVehicle = async (vehicleId: string) => {
-    if (!plan) return;
-    if (!vehicleId) {
-      toast.error("Pick a vehicle first");
-      return;
-    }
-    setBusy(true);
-    const res = await setPalVehicle(plan.id, vehicleId);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not assign vehicle");
-      return;
-    }
-    setAssigning(false);
-    toast.success("Vehicle assigned");
-    invalidatePalPlans();
-    await load();
-  };
 
   const onEditSave = async (input: PalPlanInput) => {
     if (!plan) return;
@@ -207,7 +156,8 @@ export function PalPlanDetail() {
     );
   }
 
-  const advance = ADVANCE[plan.status];
+  // Edit is always visible (detail-page standard); a Completed plan locks it.
+  const editLock = plan.status === "Completed" ? "Completed plans can't be edited" : "";
 
   const moreItems = [
     ...(can("stages", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
@@ -220,14 +170,6 @@ export function PalPlanDetail() {
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       {editing && <PalPlanForm initial={plan} onSave={(i) => void onEditSave(i)} onClose={() => setEditing(false)} />}
       {cloning && <PalPlanForm initial={plan} clone onSave={(i) => void onCloneSave(i)} onClose={() => setCloning(false)} />}
-      {assigning && (
-        <VehicleLoadModal
-          palNumber={plan.palNumber}
-          busy={busy}
-          onConfirm={(vehicleId) => void assignVehicle(vehicleId)}
-          onClose={() => setAssigning(false)}
-        />
-      )}
 
       {/* Plan list — sticky, resizable, own scroll (mirrors Quote detail). */}
       <DetailRail
@@ -250,23 +192,8 @@ export function PalPlanDetail() {
               <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{plan.palNumber}</span>
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>
-            {advance && !hasBoxedLines && can("stages", "edit") && (() => {
-              // Legacy (pre-box) flow only: once items sit in load boxes, loading and
-              // dispatch happen per box on the board. Dispatch is blocked w/o a vehicle.
-              const blocked = advance.to === "Completed" && !plan.vehicleId;
-              return (
-                <button className="hbtn primary" disabled={busy || blocked} onClick={() => onAdvance(advance.to)} title={blocked ? "Assign a vehicle first" : advance.label}>
-                  <Icon name="check" size={13} /> {advance.label}
-                </button>
-              );
-            })()}
-            {plan.status === "Loading" && !hasBoxedLines && can("stages", "edit") && (
-              <button className="hbtn" disabled={busy} onClick={() => setAssigning(true)} title={plan.vehicleNumber ? "Reassign vehicle" : "Assign vehicle"}>
-                <Icon name="truck" size={13} /> {plan.vehicleNumber ? "Reassign Vehicle" : "Assign Vehicle"}
-              </button>
-            )}
-            {can("stages", "edit") && plan.status !== "Completed" && (
-              <button className="hbtn" disabled={busy} onClick={() => setEditing(true)} title="Edit plan">
+            {can("stages", "edit") && (
+              <button className="hbtn" disabled={!!editLock} onClick={() => setEditing(true)} title={editLock || "Edit plan"}>
                 <Icon name="edit" size={13} /> Edit
               </button>
             )}

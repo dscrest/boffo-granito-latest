@@ -135,6 +135,7 @@ export function quoteToInput(q: Quote): NewQuoteInput {
     address: q.address,
     shipping_address: q.shippingAddress || "",
     salesperson: q.salesperson || "",
+    box_brand: q.boxBrandId || "",
     reference_no: q.referenceNo || "",
     customer_notes: q.customerNotes || "",
     terms: q.terms || "",

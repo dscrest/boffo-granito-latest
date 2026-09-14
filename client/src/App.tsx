@@ -121,7 +121,11 @@ function navTree(): NavNode[] {
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
-        { id: "packing", label: "Palletization", icon: "palette" },
+        // Palletization is TWO pages over one board (CR-160): the queue and
+        // the work-in-progress + Ready-for-Loading handoff. Same feature id
+        // ("packing") so one role permission covers both.
+        { id: "packing", label: "Ready for Palletization", icon: "palette", path: "/packing" },
+        { id: "packing", label: "In Palletization", icon: "palette", path: "/palletizing" },
         { id: "loading", label: "Loading and Dispatch", icon: "truck" },
       ],
     },
@@ -200,8 +204,11 @@ const NavNodeRow = memo(function NavNodeRow({ node, depth, openGroups, onToggle 
   const pad = { paddingLeft: 8 + depth * 14 } as const;
 
   if (!node.children) {
+    const to = node.path ?? `/${node.id}`;
+    // Anchor by path segment so two leaves sharing a feature id (the two
+    // Palletization pages) get distinct tour anchors.
     return (
-      <NavLink to={node.path ?? `/${node.id}`} data-tour={`nav-${node.id}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
+      <NavLink to={to} data-tour={`nav-${to.replace(/^\//, "")}`} className={({ isActive }) => `item ${isActive ? "active" : ""}`} style={pad}>
         <Icon name={node.icon} size={14} className="ic" />
         <span>{node.label}</span>
       </NavLink>
@@ -378,7 +385,8 @@ export default function App() {
             <Route path="/fit" element={<FitSuggest />} />
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
-            <Route path="/packing" element={<PalPlans />} />
+            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
+            <Route path="/palletizing" element={<PalPlans stages={["Palletizing", "Ready"]} sectionsKey="palplans.stages.wip" />} />
             <Route path="/packing/:id" element={<PalPlanDetail />} />
             <Route path="/loading" element={<LoadingBay />} />
             <Route path="/loading/:id" element={<LoadingDetail />} />

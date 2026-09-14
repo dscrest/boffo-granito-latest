@@ -63,6 +63,7 @@ const FIELDS: FieldDef[] = [
   { key: "expiryDate", label: "Expiry Date", value: (q) => q.expiryDate || "—" },
   // #14: Reference No. removed from quotes (SO-only field).
   { key: "salesperson", label: "Salesperson", value: (q) => q.salesperson || "—" },
+  { key: "boxBrand", label: "Box Brand", value: (q) => q.boxBrandLabel || "—" },
   { key: "paymentTerm", label: "Payment Term", value: (q) => q.paymentTerm || "—" },
   { key: "portOfDischarge", label: "Port of Discharge", value: (q) => q.portOfDischarge || "—" },
   { key: "currency", label: "Currency", value: (q) => q.currency },
@@ -300,7 +301,7 @@ export function QuoteDetail() {
     setBusy("Converting…");
     const res = await convertQuote(quote.id, isFull ? "Full" : "Partial", lines, {
       po_number: d.po_number,
-      box_branding: d.box_branding,
+      box_brand: d.box_brand,
       order_date: d.order_date,
       shipment_date: d.shipment_date,
       payment_term: d.payment_term,

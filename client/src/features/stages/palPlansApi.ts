@@ -53,6 +53,7 @@ export interface PalPlanLine {
   palletId: string;
   palletName: string;
   palletCapacity: number; // container capacity: A + B arrangements, as in palletsApi.totalBoxesPerContainer (0 = unknown)
+  boxesPerPallet: number; // Pallet.boxes_per_pallet (A arrangement) — pallet count = boxes ÷ this (0 = unknown)
   boxes: number;
   position: number;
   status: PalLineStatus; // Ready for Palletization → Ready for Loading (per-item kanban move)
@@ -63,7 +64,8 @@ export interface PalPlanLine {
   sizeCode: string; // via Design.size → Size.code
   finish: string; // via Design.finish → Finish.name ("" = unknown)
   poNumber: string; // SalesOrder.po_number ("" = none) — customer's PO
-  boxBrandId: string; // line's own Brand override ("" = inherit customer default)
+  boxBrandId: string; // line's own Brand override ("" = inherit the SO's, then the customer's default)
+  soBoxBrandId: string; // SalesOrder.box_brand — the order's Box Brand pick ("" = none, CR-162)
   customerBoxBrandId: string; // Customer.box_brand default ("" = none)
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
   batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
@@ -114,6 +116,40 @@ export interface LoadBox {
 export const boxLabel = (b: LoadBox) => b.loadNumber || b.vehicleNumber || `Container ${b.boxNumber}`;
 /** Sealed = container no or line seal captured → derives Ready for Dispatch. */
 export const sealed = (b: LoadBox) => !!(b.containerNumber || b.lineSeal);
+
+/** Why Dispatch is blocked for this loading (null = allowed). Mirrors the
+    server's /load-box-dispatch rule exactly: Open + a vehicle + ≥1 line.
+    Seals are NOT a gate (CR-166) — see missingLoadDetails for the warning. */
+export function dispatchGate(b: LoadBox, lineCount: number): string | null {
+  if (b.status !== "Open") return "Already dispatched";
+  if (!b.vehicleId) return "Assign a vehicle first";
+  if (lineCount === 0) return "Load at least one item first";
+  return null;
+}
+
+/** Load-capture fields still blank on this loading — shown as the standing
+    note on /loading/:id and as the warning before a dispatch goes through. */
+export function missingLoadDetails(b: LoadBox): string[] {
+  const fields: Array<[string, string]> = [
+    ["Vehicle", b.vehicleNumber],
+    ["Container No.", b.containerNumber],
+    ["Line Seal", b.lineSeal],
+    ["Electronic Seal", b.electronicSeal],
+    ["Transporter", b.transporter],
+    ["LR / Docket No.", b.lrNumber],
+    ["Destination / Port", b.destination],
+    ["Loading Supervisor", b.loadingSupervisor],
+  ];
+  return fields.filter(([, v]) => !v).map(([label]) => label);
+}
+
+/** The dispatch confirm message: item count, plus a warning listing the blank
+    load details so nobody dispatches a container with no seals by accident. */
+export function dispatchConfirmMessage(b: LoadBox, lineCount: number): string {
+  const missing = missingLoadDetails(b);
+  const base = `Dispatch ${boxLabel(b)}? ${lineCount} item${lineCount === 1 ? "" : "s"} leave with it.`;
+  return missing.length ? `${base}\n\n⚠ Load details not filled: ${missing.join(", ")}. You can still fill them later via Edit.` : base;
+}
 
 export interface PalPlan {
   id: string; // ROWID
@@ -213,7 +249,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes] = await Promise.all([
     listAll("PalletizationPlan", { order: "ROWID desc" }),
     listAll("PalletizationPlanLine"),
-    listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
+    listAll("SalesOrder", { columns: ["order_number", "po_number", "customer", "box_brand"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "finish"] }),
     listAll("Pallet", { columns: ["name", "boxes_per_pallet", "pallets_per_container", "b_boxes_per_pallet", "b_pallets_per_container"] }),
     listAll("SalesPerson", { columns: ["name", "phone", "email"] }),
@@ -233,10 +269,12 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   const soNo = new Map<string, string>();
   const soPo = new Map<string, string>(); // SalesOrder ROWID → customer's PO number
   const soCustomer = new Map<string, string>(); // SalesOrder ROWID → Customer ROWID
+  const soBoxBrand = new Map<string, string>(); // SalesOrder ROWID → Brand ROWID
   (sos.rows || []).forEach((s) => {
     soNo.set(String(s.ROWID), str(s.order_number) || str(s.po_number) || String(s.ROWID));
     soPo.set(String(s.ROWID), str(s.po_number));
     soCustomer.set(String(s.ROWID), str(s.customer));
+    soBoxBrand.set(String(s.ROWID), str(s.box_brand));
   });
   const customerById = new Map<string, { name: string; countryCode: string; boxBrandId: string }>();
   (customers.rows || []).forEach((c) =>
@@ -256,8 +294,10 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   (finishes.rows || []).forEach((f) => finishNameById.set(String(f.ROWID), str(f.name)));
   const palletName = new Map<string, string>();
   const palletCap = new Map<string, number>(); // Pallet ROWID → boxes per full container
+  const palletBpp = new Map<string, number>(); // Pallet ROWID → boxes per pallet
   (pallets.rows || []).forEach((p) => {
     palletName.set(String(p.ROWID), str(p.name));
+    palletBpp.set(String(p.ROWID), num(p.boxes_per_pallet));
     // Mixed-config pallets ("[64*12] + [32*4] = 896") stack a second B arrangement.
     palletCap.set(
       String(p.ROWID),
@@ -318,6 +358,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       palletId,
       palletName: palletName.get(palletId) || "—",
       palletCapacity: palletCap.get(palletId) || 0,
+      boxesPerPallet: palletBpp.get(palletId) || 0,
       boxes: num(l.boxes),
       position: num(l.position),
       status: (str(l.status) || "Planning") as PalLineStatus,
@@ -329,6 +370,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       finish: finishNameById.get(designFinish.get(designId) || "") || "",
       poNumber: soPo.get(soId) || "",
       boxBrandId: str(l.box_brand),
+      soBoxBrandId: soBoxBrand.get(soId) || "",
       customerBoxBrandId: customer?.boxBrandId || "",
       loadBoxId: str(l.load_box),
       batchNumber: str(l.batch_number),

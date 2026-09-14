@@ -15,6 +15,7 @@ import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { NumberInput } from "../../ui/NumberInput";
@@ -45,7 +46,7 @@ export interface OrderDraft {
   exchange_rate?: number;
   remarks: string;
   salesperson: string;
-  box_branding: string;
+  box_brand: string; // Brand ROWID from the Box Brand master ("" = none)
   customer_notes: string;
   terms: string;
   docDiscount: string;
@@ -83,9 +84,9 @@ const HEADER: FieldSpec[] = [
   // Status removed from the form — managed via the status bar on OrderDetail.
   // Port of Discharge removed 2026-07-13 (hidden app-wide; carries silently).
   { key: "salesperson", label: "Salesperson" },
-  // Renders as a free-text input with our Brand list as suggestions, so the
-  // customer's own branding can be typed when they want their name on the boxes.
-  { key: "box_branding", label: "Box Branding" },
+  // Box Brand master pick list (CR-162) — prefilled from the customer's
+  // default, carried from the quote on convert, feeds the Customer Sheet.
+  { key: "box_brand", label: "Box Brand", kind: "select", options: [] },
 ];
 
 // Qty defaults to 1 (user mandate 2026-07-20) so a new line is immediately valid
@@ -141,7 +142,7 @@ export function OrderForm({
     exchange_rate: ed?.exchangeRate,
     remarks: ed?.remarks ?? "",
     salesperson: q?.salesperson ?? ed?.salesperson ?? "",
-    box_branding: ed?.boxBranding ?? "",
+    box_brand: q?.boxBrandId ?? ed?.boxBrandId ?? "",
     customer_notes: q?.customerNotes ?? ed?.customerNotes ?? "",
     terms: q?.terms ?? ed?.terms ?? "",
     docDiscount: ed?.docDiscount ? String(ed.docDiscount) : "",
@@ -178,10 +179,13 @@ export function OrderForm({
   const stockFor = useStockLookup();
   // Quote lines converted here now carry uniqueName; design_name fallback for the SO picker's own values.
   const findDesign = (s: string) => designs.find((x) => x.uniqueName === s || x.name === s);
-  const brandOptions = useMemo(
-    () => [...new Set(designs.map((d) => d.brand).filter(Boolean))].sort(),
-    [designs],
-  );
+  // Box Brand options — DB-sourced from the Brand master (same as PartyForm).
+  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
+  useEffect(() => {
+    void listMaster("Brand", ["name"]).then((r) => {
+      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
+    });
+  }, []);
 
   // Pallet specs for the required per-line pallet picker (size-filtered by design).
   const [pallets, setPallets] = useState<PalletRow[]>([]);
@@ -219,6 +223,7 @@ export function OrderForm({
         if (cust.paymentTermLabel) next.payment_term = cust.paymentTermLabel;
         if (cust.currency) next.currency = cust.currency;
         if (cust.handlingPersonLabel) next.salesperson = cust.handlingPersonLabel;
+        if (cust.boxBrandId) next.box_brand = cust.boxBrandId;
       }
       return next;
     });
@@ -343,20 +348,14 @@ export function OrderForm({
                         placeholder="Search sales person…"
                         options={salesPersonOptions(salesPersons)}
                       />
-                    ) : f.key === "box_branding" ? (
-                      <>
-                        <input
-                          list="box-branding-brands"
-                          value={h.box_branding}
-                          onChange={(e) => setHead("box_branding", e.target.value)}
-                          placeholder="Our brand, or customer's own branding"
-                        />
-                        <datalist id="box-branding-brands">
-                          {brandOptions.map((b) => (
-                            <option key={b} value={b} />
-                          ))}
-                        </datalist>
-                      </>
+                    ) : f.key === "box_brand" ? (
+                      <Combobox
+                        value={h.box_brand}
+                        onChange={(v) => setHead("box_brand", v)}
+                        placeholder="Search box brand…"
+                        options={boxBrands.map((b) => ({ value: b._id, label: b.name }))}
+                        clearable
+                      />
                     ) : f.kind === "select" ? (
                       <select
                         className={err ? "error" : ""}

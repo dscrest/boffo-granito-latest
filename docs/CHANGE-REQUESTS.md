@@ -474,6 +474,78 @@ was not applied (out of scope for this CR).
 
 ---
 
+## CR-160 · Palletization is two pages (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 160 | **Palletization splits into two sidebar pages over the same board**: `/packing` = **Ready for Palletization** (the Planning queue only, no Sections picker) and `/palletizing` = **In Palletization** (the Palletizing stage + Ready for Loading, both visible by default, Sections picker to hide either). `PalPlans` takes `stages` + `sectionsKey` props; the board's existing `visibleStages` scoping does the rest. Both nav leaves keep feature id `packing` (one role permission), anchors derive from the path (`nav-packing` / `nav-palletizing`; the Sales Orders anchor became `nav-orders`). Workspace "Palletise →" lands on `/palletizing`; the packing page tour covers both pages and its last step runs on `/palletizing`. Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted; manual drive pending | [`PalPlans.tsx`](../client/src/features/stages/PalPlans.tsx) (props, stage defs); [`App.tsx`](../client/src/App.tsx) (nav + routes); [`Tour.tsx`](../client/src/features/tour/Tour.tsx); [`LoadingWorkspace.tsx`](../client/src/features/stages/LoadingWorkspace.tsx). |
+
+---
+
+## CR-161 · Column pickers on the palletization sheet; ID columns hideable and last; Customer → Design first (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 161 | **/packing Sheet becomes ColumnDef-driven** (`packingSheetColumns`, ColumnPicker in the board toolbar): Customer, Item, Order, Batch, Boxes, Ordered, Completed, Remaining, Age, **PAL** (the line code, last, hideable). Checkbox, edit-mode inputs and the "+" cell stay fixed outside the picker. **/loading Sheet** (`loadingColumns.v2`): Customer, Design lead; the LOAD code is now a normal last column ("Loading") — its pinned header is gone. **Loadings grid** (`loadingBoxColumns.v2`): "Loading" (code + C n/of chip) last, hideable. **/prod grid** (`productionGroupColumns.v2`): Customer, Design lead; "Production ID" last, hideable. Storage keys bumped so the new default order applies in every browser. The /prod Sheet thead stays hard-coded (edit-mode columns). Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted; manual drive pending | [`DispatchBoard.tsx`](../client/src/features/stages/DispatchBoard.tsx) (`SHEET_COLS`, `sheetCols`); [`LoadingBay.tsx`](../client/src/features/stages/LoadingBay.tsx) (`loadColumns`, `boxColumns`); [`ProductionTable.tsx`](../client/src/features/stages/ProductionTable.tsx) (`productionColumns`). |
+
+---
+
+## CR-162 · Box Brand on Quote and Sales Order from the Box Brand master (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 162 | **Quote and SO get a Box Brand pick list** (Combobox, DB-sourced from the Brand master exactly like the customer's Default Box Brand): new FK columns `Quote.box_brand` and `SalesOrder.box_brand` → Brand (SET-NULL, created on LIVE 2026-09-14). Picking a customer prefills it from `Customer.box_brand` (transactions-inherit-customer-fields); `/convert-quote` carries the quote's brand onto the SO unless the convert form overrides it. The free-text **Box Branding** input is gone (the varchar column stays read-only for old orders; detail pages show the label, falling back to the legacy text). Downstream the Customer Sheet's brand precedence is now **line override → SO brand → customer default** (`PalPlanLine.soBoxBrandId`). Server + client. | **DEPLOYED LIVE 2026-09-14** (data-ops + client), uncommitted; manual drive pending | [`index.js`](../functions/data-ops/index.js) (quote/SO insert + update, `/convert-quote`); [`QuoteForm.tsx`](../client/src/features/quotes/QuoteForm.tsx), [`OrderForm.tsx`](../client/src/features/orders/OrderForm.tsx); [`quotesApi.ts`](../client/src/features/quotes/quotesApi.ts), [`ordersApi.ts`](../client/src/features/orders/ordersApi.ts); [`palPlansApi.ts`](../client/src/features/stages/palPlansApi.ts) + [`LoadingCustomerSheet.tsx`](../client/src/features/stages/LoadingCustomerSheet.tsx); [`DATASTORE-SCHEMA.md`](../DATASTORE-SCHEMA.md). |
+
+---
+
+## CR-163 · Begin Dispatch removed from the palletization plan detail (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 163 | **The legacy plan-level Begin Dispatch / Mark Dispatched / Assign Vehicle buttons are deleted** from `/packing/:id` — loading and dispatch happen per LoadBox on /loading and the plan status follows. Header = Edit + More + ✕ (Edit stays visible on Completed plans, disabled with a reason). The Dispatch tab stays. Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted | [`PalPlanDetail.tsx`](../client/src/features/stages/PalPlanDetail.tsx). |
+
+---
+
+## CR-164 · SO Details: In Production and Available columns removed (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 164 | **The SO Items table is Design · Size · Finish · Ordered · Palletized.** The In Production drill-down and the design-wide Available figure are gone from this page (they live on the Item master); the two stock fetches the page made only for them are gone too. "N boxes to palletise" in the card header stays. Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted | [`OrderDetail.tsx`](../client/src/features/orders/OrderDetail.tsx) (Items table). |
+
+---
+
+## CR-165 · SO Palletization tab shows pallets, not the pallet name (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 165 | **SO → Palletization tab = Design · Palletization Date · Pallets · Boxes · Status + a Total row.** Pallets = boxes ÷ the pallet format's `boxes_per_pallet`, fractional to one decimal (30 boxes at 60/pallet reads 0.5; user's pick); "—" when the format is unknown (legacy rows). The PAL column is gone — the plan code + pallet name sit in the row tooltip and the row opens the plan. `PalPlanLine.boxesPerPallet` is read from the Pallet fetch the API already makes. Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted | [`OrderDetail.tsx`](../client/src/features/orders/OrderDetail.tsx) (`SoPalletisation`); [`palPlansApi.ts`](../client/src/features/stages/palPlansApi.ts) (`boxesPerPallet`). |
+
+---
+
+## CR-166 · Dispatch always reachable; blank load details warn, never block (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 166 | **Root cause of "how do I complete the loading?"**: Dispatch was only *added* to the menu once a container no. or line seal existed, so an In Loading container showed no way out. Now **Dispatch is always listed for an Open loading** and greys with the reason from one shared `dispatchGate` (Already dispatched / Assign a vehicle first / Load at least one item first — exactly the server's rule; seals are no longer a gate). Dispatching with blank load details (container no., seals, transporter, LR, destination, supervisor) **warns in the confirm** (`dispatchConfirmMessage` lists what's blank) and `/loading/:id` shows a **standing amber note** naming the still-blank details while the loading is open. Applied in all three menu builders (loading detail header, /loading row menu, Loadings grid menu). Client-only; server unchanged. | **DEPLOYED LIVE 2026-09-14**, uncommitted; manual drive pending | [`palPlansApi.ts`](../client/src/features/stages/palPlansApi.ts) (`dispatchGate`, `missingLoadDetails`, `dispatchConfirmMessage`); [`LoadingDetail.tsx`](../client/src/features/stages/LoadingDetail.tsx); [`LoadingBay.tsx`](../client/src/features/stages/LoadingBay.tsx) (`menuFor`, `boxMenuFor`, `dispatchBox`); `.confirm-msg` pre-line in [`styles.css`](../client/src/styles/styles.css). |
+
+---
+
+## CR-167 · Every detail page: a visible Edit button beside More (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 167 | **Detail-page header standard re-affirmed: `Edit` hbtn + `More` menu (+ ✕), on every page, Edit never hidden — disabled with a reason when locked.** Loading detail: the header `+` kebab is replaced by **Edit** (vehicle + load details) + **More** (Add Pallets, Add Items, Dispatch, prints, Delete). Production detail: Edit moves out of the More menu into the header (greyed "Output already recorded" once locked). Plan detail: Edit stays on Completed plans, greyed. Order/Quote/Customer/Item/Pallet/Size/Panel already conformed. Purchase Order detail (`/po/:id`, unrouted from the sidebar) has no edit form — flagged, not built. Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted | [`LoadingDetail.tsx`](../client/src/features/stages/LoadingDetail.tsx); [`ProductionDetail.tsx`](../client/src/features/stages/ProductionDetail.tsx); [`PalPlanDetail.tsx`](../client/src/features/stages/PalPlanDetail.tsx). |
+
+---
+
+## CR-168 · Grid row actions are one "+" menu everywhere (2026-09-14)
+
+| CR | Change | Status | Evidence |
+|---|---|---|---|
+| 168 | **The last loose row buttons fold into the "+" menu**: on /packing (kanban card + sheet row) the Ready-for-Loading "Load" button becomes the "+" menu's only item ("Load (n)"), so every stage row has the same trigger. Together with CR-167 the rule is: **grid rows = "+" kebab menu, detail headers = Edit + More.** Client-only. | **DEPLOYED LIVE 2026-09-14**, uncommitted | [`DispatchBoard.tsx`](../client/src/features/stages/DispatchBoard.tsx) (`plusMenuItems`). |
+
+---
+
 ## Open items, collected
 
 Twenty-seven rows above are **Open**. Grouped by what they need:

@@ -56,7 +56,7 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     // address omitted, not "" — the form doesn't edit it, and data-ops leaves
     // an unsent address alone (a converted SO inherits its quote's).
     salesperson: dr.salesperson,
-    box_branding: dr.box_branding,
+    box_brand: dr.box_brand,
     customer_notes: dr.customer_notes,
     terms: dr.terms,
     discount: parseFloat(dr.docDiscount) || 0,

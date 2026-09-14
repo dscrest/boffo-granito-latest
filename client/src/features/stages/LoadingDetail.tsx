@@ -4,12 +4,15 @@
    assigned vehicle + loading capture, the loaded items with the
    design-coloured fill bar, each associated SO's containerisation plan
    (planned vs loaded), and the LoadBox activity/status timeline.
-   Actions mirror the /loading board: Add Items (direct send-to-loading),
-   Assign Vehicle (vehicle + seals), Dispatch, QR/Dispatch Copy prints and
-   Delete Loading (Open only — items return to Ready for Loading).
+   Header = Edit (vehicle + load details) + More (Add Pallets, Add Items,
+   Dispatch, QR/Dispatch Copy prints, Delete Loading) — the detail-page
+   standard (CR-167). Dispatch is always listed for an Open loading and
+   greys with the reason until a vehicle is assigned and items are loaded;
+   blank seals/transporter/etc. only WARN (confirm + standing note, CR-166).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
@@ -34,10 +37,13 @@ import {
   cachedLoadBoxes,
   cachedPalPlans,
   deleteLoadBox,
+  dispatchConfirmMessage,
+  dispatchGate,
   dispatchLoadBox,
   invalidatePalPlans,
   lineFrac,
   listPalPlans,
+  missingLoadDetails,
   mixedBatchOrderItems,
   sealed,
   updateLoadBox,
@@ -202,10 +208,7 @@ export function LoadingDetail() {
 
   const onDispatch = async () => {
     if (busy) return;
-    const ok = await confirmDialog({
-      title: "Dispatch",
-      message: `Dispatch ${boxLabel(box)}? ${entries.length} item${entries.length === 1 ? "" : "s"} leave with it.`,
-    });
+    const ok = await confirmDialog({ title: "Dispatch", message: dispatchConfirmMessage(box, entries.length) });
     if (!ok) return;
     setBusy(true);
     const res = await dispatchLoadBox(box.id);
@@ -274,35 +277,39 @@ export function LoadingDetail() {
             : `${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`
         }
         actions={
-          <MoreMenu
-            kebab
-            icon="plus"
-            title="Loading actions"
-            items={[
-              ...(canEdit && open
-                ? [
-                    { label: "Add Pallets", disabled: busy, title: "Load more palletised stock into this container", onClick: () => setAddPallets(true) },
-                    { label: "Add Items", disabled: busy, title: "Send order items into this loading — no palletization step", onClick: () => setAddItems(true) },
-                  ]
-                : []),
-              ...(canEdit
-                ? [{ label: open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details", disabled: busy, title: "Capture vehicle + container/seal details", onClick: () => setVehModal(true) }]
-                : []),
-              ...(canEdit && open && sealed(box)
-                ? [{
-                    label: "Dispatch",
-                    disabled: busy || entries.length === 0,
-                    title: entries.length === 0 ? "Load at least one item first" : "Dispatch — the Dispatch Entry opens after",
-                    onClick: () => void onDispatch(),
-                  }]
-                : []),
-              { label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries)) },
-              { label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries)) },
-              ...(canEdit && open
-                ? [{ label: "Delete Loading", danger: true, onClick: () => void onDelete() }]
-                : []),
-            ]}
-          />
+          <>
+            {canEdit && (
+              <button className="hbtn" disabled={busy} onClick={() => setVehModal(true)} title="Edit vehicle and load details (container, seals, transporter, LR, destination, supervisor)">
+                <Icon name="edit" size={13} /> Edit
+              </button>
+            )}
+            <MoreMenu
+              items={[
+                ...(canEdit && open
+                  ? [
+                      { label: "Add Pallets", disabled: busy, title: "Load more palletised stock into this container", onClick: () => setAddPallets(true) },
+                      { label: "Add Items", disabled: busy, title: "Send order items into this loading — no palletization step", onClick: () => setAddItems(true) },
+                    ]
+                  : []),
+                ...(canEdit && open
+                  ? [(() => {
+                      const gate = dispatchGate(box, entries.length);
+                      return {
+                        label: "Dispatch",
+                        disabled: busy || !!gate,
+                        title: gate || "Dispatch — the Dispatch Entry opens after",
+                        onClick: () => void onDispatch(),
+                      };
+                    })()]
+                  : []),
+                { label: "Print QR label", onClick: () => void import("./palletQrPdf").then((m) => m.downloadPalletQrPdf(box, entries)) },
+                { label: "Dispatch Copy", onClick: () => void import("./dispatchCopyPdf").then((m) => m.downloadDispatchCopyPdf(box, entries)) },
+                ...(canEdit && open
+                  ? [{ label: "Delete Loading", danger: true, onClick: () => void onDelete() }]
+                  : []),
+              ]}
+            />
+          </>
         }
         fields={fields}
         hiddenStorageKey="loadingDetailFields"
@@ -365,6 +372,15 @@ export function LoadingDetail() {
           },
         ]}
       >
+        {open && missingLoadDetails(box).length > 0 && (
+          <div className="card" style={{ padding: "10px 14px", marginBottom: 12, fontSize: "var(--t-sm)", color: "var(--c-amber)", display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <Icon name="alert" size={14} />
+            <span>
+              Fill the load details before dispatch — still blank: {missingLoadDetails(box).join(", ")}.
+              {canEdit && " Use Edit to capture them."}
+            </span>
+          </div>
+        )}
         {siblings.length > 0 && (
           <div className="card" style={{ padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Part of a {siblings.length + 1}-container plan · {plan?.group?.no ? `container ${plan.group.no} of ${plan.group.of}` : ""}</span>

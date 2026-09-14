@@ -593,7 +593,7 @@ export function LoadingWorkspace({
                   kebab
                   icon="plus"
                   title="Loading actions"
-                  items={[{ label: "Palletise →", title: "Palletise on the Palletization board", onClick: () => navigate("/packing") }]}
+                  items={[{ label: "Palletise →", title: "Open the In Palletization page", onClick: () => navigate("/palletizing") }]}
                 />
               )}
             </div>

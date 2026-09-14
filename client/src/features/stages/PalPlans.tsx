@@ -1,9 +1,12 @@
-/* Palletization (/packing) — full-page stage board of
-   PalletizationPlanLines (DispatchBoard), backed by the Catalyst Data Store via
-   palPlansApi. The page header holds the status tab, the ONE Kanban/Sheet view
-   toggle, and "New Palletization Plan" (opens PalPlanForm and lands on the
-   created record). The old plans-list grid was retired in the 2026-08-22
-   declutter — git history holds it. */
+/* Palletization — full-page stage board of PalletizationPlanLines
+   (DispatchBoard), backed by the Catalyst Data Store via palPlansApi. Since
+   CR-160 it is TWO pages over the same component, scoped by `stages`:
+     /packing      → Ready for Palletization (the Planning stage only)
+     /palletizing  → In Palletization + Ready for Loading (Load handoff)
+   The page header holds the status tab, the ONE Kanban/Sheet view toggle,
+   Group (+ Sections when the page has >1 stage) and "New Palletization Plan"
+   (opens PalPlanForm and lands on the created record). The old plans-list
+   grid was retired in the 2026-08-22 declutter — git history holds it. */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -33,8 +36,7 @@ export const STATUS_CHIP: Record<PalStatus, string> = {
   Completed: "p-completed",
 };
 
-// Sections picker defs — the board's 3 stage columns.
-const STAGE_DEFS: ColumnDef[] = COLUMNS.map((c) => ({ key: c.key, label: c.label }));
+type StageKey = (typeof COLUMNS)[number]["key"];
 
 // Completed (dispatched) plans left this board — they live on /loading.
 const TABS: Array<{ id: string; label: string }> = [
@@ -42,8 +44,21 @@ const TABS: Array<{ id: string; label: string }> = [
   ...PAL_STATUSES.filter((s) => s !== "Completed").map((s) => ({ id: s, label: PAL_STATUS_LABEL[s] })),
 ];
 
-export function PalPlans() {
+export function PalPlans({
+  stages = ["Planning"],
+  sectionsKey = "palplans.stages",
+}: {
+  /** Stage sections this page shows (in order). One stage = no Sections picker. */
+  stages?: StageKey[];
+  /** localStorage key for the Sections show/hide prefs (per page). */
+  sectionsKey?: string;
+}) {
   const navigate = useNavigate();
+  // Sections picker defs — this page's stage columns.
+  const STAGE_DEFS = useMemo<ColumnDef[]>(
+    () => COLUMNS.filter((c) => stages.includes(c.key)).map((c) => ({ key: c.key, label: c.label })),
+    [stages],
+  );
   const [tab, setTab] = usePersistedState("palplans.tab", "all");
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
   // whatever Settings → Default view says; key kept from the old inner toggle
@@ -71,9 +86,12 @@ export function PalPlans() {
   const toggleGroup = (key: string) =>
     setGroupBy((prev) => (prev.includes(key as DispatchGroupBy) ? prev.filter((d) => d !== key) : [...prev, key as DispatchGroupBy]));
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as DispatchGroupBy)) as DispatchGroupBy[]);
-  // Stage sections show/hide (kanban lanes + sheet rows) — Ready for Loading
-  // starts hidden; per-browser like every other column pref.
-  const stageCols = useColumns("palplans.stages", STAGE_DEFS, ["Ready"]);
+  // Stage sections show/hide (kanban lanes + sheet rows) — all of this page's
+  // stages start visible; per-browser like every other column pref.
+  const stageCols = useColumns(sectionsKey, STAGE_DEFS);
+  // Only this page's stages ever reach the board (a hidden-all pref falls back to all).
+  const visibleStages = stageCols.visible.map((c) => c.key);
+  const boardStages = visibleStages.length ? visibleStages : stages;
   const [showForm, setShowForm] = useState(false);
   // "Send to Palletization" lands here as /packing?fromOrder=<soId> → open a
   // preset New-plan form scoped to that Sales Order.
@@ -197,15 +215,17 @@ export function PalPlans() {
           icon="menu"
           title="Group into sections — check dimensions, drag to set order"
         />
-        <ColumnPicker
-          columns={stageCols.ordered}
-          hidden={stageCols.hidden}
-          onToggle={stageCols.toggle}
-          onMove={stageCols.move}
-          label="Sections"
-          icon="columns"
-          title="Show or hide board sections"
-        />
+        {STAGE_DEFS.length > 1 && (
+          <ColumnPicker
+            columns={stageCols.ordered}
+            hidden={stageCols.hidden}
+            onToggle={stageCols.toggle}
+            onMove={stageCols.move}
+            label="Sections"
+            icon="menu"
+            title="Show or hide board sections"
+          />
+        )}
         {can("stages", "create") && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
@@ -217,7 +237,7 @@ export function PalPlans() {
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={stageCols.visible.map((c) => c.key)} onChanged={() => void load()} />
+        <DispatchBoard plans={filtered} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={boardStages} onChanged={() => void load()} />
       )}
     </div>
   );

@@ -37,6 +37,7 @@ export interface TourStep {
 /** Page tours that auto-start on a user's first visit to the route. */
 export const AUTO_TOURS: Record<string, string> = {
   "/packing": "packing",
+  "/palletizing": "packing",
   "/loading": "loading",
 };
 
@@ -70,7 +71,7 @@ export const TOURS: Record<string, TourStep[]> = {
       body: "Price an enquiry here. Once a quote is Accepted, one click converts it into a Sales Order — this is where every deal begins.",
     },
     {
-      anchor: "nav-byorder",
+      anchor: "nav-orders",
       group: "Sales",
       route: "/orders",
       title: "Sales Orders",
@@ -88,7 +89,7 @@ export const TOURS: Record<string, TourStep[]> = {
       group: "Sales",
       route: "/packing",
       title: "Palletization",
-      body: "Pack produced stock onto pallets, batch by batch. Completed pallets become ready for loading.",
+      body: "Pack produced stock onto pallets, batch by batch. Two pages: Ready for Palletization is the queue; In Palletization holds the work in progress and the pallets ready for loading.",
     },
     {
       anchor: "nav-loading",
@@ -132,7 +133,7 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/packing",
       waitMs: 5000,
       title: "Views and stages",
-      body: "Kanban shows the three stages — Ready for Palletization, In Palletization, Ready for Loading. Sheet is the same data as an editable grid. Use Group to band rows by Customer, Order, Batch or Item.",
+      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress + Ready for Loading). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",
@@ -154,9 +155,9 @@ export const TOURS: Record<string, TourStep[]> = {
       body: "All prints are on demand. Today's Report prints everything palletised today; select pallets below and Packing Report and Pallet Slips buttons appear in the selection bar.",
     },
     {
-      route: "/packing",
+      route: "/palletizing",
       title: "On to loading",
-      body: "When a line reaches Ready for Loading, its Load button puts it into a container. A batch can only be loaded once it is fully palletised — a partly palletised batch stays back in In Palletization.",
+      body: "Started pallets move to the In Palletization page. When a line reaches Ready for Loading there, its + menu's Load puts it into a container. A batch can only be loaded once it is fully palletised — a partly palletised batch stays back in In Palletization.",
     },
   ],
 

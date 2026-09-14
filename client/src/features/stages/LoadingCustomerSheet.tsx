@@ -296,8 +296,9 @@ export function LoadingCustomerSheet({
                     : 0;
                   const poSpan = runStart ? (runLen === -1 || runLen === 0 ? g.lines.length - i : runLen) : 0;
                   const pallet = palletById.get(l.palletId);
+                  // Brand precedence (CR-162): line override → the order's Box Brand → customer default.
                   const brandOverride = lineDraft[l.id]?.boxBrandId ?? l.boxBrandId;
-                  const effectiveBrand = brandOverride || l.customerBoxBrandId;
+                  const effectiveBrand = brandOverride || l.soBoxBrandId || l.customerBoxBrandId;
                   return (
                     <tr key={l.id}>
                       {i === 0 && (
@@ -365,7 +366,7 @@ export function LoadingCustomerSheet({
                             }
                           >
                             <option value="">
-                              {l.customerBoxBrandId ? `Default · ${brandName(l.customerBoxBrandId)}` : "—"}
+                              {l.soBoxBrandId || l.customerBoxBrandId ? `Default · ${brandName(l.soBoxBrandId || l.customerBoxBrandId)}` : "—"}
                             </option>
                             {brands.map((b) => (
                               <option key={b._id} value={b._id}>

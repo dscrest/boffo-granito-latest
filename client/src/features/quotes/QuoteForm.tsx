@@ -19,6 +19,7 @@ import {
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
+import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
@@ -87,6 +88,7 @@ type Head = Required<
     | "currency"
     | "remarks"
     | "salesperson"
+    | "boxBrandId"
     | "referenceNo"
     | "customerNotes"
     | "terms"
@@ -126,6 +128,7 @@ export function QuoteForm({
     currency: initial?.currency ?? "INR",
     remarks: initial?.remarks ?? "",
     salesperson: initial?.salesperson ?? "",
+    boxBrandId: initial?.boxBrandId ?? "",
     referenceNo: initial?.referenceNo ?? "",
     customerNotes: initial?.customerNotes ?? "",
     terms: initial?.terms ?? "",
@@ -165,10 +168,19 @@ export function QuoteForm({
         if (cust.paymentTermLabel) next.paymentTerm = cust.paymentTermLabel;
         if (cust.currency) next.currency = cust.currency;
         if (cust.handlingPersonLabel) next.salesperson = cust.handlingPersonLabel;
+        if (cust.boxBrandId) next.boxBrandId = cust.boxBrandId;
       }
       return next;
     });
   };
+
+  // Box Brand options — DB-sourced from the Brand master (same as PartyForm / OrderForm).
+  const [boxBrands, setBoxBrands] = useState<MasterRow[]>([]);
+  useEffect(() => {
+    void listMaster("Brand", ["name"]).then((r) => {
+      if (r.ok) setBoxBrands(r.rows.slice().sort((a, b) => a.name.localeCompare(b.name)));
+    });
+  }, []);
 
   // Pick-list of the selected customer's addresses of one kind. The current
   // value stays selectable even when it's not on the master (legacy quotes /
@@ -294,6 +306,16 @@ export function QuoteForm({
                   options={salesPersonOptions(salesPersons)}
                   onChange={(v) => setHead("salesperson", v)}
                   placeholder="Search sales person…"
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Box Brand</span>
+                <Combobox
+                  value={h.boxBrandId}
+                  onChange={(v) => setHead("boxBrandId", v)}
+                  placeholder="Search box brand…"
+                  options={boxBrands.map((b) => ({ value: b._id, label: b.name }))}
+                  clearable
                 />
               </label>
               <label className="form-field">

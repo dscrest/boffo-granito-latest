@@ -22,15 +22,13 @@ import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansA
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
 import { ProductionForm } from "@/features/stages/ProductionForm";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
-import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
-import { cachedProductionLogs, invalidateProductionLogs, listProductionLogs, requestProduction, stageChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
+import { invalidateProductionLogs, listProductionLogs, requestProduction, stageChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
 import { useMasters } from "@/features/masters/useMasters";
-import { designStock, openingStockFor } from "@/lib/stock";
-import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 
 // Boxes produced on THIS order still waiting to be palletised — drives the
 // palletise selection/checkboxes only. NOT the sellable "Available" figure
-// (that's designStock.available, incl. opening stock — see the Items table).
+// (that's designStock.available on the Item master; CR-164 dropped the
+// In Production / Available columns from this page).
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 
 /* One meaningful header status. Approval/terminal statuses (Draft, Pending
@@ -136,9 +134,23 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
     Production tab). Sourced from the current PalPlan flow (PalletizationPlan
     lines — this is what /packing writes); legacy PalletisedBatch rows are
     appended so pre-rework history still shows. */
-type SoPalRow = { key: string; pal: string; date: string; design: string; pallet: string; boxes: number; status: string };
+type SoPalRow = {
+  key: string;
+  pal: string; // PAL/FY/NNN ("" for legacy rows) — tooltip only since CR-165
+  planId: string; // "" for legacy rows (no detail page)
+  date: string;
+  design: string;
+  pallet: string; // pallet format name (tooltip)
+  pallets: number | null; // boxes ÷ boxes-per-pallet, fractional (null = unknown format)
+  boxes: number;
+  status: string;
+};
+
+/** One-decimal pallet count: 9 → "9", 0.5 → "0.5". */
+const fmtPallets = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<SoPalRow[] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -158,16 +170,18 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
             return {
               key: l.id,
               pal: p.palNumber,
+              planId: p.id,
               date: p.plannedDate || p.createdTime.slice(0, 10),
               design: l.designLabel,
               pallet: l.palletName,
+              pallets: l.boxesPerPallet > 0 ? l.boxes / l.boxesPerPallet : null,
               boxes: l.boxes,
               status,
             };
           }),
       );
       const legacyRows: SoPalRow[] = (legacy.ok ? legacy.rows : []).map((b) => ({
-        key: `batch-${b.batchId}`, pal: "", date: b.date, design: b.design, pallet: b.pallet, boxes: b.boxes, status: b.status,
+        key: `batch-${b.batchId}`, pal: "", planId: "", date: b.date, design: b.design, pallet: b.pallet, pallets: null, boxes: b.boxes, status: b.status,
       }));
       setRows([...planRows, ...legacyRows]);
     });
@@ -177,36 +191,50 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
   }, [salesOrderId]);
 
   if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading palletisation…</div>;
+  const totalBoxes = rows.reduce((s, r) => s + r.boxes, 0);
+  const totalPallets = rows.reduce((s, r) => s + (r.pallets ?? 0), 0);
   return (
     <div className="card">
       <div style={{ overflow: "auto" }}>
         <table className="tbl">
           <thead>
             <tr>
-              <th>PAL</th>
-              <th>Palletization Date</th>
               <th>Design</th>
-              <th>Pallet</th>
+              <th>Palletization Date</th>
+              <th className="num" style={{ textAlign: "right" }}>Pallets</th>
               <th className="num" style={{ textAlign: "right" }}>Boxes</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((b) => (
-              <tr key={b.key}>
-                <td className="mono">{b.pal || "—"}</td>
-                <td className="mono muted">{b.date}</td>
+              <tr
+                key={b.key}
+                title={[b.pal, b.pallet].filter(Boolean).join(" · ") || undefined}
+                tabIndex={b.planId ? 0 : undefined}
+                style={b.planId ? { cursor: "pointer" } : undefined}
+                onClick={() => b.planId && navigate(`/packing/${encodeURIComponent(b.planId)}`)}
+                onKeyDown={(e) => e.key === "Enter" && e.target === e.currentTarget && b.planId && navigate(`/packing/${encodeURIComponent(b.planId)}`)}
+              >
                 <td><span className="design-name">{b.design}</span></td>
-                <td>{b.pallet}</td>
+                <td className="mono muted">{b.date}</td>
+                <td className="num mono">{b.pallets == null ? <span className="dim">—</span> : fmtPallets(b.pallets)}</td>
                 <td className="num mono">{fmt(b.boxes)}</td>
                 <td><span className="chip" title={b.status}>{codeOf(b.status)}</span></td>
               </tr>
             ))}
-            {rows.length === 0 && (
+            {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   Nothing palletised against this order yet.
                 </td>
+              </tr>
+            ) : (
+              <tr>
+                <td colSpan={2} style={{ fontWeight: 500 }}>Total</td>
+                <td className="num mono" style={{ fontWeight: 500 }}>{fmtPallets(totalPallets)}</td>
+                <td className="num mono" style={{ fontWeight: 500 }}>{fmt(totalBoxes)}</td>
+                <td />
               </tr>
             )}
           </tbody>
@@ -263,9 +291,7 @@ export function OrderDetail() {
   const [printing, setPrinting] = useState(false);
   const [sendLoad, setSendLoad] = useState(false);
   const [listQ, setListQ] = useState("");
-  const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
-  const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
-  const { designRows, customers } = useMasters();
+  const { customers } = useMasters();
 
   const load = async () => {
     const res = await listOrders();
@@ -274,20 +300,7 @@ export function OrderDetail() {
   };
   useEffect(() => {
     void load();
-    void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
-    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
   }, []);
-
-  // Per-design stock, same source of truth as the Item master. In-production is
-  // therefore the design-wide total across ALL orders (not just this line), with
-  // its per-order breakdown for the drill-down popup.
-  const stockOf = (o: Order) => {
-    const key = o.designName || o.design; // plain design_name is the stock key (o.design is the display label)
-    const opening = openingStockFor(designRows.find((d) => d.designName === key), openingByDesign);
-    return designStock(key, { openingStock: opening, orders, prodLogs });
-  };
-  // Line whose "In production" drill-down popup is open (null = closed).
-  const [ipBreak, setIpBreak] = useState<Order | null>(null);
 
   // The clicked row is one OrderItem — or, from a pallet's related list, the
   // SalesOrder itself. Either way the detail below is the whole SalesOrder.
@@ -428,6 +441,7 @@ export function OrderDetail() {
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
+    { key: "boxBrand", label: "Box Brand", value: head.boxBrandLabel || head.boxBranding || "—" },
   ];
 
   // Left panel: one row per Sales Order (orders is per-line-item), filtered.
@@ -656,27 +670,19 @@ export function OrderDetail() {
                 <th>Size</th>
                 <th>Finish</th>
                 <th className="num" style={{ textAlign: "right" }}>Ordered</th>
-                <th className="num" style={{ textAlign: "right" }}>In Production</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
-                <th className="num" style={{ textAlign: "right" }}>Available</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((o) => {
-                const st = stockOf(o);
-                const stock = st.available;
-                return (
-                  <tr key={o.id}>
-                    <td><span className="design-name">{o.design}</span></td>
-                    <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
-                    <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
-                    <td className="num mono">{fmt(o.orderQty)}</td>
-                    <td className="num"><InProductionCell total={st.inProduction} onOpen={() => setIpBreak(o)} /></td>
-                    <td className="num mono">{fmt(o.palletizedQty)}</td>
-                    <td className="num mono" style={{ color: stock > 0 ? "var(--c-green)" : "var(--dim)" }}>{stock || "—"}</td>
-                  </tr>
-                );
-              })}
+              {items.map((o) => (
+                <tr key={o.id}>
+                  <td><span className="design-name">{o.design}</span></td>
+                  <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
+                  <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
+                  <td className="num mono">{fmt(o.orderQty)}</td>
+                  <td className="num mono">{fmt(o.palletizedQty)}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -714,10 +720,6 @@ export function OrderDetail() {
           onClose={() => setPrinting(false)}
         />
       )}
-      {ipBreak && (() => {
-        const s = stockOf(ipBreak);
-        return <InProductionModal label={ipBreak.design} total={s.inProduction} orders={s.inProductionOrders} onClose={() => setIpBreak(null)} />;
-      })()}
       {editing && <OrderForm initial={items} onSave={(d) => void onEditSave(d)} onClose={() => setEditing(false)} />}
       {cloning && <OrderForm initial={items} clone onSave={(d) => void onCloneSave(d)} onClose={() => setCloning(false)} />}
       {prod && head.salesOrderId && (

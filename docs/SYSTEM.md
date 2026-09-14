@@ -180,7 +180,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/orders` · `/byorder` · `/kanban` | `orders/OrdersTable` · `ByOrderView` · `pipeline/Kanban` | One nav leaf, `ViewToggle` switches |
 | `/orders/:id` | `orders/OrderDetail.tsx` | |
 | `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy |
-| `/packing` · `/packing/:id` | `stages/PalPlans` · `PalPlanDetail` | Palletization board |
+| `/packing` · `/palletizing` · `/packing/:id` | `stages/PalPlans` (×2, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization (+ Ready for Loading) — CR-160 |
 | `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading and Dispatch board |
 | `/cut-stock` · `/panels` · `/panels/:id` · `/panel-orders` | `panels/*` | Panel Craft |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
@@ -340,8 +340,17 @@ deliberately **not** stock-adjusted.
 
 ### 5.4 Palletization
 
-Screen `/packing` (grid + kanban; opens on Sheet, see §Default view). Title: "Palletization and Loading".
-Plans are `PAL/FY/NNN` and may span sales orders.
+**Two sidebar pages over one board since 2026-09-14 (CR-160)**: `/packing` **Ready for
+Palletization** (the Planning queue only) and `/palletizing` **In Palletization** (the Palletizing
+stage + Ready for Loading, both visible by default, a Sections picker hides either). Same
+`PalPlans` component scoped by a `stages` prop; both nav leaves share feature id `packing`.
+Kanban/Sheet toggle, Group, Today's Report and New Palletization Plan sit on both. The Sheet is
+ColumnDef-driven (CR-161: Customer, Item, Order, Batch, Boxes, Ordered, Completed, Remaining, Age,
+**PAL** last and hideable; checkbox / edit inputs / "+" cell fixed). Every row incl. Ready for
+Loading carries the one "+" menu (Load lives in it, CR-168).
+Plans are `PAL/FY/NNN` and may span sales orders. Plan detail (`/packing/:id`) is Edit + More + ✕
+only — the legacy plan-level Begin Dispatch / Mark Dispatched / Assign Vehicle buttons went in
+CR-163; dispatch is per LoadBox and the plan status follows.
 
 **Three columns**: *Ready for Palletization* (grouped by SO) → *In Palletization*
 → *Ready for Loading*. **Two-step flow since 2026-09-04** (reverses the 2026-08-27 one-hop):
@@ -445,7 +454,11 @@ Pallet master's A/B arrangements as Pallet 1 / Pallet 2, and a Total footer. **A
 in place since CR-145** (no Edit toggle, rows don't navigate): the load-detail captures
 (P.O. → `SalesOrder.po_number`, L.R./truck/container/seals → `/load-box-update`) plus a
 per-line **Box Brand** override (Brand master, relabeled "Box Brand" 2026-09-11 — the short-lived
-separate BoxBrand table was merged into it; customer default on `Customer.box_brand`,
+separate BoxBrand table was merged into it; **Quote and SalesOrder carry `box_brand` too since
+2026-09-14 (CR-162)** — a Box Brand Combobox on both forms, DB-sourced from the Brand master,
+prefilled from the customer's default, carried by `/convert-quote`; the free-text
+`SalesOrder.box_branding` is retired (read-only on old orders). Sheet precedence is line
+override → SO brand → customer default; customer default on `Customer.box_brand`,
 override on `PalletizationPlanLine.box_brand`) stage into drafts — Save/Cancel appear once
 dirty and save sequentially — pure diff/range logic in
 [`customerSheetEdit.ts`](../client/src/features/stages/customerSheetEdit.ts), view in
@@ -458,8 +471,18 @@ the advanced-filter facet is labelled "Loading" (key `container` retained for sa
 **Group by offers Customer only** for now, on both kanban and sheet; stale persisted
 `loading.groups` selections filter out on read.
 
+**Dispatch is always listed for an Open loading (CR-166, 2026-09-14)** — in the row "+" menus
+and the detail More menu — greyed with the reason from the shared `dispatchGate(box, lineCount)`
+(Already dispatched / Assign a vehicle first / Load at least one item first; the server's exact
+rule). Seals are **not** a gate: blank container no. / seals / transporter / LR / destination /
+supervisor only warn — `dispatchConfirmMessage` lists them in the Dispatch confirm and
+`/loading/:id` shows a standing amber note (`missingLoadDetails`) while the loading is open.
+The detail header is **Edit** (vehicle + load details) + **More** (CR-167); the row "+" kebab
+stays on the grids. Sheet/Loadings-grid columns: Customer, Design lead and the LOAD code is a
+normal last, hideable column (CR-161, keys `loadingColumns.v2` / `loadingBoxColumns.v2`).
+
 **Three stages, all derived** — nothing stores them. Un-boxed lines (including Ready for
-Loading) live on `/packing` since 2026-09-04; this board holds boxed lines only:
+Loading) live on `/packing` / `/palletizing` since 2026-09-04 / 2026-09-14; this board holds boxed lines only:
 
 | Stage | Derived from |
 |---|---|
@@ -713,7 +736,12 @@ defaults to today** (`todayISO`), never blank; Sales Person defaults to the logg
 (`currentSalespersonName` / `storedAuth`).
 
 **Detail pages** — one shared design, copied from Quotes / Item master. Header actions are
-**always right-aligned**. Every detail page's More menu carries **Clone**, which seeds the
+**always right-aligned** and are always **`Edit` + `More` (+ ✕)** — Edit is never hidden, only
+disabled with a reason when the record is locked (CR-167, 2026-09-14: Loading detail's header
+"+" became Edit + More, Production detail's Edit left the More menu, Plan detail keeps Edit on
+Completed plans). The "+" kebab is a grid-ROW idiom only (CR-168). The Purchase Order detail
+(`/po/:id`, not in the sidebar) has no edit form and no Edit — flagged, not built.
+Every detail page's More menu carries **Clone**, which seeds the
 create form from the record and saves as new, never copying auto-generated identity fields.
 The left sibling-list rail is extracted as [`DetailRail`](../client/src/features/common/DetailRail.tsx)
 (CR-154, 2026-09-12) — PalPlan and Loading detail use it (Loading detail gained the rail then;
