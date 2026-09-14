@@ -5,7 +5,7 @@
 
 ## 2026-09-14 (evening) — SO tab trims, totals bar, rail order, batch on SO Palletization, Box Brand image (CR-177…182)
 
-**DEPLOYED LIVE 2026-09-14 (LIVE column + client), commit pending.**
+**DEPLOYED LIVE 2026-09-14 (LIVE column + client), committed c1d6400.**
 
 - **SO Production tab** (CR-177): Remaining column removed.
 - **Totals bar** (CR-178): on /packing and /palletizing the bar under the grid reads
