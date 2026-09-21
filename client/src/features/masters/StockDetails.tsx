@@ -78,7 +78,7 @@ export function StockDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("stock.query", "");
-  const { ordered, visible, hidden, toggle, move } = useColumns("stockTableColumns", STOCK_COLUMNS, [
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("stockTableColumns", STOCK_COLUMNS, [
     "produced",
     "loaded",
   ]);
@@ -129,7 +129,7 @@ export function StockDetails() {
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search item, batch or size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
       </div>
 
       <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>

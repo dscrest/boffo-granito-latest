@@ -1,4 +1,4 @@
-/* Batch-complete loading gate — pure, no fetching (type-only import keeps the
+/* Loading pool + batch palletization progress — pure, no fetching (type-only import keeps the
    self-check runnable under plain node, same trade as batchLedger.ts). */
 import type { PalPlanLine } from "./palPlansApi";
 
@@ -21,17 +21,9 @@ export function groupProgressOf(
 // the gate degrades to "whole order item palletised" for legacy data.
 export const batchKey = (l: PalPlanLine) => `${l.orderItemId}|${l.batchNumber}`;
 
-/** Ids of lines loadable NOW: ReadyToLoad, un-boxed, and the whole batch group
-    (same order item + batch) fully palletised — a partially palletised batch
-    never reaches the loading pools. Feed ALL lines (boxed + Completed plans
-    included) or split siblings deflate the totals. */
+/** Ids of lines loadable NOW: ReadyToLoad and un-boxed. Since CR-248 the palletized part of a
+    batch loads even while the rest of the batch is still being palletized (CR-151's
+    whole-batch gate is reversed); `groupProgressOf` only feeds the "300 of 400 palletized" note. */
 export function loadableLineIds(allLines: PalPlanLine[]): Set<string> {
-  const prog = groupProgressOf(allLines, batchKey);
-  const ids = new Set<string>();
-  for (const l of allLines) {
-    if (l.status !== "ReadyToLoad" || l.loadBoxId) continue;
-    const g = prog.get(batchKey(l))!;
-    if (g.done >= g.total) ids.add(l.id);
-  }
-  return ids;
+  return new Set(allLines.filter((l) => l.status === "ReadyToLoad" && !l.loadBoxId).map((l) => l.id));
 }

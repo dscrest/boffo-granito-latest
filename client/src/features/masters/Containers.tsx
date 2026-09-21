@@ -84,7 +84,7 @@ export function Containers() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ row: ContainerRow | null } | null>(null); // null=closed, {row:null}=new
-  const { ordered, visible, hidden, toggle, move } = useColumns("containersTableColumns", CONTAINER_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("containersTableColumns", CONTAINER_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -255,7 +255,7 @@ export function Containers() {
             <Icon name="search" size={13} />
             <input type="text" placeholder="Search container…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         </div>
       )}
 

@@ -93,7 +93,7 @@ export function Sizes() {
   const [query, setQuery] = usePersistedState("sizes.query", "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move } = useColumns("sizesTableColumns", SIZE_COLUMNS, [
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("sizesTableColumns", SIZE_COLUMNS, [
     "seq",
     "remark",
     "created",
@@ -226,7 +226,7 @@ export function Sizes() {
             <Icon name="search" size={13} />
             <input type="text" placeholder="Search size…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>

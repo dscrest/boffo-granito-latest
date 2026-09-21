@@ -96,7 +96,7 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
 
 export function PurchaseOrders() {
   const { orders, loading, error, reload } = useOrders();
-  const { ordered, visible, hidden, toggle, move } = useColumns("poTableColumns", PO_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("poTableColumns", PO_COLUMNS, ["created", "modified"]);
   const [query, setQuery] = usePersistedState("po.query", "");
   // Group + sort only when the live orders snapshot changes.
   const pos = useMemo<PORow[]>(() => {
@@ -152,7 +152,7 @@ export function PurchaseOrders() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
       </div>
 
       {loading && orders.length === 0 ? (

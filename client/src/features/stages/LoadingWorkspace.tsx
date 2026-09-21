@@ -122,7 +122,7 @@ export function LoadingWorkspace({
 
   // ---- per-item derivation -----------------------------------
   const allLines = useMemo(() => plans.flatMap((p) => p.lines), [plans]);
-  // Batch-complete gate: a partially palletised batch never becomes loadable.
+  // Loading pool: every un-boxed ReadyToLoad line (no whole-batch gate since CR-248).
   const loadable = useMemo(() => loadableLineIds(allLines), [allLines]);
   const boxById = useMemo(() => new Map(boxes.map((b) => [b.id, b])), [boxes]);
   const soLines = useMemo(() => allLines.filter((l) => l.salesOrderId === soId), [allLines, soId]);

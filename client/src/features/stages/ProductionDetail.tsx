@@ -363,7 +363,7 @@ export function ProductionDetail() {
           <button onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>Activity</button>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             {tab === "details" && (
-              <ColumnPicker columns={fields.ordered} hidden={fields.hidden} onToggle={fields.toggle} onMove={fields.move} />
+              <ColumnPicker columns={fields.ordered} hidden={fields.hidden} onToggle={fields.toggle} onMove={fields.move} active={fields.customised} />
             )}
           </div>
         </div>

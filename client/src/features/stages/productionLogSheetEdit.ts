@@ -1,5 +1,5 @@
 /* ============================================================
-   Record Production sheet (CR-244) — the pure half: row shape, validation,
+   Bulk Record Production sheet (CR-244) — the pure half: row shape, validation,
    Excel paste mapping. Also home of the item matcher + date parser the Excel
    import shares. No React here; self-check in productionLogSheetEdit.test.ts.
    ============================================================ */

@@ -76,7 +76,7 @@ export function Pallets() {
   const [query, setQuery] = usePersistedState("pallets.query", "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -177,7 +177,7 @@ export function Pallets() {
             <Icon name="search" size={13} />
             <input type="text" placeholder="Search pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/pallets/new")}>

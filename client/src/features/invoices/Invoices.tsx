@@ -54,7 +54,7 @@ export function Invoices() {
   const [query, setQuery] = usePersistedState("invoices.query", "");
   const [statusF, setStatusF] = usePersistedState("invoices.statusF", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("invoices.criteria", {});
-  const { ordered, visible, hidden, toggle, move } = useColumns("invoicesTableColumns", INVOICE_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("invoicesTableColumns", INVOICE_COLUMNS, ["created", "modified"]);
 
   const load = () => {
     setLoading(true);
@@ -146,7 +146,7 @@ export function Invoices() {
           <div className="sub">{fmt(total)} total</div>
         </div>
         <div className="right" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
+          <select className={statusF ? "on" : undefined} value={statusF} onChange={(e) => setStatusF(e.target.value)} title="Filter by status">
             <option value="">All statuses</option>
             {statusOptions.map((s) => (
               <option key={s} value={s}>
@@ -165,7 +165,7 @@ export function Invoices() {
             />
           </span>
           <AdvancedFilterButton title="Invoices" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           <button className="hbtn primary" onClick={() => setShowGen(true)}>
             <Icon name="plus" size={13} />
             Generate

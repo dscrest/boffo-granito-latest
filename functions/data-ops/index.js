@@ -2240,7 +2240,7 @@ function normalizePlanLines(body) {
    the SO's ordered qty. Splitting across lines/plans is free below that.
    `excludePlanId`: that plan's Planning lines are about to be replaced by
    `lines`, so they don't count as existing. */
-async function assertPlanWithinOrdered(catalyst, lines, excludePlanId) {
+async function assertPlanWithinOrdered(catalyst, lines, excludePlanId, movedByItem) {
   const byItem = new Map();
   for (const l of lines) {
     const oi = String(l.order_item || "");
@@ -2264,7 +2264,7 @@ async function assertPlanWithinOrdered(catalyst, lines, excludePlanId) {
   for (const [oi, qty] of byItem) {
     const others = existing
       .filter((l) => String(l.order_item) === oi && !(excl && String(l.plan) === excl && String(l.status) === "Planning"))
-      .reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+      .reduce((s, l) => s + (Number(l.boxes) || 0), 0) - ((movedByItem && movedByItem.get(oi)) || 0); // CR-249: claimed queue boxes move, they are not added
     const ordered = orderedOf.get(oi) || 0;
     if (ordered && qty + others > ordered)
       throw badRequest(
@@ -2274,17 +2274,65 @@ async function assertPlanWithinOrdered(catalyst, lines, excludePlanId) {
   }
 }
 
+/* CR-249: the item's boxes already WAITING in the queue — batched, un-boxed
+   Planning lines (the auto-enqueue's), oldest first. A hand-made plan takes its
+   boxes from these instead of minting a blank-batch, brand-less duplicate.
+   Pure over `rows` (no writes): `left` tracks each donor across calls. */
+function claimQueuedBatches(rows, orderItemId, want, left) {
+  const out = [];
+  const donors = rows
+    .filter(
+      (r) =>
+        String(r.order_item) === String(orderItemId) && String(r.status) === "Planning" &&
+        !String(r.load_box || "") && String(r.batch_number || ""),
+    )
+    .sort((x, y) => String(x.CREATEDTIME).localeCompare(String(y.CREATEDTIME)) || Number(BigInt(x.ROWID) - BigInt(y.ROWID)));
+  for (const d of donors) {
+    if (want <= 0) break;
+    const id = String(d.ROWID);
+    const have = left.has(id) ? left.get(id).left : Number(d.boxes) || 0;
+    const take = Math.min(want, have);
+    if (take <= 0) continue;
+    left.set(id, { was: Number(d.boxes) || 0, left: have - take });
+    out.push({ donorId: id, batch: String(d.batch_number), brand: String(d.box_brand || ""), take });
+    want -= take;
+  }
+  return out;
+}
+
+/** Apply the claims: shrink each donor line, soft-deleting one that reaches 0.
+    A failure puts every donor back as it was before rethrowing — the caller is
+    about to delete the lines that claimed them, and queue boxes must not vanish. */
+async function shrinkDonors(ds, donors) {
+  const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const t = ds.table("PalletizationPlanLine");
+  try {
+    for (const [id, d] of donors)
+      await t.updateRow(d.left > 0 ? { ROWID: id, boxes: d.left } : { ROWID: id, deleted_at: stamp });
+  } catch (e) {
+    for (const [id, d] of donors) {
+      try { await t.updateRow({ ROWID: id, boxes: d.was, deleted_at: null }); } catch (_) {}
+    }
+    throw e;
+  }
+}
+
+const QUEUE_COLS = "ROWID, order_item, batch_number, boxes, status, load_box, box_brand, CREATEDTIME";
+
 /* CR-223: a hand-made plan line arrives batch-less (the form plans per design).
    Split it FIFO over the item's produced/allocated batches not yet on any plan
-   line — the same `unqueuedBatches` the auto-enqueue uses — so the batch trail
-   survives manual plans. Boxes beyond what is produced stay one blank-batch
-   line (planning ahead is allowed). Lines that name a batch pass through. */
+   line — the same `unqueuedBatches` the auto-enqueue uses — then (CR-249) over
+   the boxes already waiting in the queue, which MOVE here (`donors` = what to
+   shrink once the new lines are in). Boxes beyond what is produced stay one
+   blank-batch line (planning ahead is allowed). Lines that name a batch pass through. */
 async function attributeBatches(catalyst, lines) {
+  const donors = new Map(); // donor line id → { was, left } boxes
+  const moved = new Map(); // order item → boxes claimed from the queue
   const ids = [...new Set(lines.filter((l) => !l.batch_number && /^\d+$/.test(l.order_item)).map((l) => l.order_item))];
-  if (!ids.length) return lines;
+  if (!ids.length) return { lines, donors, moved };
   const live = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT order_item, batch_number, boxes FROM PalletizationPlanLine WHERE order_item IN (${ids.join(",")}) AND deleted_at is null`,
+      `SELECT ${QUEUE_COLS} FROM PalletizationPlanLine WHERE order_item IN (${ids.join(",")}) AND deleted_at is null`,
     ),
   );
   const out = [];
@@ -2298,9 +2346,14 @@ async function attributeBatches(catalyst, lines) {
       out.push({ ...l, boxes: take, batch_number: b.batch, ...(b.brand ? { box_brand: b.brand } : {}) });
       left -= take;
     }
+    for (const c of claimQueuedBatches(live, l.order_item, left, donors)) {
+      out.push({ ...l, boxes: c.take, batch_number: c.batch, ...(c.brand ? { box_brand: c.brand } : {}) });
+      moved.set(l.order_item, (moved.get(l.order_item) || 0) + c.take);
+      left -= c.take;
+    }
     if (left > 0) out.push({ ...l, boxes: left });
   }
-  return out.map((l, i) => ({ ...l, position: i }));
+  return { lines: out.map((l, i) => ({ ...l, position: i })), donors, moved };
 }
 
 /** Insert a PalletizationPlan header + its lines. Compensates on mid-write failure. */
@@ -2308,8 +2361,8 @@ async function createPalPlan(catalyst, ds, body, sMap) {
   // Blank pal_number → server assigns the next number (clients never mint it).
   const palNumber = String(body.pal_number || "").trim() || (await nextPalNumber(catalyst));
   await assertUnique(catalyst, "PalletizationPlan", "pal_number", palNumber);
-  const lines = await attributeBatches(catalyst, normalizePlanLines(body));
-  await assertPlanWithinOrdered(catalyst, lines);
+  const { lines, donors, moved } = await attributeBatches(catalyst, normalizePlanLines(body));
+  await assertPlanWithinOrdered(catalyst, lines, undefined, moved);
   const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
 
   const planRow = await ds.table("PalletizationPlan").insertRow({
@@ -2330,6 +2383,8 @@ async function createPalPlan(catalyst, ds, body, sMap) {
       const lr = await ds.table("PalletizationPlanLine").insertRow({ plan: planId, ...l });
       insertedLines.push(lr.ROWID);
     }
+    // New lines are in — now take the claimed boxes off the queue (CR-249).
+    await shrinkDonors(ds, donors);
   } catch (e) {
     for (const id of insertedLines) {
       try { await ds.table("PalletizationPlanLine").deleteRow(id); } catch (_) {}
@@ -3502,27 +3557,6 @@ async function promotePlansToLoading(catalyst, ds, planIds) {
   }
 }
 
-/* Batch-group gate: a ReadyToLoad line may load only when EVERY sibling line
-   of the same order_item + batch_number is ReadyToLoad or already boxed —
-   a partially palletised batch never reaches loading. Blank batch_number =
-   legacy aggregate: those group per order item. */
-async function assertBatchesComplete(catalyst, lines) {
-  const oiIds = [...new Set(lines.map((l) => String(l.order_item || "")).filter(Boolean))];
-  if (!oiIds.length) return;
-  const rows = rowList(
-    await catalyst.zcql().executeZCQLQuery(
-      `SELECT order_item, batch_number, status, load_box FROM PalletizationPlanLine WHERE order_item IN (${oiIds.join(",")}) AND deleted_at is null`,
-    ),
-  );
-  const incomplete = new Set();
-  for (const r of rows)
-    if (String(r.status) !== "ReadyToLoad" && !String(r.load_box || ""))
-      incomplete.add(`${String(r.order_item)}|${String(r.batch_number || "")}`);
-  for (const l of lines)
-    if (incomplete.has(`${String(l.order_item)}|${String(l.batch_number || "")}`))
-      throw badRequest("This item's batch is only partially palletised — record the remaining boxes first", 409);
-}
-
 /* Batch allocate: several Ready lines into ONE Open box in one call.
    body: { box, lines: [{ id, boxes? }] }. Validates the box and EVERY line
    before any write — one bad line rejects the whole batch. */
@@ -3562,7 +3596,6 @@ app.post("/pal-lines-box", async (req, res) => {
           }
           return { line, n };
         });
-        await assertBatchesComplete(catalyst, jobs.map(({ line }) => line));
         for (const { line, n } of jobs) await writeLineIntoBox(ds, line, String(box.ROWID), n);
         await promotePlansToLoading(catalyst, ds, [...new Set(jobs.map(({ line }) => String(line.plan || "")))]);
         await recountOrderItems(catalyst, ds, [...new Set(jobs.map(({ line }) => line.order_item))]);
@@ -3615,7 +3648,6 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
         if (toBox) {
           if (String(line.status) !== "ReadyToLoad")
             throw badRequest("Only a Ready-for-Loading item can be loaded into a container", 409);
-          await assertBatchesComplete(catalyst, [line]);
           const box = await getBox(catalyst, boxIdParam(toBox));
           if (String(box.status) !== "Open") throw badRequest("That container is already dispatched", 409);
           const lineBoxes = Number(line.boxes) || 0;
@@ -5141,6 +5173,75 @@ app.post("/renumber-loads", async (req, res) => {
           }
         }
         return { rowid: "", data: { scanned: boxes.length, updated } };
+      },
+    );
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Repair (CR-249): un-boxed blank-batch plan lines whose item still has batched
+   boxes waiting in the queue were minted by a hand-made plan BEFORE it learned to
+   claim the queue — the item sits queued twice. Give each such line its batch +
+   Box Brand from the queue (oldest first, splitting the line when it spans two
+   batches) and shrink the queue by the same boxes. Idempotent: a line with
+   nothing left to claim is skipped. body: { order_item? } narrows to one item. */
+app.post("/reattribute-blank-lines", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const ds = catalyst.datastore();
+    const only = String((req.body || {}).order_item || "").replace(/[^0-9]/g, "");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PalletizationPlanLine", operation: "reattribute-blank-lines", payload: { order_item: only } },
+      async () => {
+        const zcql = catalyst.zcql();
+        const t = ds.table("PalletizationPlanLine");
+        const COLS = "ROWID, plan, sales_order, order_item, design, pallet, boxes, position, status, load_box, batch_number, box_brand, manual_edit, CREATEDTIME";
+        // ponytail: one page of 300 — a repair for a handful of lines, page it if it ever outgrows that.
+        const blanks = rowList(
+          await zcql.executeZCQLQuery(
+            `SELECT ${COLS} FROM PalletizationPlanLine WHERE load_box is null AND deleted_at is null${only ? ` AND order_item = ${only}` : ""} LIMIT 0, 300`,
+          ),
+        )
+          .filter((l) => !String(l.batch_number || "") && /^\d+$/.test(String(l.order_item || "")))
+          .sort((a, b) => String(a.CREATEDTIME).localeCompare(String(b.CREATEDTIME)));
+        const report = [];
+        const touched = new Set();
+        for (const oi of [...new Set(blanks.map((l) => String(l.order_item)))]) {
+          const live = rowList(
+            await zcql.executeZCQLQuery(`SELECT ${QUEUE_COLS} FROM PalletizationPlanLine WHERE order_item = ${oi} AND deleted_at is null`),
+          );
+          const donors = new Map();
+          for (const l of blanks.filter((x) => String(x.order_item) === oi)) {
+            const claims = claimQueuedBatches(live, oi, Number(l.boxes) || 0, donors);
+            if (!claims.length) continue;
+            const rest = (Number(l.boxes) || 0) - claims.reduce((n, c) => n + c.take, 0);
+            const stamp = (c) => ({ batch_number: c.batch, ...(c.brand ? { box_brand: c.brand } : {}), boxes: c.take });
+            // First claim rewrites the line in place; further batches (and any unclaimed rest) become sibling slices.
+            await t.updateRow({ ROWID: l.ROWID, ...stamp(claims[0]) });
+            const copy = {
+              plan: l.plan ? String(l.plan) : undefined,
+              sales_order: l.sales_order ? String(l.sales_order) : undefined,
+              order_item: oi,
+              design: l.design ? String(l.design) : undefined,
+              pallet: l.pallet ? String(l.pallet) : undefined,
+              position: Number(l.position) || 0,
+              status: String(l.status),
+              ...(String(l.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
+            };
+            for (const c of claims.slice(1)) await t.insertRow({ ...copy, ...stamp(c) });
+            if (rest > 0) await t.insertRow({ ...copy, batch_number: "", boxes: rest });
+            report.push({ line: String(l.ROWID), status: String(l.status), batches: claims.map((c) => `${c.batch}:${c.take}`), unbatched: rest });
+            touched.add(oi);
+          }
+          await shrinkDonors(ds, donors);
+        }
+        if (touched.size) await recountOrderItems(catalyst, ds, [...touched]);
+        return { rowid: "", data: { scanned: blanks.length, repaired: report.length, report } };
       },
     );
     res.json({ ok: true, data: result.data });

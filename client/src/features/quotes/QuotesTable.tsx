@@ -152,7 +152,7 @@ export function QuotesTable() {
   const [query, setQuery] = usePersistedState("quotes.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("quotes.criteria", {});
   const COLS = useMemo(() => quoteColumns(), []);
-  const { ordered, visible, hidden, toggle, move } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
@@ -314,7 +314,7 @@ export function QuotesTable() {
       ) : (
         <div className="fbar" style={{ marginBottom: 12 }}>
           <Icon name="filter" size={12} />
-          <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+          <select className={tab !== "all" ? "on" : undefined} value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
             {TABS.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.label} ({tabCount(t.id)})
@@ -332,7 +332,7 @@ export function QuotesTable() {
             />
           </span>
           <AdvancedFilterButton title="Quotes" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("quotes", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/quotes/new")}>

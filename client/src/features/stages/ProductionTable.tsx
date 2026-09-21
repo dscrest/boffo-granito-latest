@@ -171,9 +171,8 @@ export function ProductionTable() {
   // View opens on whatever Settings → Default view says, then persists for the
   // session (board stays board until switched back).
   const [view, setView] = useViewState<"grid" | "board" | "sheet" | "demand">("production.view", "grid", "board");
-  // Filter follows the view: board → All (see everything), grid → Pending (hide
-  // the completed pile). Seeded from the opening view so a board reload starts on All.
-  const [tab, setTab] = useState(() => (view === "board" ? "all" : "pending"));
+  // Status filter opens on All in every view (CR-246).
+  const [tab, setTab] = useState("all");
   // Board grouping: an ordered list of dimensions → nested swimlanes (empty = flat).
   const [groupBy, setGroupBy] = useState<ProductionGroupBy[]>(() => {
     try {
@@ -222,7 +221,7 @@ export function ProductionTable() {
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
   // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
   // .v3 (CR-236): Batch + Mfg Date columns.
-  const { ordered, visible, hidden, toggle, move } = useColumns("productionGroupColumns.v3", COLS, ["items", "created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v3", COLS, ["items", "created", "modified"]);
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -469,12 +468,10 @@ export function ProductionTable() {
     return true;
   };
 
-  // Switching view snaps the filter back to that view's default (board=All;
-  // grid/sheet=Pending). Leaving the sheet with staged edits asks first.
+  // Leaving the sheet with staged edits asks first.
   const changeView = async (v: "grid" | "board" | "sheet" | "demand") => {
     if (editMode && !(await leaveEdit())) return;
     setView(v);
-    setTab(v === "board" ? "all" : "pending");
   };
 
   const saveDraft = async () => {
@@ -587,7 +584,7 @@ export function ProductionTable() {
       ) : (
       <div className="fbar" style={{ marginBottom: 12 }}>
         <Icon name="filter" size={12} />
-        <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+        <select className={tab !== "all" ? "on" : undefined} value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
           {TABS.map((t) => (
             <option key={t.id} value={t.id}>
               {tabLabel(t)} ({tabCount(t)})
@@ -627,12 +624,13 @@ export function ProductionTable() {
             onToggle={toggleGroup}
             onMove={moveGroup}
             onClear={() => setGroupBy([])}
+            active={groupBy.length > 0}
             label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
             icon="menu"
             title="Group into sections — check dimensions, drag to set order"
           />
         )}
-        {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
+        {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
         {/* Sheet edit mode: In Production + Produced + Status go editable across
             every row; nothing is written until Save. */}
         {view === "sheet" && canEdit && (
@@ -672,7 +670,7 @@ export function ProductionTable() {
         {canEdit && (
           <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/record")}>
             <Icon name="columns" size={13} />
-            Record Production
+            Bulk Record Production
           </button>
         )}
         {canEdit && (

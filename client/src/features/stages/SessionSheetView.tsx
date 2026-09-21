@@ -8,7 +8,7 @@
    ============================================================ */
 import type { KeyboardEvent, ReactNode } from "react";
 import { fmt } from "@/lib/format";
-import { openLines, type DesignRow, type SoBand } from "./newLoadingRows";
+import { openLines, partialNote, type DesignRow, type SoBand } from "./newLoadingRows";
 import type { PalPlanLine } from "./palPlansApi";
 
 const palletsOf = (l: PalPlanLine, q: number) => (q > 0 && l.boxesPerPallet > 0 ? Math.ceil(q / l.boxesPerPallet) : 0);
@@ -89,21 +89,19 @@ export function SessionSheetView({
               <td className="num mono">{pct(sub.share)}</td>
             </tr>,
             ...band.designs.flatMap((row) =>
-              row.lines.map(({ line: l, blocked }) => {
+              row.lines.map(({ line: l, partial }) => {
                 n += 1;
                 return (
-                  <tr key={l.id} style={blocked ? { opacity: 0.55 } : q(l) > 0 ? { background: "var(--accent-soft)" } : undefined}>
+                  <tr key={l.id} style={q(l) > 0 ? { background: "var(--accent-soft)" } : undefined}>
                     <td className="mono dim">{n}</td>
                     <td className="mono dim nw">{band.soNumber}</td>
                     <td><span className="design-name">{row.designLabel}</span></td>
                     <td className="nw">{brandName(row.brandId) || "—"}</td>
                     <td className="mono nw">{l.batchNumber || "—"}</td>
                     <td className="nw">{l.palletName || "—"}</td>
-                    {blocked ? (
-                      <td colSpan={4} className="num dim nw">{fmt(blocked.done)}/{fmt(blocked.total)} palletized — not loadable yet</td>
-                    ) : (
+                    {(
                       <>
-                        <td className="num mono">{fmt(l.boxes)}</td>
+                        <td className="num mono" title={partial ? partialNote(partial) : undefined}>{fmt(l.boxes)}{partial && <span className="dim"> / {fmt(partial.total)}</span>}</td>
                         <td className="num">{qtyCell(l, `Boxes to load, ${band.soNumber} ${row.designLabel} batch ${l.batchNumber || "—"}`)}</td>
                         <td className="num mono">{palletsOf(l, q(l)) || "—"}</td>
                         <td className="num mono">{pct(shareOf(l, q(l)))}</td>

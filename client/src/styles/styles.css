@@ -2130,6 +2130,27 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
    modal, full width: the Design column gets the room so item names read in full. */
 .form-page .ord-line.qt-line { grid-template-columns: 3fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
 .form-page .ord-line.qt-line.so-line { grid-template-columns: 3fr 1.4fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
+/* Loading Item Table (CR-247) — item, batch, boxes, pallets, pallet, box brand, remove. */
+.ord-line.qt-line.load-line { grid-template-columns: 3fr 1.1fr 0.8fr 0.6fr 1.2fr 1fr 26px; }
+@media (max-width: 900px) { .ord-lines:has(> .load-line) { overflow-x: auto; } .ord-line.qt-line.load-line { min-width: 820px; } }
+/* Add Items in Bulk — list | selection. */
+.bulk-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; min-height: 380px; }
+@media (max-width: 760px) { .bulk-pick { grid-template-columns: 1fr; } }
+.bulk-list, .bulk-sel { display: flex; flex-direction: column; min-height: 0; }
+.bulk-list > input { margin-bottom: 8px; }
+.bulk-scroll { flex: 1; min-height: 0; max-height: 52vh; overflow-y: auto; }
+.bulk-item, .bulk-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left;
+}
+.bulk-item { background: none; border-width: 0 0 1px; cursor: pointer; color: inherit; font: inherit; border-radius: 0; }
+.bulk-item:hover, .bulk-item.on { background: var(--accent-soft); }
+.bulk-item:disabled { opacity: 0.5; cursor: not-allowed; background: none; }
+.bulk-tick {
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; border: 1px solid var(--border-2); color: #fff;
+}
+.bulk-item.on .bulk-tick { background: var(--c-green); border-color: var(--c-green); }
 /* Billing | Shipping side by side (CR-221) — a full-width row inside a .form-grid. */
 .addr-pair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 13px 14px; }
 @media (max-width: 900px) { .addr-pair { grid-template-columns: 1fr; } }
@@ -2160,7 +2181,6 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .psheet-tbl .rn { width: 34px; padding: 0; text-align: center; font-size: 10px; color: var(--muted); background: var(--panel-2); }
 .psheet-tbl tr.on td { background: var(--accent-soft); }
 .psheet-tbl tr.on .rn { background: var(--accent); color: var(--accent-fg); }
-.psheet-tbl tr.blocked td:not(.cust) { opacity: 0.55; }
 .psheet-tbl .so { color: var(--accent-ink); }
 .psheet-tbl td.qty { padding: 0; width: 100px; background: var(--accent-soft); }
 .psheet-tbl td.qty input { width: 100%; height: 31px; border: 0; border-radius: 0; background: transparent; text-align: right; font-family: var(--font-mono); font-weight: 600; padding: 0 8px; box-shadow: none; }
@@ -2178,7 +2198,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .psheet-tbl .st { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: var(--panel-2); color: var(--muted); }
 .psheet-tbl .st.ok { background: color-mix(in oklab, var(--c-green) 14%, transparent); color: var(--c-green); }
 .psheet-tbl .st.warn { background: color-mix(in oklab, var(--c-amber) 16%, transparent); color: var(--c-amber); }
-/* Record Production sheet (CR-244) — typed cells beyond Qty: the control fills the ruled cell, no skin of its own. */
+/* Bulk Record Production sheet (CR-244) — typed cells beyond Qty: the control fills the ruled cell, no skin of its own. */
 .psheet-tbl td.cellin { padding: 0; }
 .psheet-tbl td.cellin input { width: 100%; height: 31px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .psheet-tbl td.cellin:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }

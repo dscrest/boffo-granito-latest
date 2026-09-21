@@ -78,7 +78,7 @@ export function PartiesView() {
   const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
   const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("parties.criteria", {});
-  const { ordered, visible, hidden, toggle, move } = useColumns("partiesTableColumns", PARTY_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("partiesTableColumns", PARTY_COLUMNS, ["created", "modified"]);
 
   const load = () => {
     setLoading(true);
@@ -201,7 +201,7 @@ export function PartiesView() {
           />
         </span>
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {can("customers", "create") && (
           /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>

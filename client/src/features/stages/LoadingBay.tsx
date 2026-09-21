@@ -2,7 +2,7 @@
    Loading and Dispatch (/loading) — the loading & dispatch board, standard
    list-page kit. Rows are PalletizationPlanLines moving through
    Ready for Loading → In Loading → Ready for Dispatch → Dispatched. The
-   stage is DERIVED: un-boxed + loadable (batch fully palletised) = Ready
+   stage is DERIVED: un-boxed + ReadyToLoad = Ready
    for Loading (CR-170, 2026-09-14 — back from /palletizing; its "+" menu
    Load opens LoadContainerModal via useLoadFlow); Open box = In Loading;
    Open box with container no / line seal captured = Ready for Dispatch;
@@ -406,7 +406,7 @@ export function LoadingBay() {
   const COLS = useMemo(() => loadColumns(), []);
   // Key bumped to .v2 (CR-161) so the Customer→Design default order and the
   // now-hideable Loading column apply everywhere; the old prefs are dead.
-  const { ordered, visible, hidden, toggle, move } = useColumns("loadingColumns.v2", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v2", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
 
   // ---- derived ------------------------------------------------
   const { allLines, openBoxes, linesOfBox } = flow;
@@ -454,9 +454,8 @@ export function LoadingBay() {
     };
   });
 
-  // Batch-complete gate (CR-151): an un-boxed ReadyToLoad line is Ready for
-  // Loading here only when its whole batch is palletised; otherwise it stays
-  // on /palletizing.
+  // An un-boxed ReadyToLoad line is Ready for Loading — even while the rest of
+  // its batch is still on /palletizing (CR-248 reversed CR-151's gate).
   const loadable = useMemo(() => loadableLineIds(allLines.map(({ l }) => l)), [plans]); // eslint-disable-line react-hooks/exhaustive-deps
   const stageOf = (l: PalPlanLine): LoadStage | null => {
     const b = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
@@ -953,12 +952,13 @@ export function LoadingBay() {
             onToggle={toggleGroup}
             onMove={moveGroup}
             onClear={() => setGroupBy([])}
+            active={groupBy.length > 0}
             label={groupBy.length ? `Group: ${groupBy.map((d) => GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
             icon="menu"
             title="Group into sections — check dimensions, drag to set order"
           />
         )}
-        {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />}
+        {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
         {/* Sheet edit mode (CR-173): Loaded qty + Container go editable per row;
             ✓ commits one row, Save commits every drafted row. */}
         {view === "sheet" && canEdit && (
@@ -984,7 +984,7 @@ export function LoadingBay() {
             </button>
           )
         )}
-        {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
+        {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} active={boxCols.customised} />}
         {/* CR-227 trial: the spreadsheet-style page, beside New Loading until approved. */}
         {canEdit && (
           <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => navigate("/loading/plan")}>

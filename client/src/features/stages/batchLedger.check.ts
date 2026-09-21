@@ -89,11 +89,11 @@ const sum = (rows: { boxes: number }[]) => rows.reduce((s, r) => s + r.boxes, 0)
   assert.strictEqual(rows[0].dispatchDate, "2026-08-20", "dispatch date comes off the box");
 }
 
-// 4. Batch-complete loading gate: a partially palletised batch never loads.
+// 4. Loading pool (CR-248 reversed CR-151): the palletized part of a batch loads even while the rest is pending.
 {
-  // Split pair, same batch: 40 ReadyToLoad + 60 still Planning → nothing loadable.
+  // Split pair, same batch: 40 ReadyToLoad + 60 still Planning → the 40 load.
   const partial = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning" })] as never);
-  assert.strictEqual(partial.size, 0, "partially palletized batch → not loadable");
+  assert.deepStrictEqual([...partial], ["L1"], "partially palletized batch → its ReadyToLoad part loads");
   // Whole batch ReadyToLoad → both slices loadable.
   const full = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60 })] as never);
   assert.deepStrictEqual([...full].sort(), ["L1", "L2"], "complete batch → all lines loadable");

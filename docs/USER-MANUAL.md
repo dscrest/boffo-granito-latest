@@ -82,7 +82,7 @@ These work the same on almost every list and detail page, so learn them once:
 
 - **Click a row to open it.** List rows have no buttons — the tick-boxes on the left are only for bulk actions.
 - **Search box** filters the list as you type.
-- **Columns button** lets *you* choose which columns show and in what order — your choice is remembered next time.
+- **Columns button** lets *you* choose which columns show and in what order — your choice is remembered next time. The button turns **indigo** when your view differs from the standard one; the **Group** and **Search** buttons do the same when a grouping or filter is applied. The status drop-down opens on **All** and also turns indigo once you narrow it.
 - **Advanced Filter** (the magnifier) opens a pop-up to filter by several fields at once — date ranges, status, number ranges, and so on.
 - **Footer pager** moves through long lists; the page size is remembered.
 - **Bulk actions** appear when you tick one or more rows (e.g. change status, delete).
@@ -264,7 +264,7 @@ The production and logistics chain. Remember the golden rule: each stage can onl
 
 *The list of production jobs, each moving through New Request → In Production → Completed* (a job can also be Rejected). The default view hides completed jobs.
 
-**To record many items at once:** click **Record Production**. A sheet opens with one row per item — pick the **Design**, type the **Qty**, and optionally a **Batch No.** (leave blank to auto-number), a **Date** (leave blank to use the Production date at the top, which defaults to today), **Box Brand** and **Remark**. Press Enter to move down a column; you can also copy rows from Excel and paste them in. Save once — every row is recorded as completed production and goes straight to stock. If Save reports a problem (for example a batch number that already exists), fix that cell and Save again; rows already recorded are not repeated.
+**To record many items at once:** click **Bulk Record Production**. A sheet opens with one row per item — pick the **Design**, type the **Qty**, and optionally a **Batch No.** (leave blank to auto-number), a **Date** (leave blank to use the Production date at the top, which defaults to today), **Box Brand** and **Remark**. Press Enter to move down a column; you can also copy rows from Excel and paste them in. Save once — every row is recorded as completed production and goes straight to stock. If Save reports a problem (for example a batch number that already exists), fix that cell and Save again; rows already recorded are not repeated.
 
 **To start production:** click **Start New Production**, add one line per item (**Item · Qty**) and Save. The job lands in **In Production** with nothing produced yet. Production is make-to-stock — stock is allocated to Sales Orders afterwards. "Recorded by" and the date stamp themselves.
 

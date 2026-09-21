@@ -94,7 +94,7 @@ export function CurrenciesAdmin() {
     ],
     [],
   );
-  const { ordered, visible, hidden, toggle, move } = useColumns("currenciesTableColumns", columns, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("currenciesTableColumns", columns, ["created", "modified"]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -280,7 +280,7 @@ export function CurrenciesAdmin() {
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search code, name…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
       </div>
 
       <div className="card">

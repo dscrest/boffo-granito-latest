@@ -49,13 +49,13 @@ export function PalPlans({
     () => COLUMNS.filter((c) => stages.includes(c.key)).map((c) => ({ key: c.key, label: c.label })),
     [stages],
   );
-  // Status filter: this page's own stage(s) by default; "All" lists every line
+  // Status filter: "All" by default (CR-246, key bumped to .v2) — lists every line
   // of every stage (boxed + dispatched included) as a read-only overview.
   const TABS = [
     { id: "page", label: STAGE_DEFS.map((c) => c.label).join(" + ") },
     { id: "all", label: "All" },
   ];
-  const [tab, setTab] = usePersistedState(`${sectionsKey}.show`, "page");
+  const [tab, setTab] = usePersistedState(`${sectionsKey}.show.v2`, "all");
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
   // whatever Settings → Default view says; key kept from the old inner toggle
   // so existing users keep their preference.
@@ -153,7 +153,7 @@ export function PalPlans({
 
       <div className="fbar" style={{ marginBottom: 12 }}>
         <Icon name="filter" size={12} />
-        <select value={showAll ? "all" : "page"} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+        <select className={showAll ? undefined : "on"} value={showAll ? "all" : "page"} onChange={(e) => setTab(e.target.value)} title="Filter by status">
           {TABS.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label} ({tabCount(t.id)})
@@ -187,6 +187,7 @@ export function PalPlans({
           onToggle={toggleGroup}
           onMove={moveGroup}
           onClear={() => setGroupBy([])}
+          active={groupBy.length > 0}
           label={groupBy.length ? `Group: ${groupBy.map((d) => DISPATCH_GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
           icon="menu"
           title="Group into sections — check dimensions, drag to set order"
@@ -197,6 +198,7 @@ export function PalPlans({
             hidden={stageCols.hidden}
             onToggle={stageCols.toggle}
             onMove={stageCols.move}
+            active={stageCols.customised}
             label="Sections"
             icon="menu"
             title="Show or hide board sections"

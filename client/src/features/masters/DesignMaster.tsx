@@ -197,7 +197,7 @@ export function DesignMaster() {
   const [query, setQuery] = usePersistedState("design.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("design.criteria", {});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const { ordered, visible, hidden, toggle, move } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
   const [showBulk, setShowBulk] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -355,7 +355,7 @@ export function DesignMaster() {
             <input type="text" placeholder="Search items…" value={query} onChange={(e) => setQuery(e.target.value)} />
           </span>
           <AdvancedFilterButton title="Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
             <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/design/new")}>

@@ -149,8 +149,8 @@ export function DispatchBoard({
   // Partial-palletise progress across ALL lines (boxed + Completed included,
   // or split siblings would deflate the totals).
   const oiProgress = oiProgressOf(allPlans.flatMap((p) => p.lines));
-  // Batch-complete gate: a ReadyToLoad slice of a partially palletised batch
-  // stays in "In Palletization" and out of the loading pools.
+  // Loading pool: every un-boxed ReadyToLoad line — a partly palletized batch's
+  // palletized slice is Ready for Loading too (CR-248 reversed CR-151's gate).
   const loadable = loadableLineIds(allPlans.flatMap((p) => p.lines));
   // Age = days since the LINE was created (auto-enqueue creates it right after
   // production; plans are reused per SO so the plan date is the wrong anchor).
@@ -827,7 +827,7 @@ export function DispatchBoard({
                 </button>
               )}
               {view === "sheet" && (
-                <ColumnPicker columns={sheetCols.ordered} hidden={sheetCols.hidden} onToggle={sheetCols.toggle} onMove={sheetCols.move} />
+                <ColumnPicker columns={sheetCols.ordered} hidden={sheetCols.hidden} onToggle={sheetCols.toggle} onMove={sheetCols.move} active={sheetCols.customised} />
               )}
               {/* Sheet edit mode: Palletise qty + Top Up donor go editable across
                   every row; nothing is written until Save. */}

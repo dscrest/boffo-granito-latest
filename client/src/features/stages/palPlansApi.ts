@@ -205,7 +205,7 @@ export interface PalPlanInput {
   }[];
 }
 
-// Batch-complete loading gate + progress grouping live in palLoadGate.ts
+// Loading pool + progress grouping live in palLoadGate.ts
 // (pure module, keeps the self-check runnable under plain node).
 export { groupProgressOf, loadableLineIds } from "./palLoadGate";
 import { groupProgressOf as _groupProgressOf } from "./palLoadGate";

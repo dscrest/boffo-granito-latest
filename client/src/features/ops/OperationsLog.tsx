@@ -51,7 +51,7 @@ export function OperationsLog() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [opF, setOpF] = useState("");
-  const { ordered, visible, hidden, toggle, move } = useColumns("opsTableColumns", OPS_COLUMNS, []);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("opsTableColumns", OPS_COLUMNS, []);
 
   const load = async () => {
     setLoading(true);
@@ -120,7 +120,7 @@ export function OperationsLog() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
       </div>
 
       <div className="card">

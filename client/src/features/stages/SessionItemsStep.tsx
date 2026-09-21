@@ -20,7 +20,7 @@ import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
 import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill";
-import { groupReady, openLines, spreadQty, type DesignRow, type SoBand } from "./newLoadingRows";
+import { groupReady, openLines, partialNote, spreadQty, type DesignRow, type SoBand } from "./newLoadingRows";
 import { SessionSheetView } from "./SessionSheetView";
 import {
   boxFill,
@@ -41,11 +41,13 @@ export interface SessionPickProps {
   box?: LoadBox;
   /** Sales Order detail's "New Loading" (CR-175): that SO only, no customer rail. */
   presetSalesOrderId?: string;
+  /** CR-252 (LoadingSession): Customer is only a filter — blank = every customer, a container may mix customers. */
+  anyCustomer?: boolean;
   onSaved: (boxId: string) => void | Promise<void>;
 }
 
 /** Selection state + Save of step 1 — shared by this step and the CR-227 PlanSheetStep. */
-export function useSessionPick({ plans, boxes, box, presetSalesOrderId, onSaved }: SessionPickProps) {
+export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer, onSaved }: SessionPickProps) {
   const [brands, setBrands] = useState<MasterRow[]>([]);
   const [pickedCustomer, setPickedCustomer] = useState("");
   // The ONE selection state: boxes to load per PalPlanLine id.
@@ -66,7 +68,7 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, onSaved 
   // Customer fixed by the entry point: the SO's, or the loading's existing lines'.
   const lockedCustomer = presetSalesOrderId
     ? allLines.find((l) => l.salesOrderId === presetSalesOrderId)?.customerId || ""
-    : boxLines[0]?.customerId || "";
+    : anyCustomer ? "" : boxLines[0]?.customerId || "";
   const showRail = !presetSalesOrderId && !lockedCustomer;
 
   // Rail: every customer with Ready-for-Loading stock (blocked batches included,
@@ -83,42 +85,54 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, onSaved 
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [allLines]);
 
-  const customerId = lockedCustomer || pickedCustomer || (customers.length === 1 ? customers[0].id : "");
+  const customerId = lockedCustomer || pickedCustomer || (!anyCustomer && customers.length === 1 ? customers[0].id : "");
+  // CR-227 "All customers" view: every customer's ready stock in one list.
+  const allBands = useMemo<SoBand[]>(() => groupReady(allLines, () => true), [allLines]);
   const bands = useMemo<SoBand[]>(
     () =>
       presetSalesOrderId
         ? groupReady(allLines, (l) => l.salesOrderId === presetSalesOrderId)
         : customerId
           ? groupReady(allLines, (l) => l.customerId === customerId)
-          : [],
-    [allLines, customerId, presetSalesOrderId],
+          : anyCustomer ? allBands : [],
+    [allLines, allBands, anyCustomer, customerId, presetSalesOrderId],
   );
-
-  // CR-227 "All customers" view: every customer's ready stock in one list.
-  const allBands = useMemo<SoBand[]>(() => groupReady(allLines, () => true), [allLines]);
 
   const pickCustomer = (id: string) => {
     setPickedCustomer(id);
-    setQty(new Map()); // one customer per container
+    if (!anyCustomer) setQty(new Map()); // one customer per container
   };
 
   const merge = (m: Map<string, number>) => setQty((prev) => new Map([...prev, ...m]));
   const setLine = (l: PalPlanLine, v: number) => merge(new Map([[l.id, Math.max(0, Math.min(l.boxes, Math.floor(v) || 0))]]));
-  const setDesign = (row: DesignRow, v: number) => merge(spreadQty(openLines(row), v));
+  const setDesign = (row: DesignRow, v: number, skip?: Set<string>) => merge(spreadQty(openLines(row), v, skip));
 
   // Plan as a helper: prefill the SO's next unsent container, FIFO per design.
-  const fillFromPlan = (band: SoBand) => {
+  /** The SO's next unsent planned container (null = no plan / all sent) + how many the plan has. */
+  const planNext = (band: SoBand) => {
     const slice = nextPlanContainer(band.salesOrderId, planBySo, plans, boxes, designIdOf);
+    return slice && { ...slice, of: planBySo.get(band.salesOrderId)!.plan.containers.length };
+  };
+  /** Returns the lines it put boxes on, so a row-based caller can show them. */
+  const fillFromPlan = (band: SoBand): { rowKey: string; lineId: string }[] => {
+    const slice = planNext(band);
     if (!slice) {
       toast.error("Every planned container of this order is already sent");
-      return;
+      return [];
     }
     const want = new Map<string, number>();
     for (const ln of slice.lines) want.set(designIdOf(ln.design), (want.get(designIdOf(ln.design)) || 0) + ln.boxes);
-    for (const row of band.designs) if (want.has(row.designId)) setDesign(row, want.get(row.designId)!);
+    const filled: { rowKey: string; lineId: string }[] = [];
+    for (const row of band.designs) {
+      if (!want.has(row.designId)) continue;
+      setDesign(row, want.get(row.designId)!);
+      for (const [lineId, n] of spreadQty(openLines(row), want.get(row.designId)!)) if (n > 0) filled.push({ rowKey: row.key, lineId });
+    }
+    return filled;
   };
 
-  const picked = bands.flatMap((b) => b.designs.flatMap(openLines)).filter((l) => (qty.get(l.id) || 0) > 0);
+  // anyCustomer: picks outlive the Customer filter, so count them over every band.
+  const picked = (anyCustomer ? allBands : bands).flatMap((b) => b.designs.flatMap(openLines)).filter((l) => (qty.get(l.id) || 0) > 0);
   const totalBoxes = picked.reduce((s, l) => s + qty.get(l.id)!, 0);
   const totalPallets = picked.reduce((s, l) => s + (l.boxesPerPallet > 0 ? Math.ceil(qty.get(l.id)! / l.boxesPerPallet) : 0), 0);
   // Share of a container (boxFill idiom): already loaded + picked — advisory, never blocks (CR-195).
@@ -196,7 +210,7 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, onSaved 
   };
 
   return {
-    brandName, customers, customerId, showRail, pickCustomer, bands, allBands, qty, setLine, setDesign, fillFromPlan,
+    brandName, customers, customerId, showRail, pickCustomer, bands, allBands, qty, setLine, setDesign, fillFromPlan, planNext,
     planBySo, boxLines, picked, totalBoxes, totalPallets, fill, over, busy, onSave, saveAdds, loadPlan,
   };
 }
@@ -373,19 +387,17 @@ export function SessionItemsStep({ pick, presetSalesOrderId }: { pick: ReturnTyp
               <tbody>
                 {band.designs.map((row) =>
                     // One row per batch; the first carries the Design + Box Brand (CR-204).
-                    row.lines.map(({ line: l, blocked }, i) => (
-                      <tr key={l.id} style={blocked ? { opacity: 0.55 } : (qty.get(l.id) || 0) > 0 ? { background: "var(--accent-soft)" } : undefined}>
+                    row.lines.map(({ line: l, partial }, i) => (
+                      <tr key={l.id} style={(qty.get(l.id) || 0) > 0 ? { background: "var(--accent-soft)" } : undefined}>
                         <td>{i === 0 && <span className="design-name">{row.designLabel}</span>}</td>
                         <td className="nw">{i === 0 && (brandName(row.brandId) || "—")}</td>
                         <td className="nw">
                           <span className="mono">{l.batchNumber || "—"}</span>
                           {l.palletName && <span className="dim"> · {l.palletName}</span>}
                         </td>
-                        {blocked ? (
-                          <td colSpan={2} className="num dim nw">{fmt(blocked.done)}/{fmt(blocked.total)} palletized — not loadable yet</td>
-                        ) : (
+                        {(
                           <>
-                            <td className="num mono">{fmt(l.boxes)}</td>
+                            <td className="num mono" title={partial ? partialNote(partial) : undefined}>{fmt(l.boxes)}{partial && <span className="dim"> / {fmt(partial.total)}</span>}</td>
                             <td className="num">{qtyInput(qty.get(l.id) || 0, false, (v) => setLine(l, v), `Boxes to load, ${row.designLabel} batch ${l.batchNumber || "—"}`)}</td>
                           </>
                         )}

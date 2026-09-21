@@ -176,7 +176,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/pallets/new[?size=<id>]` · `/pallets/:id/edit` · `/pallets/:id/clone` | `masters/PalletFormPage.tsx` | CR-220; `?size=` locks the Size and returns to `/sizes/:id` |
 | `/prod` · `/prod/:id` | `stages/Production` · `ProductionDetail` | Kanban + Sheet |
 | `/prod/new` · `/prod/:id/clone` · `/prod/:id/edit` | `stages/ProductionFormPage.tsx` | CR-220: Start New Production (CR-234) / Edit Production pages |
-| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Record Production sheet — many items, one Save, straight to stock |
+| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production sheet — many items, one Save, straight to stock |
 | `/parties` · `/parties/:id` | `masters/Parties` · `CustomerDetail` | Customers |
 | `/parties/new` · `/parties/:id/edit` · `/parties/:id/clone` | `masters/PartyFormPage.tsx` | CR-220: Customer form page (`:id` = customer code) |
 | `/quotes` · `/quotes/:id` | `quotes/QuotesTable` · `QuoteDetail` | |
@@ -298,7 +298,7 @@ Screen `/prod` — a Kanban board and a Sheet (grid) view of the same rows.
 
 **Production first, then SO allocation (CR-197…200, 2026-09-18).** The factory produces to
 **stock**; stock is then allocated to Sales Orders.
-- **Record Production** (CR-244, `/prod/record`, header button on `/prod`) is the fast path for
+- **Bulk Record Production** (CR-244, `/prod/record`, header button on `/prod`) is the fast path for
   make-to-stock output: a ruled sheet in the Loading Plan sheet's `.psheet` skin, one row per item —
   Design · Batch No. (blank = auto) · Date (blank = the sheet's Production date) · Qty, plus optional
   Size / Box Brand / Remark columns (ColumnPicker). 20 rows to start, grows as the tail is typed in;
@@ -433,6 +433,12 @@ the full line splits it via `/pal-line-status` `boxes` — only the slice transi
 remainder keeps its column, so a partial never lands the whole line in Ready for Loading.
 This is the recording mechanic behind CR-148: 700 today, 300 tomorrow, batch identity riding
 each slice.
+**⚠ CR-248 (2026-09-21) REVERSED the gate below:** every un-boxed `ReadyToLoad` line is loadable —
+300 palletized of a 400-box batch load now, the other 100 later. `loadableLineIds` no longer tests
+the batch group, `assertBatchesComplete` and its two calls are deleted from data-ops, and
+`groupReady` flags such lines `partial` (a "300 of 400 palletized" note on the Item Table batch
+list, the bulk picker and the older pick lists) instead of `blocked`. The paragraph is history.
+
 **Batch-complete loading gate (CR-151, 2026-09-12):** a `ReadyToLoad` slice is *loadable* only
 when its whole batch group (order item + `batch_number`; blank batch = whole order item) is
 fully palletised — every sibling line `ReadyToLoad` or already boxed. Until then the slice
@@ -473,6 +479,15 @@ button (and load-together checkboxes): it opens `LoadContainerModal` through the
 - **Batch attribution on create (CR-223):** the form plans per design; `createPalPlan` runs
   `attributeBatches`, splitting each batch-less line FIFO over `unqueuedBatches` (§6.4) and
   carrying Box Brand. Boxes planned beyond production stay one blank-batch line.
+- **Queue claim (CR-249, 2026-09-21):** when no un-queued batch is left because the auto-enqueue
+  already put the item's boxes on its queue plan, `attributeBatches` takes them from there —
+  pure `claimQueuedBatches` over the item's batched, un-boxed **Planning** lines, oldest first.
+  The new lines carry the donor's batch + Box Brand; after they are inserted `shrinkDonors`
+  shrinks / soft-deletes the donors (restoring them if it fails). Claimed boxes are netted off
+  `assertPlanWithinOrdered` (they move, they are not added). Before this a second plan for a
+  queued item minted a blank-batch, brand-less line and queued the item twice; the admin one-off
+  `/reattribute-blank-lines` (`{ order_item? }`) repairs such lines the same way. Self-check:
+  `node scripts/claim-queued-batches.check.mjs`.
 - Multi-select checkboxes on the board open `PalletiseModal`.
 - Pallet details prefill from the SO's container plan
   ([`containerPlanPrefill.ts`](../client/src/features/stages/containerPlanPrefill.ts)); the
@@ -664,6 +679,48 @@ failure, keeps what saved, reloads; a new loading minted before the failure re-o
 edit page so a retry never mints a second. A dispatched loading shows the details section only.
 The ruled Loading Sheet is NOT on this page — it lives on the detail's Loading Sheet tab, whose
 columns now lead with **Design · Batch · P.O. No.** (CR-243; P.O. No. kept).
+
+**⚠ Since CR-247 (2026-09-21) the page is laid out like a Sales Order form** (same routes, same
+Save order, client-only). Top → bottom: **Customer** `Combobox` (customers with Ready-for-Loading
+stock; locked by `?so=` or once the loading has lines; changing it after picks asks, then clears —
+one customer per container) → **Loading Details** (Loading No. auto + `LoadDetailsFields
+part="details"`: Size, Destination, Transporter, Supervisor) → **Item Table** (`.ord-line.load-line`;
+palletized stock only: Item `Combobox` = design · SO → Batch `Combobox` → Boxes; a partly palletized
+batch is listed with its n/m badge but `pickable` refuses it; a batch held by one row leaves the
+other rows' lists; **Add New Row** + **Add Items in Bulk**
+([`BulkLoadItemsModal.tsx`](../client/src/features/stages/BulkLoadItemsModal.tsx) — list | selected
+with a boxes stepper); in Edit the already-loaded lines are the table's first rows, replacing the
+Loaded-items card) → **Vehicle & Container Seal Details** (`part="vehicle"`; all optional — a
+loading saves without them and takes them later from Edit, the Loading Sheet's Truck No. cell or
+Assign Vehicle; only Dispatch needs a vehicle, CR-251). **⚠ CR-250 (2026-09-21): the CR-241 "Add
+items" direct-send card is REMOVED from this page** (with its `listOrders` fetch and the
+`/send-to-loading` step of the Save order) — the page loads palletized stock only. `/send-to-loading`
+itself and the SO detail's Send to Loading stay.
+
+**⚠ Since CR-256 (2026-09-21) an Item Table row is an ITEM, not a batch** — `ItemRow = { rowKey, off[] }`
+(`off` = batches the picker left out). The Batches cell opens the batch picker = `BulkLoadItemsModal`
+scoped to that one item (`initial` = `pick.qty`; Apply → `applyPicks` rewrites every line in scope,
+so boxes are chosen PER BATCH; Add Items in Bulk is the same modal over all bands); Boxes typed on the row → `pick.setDesign(row, v, skip)` → `spreadQty(lines, want, skip)`
+→ `allocateFifo`, so `qty` stays per line id and the `/pal-lines-box` payload is unchanged. Loaded
+lines (Edit) group by `salesOrderId|designId`; a typed total is spread FIFO into the per-line
+`loadedDraft` (newest batch gives way first). `batchOptions` / `pickable` below are gone;
+`itemOptions(bands, takenRows)` keeps an item to one row. Double-loading is still stopped by the
+server (`load_box` already set → 409); a part-loaded batch's split remainder stays loadable.
+
+**⚠ Since CR-252…255 (2026-09-21) the page order is Customer → Item Table → tabs.** Customer is an
+optional FILTER (`useSessionPick({ anyCustomer: true })`): blank lists every customer's
+Ready-for-Loading stock (labels `design · SO · customer` via `bandLabel`), picks survive a filter
+change (`picked` reads `allBands`), and a container may mix customers — the older "one customer per
+container" text above is history for this page (the `/loading/plan` trial is unchanged). The Item
+Table ends in a **totals row on the same grid** (Boxes / Pallets under their columns, loaded-after-
+edits + picks, plus `fill` % of a container); the footer carries only a blocking error + Cancel /
+Save. Under it, a **Container Planning hint** per listed order (`planNext` = `nextPlanContainer` +
+container count) with **Fill from plan** (`fillFromPlan` returns the filled lines → table rows).
+**Loading Details | Vehicle Details** are tabs below the items (RecordDetail `tabStyle`, both
+mounted). Boxes still live in `useSessionPick`'s `qty` map — a table row only names the
+line it shows; option shaping is pure (`itemOptions` / `batchOptions` / `pickable` in
+`newLoadingRows.ts`, self-checked). The customer-rail pick list (`SessionItemsStep` render,
+`SessionSheetView`) is no longer mounted here; the files are kept.
 
 **Loading Plan page — TRIAL (CR-227)** ([`LoadingPlanPage.tsx`](../client/src/features/stages/LoadingPlanPage.tsx);
 `/loading/plan[?so=<id>]`, then `/loading/:id/plan?step=1|2`; opened by **New Loading (sheet)** on
@@ -924,6 +981,9 @@ default in a page — go through `useViewState` so the setting keeps reaching ev
 
 **ColumnPicker Apply is locked.** Checkbox changes and reorder both *stage*; nothing applies
 until **Apply**. Never make it immediate. Detail-page Fields pickers use the same component.
+The button lights up (`.btn.active`, same as an applied Search) when the view is non-default:
+`useColumns().customised` → `active` for column/field pickers, `groupBy.length > 0` for Group (CR-245). Status filters open on **All** on every grid and their
+`<select>` takes `.fbar select.on` (same indigo) when narrowed (CR-246).
 
 **Forms** — no negative values anywhere; pick lists are `Combobox` only and **always sourced
 from the DB masters, never a static array**; required marker sits in-box with a legend;

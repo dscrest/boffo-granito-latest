@@ -169,7 +169,8 @@ select:focus, textarea:focus {
   color: var(--text-muted); /* "All X" resting state */
   padding: 0 24px 0 10px;
 }
-.fbar select.on { color: var(--text-primary); }
+/* A filter is applied — same indigo as .btn.active (Search / Columns / Group, CR-245/246). */
+.fbar select.on { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
 .fbar select:focus, .page-head .right select:focus { border-color: var(--accent); }
 .lp-search input[type="text"] {
   height: 30px;

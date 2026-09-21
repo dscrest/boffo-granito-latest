@@ -61,7 +61,7 @@ export function Panels() {
   const [designFilter, setDesignFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move } = useColumns("panelsTableColumns", PANEL_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns", PANEL_COLUMNS, ["created", "modified"]);
   const [showNew, setShowNew] = useState(false);
   const [editRow, setEditRow] = useState<PanelRow | null>(null);
   const [cloneRow, setCloneRow] = useState<PanelRow | null>(null);
@@ -219,7 +219,7 @@ export function Panels() {
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search panel…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {can("panel_craft", "create") && (
           <button className="hbtn primary" onClick={() => setShowNew(true)}>
             <Icon name="plus" size={13} />

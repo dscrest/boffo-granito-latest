@@ -15,7 +15,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import { Combobox } from "@/ui/Combobox";
 import { fmt } from "@/lib/format";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
-import type { DesignRow, SoBand } from "./newLoadingRows";
+import { partialNote, type DesignRow, type SoBand } from "./newLoadingRows";
 import { useSessionPick, type SessionPickProps } from "./SessionItemsStep";
 import { walk } from "./SessionSheetView";
 import type { PalPlanLine } from "./palPlansApi";
@@ -111,22 +111,20 @@ export function PlanSheetStep({ onCancel, ...pickProps }: SessionPickProps & { o
         </td>
       </tr>,
       ...g.bands.flatMap((band) => band.designs.flatMap((row) =>
-        row.lines.map(({ line: l, blocked }) => {
+        row.lines.map(({ line: l, partial }) => {
           n += 1;
           if (shut) return null;
           const v = q(l);
-          const status = blocked ? "Not loadable" : v === 0 ? "Not planned" : v < l.boxes ? "Partial" : "Full";
+          const status = v === 0 ? "Not planned" : v < l.boxes ? "Partial" : "Full";
           return (
-            <tr key={l.id} className={blocked ? "blocked" : v > 0 ? "on" : undefined}>
+            <tr key={l.id} className={v > 0 ? "on" : undefined}>
               <td className="rn mono">{n}</td>
               <td className="cust nw">{l.customerName || "—"}</td>
               <td className="gapc" />
               {cols.visible.map((c) => <td key={c.key} className={c.className}>{c.render!({ band, row, l })}</td>)}
-              {blocked ? (
-                <td colSpan={3} className="num dim nw">{fmt(blocked.done)}/{fmt(blocked.total)} palletized — not loadable yet</td>
-              ) : (
+              {(
                 <>
-                  <td className="num mono">{fmt(l.boxes)}</td>
+                  <td className="num mono" title={partial ? partialNote(partial) : undefined}>{fmt(l.boxes)}{partial && <span className="dim"> / {fmt(partial.total)}</span>}</td>
                   <td className="qty">
                     <NumberInput
                       maxDecimals={0}
@@ -177,7 +175,7 @@ export function PlanSheetStep({ onCancel, ...pickProps }: SessionPickProps & { o
           <input type="search" className="set-search" style={{ margin: 0, flex: "0 1 260px" }} placeholder="Search design, batch, SO…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <button className={`seg-btn ${onlyPicked ? "active" : ""}`} aria-pressed={onlyPicked} onClick={() => setOnlyPicked((x) => !x)}>Only picked</button>
           <span style={{ flex: 1 }} />
-          <ColumnPicker columns={cols.ordered} hidden={cols.hidden} onToggle={cols.toggle} onMove={cols.move} />
+          <ColumnPicker columns={cols.ordered} hidden={cols.hidden} onToggle={cols.toggle} onMove={cols.move} active={cols.customised} />
         </div>
 
         {/* sheet */}

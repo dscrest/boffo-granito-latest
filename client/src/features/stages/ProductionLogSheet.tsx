@@ -1,5 +1,5 @@
 /* ============================================================
-   Record Production — /prod/record (CR-244). Make-to-stock output logged
+   Bulk Record Production — /prod/record (CR-244). Make-to-stock output logged
    the fast way: one ruled sheet (the Loading Plan sheet's .psheet skin), a
    row per item — Design · Batch · Date · Qty (+ Box Brand, Remark) — and ONE
    Save. Each row ends as a Completed production whose output is in stock.
@@ -171,7 +171,7 @@ export function ProductionLogSheet() {
     <div>
       <div className="page-head">
         <div>
-          <div className="title">Record Production</div>
+          <div className="title">Bulk Record Production</div>
         </div>
       </div>
 
@@ -182,7 +182,7 @@ export function ProductionLogSheet() {
           <span className="dim nw">Recorded by <b>{recordedBy || "—"}</b></span>
           <span style={{ flex: 1 }} />
           <span className="dim nw"><span className="req">*</span> Required</span>
-          <ColumnPicker columns={cols.ordered} hidden={cols.hidden} onToggle={cols.toggle} onMove={cols.move} />
+          <ColumnPicker columns={cols.ordered} hidden={cols.hidden} onToggle={cols.toggle} onMove={cols.move} active={cols.customised} />
         </div>
 
         <div className="pane-scroll" style={{ overflowX: "auto" }}>

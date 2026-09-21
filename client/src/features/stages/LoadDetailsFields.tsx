@@ -51,9 +51,13 @@ export const captureOf = (b: LoadBox): LoadingCapture => ({
   destination: b.destination,
 });
 
-export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned }: ReturnType<typeof useLoadDetails> & {
+export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned, part }: ReturnType<typeof useLoadDetails> & {
   /** Hide the fields the Loading Sheet owns (Vehicle No., Container No., seals, LR). */
   sheetOwned?: boolean;
+  /** Loading page (CR-247) renders the ONE field set in two places: "details" on top
+      (Size, Destination, Transporter, Supervisor), "vehicle" at the bottom (vehicle + container/seals/LR).
+      Omitted = everything, as in VehicleLoadModal. Returns bare fields for the caller's .form-grid. */
+  part?: "details" | "vehicle";
 }) {
   const text = (label: string, k: keyof LoadingCapture, placeholder: string) => (
     <label className="form-field">
@@ -61,39 +65,68 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
       <input value={capture[k] || ""} placeholder={placeholder} onChange={(e) => setCap(k, e.target.value)} />
     </label>
   );
+  const vehicleNo = (
+    <label className="form-field">
+      <span className="lbl">Vehicle Number</span>
+      <input value={vehicle.vehicle_number} autoFocus={!part} placeholder="e.g. GJ-01-AB-1234"
+        onChange={(e) => setVeh("vehicle_number", formatVehicleNumber(e.target.value))} />
+    </label>
+  );
+  const driver = (
+    <>
+      <label className="form-field">
+        <span className="lbl">Driver Name</span>
+        <input value={vehicle.driver_name} placeholder="Driver name" onChange={(e) => setVeh("driver_name", e.target.value)} />
+      </label>
+      <label className="form-field">
+        <span className="lbl">Mobile</span>
+        <input value={vehicle.mobile_number} placeholder="Mobile number" onChange={(e) => setVeh("mobile_number", e.target.value)} />
+      </label>
+    </>
+  );
+  const size = (
+    <label className="form-field">
+      <span className="lbl">Size</span>
+      <Combobox
+        value={capture.container_size || ""}
+        options={CONTAINER_TYPES.map((t) => ({ value: t, label: t }))}
+        onChange={(v) => setCap("container_size", v)}
+        placeholder="Container size…"
+        ariaLabel="Container size"
+      />
+    </label>
+  );
+  if (part === "details")
+    return (
+      <>
+        {size}
+        {text("Destination / Port", "destination", "Port / city")}
+        {text("Transporter", "transporter", "Carrier company")}
+        {text("Loading Supervisor", "loading_supervisor", "Name")}
+      </>
+    );
+  if (part === "vehicle")
+    return (
+      <>
+        {vehicleNo}
+        {driver}
+        {text("Container No.", "container_number", "e.g. MSCU1234567")}
+        {text("Line Seal", "line_seal", "Line seal no.")}
+        {text("Electronic Seal", "electronic_seal", "E-seal no.")}
+        {text("LR / Docket No.", "lr_number", "LR number")}
+      </>
+    );
   return (
     <div className="form-section">
       <div className="form-section-title">Vehicle</div>
       <div className="form-grid">
-        {!sheetOwned && (
-          <label className="form-field">
-            <span className="lbl">Vehicle Number</span>
-            <input value={vehicle.vehicle_number} autoFocus placeholder="e.g. GJ-01-AB-1234"
-              onChange={(e) => setVeh("vehicle_number", formatVehicleNumber(e.target.value))} />
-          </label>
-        )}
-        <label className="form-field">
-          <span className="lbl">Driver Name</span>
-          <input value={vehicle.driver_name} placeholder="Driver name" onChange={(e) => setVeh("driver_name", e.target.value)} />
-        </label>
-        <label className="form-field">
-          <span className="lbl">Mobile</span>
-          <input value={vehicle.mobile_number} placeholder="Mobile number" onChange={(e) => setVeh("mobile_number", e.target.value)} />
-        </label>
+        {!sheetOwned && vehicleNo}
+        {driver}
       </div>
       <div className="form-section-title" style={{ marginTop: 14 }}>Loading details</div>
       <div className="form-grid">
         {!sheetOwned && text("Container No.", "container_number", "e.g. MSCU1234567")}
-        <label className="form-field">
-          <span className="lbl">Size</span>
-          <Combobox
-            value={capture.container_size || ""}
-            options={CONTAINER_TYPES.map((t) => ({ value: t, label: t }))}
-            onChange={(v) => setCap("container_size", v)}
-            placeholder="Container size…"
-            ariaLabel="Container size"
-          />
-        </label>
+        {size}
         {!sheetOwned && text("Line Seal", "line_seal", "Line seal no.")}
         {!sheetOwned && text("Electronic Seal", "electronic_seal", "E-seal no.")}
         {text("Transporter", "transporter", "Carrier company")}

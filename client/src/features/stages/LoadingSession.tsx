@@ -1,12 +1,18 @@
 /* ============================================================
    Loading Session — ONE scrolling page for New Loading AND the loading
    detail's Edit (no steps since 2026-09-21; CR-203's stepper is gone):
-     Loaded items      (edit) change qty / remove what is already loaded
-     Add pallets       the SessionItemsStep pick list (Ready-for-Loading stock)
-     Add items         order items straight in, no palletization (/send-to-loading)
-     Vehicle & details the full LoadDetailsFields
+   laid out like a Sales Order form (CR-247):
+     Customer          Combobox on top — an optional FILTER (CR-252): blank = every customer's
+                       stock, a container may mix customers
+     Item Table        palletized Ready-for-Loading stock only: ONE row per item (CR-256) — its
+                       batches combined; the Batches cell opens the batch picker (boxes per batch), Boxes typed
+                       on the row drain the chosen batches oldest first;
+                       Add New Row + Add Items in Bulk; (edit) loaded items are its first rows
+     Totals row        under the Boxes / Pallets columns + container fill % (CR-253)
+     Plan hint         per order: next planned container + Fill from plan (CR-255)
+     Tabs              Loading Details | Vehicle Details, below the items (CR-254)
    One Save runs it all in order: vehicle → (mint the LoadBox) → unload /
-   shrink → add pallets → add items → load details. It stops at the first
+   shrink → add pallets → load details. It stops at the first
    failure; what already saved stays saved and the page reloads for a retry.
    A dispatched loading shows the details section only (the server keeps
    those editable; its lines are immutable).
@@ -15,18 +21,19 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Combobox } from "@/ui/Combobox";
 import { Icon } from "@/ui/Icon";
 import { NumberInput } from "@/ui/NumberInput";
 import { toast } from "@/ui/Toast";
 import { EmptyState } from "@/ui/States";
+import { tabStyle } from "@/features/common/RecordDetail";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
-import type { Order } from "@/data";
-import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { resolveVehicle } from "@/features/masters/vehiclesApi";
 import { LoadDetailsFields, captureOf, useLoadDetails } from "./LoadDetailsFields";
-import { SessionItemsStep, useSessionPick } from "./SessionItemsStep";
-import { remainingOf, soSendable } from "./SendToLoadingModal";
+import { BulkLoadItemsModal } from "./BulkLoadItemsModal";
+import { bandLabel, batchLabel, batchSummary, itemOptions, openLines, spreadQty, type DesignRow } from "./newLoadingRows";
+import { useSessionPick } from "./SessionItemsStep";
 import { UNLOAD, resolveLoadSheetEdit, type LoadSheetDraft } from "./loadSheetEdit";
 import { duplicateSeals } from "./sealChecks";
 import {
@@ -36,7 +43,6 @@ import {
   createLoadBox,
   invalidatePalPlans,
   listPalPlans,
-  sendToLoading,
   setLineBox,
   updateLoadBox,
   type LoadBox,
@@ -46,6 +52,11 @@ import {
 } from "./palPlansApi";
 
 const NEW = "__new";
+/** One row per item (CR-256): its batches combined; `off` = its batches the batch picker left out. */
+interface ItemRow { key: number; /** DesignRow.key */ rowKey: string; off: string[] }
+const BLANK = { rowKey: "", off: [] as string[] };
+const sumPallets = (parts: { l: PalPlanLine; n: number }[]) => parts.reduce((s, x) => s + (x.l.boxesPerPallet > 0 && x.n > 0 ? Math.ceil(x.n / x.l.boxesPerPallet) : 0), 0);
+const palletNames = (ls: PalPlanLine[]) => [...new Set(ls.map((l) => l.palletName).filter(Boolean))].join(" / ");
 
 export function LoadingSession() {
   const { id = "" } = useParams();
@@ -55,16 +66,14 @@ export function LoadingSession() {
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
   const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
-  const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [loading, setLoading] = useState(true);
   const load = async () => {
-    const [res, ord] = await Promise.all([listPalPlans(), listOrders()]);
+    const res = await listPalPlans();
     setLoading(false);
     if (res.ok) {
       setPlans(res.plans);
       setBoxes(res.boxes);
     }
-    if (ord.ok) setOrders(ord.orders);
   };
   useEffect(() => {
     void load();
@@ -76,23 +85,70 @@ export function LoadingSession() {
     return loading ? <div className="muted mono" style={{ padding: 24 }}>Loading…</div> : <EmptyState title="Loading not found" />;
   }
   // Keyed by box: the details form seeds once from it.
-  return <SessionPage key={box?.id || NEW} box={box} plans={plans} boxes={boxes} orders={orders} presetSalesOrderId={box ? undefined : params.get("so") || undefined} reload={load} />;
+  return <SessionPage key={box?.id || NEW} box={box} plans={plans} boxes={boxes} presetSalesOrderId={box ? undefined : params.get("so") || undefined} reload={load} />;
 }
 
-function SessionPage({ box, plans, boxes, orders, presetSalesOrderId, reload }: {
-  box?: LoadBox; plans: PalPlan[]; boxes: LoadBox[]; orders: Order[]; presetSalesOrderId?: string; reload: () => Promise<void>;
+function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
+  box?: LoadBox; plans: PalPlan[]; boxes: LoadBox[]; presetSalesOrderId?: string; reload: () => Promise<void>;
 }) {
   const navigate = useNavigate();
   const open = !box || box.status === "Open";
-  const pick = useSessionPick({ plans, boxes, box, presetSalesOrderId, onSaved: () => undefined });
+  const pick = useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer: true, onSaved: () => undefined });
   const details = useLoadDetails(box, box ? captureOf(box) : undefined);
   // Loaded lines: typed qty per line id ("0" = remove).
   const [loadedDraft, setLoadedDraft] = useState<Record<string, string>>({});
-  // Direct order items: boxes per OrderItem id.
-  const [direct, setDirect] = useState<Map<string, number>>(new Map());
   const [busy, setBusy] = useState(false);
+  // Item Table rows. The boxes live in pick.qty (the ONE selection state, per line); a row only names its item.
+  const [rows, setRows] = useState<ItemRow[]>([{ key: 0, ...BLANK }]);
+  /** The batch picker: "all" = Add Items in Bulk, else the DesignRow.key of the row whose batches it edits. */
+  const [picker, setPicker] = useState("");
+  const [tab, setTab] = useState<"details" | "vehicle">("details");
 
   const loaded = pick.boxLines;
+  // Rows resolve over EVERY band — the Customer filter only narrows the pick lists (CR-252).
+  const designRows = useMemo(() => new Map(pick.allBands.flatMap((b) => b.designs).map((r) => [r.key, r])), [pick.allBands]);
+  const taken = new Set(rows.map((r) => r.rowKey).filter(Boolean));
+  const nextKey = () => rows.reduce((m, r) => Math.max(m, r.key), 0) + 1;
+  const patchRow = (key: number, p: Partial<ItemRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
+  const rowQty = (dr: DesignRow) => openLines(dr).reduce((s, l) => s + (pick.qty.get(l.id) || 0), 0);
+  const release = (r: ItemRow) => {
+    const dr = designRows.get(r.rowKey);
+    if (dr) pick.setDesign(dr, 0);
+  };
+  /** Picking an item prefills everything it has ready. */
+  const setItem = (r: ItemRow, rowKey: string) => {
+    release(r);
+    const dr = rowKey && !taken.has(rowKey) ? designRows.get(rowKey) : undefined;
+    if (dr) pick.setDesign(dr, dr.ready);
+    patchRow(r.key, { rowKey: dr ? rowKey : "", off: [] });
+  };
+  const removeRow = (r: ItemRow) => {
+    release(r);
+    setRows((rs) => (rs.length > 1 ? rs.filter((x) => x.key !== r.key) : [{ key: nextKey(), ...BLANK }]));
+  };
+  /** Shows `keys` as rows: blank rows give way, an item already on a row is not repeated; `off` re-derived from the picks. */
+  const addRows = (keys: string[], qtyOf: (lineId: string) => number = () => 1) => {
+    let k = nextKey();
+    // Nothing chosen = nothing left out (a row always has batches to draw on).
+    const offOf = (rowKey: string) => {
+      const ls = openLines(designRows.get(rowKey)!);
+      const off = ls.filter((l) => qtyOf(l.id) <= 0).map((l) => l.id);
+      return off.length === ls.length ? [] : off;
+    };
+    const uniq = [...new Set(keys)];
+    setRows((rs) => [
+      ...rs.filter((r) => r.rowKey).map((r) => (uniq.includes(r.rowKey) ? { ...r, off: offOf(r.rowKey) } : r)),
+      ...uniq.filter((rowKey) => !taken.has(rowKey)).map((rowKey) => ({ key: k++, rowKey, off: offOf(rowKey) })),
+    ]);
+  };
+  /** The picker's Apply: its WHOLE scope is rewritten — a batch left out goes back to 0. */
+  const applyPicks = (scope: DesignRow[], picks: { rowKey: string; lineId: string; boxes: number }[]) => {
+    const want = new Map(picks.map((p) => [p.lineId, p.boxes]));
+    for (const dr of scope) for (const l of openLines(dr)) pick.setLine(l, want.get(l.id) || 0);
+    // A one-item scope re-derives that row even when everything was deselected.
+    addRows([...picks.map((p) => p.rowKey), ...(scope.length === 1 ? [scope[0].key] : [])], (id) => want.get(id) || 0);
+    setPicker("");
+  };
   const draftOf = (l: PalPlanLine): LoadSheetDraft | undefined => {
     const v = loadedDraft[l.id];
     if (v == null || v.trim() === "") return undefined;
@@ -100,19 +156,17 @@ function SessionPage({ box, plans, boxes, orders, presetSalesOrderId, reload }: 
   };
   const loadedOps = loaded.map((l) => ({ l, ...resolveLoadSheetEdit(l, box, [], draftOf(l)) }));
   const loadedError = loadedOps.find((o) => o.error)?.error || "";
-
-  // Order items that can go straight in: this customer's (or the preset SO's), with boxes left to send.
-  const directBands = useMemo(() => {
-    const m = new Map<string, Order[]>();
-    for (const o of orders) {
-      if (!o.salesOrderId || !soSendable(o) || remainingOf(o) <= 0) continue;
-      if (presetSalesOrderId ? o.salesOrderId !== presetSalesOrderId : !pick.customerId || o.customerId !== pick.customerId) continue;
-      m.set(o.salesOrderId, [...(m.get(o.salesOrderId) || []), o]);
-    }
-    return [...m.entries()];
-  }, [orders, presetSalesOrderId, pick.customerId]);
-  const directQty = (o: Order) => Math.min(direct.get(o.id) || 0, remainingOf(o));
-  const directTotal = directBands.reduce((s, [, items]) => s + items.reduce((n, o) => n + directQty(o), 0), 0);
+  // Loaded lines shown one row per item too; a typed total is kept oldest batch first (per-line drafts underneath).
+  const keptOf = (l: PalPlanLine) => {
+    const n = parseInt(loadedDraft[l.id] ?? "", 10);
+    return n >= 0 ? Math.min(n, l.boxes) : l.boxes;
+  };
+  const loadedGroups = [...loaded.reduce((m, l) => {
+    const k = `${l.salesOrderId}|${l.designId}`;
+    return m.set(k, [...(m.get(k) ?? []), l]);
+  }, new Map<string, PalPlanLine[]>()).values()].map((ls) => [...ls].sort((a, b) => a.createdTime.localeCompare(b.createdTime)));
+  const setGroupQty = (ls: PalPlanLine[], v: number) =>
+    setLoadedDraft((p) => ({ ...p, ...Object.fromEntries([...spreadQty(ls, v)].map(([id, n]) => [id, String(n)])) }));
 
   const dups = duplicateSeals(
     [
@@ -151,13 +205,6 @@ function SessionPage({ box, plans, boxes, orders, presetSalesOrderId, reload }: 
       const addErr = await pick.saveAdds(bid);
       if (addErr) return [addErr, bid];
 
-      for (const [soId, items] of directBands) {
-        const lines = items.filter((o) => directQty(o) > 0).map((o) => ({ order_item: o.id, boxes: directQty(o) }));
-        if (lines.length === 0) continue;
-        const r = await sendToLoading({ sales_order: soId, box: bid, lines });
-        if (!r.ok) return [r.error || "Could not add the order items", bid];
-      }
-      setDirect(new Map());
     }
 
     if (box) {
@@ -191,137 +238,206 @@ function SessionPage({ box, plans, boxes, orders, presetSalesOrderId, reload }: 
     if (!box && bid) navigate(`${detailUrl(bid)}/session`, { replace: true });
   };
 
-  const nothingNew = !box && pick.totalBoxes + directTotal === 0;
-  const title = (t: string, sub?: string) => (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "18px 0 8px" }}>
-      <span style={{ fontWeight: 700, fontSize: "var(--t-lg)" }}>{t}</span>
-      {sub && <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{sub}</span>}
-    </div>
-  );
+  const customerLocked = !pick.showRail || !open;
+  const customerOptions = [
+    ...pick.customers.map((c) => ({ value: c.id, label: c.name, hint: `${fmt(c.ready)} boxes ready` })),
+    // A locked customer with nothing left to load is not in the ready list — still name them.
+    ...(pick.customerId && !pick.customers.some((c) => c.id === pick.customerId)
+      ? [{ value: pick.customerId, label: loaded[0]?.customerName || pick.customerId }]
+      : []),
+  ];
 
+  // Totals row: loaded lines after their typed edits + the new picks.
+  const kept = loaded.map((l) => ({ l, n: keptOf(l) })).filter((x) => x.n > 0);
+  // "lines" counts item rows, the way the table shows them.
+  const totalLines = new Set([...kept.map((x) => x.l), ...pick.picked].map((l) => `${l.salesOrderId}|${l.designId}`)).size;
+  const totalBoxes = kept.reduce((s, x) => s + x.n, 0) + pick.totalBoxes;
+  const totalPallets = sumPallets(kept) + pick.totalPallets;
+  const planHints = pick.bands.flatMap((band) => {
+    const next = pick.planNext(band);
+    return next ? [{ band, next, boxes: next.lines.reduce((s, ln) => s + ln.boxes, 0) }] : [];
+  });
+
+  const nothingNew = !box && pick.totalBoxes === 0;
   return (
     <div>
       {/* No page title (user 2026-09-19): the strip carries the loading's identity + Back. */}
       <nav className="steps" aria-label="Loading">
         <span style={{ fontWeight: 700 }}>{box ? "Edit Loading" : "New Loading"}</span>
-        {box && <span className="mono dim nw" style={{ marginLeft: "auto" }}>{boxLabel(box)}{loaded[0]?.customerName ? ` · ${loaded[0].customerName}` : ""}</span>}
+        {box && <span className="mono dim nw" style={{ marginLeft: "auto" }}>{boxLabel(box)}{new Set(loaded.map((l) => l.customerId)).size === 1 && loaded[0].customerName ? ` · ${loaded[0].customerName}` : ""}</span>}
         <button className="hbtn" style={box ? undefined : { marginLeft: "auto" }} onClick={back}>
           <Icon name="chev-l" size={13} /> {box ? "Back to loading" : "Back to Loading"}
         </button>
       </nav>
 
-      {box && open && loaded.length > 0 && (
-        <>
-          {title("Loaded items", "type fewer boxes to send the rest back to Ready for Loading · 0 removes the item")}
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Design</th>
-                  <th>Batch</th>
-                  <th>Pallet</th>
-                  <th>Order</th>
-                  <th className="num" style={{ textAlign: "right" }}>Loaded</th>
-                  <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                  <th style={{ width: 40 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {loadedOps.map(({ l, error }) => {
-                  const removed = draftOf(l)?.boxId === UNLOAD;
-                  return (
-                    <tr key={l.id} style={removed ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
-                      <td><span className="design-name">{l.designLabel}</span></td>
-                      <td className="nw mono">{l.batchNumber || "—"}</td>
-                      <td className="nw">{l.palletName || "—"}</td>
-                      <td className="nw mono">{l.soNumber || "—"}</td>
-                      <td className="num mono">{fmt(l.boxes)}</td>
-                      <td className="num" title={error || undefined}>
-                        <NumberInput
-                          maxDecimals={0}
-                          value={loadedDraft[l.id] ?? String(l.boxes)}
-                          aria-label={`Boxes loaded, ${l.designLabel} batch ${l.batchNumber || "—"}`}
-                          aria-invalid={!!error}
-                          onChange={(e) => setLoadedDraft((p) => ({ ...p, [l.id]: e.target.value }))}
-                          style={{ width: 90, textAlign: "right", ...(error ? { borderColor: "var(--c-red)" } : {}) }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          className="btn x"
-                          title={removed ? "Keep this item" : "Remove from this loading"}
-                          onClick={() => setLoadedDraft((p) => ({ ...p, [l.id]: removed ? "" : "0" }))}
-                        >
-                          <Icon name={removed ? "refresh" : "x"} size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      <div className="form-section">
+        <div className="form-grid">
+          <label className="form-field">
+            <span className="lbl">Customer</span>
+            <Combobox
+              value={pick.customerId}
+              options={customerOptions}
+              onChange={pick.pickCustomer}
+              placeholder="All customers"
+              ariaLabel="Customer"
+              disabled={customerLocked}
+            />
+          </label>
+        </div>
+      </div>
 
       {open && (
-        <>
-          {title("Add pallets", "palletized stock that is Ready for Loading")}
-          {/* The pick list scrolls inside its own panels (.session-fill) — give it a fixed window on this page. */}
-          <div style={{ height: 460, display: "flex", flexDirection: "column" }}>
-            <SessionItemsStep pick={pick} presetSalesOrderId={presetSalesOrderId} />
-          </div>
+        <div className="form-section">
+          <div className="form-section-title">Item Table</div>
+          <div className="ord-lines">
+            <div className="ord-line ord-line-head qt-line load-line">
+              <span>Item Details</span>
+              <span>Batches</span>
+              <span style={{ textAlign: "right" }}>Boxes</span>
+              <span style={{ textAlign: "right" }}>Pallets</span>
+              <span>Pallet</span>
+              <span>Box Brand</span>
+              <span />
+            </div>
 
-          {title("Add items", "order items straight into this loading — no palletization")}
-          <div className="card" style={{ overflowX: "auto" }}>
-            {directBands.length === 0 ? (
-              <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "12px 14px" }}>
-                {pick.customerId || presetSalesOrderId ? "No order items left to send." : "Pick a customer above."}
+            {/* Already loaded (edit), one row per item: fewer boxes sends the rest (newest batch first) back to Ready for Loading; ✕ / 0 unloads. */}
+            {loadedGroups.map((ls) => {
+              const l0 = ls[0];
+              const total = ls.reduce((n, l) => n + l.boxes, 0);
+              const keptN = ls.reduce((n, l) => n + keptOf(l), 0);
+              const touched = ls.some((l) => (loadedDraft[l.id] ?? "").trim() !== "");
+              const removed = touched && keptN === 0;
+              const error = loadedOps.find((o) => o.error && ls.includes(o.l))?.error;
+              const batches = ls.map((l) => `${batchLabel(l)} · ${fmt(l.boxes)}`);
+              return (
+                <div key={l0.id} className="ord-line qt-line load-line" style={removed ? { opacity: 0.5 } : undefined}>
+                  <div className="form-field"><input readOnly tabIndex={-1} value={`${l0.designLabel} · ${l0.soNumber || "—"}`} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} title={batches.join("\n")} value={ls.length === 1 ? l0.batchNumber || "—" : `${ls.length} batches`} /></div>
+                  <div className="form-field" title={error || undefined}>
+                    <NumberInput
+                      maxDecimals={0}
+                      value={touched ? String(keptN) : String(total)}
+                      aria-label={`Boxes loaded, ${l0.designLabel}`}
+                      aria-invalid={!!error}
+                      onChange={(e) => setGroupQty(ls, Math.min(total, Number(e.target.value) || 0))}
+                      style={{ textAlign: "right", ...(error ? { borderColor: "var(--c-red)" } : {}) }}
+                    />
+                  </div>
+                  <div className="form-field"><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={fmt(sumPallets(ls.map((l) => ({ l, n: keptOf(l) })))) || ""} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} value={palletNames(ls) || "—"} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} value={pick.brandName(l0.boxBrandId || l0.soBoxBrandId || l0.customerBoxBrandId) || "—"} /></div>
+                  <button
+                    className="btn ord-rm"
+                    title={removed ? "Keep this item" : "Remove from this loading"}
+                    onClick={() => setLoadedDraft((p) => ({ ...p, ...Object.fromEntries(ls.map((l) => [l.id, removed ? "" : "0"])) }))}
+                  >
+                    <Icon name={removed ? "refresh" : "x"} size={13} />
+                  </button>
+                </div>
+              );
+            })}
+
+            {rows.map((r) => {
+              const dr = designRows.get(r.rowKey);
+              const skip = new Set(r.off);
+              const v = dr ? rowQty(dr) : 0;
+              const max = dr ? openLines(dr).reduce((n, l) => n + (skip.has(l.id) ? 0 : l.boxes), 0) : 0;
+              const used = dr ? openLines(dr).filter((l) => (pick.qty.get(l.id) || 0) > 0) : [];
+              return (
+                <div key={r.key} className="ord-line qt-line load-line">
+                  <Combobox
+                    value={r.rowKey}
+                    options={itemOptions(pick.bands, new Set([...taken].filter((k) => k !== r.rowKey)))}
+                    onChange={(k) => setItem(r, k)}
+                    placeholder="Type or click to select an item…"
+                    ariaLabel="Item"
+                  />
+                  <div className="combo">
+                    <input
+                      className="combo-input"
+                      readOnly
+                      disabled={!dr}
+                      aria-label="Batches"
+                      aria-haspopup="dialog"
+                      title={dr ? "Choose batches and boxes" : undefined}
+                      value={dr ? batchSummary(openLines(dr), v ? new Set(openLines(dr).filter((l) => !pick.qty.get(l.id)).map((l) => l.id)) : skip) : ""}
+                      placeholder="—"
+                      style={{ cursor: dr ? "pointer" : undefined }}
+                      onClick={() => setPicker(r.rowKey)}
+                      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setPicker(r.rowKey)}
+                    />
+                  </div>
+                  <div className="form-field" title={dr ? `${fmt(max)} boxes ready` : undefined}>
+                    <NumberInput
+                      maxDecimals={0}
+                      value={dr ? v || "" : ""}
+                      placeholder="0"
+                      disabled={!dr}
+                      aria-label="Boxes"
+                      onChange={(e) => dr && pick.setDesign(dr, Number(e.target.value) || 0, skip)}
+                      style={{ textAlign: "right" }}
+                    />
+                  </div>
+                  <div className="form-field"><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={dr && v ? fmt(sumPallets(used.map((l) => ({ l, n: pick.qty.get(l.id)! })))) : ""} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} value={dr ? palletNames(used.length ? used : openLines(dr)) : ""} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} value={dr ? pick.brandName(dr.brandId) : ""} /></div>
+                  <button className="btn ord-rm" title="Remove row" onClick={() => removeRow(r)}><Icon name="x" size={13} /></button>
+                </div>
+              );
+            })}
+
+            {/* Totals sit under their columns (same grid as the rows) — loaded (after edits) + picked. */}
+            <div className="ord-line qt-line load-line" style={{ fontWeight: 700, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+              <span>Total <span className="dim" style={{ fontWeight: 400 }}>· {fmt(totalLines)} lines</span></span>
+              <span />
+              <span className="mono" style={{ textAlign: "right", paddingRight: 10 }}>{fmt(totalBoxes)}</span>
+              <span className="mono" style={{ textAlign: "right", paddingRight: 10 }}>{fmt(totalPallets)}</span>
+              <span className="mono nw" style={{ fontWeight: 400, color: pick.over ? "var(--c-amber)" : "var(--muted)" }} title="Share of one container">
+                {pick.fill > 0 ? `${Math.round(pick.fill * 100)}% of a container` : ""}
+              </span>
+              <span />
+              <span />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+              <button className="btn" onClick={() => setRows((rs) => [...rs, { key: nextKey(), ...BLANK }])}>
+                <Icon name="plus" size={12} /> Add New Row
+              </button>
+              <button className="btn" onClick={() => setPicker("all")}>
+                <Icon name="plus" size={12} /> Add Items in Bulk
+              </button>
+            </div>
+
+            {/* Container Planning (CR-255): the order's next unsent planned container — a helper, never a gate. */}
+            {planHints.map(({ band, next, boxes: planned }) => (
+              <div key={band.salesOrderId} className="dim" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, fontSize: "var(--t-sm)", flexWrap: "wrap" }}>
+                <Icon name="package" size={13} />
+                <span>
+                  <span className="mono">{bandLabel(band)}</span> · container plan: Container {next.ci + 1} of {next.of} · <span className="mono">{fmt(planned)}</span> boxes
+                </span>
+                <button className="btn" onClick={() => addRows(pick.fillFromPlan(band).map((f) => f.rowKey))}>Fill from plan</button>
               </div>
-            ) : (
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Design</th>
-                    <th>Order</th>
-                    <th className="num" style={{ textAlign: "right" }}>Ordered</th>
-                    <th className="num" style={{ textAlign: "right" }}>Available</th>
-                    <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {directBands.flatMap(([, items]) =>
-                    items.map((o) => (
-                      <tr key={o.id} style={directQty(o) > 0 ? { background: "var(--accent-soft)" } : undefined}>
-                        <td><span className="design-name">{o.design}</span></td>
-                        <td className="nw mono">{o.orderNumber || o.poNumber || "—"}</td>
-                        <td className="num mono">{fmt(o.orderQty)}</td>
-                        <td className="num mono">{fmt(remainingOf(o))}</td>
-                        <td className="num">
-                          <NumberInput
-                            maxDecimals={0}
-                            value={direct.get(o.id) || ""}
-                            placeholder="0"
-                            aria-label={`Boxes to add, ${o.design}`}
-                            onChange={(e) =>
-                              setDirect((p) => new Map(p).set(o.id, Math.max(0, Math.min(remainingOf(o), Math.floor(Number(e.target.value)) || 0))))
-                            }
-                            style={{ width: 90, textAlign: "right" }}
-                          />
-                        </td>
-                      </tr>
-                    )),
-                  )}
-                </tbody>
-              </table>
-            )}
+            ))}
           </div>
-        </>
+        </div>
       )}
 
-      {title("Vehicle & load details")}
-      <div className="card" style={{ padding: "14px 16px" }}>
-        <LoadDetailsFields {...details} />
+      <div className="form-section" style={{ marginTop: 18 }}>
+        <div className="row" role="tablist" style={{ gap: 4, marginBottom: 12, borderBottom: "1px solid var(--border)" }}>
+          <button role="tab" aria-selected={tab === "details"} onClick={() => setTab("details")} style={tabStyle(tab === "details")}>Loading Details</button>
+          <button role="tab" aria-selected={tab === "vehicle"} onClick={() => setTab("vehicle")} style={tabStyle(tab === "vehicle")}>Vehicle Details</button>
+        </div>
+        {/* Both stay mounted — one Save reads the same `details` state either way. */}
+        <div className="form-grid" style={tab === "details" ? undefined : { display: "none" }}>
+          <label className="form-field">
+            <span className="lbl">Loading No.</span>
+            <input readOnly tabIndex={-1} value={box ? boxLabel(box) : "Auto"} />
+          </label>
+          <LoadDetailsFields {...details} part="details" />
+        </div>
+        <div className="form-grid" style={tab === "vehicle" ? undefined : { display: "none" }}>
+          <LoadDetailsFields {...details} part="vehicle" />
+        </div>
       </div>
       {dups.map((d) => (
         <div key={d.field} className="card" role="alert" style={{ marginTop: 10, padding: "9px 12px", display: "flex", gap: 8, alignItems: "center", borderColor: "var(--c-amber)", color: "var(--c-amber)" }}>
@@ -330,9 +446,23 @@ function SessionPage({ box, plans, boxes, orders, presetSalesOrderId, reload }: 
         </div>
       ))}
 
+      {picker && (() => {
+        const one = picker === "all" ? undefined : designRows.get(picker);
+        const bands = one ? pick.allBands.flatMap((b) => (b.designs.includes(one) ? [{ ...b, designs: [one] }] : [])) : pick.bands;
+        return (
+          <BulkLoadItemsModal
+            bands={bands}
+            initial={pick.qty}
+            title={one ? `Batches · ${one.designLabel}` : undefined}
+            onClose={() => setPicker("")}
+            onAdd={(picks) => applyPicks(bands.flatMap((b) => b.designs), picks)}
+          />
+        );
+      })()}
+
       <div className="session-foot">
         <span className="mono dim" style={{ flex: 1, fontSize: "var(--t-sm)", color: loadedError ? "var(--c-red)" : undefined }}>
-          {loadedError || (pick.totalBoxes + directTotal > 0 && `Adding ${fmt(pick.totalBoxes + directTotal)} boxes${pick.totalPallets > 0 ? ` · ${fmt(pick.totalPallets)} pallets` : ""}`)}
+          {loadedError}
         </span>
         <button className="btn" onClick={back} disabled={busy}>Cancel</button>
         <button className="hbtn primary" disabled={busy || nothingNew || !!loadedError} onClick={() => void save()}>

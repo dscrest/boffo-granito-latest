@@ -517,7 +517,7 @@ export function QuoteDetail() {
                 </button>
               </div>
               {view === "details" && (
-                <ColumnPicker columns={fields.ordered} hidden={fields.hidden} onToggle={fields.toggle} onMove={fields.move} />
+                <ColumnPicker columns={fields.ordered} hidden={fields.hidden} onToggle={fields.toggle} onMove={fields.move} active={fields.customised} />
               )}
             </>
           )}

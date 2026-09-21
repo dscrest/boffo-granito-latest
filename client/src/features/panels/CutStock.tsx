@@ -51,7 +51,7 @@ export function CutStock() {
   const [designFilter, setDesignFilter] = useState("");
   // null = closed; {} = blank Adjust; ids = prefilled from a row click.
   const [adjust, setAdjust] = useState<{ design?: string; cutSize?: string } | null>(null);
-  const { ordered, visible, hidden, toggle, move } = useColumns("cutStockColumns", STOCK_COLUMNS, ["modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("cutStockColumns", STOCK_COLUMNS, ["modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -135,7 +135,7 @@ export function CutStock() {
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search design or cut size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {canAdjust && (
           <button className="hbtn primary" onClick={() => setAdjust({})}>
             <Icon name="plus" size={13} />

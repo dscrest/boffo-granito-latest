@@ -95,8 +95,18 @@ export function useColumns<D extends ColumnDef>(storageKey: string, defs: D[], d
       return next;
     });
 
+  /* True when the view differs from the code default (order or hidden set) —
+     lights the picker button. Compared over current defs only, so schema drift
+     or stale stored keys never flag it. */
+  const customised = useMemo(() => {
+    if (ordered.some((c, i) => c.key !== defs[i]?.key)) return true;
+    const dh = new Set(defaultHidden);
+    return defs.some((d) => hidden.has(d.key) !== dh.has(d.key));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, defs, hidden, defaultHidden.join(" ")]);
+
   const show = (key: string) => !hidden.has(key);
-  return { ordered, visible, hidden, toggle, move, show };
+  return { ordered, visible, hidden, toggle, move, show, customised };
 }
 
 /** Legacy hook — hidden set only. Prefer useColumns for new/converted grids. */
@@ -121,6 +131,7 @@ export function ColumnPicker({
   onToggle,
   onMove,
   onClear,
+  active,
   label,
   icon = "columns",
   title = "Columns — show / hide / reorder",
@@ -132,6 +143,8 @@ export function ColumnPicker({
   onMove?: (keys: string[]) => void;
   /** When provided, a "Clear" button resets to the empty/default selection. */
   onClear?: () => void;
+  /** Highlights the button (same look as an applied Search) — view is non-default. */
+  active?: boolean;
   /** Optional text next to the icon (icon-only when omitted, as in grids). */
   label?: string;
   icon?: string;
@@ -209,9 +222,9 @@ export function ColumnPicker({
   return (
     <div className="hdr-pop" ref={ref}>
       <button
-        className="btn"
+        className={`btn${active ? " active" : ""}`}
         onClick={toggleOpen}
-        title={title}
+        title={active ? `${title} — customised` : title}
         aria-label={title}
         style={label ? { gap: 6 } : undefined}
       >

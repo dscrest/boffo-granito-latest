@@ -75,7 +75,7 @@ export function Palletizations() {
   const presetOrderId = params.get("fromOrder") || "";
 
   const COLS = useMemo(() => columns(), []);
-  const { ordered, visible, hidden, toggle, move } = useColumns("palletisationsColumns", COLS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletisationsColumns", COLS, ["created", "modified"]);
 
   const [rows, setRows] = useState<PalletisationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,7 +183,7 @@ export function Palletizations() {
 
       <div className="fbar" style={{ marginBottom: 12 }}>
         <Icon name="filter" size={12} />
-        <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+        <select className={tab !== "all" ? "on" : undefined} value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
           {TABS.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label} ({tabCount(t.id)})
@@ -196,7 +196,7 @@ export function Palletizations() {
           <input type="text" placeholder="Search SO, design, pallet…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <AdvancedFilterButton title="Palletizations" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {can("stages", "create") && (
           <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />

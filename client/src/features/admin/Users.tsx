@@ -78,7 +78,7 @@ export function UsersAdmin() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [roleF, setRoleF] = useState("");
-  const { ordered, visible, hidden, toggle, move } = useColumns("usersTableColumns", USER_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("usersTableColumns", USER_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -263,7 +263,7 @@ export function UsersAdmin() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
       </div>
 
       <div className="card">

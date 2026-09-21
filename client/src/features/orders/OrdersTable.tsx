@@ -155,7 +155,7 @@ export function OrdersTable() {
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("orders.criteria", {});
   const COLS = useMemo(() => soColumns(), []);
   // Fresh storage key (old ordersTableColumns prefs were per-line-item columns).
-  const { ordered, visible, hidden, toggle, move } = useColumns("soGridColumns", COLS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("soGridColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [loading, setLoading] = useState(() => cachedOrders() == null);
@@ -330,7 +330,7 @@ export function OrdersTable() {
       ) : (
         <div className="fbar" style={{ marginBottom: 12 }}>
           <Icon name="filter" size={12} />
-          <select value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
+          <select className={tab !== "all" ? "on" : undefined} value={tab} onChange={(e) => setTab(e.target.value)} title="Filter by status">
             {STATUS_TABS.map((t) => (
               <option key={t} value={t}>
                 {t === "all" ? "All" : soStatusLabel(t)} ({tabCount(t)})
@@ -348,7 +348,7 @@ export function OrdersTable() {
             />
           </span>
           <AdvancedFilterButton title="Sales Orders" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           <ViewToggle />
           {can("orders", "create") && (
             <button className="hbtn primary" onClick={() => navigate("/orders/new")} title="New Order">
