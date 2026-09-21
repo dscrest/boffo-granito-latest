@@ -133,31 +133,31 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/packing",
       waitMs: 5000,
       title: "Views and stages",
-      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress — fully palletised batches move on to Ready for Loading on the Loading and Dispatch page). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
+      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress — fully palletized batches move on to Ready for Loading on the Loading and Dispatch page). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",
       title: "Where the quantities come from",
-      body: "Recording production feeds this board. On the Production page, use Record New Production (or the + on a production row) to enter output batch-wise — the recorded boxes queue up here automatically.",
+      body: "Recording production feeds this board. On the Production page, use Start New Production to open a job, then the + on its row (Log Production) to enter output batch-wise — the recorded boxes queue up here automatically.",
     },
     {
       anchor: "pal-selbar",
       route: "/packing",
       waitMs: 5000,
-      title: "Palletising",
-      body: "Each line's + menu holds the actions: Start Palletisation, Top Up Batch (mix a same-design batch in) and Complete Palletisation — or tick several rows and use this bar to palletise them together. Partial is fine: a Partial chip marks order items not yet fully palletised.",
+      title: "Palletizing",
+      body: "Each line's + menu holds the actions: Start Palletization, Top Up Batch (mix a same-design batch in) and Complete Palletization — or tick several rows and use this bar to palletize them together. Partial is fine: a Partial chip marks order items not yet fully palletized.",
     },
     {
       anchor: "pal-report",
       route: "/packing",
       waitMs: 5000,
       title: "Prints",
-      body: "All prints are on demand. Today's Report prints everything palletised today; select pallets below and Packing Report and Pallet Slips buttons appear in the selection bar.",
+      body: "All prints are on demand. Today's Report prints everything palletized today; select pallets below and Packing Report and Pallet Slips buttons appear in the selection bar.",
     },
     {
       route: "/palletizing",
       title: "On to loading",
-      body: "Started pallets move to the In Palletization page. Complete Palletisation records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows Recorded here and waits. Edit lets you type quantities across rows and save each with ✓.",
+      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows Recorded here and waits. Edit lets you type quantities across rows and save each with ✓.",
     },
   ],
 
@@ -165,7 +165,7 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/loading",
       title: "Loading and Dispatch",
-      body: "The last stage: pallets go into containers, the vehicle is assigned, goods dispatch. Fully palletised stock arrives here as Ready for Loading — its + menu's Load puts it into a container, or start from New Loading here or on the sales order.",
+      body: "The last stage: pallets go into containers, the vehicle is assigned, goods dispatch. Fully palletized stock arrives here as Ready for Loading — its + menu's Load puts it into a container, or start from New Loading here or on the sales order.",
     },
     {
       anchor: "load-view-toggle",
@@ -179,7 +179,7 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/loading",
       waitMs: 5000,
       title: "New Loading",
-      body: "Pick a sales order — its container plan prefills the remaining quantities against Ready-for-Loading stock. One submit creates one container; vehicle and seal details come later.",
+      body: "Opens a two-step page. Step 1: pick the customer on the left — all their orders and designs list on the right. Type a quantity per design, adjust the batches, and use Fill from plan if the order has a container plan. Save creates one container and moves on: step 2 is the seals sheet for all of that customer's open containers — type the truck, container and seal numbers next to the designs and boxes — with the driver, transporter and other load details below it.",
     },
     {
       route: "/loading",

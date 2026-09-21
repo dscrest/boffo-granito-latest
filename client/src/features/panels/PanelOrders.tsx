@@ -23,6 +23,7 @@ import { usePersistedState, useViewState } from "@/lib/usePersistedState";
 import { FilterSelect, IconBtn, ORDER_STATUS_TONE } from "./pcBits";
 import { PanelOrderForm } from "./PanelOrderForm";
 import { CutStockForm } from "./CutStockForm";
+import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
 import {
   setCutPieceStock,
@@ -92,14 +93,27 @@ export function PanelOrders() {
     );
   }, [orders, query, statusFilter]);
 
-  const onCreate = async (input: PanelOrderInput) => {
-    const res = await createPanelOrder(input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
+  // CR-193: one order row per picked panel, written one after another (the
+  // Dev org shares function concurrency — no parallel bursts).
+  const onCreate = async (inputs: PanelOrderInput[]) => {
+    let done = 0;
+    let firstError = "";
+    const failed: string[] = []; // panel codes that did not save
+    for (const input of inputs) {
+      const res = await createPanelOrder(input);
+      if (res.ok) done++;
+      else {
+        firstError ||= res.error || "Save failed";
+        failed.push(panelById.get(input.panel)?.panelCode || "a panel");
+      }
+    }
+    if (done === 0) {
+      toast.error(firstError);
       return;
     }
     setShowNew(false);
-    toast.success("Panel order saved");
+    if (firstError) toast.error(`${done} of ${inputs.length} orders saved — not saved: ${failed.join(", ")} (${firstError})`);
+    else toast.success(done === 1 ? "Panel order saved" : `${done} panel orders saved`);
     await load();
   };
 
@@ -147,8 +161,10 @@ export function PanelOrders() {
       : k === "date" ? o.orderDate
       : k === "sales" ? o.salesperson
       : k === "status" ? o.status
+      : k === "created" ? o.createdTime
       : o.panelCode,
-    "",
+    "created",
+    -1, // newest first
   );
   const pager = usePagination(sort.sorted.length, "panelOrdersPageSize", `${query}|${statusFilter}`);
   const pageRows = pager.slice(sort.sorted);
@@ -168,7 +184,9 @@ export function PanelOrders() {
     const action = actionFor(o);
     const done = o.status === "Dispatched";
     return (
-      <div key={o.id} className="pc-job-card">
+      <div key={o.id} className="pc-job-card" style={{ display: "flex", gap: 10 }}>
+        <ImageThumb images={panelById.get(o.panelId)?.images ?? []} size={44} alt={o.panelCode} />
+        <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {!done && (
             <span
@@ -202,6 +220,7 @@ export function PanelOrders() {
             {busyId === o.id ? "Saving…" : action.label}
           </button>
         )}
+        </div>
       </div>
     );
   };
@@ -248,7 +267,10 @@ export function PanelOrders() {
               return (
                 <tr key={o.id}>
                   <td className="mono">
-                    <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel">{o.panelCode}</Link>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <ImageThumb images={panelById.get(o.panelId)?.images ?? []} alt={o.panelCode} />
+                      <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel">{o.panelCode}</Link>
+                    </span>
                   </td>
                   <td>{o.customerName}</td>
                   <td className="num mono">{fmt(o.qty)}</td>
@@ -292,7 +314,7 @@ export function PanelOrders() {
 
   return (
     <div>
-      {showNew && <PanelOrderForm onSave={(i) => void onCreate(i)} onClose={() => setShowNew(false)} />}
+      {showNew && <PanelOrderForm onSave={onCreate} onClose={() => setShowNew(false)} />}
       {showStock && <CutStockForm onSave={(d, c, qty) => void onAdjust(d, c, qty)} onClose={() => setShowStock(false)} />}
 
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}

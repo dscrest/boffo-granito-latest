@@ -19,7 +19,7 @@ export function groupProgressOf(
 
 // Blank batchNumber = legacy aggregate: those lines group per order item, so
 // the gate degrades to "whole order item palletised" for legacy data.
-const batchKey = (l: PalPlanLine) => `${l.orderItemId}|${l.batchNumber}`;
+export const batchKey = (l: PalPlanLine) => `${l.orderItemId}|${l.batchNumber}`;
 
 /** Ids of lines loadable NOW: ReadyToLoad, un-boxed, and the whole batch group
     (same order item + batch) fully palletised — a partially palletised batch

@@ -2,7 +2,7 @@
    allocateFifo — map a wanted box count onto actual PalPlanLine rows.
    Drains `want` boxes FIFO across `lines` (pass them in creation order);
    `boxes` is omitted when a whole line is consumed so the server skips
-   the split. Used by NewLoadingModal's plan view (a plan quantity is per
+   the split. Once used by the New Loading modal's plan view (a plan quantity is per
    design, the stock is per line).
    ============================================================ */
 

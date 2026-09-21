@@ -41,8 +41,8 @@ const donor = (over: Partial<PalPlanLine> = {}): PalPlanLine =>
 
 // Top-up rejections: wrong stage, stale donor, missing/over qty.
 {
-  assert.strictEqual(resolvePalSheetEdit(line(), [donor()], { donorId: "d-1", qty: "10" }).error, "Start palletisation first");
-  assert.strictEqual(resolvePalSheetEdit(line({ status: "Palletizing", palletId: "" }), [donor()], { donorId: "d-1", qty: "10" }).error, "Start palletisation first");
+  assert.strictEqual(resolvePalSheetEdit(line(), [donor()], { donorId: "d-1", qty: "10" }).error, "Start palletization first");
+  assert.strictEqual(resolvePalSheetEdit(line({ status: "Palletizing", palletId: "" }), [donor()], { donorId: "d-1", qty: "10" }).error, "Start palletization first");
   assert.strictEqual(resolvePalSheetEdit(line({ status: "Palletizing" }), [], { donorId: "d-1", qty: "10" }).error, "That batch is no longer available");
   assert.strictEqual(resolvePalSheetEdit(line({ status: "Palletizing" }), [donor()], { donorId: "d-1" }).error, "Enter the boxes to move from that batch");
   assert.strictEqual(resolvePalSheetEdit(line({ status: "Palletizing" }), [donor()], { donorId: "d-1", qty: "41" }).error, "Only 40 boxes in that batch");

@@ -3,7 +3,7 @@
    function and refetch. Every write's outcome is recorded in OperationLog
    (see the /ops page). */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
@@ -16,8 +16,7 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { quoteTotals, type Quote, type QuoteStatus } from "@/data";
-import { QuoteForm } from "./QuoteForm";
-import { cachedQuotes, createQuote, deleteQuote, invalidateQuotes, listQuotes, setQuoteStatus, type NewQuoteInput } from "./quotesApi";
+import { cachedQuotes, deleteQuote, invalidateQuotes, listQuotes, setQuoteStatus, type NewQuoteInput } from "./quotesApi";
 
 export const STATUS_CHIP: Record<QuoteStatus, string> = {
   Draft: "q-draft",
@@ -152,31 +151,12 @@ export function QuotesTable() {
   const [tab, setTab] = usePersistedState("quotes.tab", "all");
   const [query, setQuery] = usePersistedState("quotes.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("quotes.criteria", {});
-  const [showForm, setShowForm] = useState(false);
-  // Customer name to preset in a fresh QuoteForm (deep-link from the
-  // customer detail's "Create Quotation"); cleared when the form closes.
-  const [presetCustomer, setPresetCustomer] = useState("");
-
-  // Deep-link /quotes?new=<customer name> opens the form pre-filled;
-  // the param is consumed once so back/refresh never reopens it.
-  const [searchParams, setSearchParams] = useSearchParams();
-  useEffect(() => {
-    const preset = searchParams.get("new");
-    if (preset !== null) {
-      setPresetCustomer(preset);
-      setShowForm(true);
-      searchParams.delete("new");
-      setSearchParams(searchParams, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const COLS = useMemo(() => quoteColumns(), []);
   const { ordered, visible, hidden, toggle, move } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
   // Bulk selection (same master-page convention as DesignMaster).
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -199,24 +179,6 @@ export function QuotesTable() {
     void load();
   }, []);
 
-  const onSave = async (q: Quote) => {
-    setShowForm(false);
-    setPresetCustomer("");
-    setSaving(true);
-    const res = await createQuote(quoteToInput(q));
-    setSaving(false);
-    if (!res.ok) {
-      setError(res.error || "Save failed");
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    toast.success(`Quote saved (#${res.rowid})`);
-    invalidateQuotes();
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/quotes/${encodeURIComponent(res.rowid)}`);
-  };
-
-  const nextSeq = quotes.length + 1;
 
   // Advanced search fields (magnifier button) — options DB-sourced from rows.
   const filterFields = useMemo<FilterField<Quote>[]>(() => {
@@ -316,18 +278,6 @@ export function QuotesTable() {
 
   return (
     <div>
-      {showForm && (
-        <QuoteForm
-          nextSeq={nextSeq}
-          presetCustomer={presetCustomer || undefined}
-          onSave={onSave}
-          onClose={() => {
-            setShowForm(false);
-            setPresetCustomer("");
-          }}
-        />
-      )}
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
@@ -385,9 +335,9 @@ export function QuotesTable() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           {can("quotes", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/quotes/new")}>
               <Icon name="plus" size={13} />
-              {saving ? "Saving…" : "New Quote"}
+              New Quote
             </button>
           )}
         </div>
@@ -445,7 +395,7 @@ export function QuotesTable() {
                         title="No quotes yet"
                         hint="Create your first quote with New Quote"
                         action={
-                          <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                          <button className="hbtn primary" onClick={() => navigate("/quotes/new")}>
                             New Quote
                           </button>
                         }

@@ -16,7 +16,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import type { ProductionRequestGroup } from "./productionApi";
 
 export interface ProductionCompleteResult {
-  lines: { id: string; qty_boxes: number }[];
+  lines: { id: string; qty_boxes: number; batch_number?: string }[];
   production_date: string;
   performed_by: string;
   note: string;
@@ -39,6 +39,8 @@ export function ProductionCompleteForm({
   const [produced, setProduced] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((e) => [e.id, String(e.qtyRequested)])),
   );
+  // Batch for the output this completion records; blank → server auto-numbers.
+  const [batch, setBatch] = useState<Record<string, string>>({});
   const [note, setNote] = useState("");
   const [date, setDate] = useState(todayISO());
   const [saving, setSaving] = useState(false);
@@ -52,7 +54,7 @@ export function ProductionCompleteForm({
     setSaving(true);
     try {
       await onSave({
-        lines: lines.map((e) => ({ id: e.id, qty_boxes: parseInt(produced[e.id], 10) || 0 })),
+        lines: lines.map((e) => ({ id: e.id, qty_boxes: parseInt(produced[e.id], 10) || 0, batch_number: (batch[e.id] || "").trim() || undefined })),
         production_date: date,
         performed_by: loggedBy,
         note: note.trim(),
@@ -80,6 +82,7 @@ export function ProductionCompleteForm({
               <thead>
                 <tr>
                   <th>Design</th>
+                  <th style={{ width: 170 }}>Batch No.</th>
                   <th className="num" style={{ textAlign: "right" }}>Requested</th>
                   <th className="num" style={{ textAlign: "right", width: 120 }}>Produced</th>
                 </tr>
@@ -88,6 +91,20 @@ export function ProductionCompleteForm({
                 {lines.map((e) => (
                   <tr key={e.id}>
                     <td><span className="design-name">{e.design || "—"}</span></td>
+                    <td>
+                      <input
+                        value={batch[e.id] ?? ""}
+                        onChange={(ev) => setBatch((b) => ({ ...b, [e.id]: ev.target.value }))}
+                        placeholder="Auto-numbered if blank"
+                        aria-label={`${e.design} batch number`}
+                        style={{ width: "100%" }}
+                      />
+                      {e.records.length > 0 && (
+                        <div className="mono dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+                          Logged: {[...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))].join(" · ")}
+                        </div>
+                      )}
+                    </td>
                     <td className="num mono">{fmt(e.qtyRequested)}</td>
                     <td className="num">
                       <NumberInput

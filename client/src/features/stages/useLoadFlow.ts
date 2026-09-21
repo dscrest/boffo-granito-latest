@@ -3,7 +3,7 @@
    the all-or-nothing confirm, and the SO-plan hint. Extracted from
    LoadingBay (2026-09-04) when the Load entry point moved to the
    Palletization board (/packing); boards mount LoadContainerModal
-   themselves. "New Loading" on /loading uses NewLoadingModal instead.
+   themselves. "New Loading" on /loading is the Loading Session page instead.
    ============================================================ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";

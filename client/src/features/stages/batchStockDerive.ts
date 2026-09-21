@@ -136,3 +136,61 @@ export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): 
   }
   return rows;
 }
+
+/* ---- Free stock (CR-199, production-first) ----------------------------------
+   On-hand (`current`) minus boxes already spoken for: an order item's CLAIM on
+   a batch (order-linked production records + stock allocations) that has not
+   left the building yet. Loaded boxes drop out of BOTH sides — they already
+   reduced `current` — so a claim is netted by that order item's own loaded
+   boxes: same batch first, then its blank-batch loads FIFO over what is left. */
+export interface ClaimIn {
+  designId: string;
+  batch: string;
+  orderItemId: string;
+  qty: number;
+}
+export interface LoadedIn {
+  orderItemId: string;
+  batch: string;
+  boxes: number;
+}
+
+const stockKey = (designId: string, batch: string) => `${designId}|${batch}`;
+
+/** Reserved boxes per `designId|batch` — subtract from `current` for free stock. */
+export function reservedByBatch(claims: ClaimIn[], loaded: LoadedIn[]): Map<string, number> {
+  // order item → batch → outstanding claim (insertion order = FIFO for blanks)
+  const byOi = new Map<string, Map<string, { designId: string; left: number }>>();
+  for (const c of claims) {
+    if (c.qty <= 0 || !c.orderItemId) continue;
+    const m = byOi.get(c.orderItemId) ?? byOi.set(c.orderItemId, new Map()).get(c.orderItemId)!;
+    const cur = m.get(c.batch);
+    if (cur) cur.left += c.qty;
+    else m.set(c.batch, { designId: c.designId, left: c.qty });
+  }
+  const blank = new Map<string, number>();
+  for (const l of loaded) {
+    const m = byOi.get(l.orderItemId);
+    if (!m || l.boxes <= 0) continue;
+    const hit = l.batch ? m.get(l.batch) : undefined;
+    if (hit) hit.left -= l.boxes;
+    else blank.set(l.orderItemId, (blank.get(l.orderItemId) || 0) + l.boxes);
+  }
+  const out = new Map<string, number>();
+  for (const [oi, m] of byOi) {
+    let spill = blank.get(oi) || 0;
+    for (const [batch, c] of m) {
+      let left = Math.max(0, c.left);
+      const take = Math.min(left, spill);
+      left -= take;
+      spill -= take;
+      if (left > 0) out.set(stockKey(c.designId, batch), (out.get(stockKey(c.designId, batch)) || 0) + left);
+    }
+  }
+  return out;
+}
+
+/** Free boxes of one derived row = max(0, current − reserved). */
+export function freeOf(row: { designId: string; batch: string; current: number }, reserved: Map<string, number>): number {
+  return Math.max(0, row.current - (reserved.get(stockKey(row.designId, row.batch)) || 0));
+}

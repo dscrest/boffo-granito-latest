@@ -3,7 +3,7 @@
    planner from the 2026-09-11 "Loading Sheet" design: pick Customer +
    Sales Order, then work three tabs.
    · Items — the SO's items split into "Ready for loading" (multi-select
-     → Assign to Loading) and "In palletisation" (read-only progress,
+     → Assign to Loading) and "In palletization" (read-only progress,
      shortcut to /packing).
    · Container plan — the SO's LoadBoxes as cards: fill bar, pallet
      lines (whole-line Move between containers — lines are physical
@@ -320,7 +320,7 @@ export function LoadingWorkspace({
               {soHead?.portOfDischarge && <span>{soHead.portOfDischarge}</span>}
               <span>Ordered <b style={{ color: "var(--fg)" }}>{fmt(tOrd)}</b> bx{tOrdSqm > 0 ? ` · ${fmt(Math.round(tOrdSqm))} sqm` : ""}</span>
               <span>Planned <b style={{ color: "var(--fg)" }}>{fmt(tPlan)}</b> bx{tOrd > 0 ? ` · ${Math.round((tPlan / tOrd) * 100)}%` : ""}</span>
-              <span>Palletised <b style={{ color: "var(--fg)" }}>{fmt(tPal)}</b> bx</span>
+              <span>Palletized <b style={{ color: "var(--fg)" }}>{fmt(tPal)}</b> bx</span>
               <span>Balance <b style={{ color: balColor(tOrd - tPlan) }}>{fmt(tOrd - tPlan)}</b> bx</span>
             </span>
           )}
@@ -544,7 +544,7 @@ export function LoadingWorkspace({
                 <tbody>
                   {readyItems.length === 0 && (
                     <tr><td colSpan={canEdit ? 8 : 7}>
-                      <EmptyState title="Nothing palletised yet" hint="Items land here once palletisation marks them Ready for Loading" />
+                      <EmptyState title="Nothing palletized yet" hint="Items land here once palletization marks them Ready for Loading" />
                     </td></tr>
                   )}
                   {readyItems.map((i) => {
@@ -585,7 +585,7 @@ export function LoadingWorkspace({
 
           <div className="card" style={{ padding: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-              <span style={{ fontWeight: 600 }}>In Palletisation</span>
+              <span style={{ fontWeight: 600 }}>In Palletization</span>
               <span className="dim mono" style={{ fontSize: "var(--t-sm)" }}>{wipItems.length} item{wipItems.length === 1 ? "" : "s"}</span>
               <div style={{ flex: 1 }} />
               {canEdit && wipItems.length > 0 && (
@@ -593,7 +593,7 @@ export function LoadingWorkspace({
                   kebab
                   icon="plus"
                   title="Loading actions"
-                  items={[{ label: "Palletise →", title: "Open the In Palletization page", onClick: () => navigate("/palletizing") }]}
+                  items={[{ label: "Palletize →", title: "Open the In Palletization page", onClick: () => navigate("/palletizing") }]}
                 />
               )}
             </div>
@@ -603,7 +603,7 @@ export function LoadingWorkspace({
                   <tr>
                     <th>Item</th>
                     <th style={{ textAlign: "right" }}>Ordered</th>
-                    <th style={{ textAlign: "right" }}>Palletised</th>
+                    <th style={{ textAlign: "right" }}>Palletized</th>
                     <th style={{ minWidth: 220 }}>Progress</th>
                     <th>Batch</th>
                   </tr>
@@ -611,7 +611,7 @@ export function LoadingWorkspace({
                 <tbody>
                   {wipItems.length === 0 && (
                     <tr><td colSpan={5} className="dim" style={{ textAlign: "center", padding: 16 }}>
-                      All items on this order are palletised.
+                      All items on this order are palletized.
                     </td></tr>
                   )}
                   {wipItems.map((i) => {
@@ -745,7 +745,7 @@ function AssignLoadingModal({
       }
     } else {
       // load_plan snapshot keeps the loading's Planned rows rendering if the
-      // line assignment fails after (same recovery as NewLoadingModal).
+      // line assignment fails after (same recovery as SessionItemsStep).
       const lineById = new Map(items.flatMap((i) => i.readyLines).map((l) => [l.id, l]));
       const planLines = entries.map((e) => {
         const l = lineById.get(e.lineId)!;

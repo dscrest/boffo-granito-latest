@@ -8,11 +8,12 @@
    `ContainerPicker` is the shared half — LOAD INTO + the after-loading
    preview + the new-container form — and is mounted by the board's Load
    button (pallet mode) and Add Items on a loading detail page.
-   "New Loading" on /loading is NewLoadingModal, not this.
+   "New Loading" on /loading is the Loading Session page, not this.
 
    Vehicle/driver stay on the Vehicle master: the typed registration is
-   find-or-created (formatVehicleNumber match), so LoadBox.vehicle keeps
-   pointing at a real Vehicle row.
+   resolved by `resolveVehicle` (find by formatted number → update driver /
+   mobile if typed → else create), so LoadBox.vehicle keeps pointing at a
+   real Vehicle row without the user ever touching the master (CR-185).
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -24,7 +25,7 @@ import { todayISO } from "@/lib/dates";
 import { type Order } from "@/data";
 import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { CONTAINER_TYPES } from "@/features/masters/containersApi";
-import { createVehicle, formatVehicleNumber, listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
+import { formatVehicleNumber, resolveVehicle } from "@/features/masters/vehiclesApi";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import {
   boxFill,
@@ -76,26 +77,20 @@ export const newContainerDraft = (): ContainerDraft => ({
 export const draftMissing = (d: ContainerDraft): boolean =>
   !d.container_number.trim() || !d.vehicle_number.trim() || !d.driver_name.trim() || !d.electronic_seal.trim();
 
-/** Find-or-create the Vehicle behind a typed registration, then hand back the
-    LoadBox payload. Returns null (after surfacing nothing) if the create fails —
-    callers show their own error. */
+/** Resolve the Vehicle behind the typed registration (master maintained
+    silently), then hand back the LoadBox payload. Returns null (after surfacing
+    nothing) if the vehicle write fails — callers show their own error. */
 export async function draftToCreateInput(
   d: ContainerDraft,
-  vehicles: VehicleRow[],
 ): Promise<({ vehicle?: string; dispatch_date?: string } & LoadingCapture) | null> {
-  const reg = formatVehicleNumber(d.vehicle_number);
-  let vehicleId = vehicles.find((v) => formatVehicleNumber(v.vehicleNumber) === reg)?.id || "";
-  if (!vehicleId) {
-    const res = await createVehicle({
-      vehicle_number: reg,
-      driver_name: d.driver_name.trim(),
-      mobile_number: d.driver_phone.trim(),
-    });
-    if (!res.ok || !res.rowid) return null;
-    vehicleId = res.rowid;
-  }
+  const veh = await resolveVehicle({
+    vehicle_number: d.vehicle_number,
+    driver_name: d.driver_name,
+    mobile_number: d.driver_phone,
+  });
+  if (!veh.ok) return null;
   return {
-    vehicle: vehicleId,
+    ...(veh.rowid ? { vehicle: veh.rowid } : {}),
     dispatch_date: d.dispatch_date,
     container_number: d.container_number.trim(),
     container_size: d.container_size,
@@ -316,7 +311,8 @@ interface ProdPick {
   remaining: number;
 }
 
-const remainingOf = (o: Order) => Math.max(0, o.orderQty - o.palletizedQty);
+// CR-199: only boxes the order owns (produced/allocated) can ship — mirrors /send-to-loading.
+const remainingOf = (o: Order) => Math.max(0, Math.min(o.orderQty, o.producedQty) - o.palletizedQty);
 
 export function LoadContainerModal({
   lines = [],
@@ -362,11 +358,11 @@ export function LoadContainerModal({
   const effLines = lines.filter((l) => !removed.has(l.id)).concat(extraLines);
   const single = effLines.length === 1 && prodPicks.length === 0 ? effLines[0] : undefined;
   const [count, setCount] = useState(single?.boxes ?? 0);
-  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [saving, setSaving] = useState(false);
+  // CR-195 manual override: load past 100% (server never checks fullness).
+  const [override, setOverride] = useState(false);
 
   useEffect(() => {
-    void listVehicles().then((r) => r.ok && setVehicles(r.vehicles));
     void listOrders().then((r) => r.ok && setOrders(r.orders));
   }, []);
 
@@ -376,7 +372,7 @@ export function LoadContainerModal({
   // Every clamp is shown in the table below — nothing is dropped silently.
   let runningFill = selBox ? boxFill(linesOfBox(selBox.id).map(({ l }) => l)) : 0;
   const fits = effLines.map((l) => {
-    const fit = l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - runningFill) * l.palletCapacity) : l.boxes;
+    const fit = !override && l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - runningFill) * l.palletCapacity) : l.boxes;
     const n = Math.max(0, Math.min(l.boxes, fit));
     if (l.palletCapacity > 0) runningFill += n / l.palletCapacity;
     return { l, n };
@@ -415,7 +411,7 @@ export function LoadContainerModal({
       return;
     }
     setSaving(true);
-    const details = await draftToCreateInput(draft, vehicles);
+    const details = await draftToCreateInput(draft);
     setSaving(false);
     if (!details) {
       setShowErrors(true);
@@ -686,6 +682,16 @@ export function LoadContainerModal({
                 ariaLabel="Add item"
               />
             </label>
+          )}
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: "var(--t-sm)", cursor: "pointer" }}>
+            <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} style={{ margin: 0 }} />
+            Override — load beyond 100%
+          </label>
+          {override && runningFill > 1.001 && (
+            <div style={{ fontSize: "var(--t-sm)", marginTop: 4, color: "var(--c-red)", fontWeight: 600 }}>
+              ~{Math.round(runningFill * 100)}% of a container by pallet capacity — loading anyway
+            </div>
           )}
 
           {!single && wouldMixBatches && (

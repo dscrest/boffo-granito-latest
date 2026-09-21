@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fmt } from "@/lib/format";
 import { EmptyState } from "@/ui/States";
+import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
 import { cachedPanelOrders, listPanelOrders, PANEL_ORDER_STATUS_LABEL, type PanelOrderRow } from "./panelOrdersApi";
 
@@ -67,6 +68,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
           <table className="tbl">
             <thead>
               <tr>
+                <th style={{ width: 44 }}>Image</th>
                 <th>Panel Code</th>
                 <th>Panel Size</th>
                 <th>Cut Piece Size</th>
@@ -78,6 +80,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
                 const line = p.lines.find((l) => l.designId === scope.designId)!;
                 return (
                   <tr key={p.id}>
+                    <td><ImageThumb images={p.images} alt={p.panelCode} /></td>
                     <td className="mono">
                       <Link className="linkish" to={`/panels/${encodeURIComponent(p.id)}`} title="Open panel">{p.panelCode}</Link>
                     </td>
@@ -107,6 +110,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
         <table className="tbl">
           <thead>
             <tr>
+              <th style={{ width: 44 }}>Image</th>
               <th>Panel Code</th>
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
@@ -117,6 +121,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
           <tbody>
             {myOrders.map((o) => (
               <tr key={o.id}>
+                <td><ImageThumb images={panels.find((p) => p.id === o.panelId)?.images ?? []} alt={o.panelCode} /></td>
                 <td className="mono">
                   <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel">{o.panelCode}</Link>
                 </td>

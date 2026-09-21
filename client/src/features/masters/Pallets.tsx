@@ -10,6 +10,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -19,8 +20,7 @@ import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { PalletForm } from "./PalletForm";
-import { bulkDeletePallets, createPallet, listPallets, type PalletInput, type PalletRow, type SizeOption } from "./palletsApi";
+import { bulkDeletePallets, listPallets, type PalletRow } from "./palletsApi";
 
 const dash = <span className="dim">—</span>;
 
@@ -71,14 +71,12 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
 export function Pallets() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<PalletRow[]>([]);
-  const [sizes, setSizes] = useState<SizeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("pallets.query", "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { ordered, visible, hidden, toggle, move } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);
-  const [showNew, setShowNew] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -90,7 +88,6 @@ export function Pallets() {
     }
     setError(null);
     setRows(res.pallets);
-    setSizes(res.sizes);
     setSelected(new Set());
   };
 
@@ -111,21 +108,7 @@ export function Pallets() {
   }, [rows, query]);
 
   const pager = usePagination(filtered.length, "palletsPageSize", query);
-  const pageRows = pager.slice(filtered);
-
-  const onCreate = async (input: PalletInput) => {
-    const res = await createPallet(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      setError(res.error || "Save failed");
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowNew(false);
-    toast.success("Pallet saved");
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/pallets/${encodeURIComponent(res.rowid)}`);
-  };
+  const pageRows = pager.slice(newestFirst(filtered));
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
@@ -162,21 +145,11 @@ export function Pallets() {
     await load();
   };
 
-  // Distinct types already saved, fed to the form so the picker can create-on-save.
-  const palletTypes = useMemo(
-    () => [...new Set(rows.map((r) => r.palletType).filter(Boolean))].sort(),
-    [rows],
-  );
-
   return (
     /* Column fills the scrollport exactly (.main pads 14px top + a 32px ::after),
        so the grid card grows and its footer sits on the window edge — no dead
        band under short tables. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
-      {showNew && (
-        <PalletForm palletTypes={palletTypes} sizeOptions={sizes} onSave={onCreate} onClose={() => setShowNew(false)} />
-      )}
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
@@ -207,7 +180,7 @@ export function Pallets() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/pallets/new")}>
               <Icon name="plus" size={13} />
               New pallet
             </button>
@@ -270,7 +243,7 @@ export function Pallets() {
                         title="No pallets yet"
                         hint="Add your first pallet spec with New pallet"
                         action={
-                          <button className="hbtn primary" onClick={() => setShowNew(true)}>
+                          <button className="hbtn primary" onClick={() => navigate("/pallets/new")}>
                             New pallet
                           </button>
                         }

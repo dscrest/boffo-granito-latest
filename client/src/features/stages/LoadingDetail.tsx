@@ -26,11 +26,8 @@ import { useMasters } from "@/features/masters/useMasters";
 import { useOrders } from "@/features/orders/useOrders";
 import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
-import { VehicleLoadModal } from "./VehicleLoadModal";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
-import { SendToLoadingModal } from "./SendToLoadingModal";
-import { NewLoadingModal } from "./NewLoadingModal";
 import {
   boxFill,
   boxLabel,
@@ -46,11 +43,10 @@ import {
   missingLoadDetails,
   mixedBatchOrderItems,
   sealed,
-  updateLoadBox,
   type LoadBox,
-  type LoadingCapture,
   type PalPlan,
   type PalPlanLine,
+  soHeadOf,
 } from "./palPlansApi";
 
 type Entry = { p: PalPlan; l: PalPlanLine };
@@ -69,9 +65,6 @@ export function LoadingDetail() {
   const { planBySo, designIdOf } = useContainerPlanBySo();
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [busy, setBusy] = useState(false);
-  const [vehModal, setVehModal] = useState(false);
-  const [addItems, setAddItems] = useState(false);
-  const [addPallets, setAddPallets] = useState(false);
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
   const [planSo, setPlanSo] = useState(""); // Container Planning tab: selected SO
   useMasters(); // warm the designs cache for the embedded planner
@@ -192,20 +185,6 @@ export function LoadingDetail() {
     void load();
   };
 
-  const confirmLoadDetails = async (vehicleId: string, capture: LoadingCapture) => {
-    setVehModal(false);
-    setBusy(true);
-    const res = await updateLoadBox(box.id, { ...(vehicleId ? { vehicle: vehicleId } : {}), ...capture });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not save loading details");
-      return;
-    }
-    const nowSealed = !!(capture.container_number || capture.line_seal);
-    toast.success(open && nowSealed ? `${boxLabel(box)} → Ready for Dispatch` : "Loading details saved");
-    refresh();
-  };
-
   const onDispatch = async () => {
     if (busy) return;
     const ok = await confirmDialog({ title: "Dispatch", message: dispatchConfirmMessage(box, entries.length) });
@@ -244,9 +223,15 @@ export function LoadingDetail() {
     navigate("/loading");
   };
 
+  // Order(s) / Customer resolve like the Loadings grid (soHeadOf): the lines'
+  // own joined values first, so a stale or missing orders cache never blanks them.
+  const planSoIds = (parseLoadPlan(box.loadPlan)?.lines ?? []).map((l) => l.so);
+  const heads = [...new Set([...lines.map((l) => l.salesOrderId), ...planSoIds].filter(Boolean))].map((soId) =>
+    soHeadOf(soId, sheetRows.map((r) => r.l), orders),
+  );
   const fields: RecordField[] = [
-    { key: "orders", label: "Order(s)", value: soHeads.map(({ head }) => head.orderNumber || head.poNumber).filter(Boolean).join(", ") || "—" },
-    { key: "customer", label: "Customer", value: [...new Set(soHeads.map(({ head }) => head.party).filter(Boolean))].join(", ") || "—" },
+    { key: "orders", label: "Order(s)", value: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", ") || "—" },
+    { key: "customer", label: "Customer", value: [...new Set(heads.map((h) => h.customer).filter(Boolean))].join(", ") || "—" },
     { key: "plannedBoxes", label: "Planned Boxes", value: planLines.length ? fmt(plannedBoxes) : totalBoxes ? fmt(totalBoxes) : "—" },
     { key: "vehicle", label: "Vehicle", value: box.vehicleNumber || "—" },
     { key: "driver", label: "Driver", value: box.driverName || "—" },
@@ -279,18 +264,12 @@ export function LoadingDetail() {
         actions={
           <>
             {canEdit && (
-              <button className="hbtn" disabled={busy} onClick={() => setVehModal(true)} title="Edit vehicle and load details (container, seals, transporter, LR, destination, supervisor)">
+              <button className="hbtn" disabled={busy} onClick={() => navigate(`/loading/${encodeURIComponent(box.id)}/session`)} title="Edit this loading — items, quantities, vehicle and load details">
                 <Icon name="edit" size={13} /> Edit
               </button>
             )}
             <MoreMenu
               items={[
-                ...(canEdit && open
-                  ? [
-                      { label: "Add Pallets", disabled: busy, title: "Load more palletised stock into this container", onClick: () => setAddPallets(true) },
-                      { label: "Add Items", disabled: busy, title: "Send order items into this loading — no palletization step", onClick: () => setAddItems(true) },
-                    ]
-                  : []),
                 ...(canEdit && open
                   ? [(() => {
                       const gate = dispatchGate(box, entries.length);
@@ -313,6 +292,7 @@ export function LoadingDetail() {
         }
         fields={fields}
         hiddenStorageKey="loadingDetailFields"
+        hideFields // user 2026-09-21: Fields button hidden "for now"
         activityTable="LoadBox"
         entityId={box.id}
         created={box.createdTime}
@@ -482,48 +462,6 @@ export function LoadingDetail() {
           )}
         </div>
       </RecordDetail>
-
-      {vehModal && (
-        <VehicleLoadModal
-          palNumber={boxLabel(box)}
-          title={open && !sealed(box) ? "Assign Vehicle" : "Edit Load Details"}
-          busy={busy}
-          initialVehicleId={box.vehicleId}
-          initialCapture={{
-            container_number: box.containerNumber,
-            line_seal: box.lineSeal,
-            electronic_seal: box.electronicSeal,
-            loading_supervisor: box.loadingSupervisor,
-            container_size: box.containerSize,
-            transporter: box.transporter,
-            lr_number: box.lrNumber,
-            destination: box.destination,
-          }}
-          onConfirm={(vehicleId, capture) => void confirmLoadDetails(vehicleId, capture)}
-          onClose={() => setVehModal(false)}
-        />
-      )}
-
-      {addItems && (
-        <SendToLoadingModal
-          presetBoxId={box.id}
-          boxName={boxLabel(box)}
-          onDone={() => {
-            setAddItems(false);
-            refresh();
-          }}
-          onClose={() => setAddItems(false)}
-        />
-      )}
-
-      {addPallets && (
-        <NewLoadingModal
-          boxId={box.id}
-          boxName={boxLabel(box)}
-          onDone={refresh}
-          onClose={() => setAddPallets(false)}
-        />
-      )}
 
       {entryOverlay && (
         <DispatchEntryOverlay

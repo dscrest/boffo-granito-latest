@@ -308,8 +308,12 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       const perms = entry.user.perms;
       const seg = path.split("/")[1] || "";
 
-      // Business routes with an explicit module+action mapping.
-      const biz = ROUTE_PERM[seg];
+      // Business routes with an explicit module+action mapping. Express matches
+      // routes case-insensitively, so the lookup must too — otherwise
+      // /DISPATCH/1 misses the map, lands on the legacy fallback below and
+      // still reaches the /dispatch handler. (Table names stay exact-case:
+      // assertTable rejects any other spelling.)
+      const biz = ROUTE_PERM[seg.toLowerCase()];
       if (biz) {
         if (!hasPerm(perms, biz[0], biz[1]))
           return res.status(403).json({ ok: false, error: `Your role cannot ${biz[1]} ${biz[0]}` });

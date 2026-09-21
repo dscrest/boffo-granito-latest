@@ -56,7 +56,7 @@ export function Kanban() {
           <>
             <ViewToggle />
             {can("orders", "create") && (
-              <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }} title="New Order">
+              <button className="hbtn primary" onClick={() => { location.hash = "#/orders/new"; }} title="New Order">
                 <Icon name="plus" size={13} />
                 New Order
               </button>

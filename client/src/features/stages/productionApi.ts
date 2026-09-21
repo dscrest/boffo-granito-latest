@@ -46,6 +46,8 @@ export interface ProductionRecordRow {
   note: string;
   /** Production batch (B/YYYY-MM/NNN) this output belongs to. */
   batchNumber: string;
+  /** Box Brand (Brand ROWID) the boxes were packed in; blank on older rows. */
+  boxBrandId: string;
   orderItemId: string;
   createdTime: string;
 }
@@ -106,6 +108,16 @@ export function cachedProductionLogs(): ProductionEntry[] | null {
 }
 /** Opening-stock rows (entry_type="opening") for batch-tracked items — surfaced
     on the item Production tab alongside recorded output. Not plan lines. */
+export function cachedAllocEntries(): AllocEntry[] {
+  return cache.cached()?.allocEntries ?? [];
+}
+/** Σ allocated boxes per design NAME — designStock's `allocated` term. Read it
+    during render: it is fresh whenever the production-log cache is. */
+export function cachedAllocByDesign(): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const a of cachedAllocEntries()) m.set(a.design, (m.get(a.design) || 0) + a.qtyBoxes);
+  return m;
+}
 export function cachedOpeningEntries(): ProductionRecordRow[] {
   return cache.cached()?.openingEntries ?? [];
 }
@@ -135,10 +147,26 @@ export async function shareProductionRecord(rowid: string): Promise<string> {
   return r.data;
 }
 
+/** One stock allocation: `qtyBoxes` of a design's batch claimed by an order item. */
+export interface AllocEntry {
+  id: string;
+  designId: string;
+  design: string;
+  salesOrderId: string;
+  orderItemId: string;
+  batchNumber: string;
+  boxBrandId: string;
+  qtyBoxes: number;
+  performedBy: string;
+  createdTime: string;
+}
+
 export interface ProductionLogResult {
   ok: boolean;
   entries: ProductionEntry[];
   openingEntries: ProductionRecordRow[];
+  /** Stock allocations (entry_type "alloc") — free stock claimed by an order item (CR-199). */
+  allocEntries: AllocEntry[];
   error?: string;
 }
 
@@ -157,7 +185,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     listAll("Customer", { columns: ["name"] }),
     listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
   ]);
-  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], error: logs.error };
+  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], error: logs.error };
 
   const designName = mapBy(designs.rows, "design_name");
   const sizeName = mapBy(sizes.rows, "code");
@@ -195,6 +223,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       performedBy: str(r.performed_by),
       note: str(r.note),
       batchNumber: str(r.batch_number),
+      boxBrandId: str(r.box_brand),
       orderItemId: str(r.order_item),
       createdTime: str(r.CREATEDTIME),
     };
@@ -220,15 +249,31 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       performedBy: str(r.performed_by),
       note: str(r.note),
       batchNumber: str(r.batch_number),
+      boxBrandId: str(r.box_brand),
       orderItemId: "",
       createdTime: str(r.CREATEDTIME),
     });
   }
 
+  const allocEntries: AllocEntry[] = rows
+    .filter((r) => str(r.entry_type) === "alloc")
+    .map((r) => ({
+      id: String(r.ROWID),
+      designId: str(r.design),
+      design: designName.get(str(r.design)) || str(r.design) || "—",
+      salesOrderId: str(r.sales_order),
+      orderItemId: str(r.order_item),
+      batchNumber: str(r.batch_number),
+      boxBrandId: str(r.box_brand),
+      qtyBoxes: num(r.qty_boxes),
+      performedBy: str(r.performed_by),
+      createdTime: str(r.CREATEDTIME),
+    }));
+
   // Plan lines carry qty_requested; produced-so-far is derived from their
-  // records. Record + opening rows are excluded (opening is not a plan line).
+  // records. Record, opening and alloc rows are excluded (none is a plan line).
   const entries: ProductionEntry[] = rows
-    .filter((r) => str(r.entry_type) !== "record" && str(r.entry_type) !== "opening")
+    .filter((r) => !["record", "opening", "alloc"].includes(str(r.entry_type)))
     .map((r) => {
       const designId = str(r.design);
       const { size, finish } = hydrateSizeFinish(designId);
@@ -272,7 +317,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       };
     });
 
-  return { ok: true, entries, openingEntries };
+  return { ok: true, entries, openingEntries, allocEntries };
 }
 
 /** One line of a production request. */
@@ -285,6 +330,8 @@ export interface ProductionRequestLine {
 }
 export interface ProductionRequestInput {
   lines: ProductionRequestLine[];
+  /** Opening Kanban stage. "Start New Production" sends InProduction (CR-234); default New. */
+  stage?: "New" | "InProduction";
   production_date?: string;
   shift?: string;
   performed_by?: string;
@@ -301,6 +348,8 @@ export interface ProductionRecordInput {
   batch_number?: string;
   /** Pallet spec for the queue line this record creates; blank → the SO line's own. */
   pallet?: string;
+  /** Box Brand (Brand ROWID) the boxes were packed in — captured at production (CR-197). */
+  box_brand?: string;
 }
 /** One batch row of a multi-batch record (batch-tracked items). */
 export interface ProductionRecordLine {
@@ -317,6 +366,8 @@ export interface ProductionRecordLinesInput {
   performed_by?: string;
   /** Pallet spec for the queue lines these records create; blank → the SO line's own. */
   pallet?: string;
+  /** Box Brand (Brand ROWID) for every row of this recording (CR-197). */
+  box_brand?: string;
 }
 /** One batch row of opening stock (batch-tracked items). */
 export interface OpeningStockLine {
@@ -366,6 +417,16 @@ export function recordProduction(rowid: string, input: ProductionRecordInput) {
   return bust(op<{ produced_qty_boxes?: number; recorded?: number; batch_number?: string }>(`production-record/${encodeURIComponent(rowid)}`, input));
 }
 
+/** Allocate free stock to an order item (CR-199): bumps its produced qty and
+    feeds the Ready-for-Palletization queue, exactly like a production record did. */
+export function allocateStock(input: { order_item: string; rows: { batch_number: string; qty_boxes: number }[] }) {
+  return bustStock(op<{ allocated: number; rows: number }>("allocate-stock", input));
+}
+/** Undo one allocation row — refused once its boxes are palletised. */
+export function deallocateStock(rowid: string) {
+  return bustStock(op<{ deallocated: number }>(`deallocate-stock/${encodeURIComponent(rowid)}`, {}));
+}
+
 /** Record several batches at once on a plan line (batch-tracked items). Atomic:
     validates Σ qty ≤ remaining, inserts one record child per batch, bumps produced. */
 export function recordProductionLines(rowid: string, input: ProductionRecordLinesInput) {
@@ -393,7 +454,8 @@ export function setProductionStage(
     under-production allowed), bumps available stock, and flips every line to
     Completed. `lines` is [{ id, qty_boxes }] per plan line. */
 export function completeProduction(input: {
-  lines: { id: string; qty_boxes: number }[];
+  /** Per-line production_date / note override the call-level ones (CR-244 sheet). */
+  lines: { id: string; qty_boxes: number; batch_number?: string; production_date?: string; box_brand?: string; note?: string }[];
   production_date?: string;
   performed_by?: string;
   note?: string;

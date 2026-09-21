@@ -1,7 +1,7 @@
 /* Self-check for productionSheetEdit — run with:  npx tsx client/src/features/stages/productionSheetEdit.test.ts
    Plain asserts, no framework (same style as quotes/planProgress.test.ts). */
 import assert from "node:assert";
-import { capFor, resolveSheetEdit } from "./productionSheetEdit";
+import { batchRows, capFor, resolveSheetEdit } from "./productionSheetEdit";
 import type { ProductionEntry } from "./productionApi";
 
 // SO-linked line: 500 requested, nothing produced, order wants 800 (300 made elsewhere).
@@ -76,6 +76,15 @@ const entry = (over: Partial<ProductionEntry> = {}): ProductionEntry =>
 {
   const r = resolveSheetEdit(entry({ produced: 0 }), { inProd: "600", qty: "600", stage: "Completed" });
   assert.deepStrictEqual(r, { ops: { qtyRequested: 600, record: 600, stage: "Completed" }, error: null });
+}
+
+// Flat batch rows: no output → one blank row; else one row per batch, summing to produced.
+{
+  assert.deepStrictEqual(batchRows(entry({ records: [] })), [null]);
+  const recs = [{ qtyBoxes: 70 }, { qtyBoxes: 50 }] as ProductionEntry["records"];
+  const rows = batchRows(entry({ records: recs, producedSoFar: 120 }));
+  assert.strictEqual(rows.length, 2);
+  assert.strictEqual(rows.reduce((s, r) => s + (r?.qtyBoxes ?? 0), 0), 120);
 }
 
 console.log("productionSheetEdit: ok");

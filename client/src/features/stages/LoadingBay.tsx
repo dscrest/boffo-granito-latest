@@ -11,8 +11,8 @@
    Sheet / Loadings / Customer Sheet views (Workspace + Kanban hidden, code
    kept), search, advanced filter, ColumnPicker, Production-style group-by
    bands, and a Sheet edit mode (CR-173: Loaded boxes + Container per row,
-   per-row ✓/✗ or one Save). "New Loading" opens NewLoadingModal (SO →
-   container-plan prefill → one container per submit).
+   per-row ✓/✗ or one Save). "New Loading" opens the Loading Session page
+   (/loading/new, CR-203 — one container per session).
    ============================================================ */
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -35,9 +35,9 @@ import { useOrders } from "@/features/orders/useOrders";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { TotalsRow } from "@/features/reports/ReportShell";
 import { VehicleLoadModal } from "./VehicleLoadModal";
+import { captureOf } from "./LoadDetailsFields";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { LoadingWorkspace } from "./LoadingWorkspace";
-import { NewLoadingModal } from "./NewLoadingModal";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { useLoadFlow } from "./useLoadFlow";
@@ -64,6 +64,7 @@ import {
   type LoadingCapture,
   type PalPlan,
   type PalPlanLine,
+  soHeadOf,
 } from "./palPlansApi";
 
 type Entry = { p: PalPlan; l: PalPlanLine };
@@ -364,7 +365,6 @@ export function LoadingBay() {
   // Kanban (2026-09-11) and Workspace (CR-172, 2026-09-14) are hidden here — a
   // persisted "kanban"/"board"/"workspace" falls back to the Sheet; render code kept.
   const view = ["board", "kanban", "workspace"].includes(rawView as string) ? "sheet" : rawView;
-  const [newOpen, setNewOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
   // Shared load flow — picker state + confirm live in the hook (Ready rows' "+ → Load").
@@ -426,12 +426,7 @@ export function LoadingBay() {
     if (pls.length === 0) return null;
     const soIds = [...new Set(pls.map((x) => x.so).filter(Boolean))];
     const slice = soIds.length === 1 ? nextPlanContainer(soIds[0], flow.planBySo, plans, boxes, flow.designIdOf) : null;
-    const heads = soIds.map((id) => {
-      const line = allLines.find(({ l }) => l.salesOrderId === id && l.customerName)?.l;
-      if (line) return { so: line.soNumber, customer: line.customerName };
-      const o = orders.find((o) => o.salesOrderId === id);
-      return { so: o?.orderNumber || "", customer: o?.party || "" };
-    });
+    const heads = soIds.map((id) => soHeadOf(id, allLines.map(({ l }) => l), orders));
     return {
       sos: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", "),
       customers: [...new Set(heads.map((h) => h.customer).filter(Boolean))].join(", "),
@@ -990,8 +985,15 @@ export function LoadingBay() {
           )
         )}
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} />}
+        {/* CR-227 trial: the spreadsheet-style page, beside New Loading until approved. */}
         {canEdit && (
-          <button className="hbtn primary" data-tour="load-new" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => setNewOpen(true)}>
+          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => navigate("/loading/plan")}>
+            <Icon name="plus" size={13} />
+            New Loading (sheet)
+          </button>
+        )}
+        {canEdit && (
+          <button className="hbtn primary" data-tour="load-new" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => navigate("/loading/new")}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
@@ -1239,7 +1241,6 @@ export function LoadingBay() {
         </div>
       )}
 
-      {newOpen && <NewLoadingModal onDone={() => void load()} onClose={() => setNewOpen(false)} />}
 
       {flow.picker && (() => {
         // Ready-for-Loading "+ → Load" (CR-170) — same mount as the palletization board's.
@@ -1266,17 +1267,8 @@ export function LoadingBay() {
           palNumber={boxLabel(vehModal.box)}
           title={vehModal.box.status === "Open" && !sealed(vehModal.box) ? "Assign Vehicle" : "Edit Load Details"}
           busy={busy}
-          initialVehicleId={vehModal.box.vehicleId}
-          initialCapture={{
-            container_number: vehModal.box.containerNumber,
-            line_seal: vehModal.box.lineSeal,
-            electronic_seal: vehModal.box.electronicSeal,
-            loading_supervisor: vehModal.box.loadingSupervisor,
-            container_size: vehModal.box.containerSize,
-            transporter: vehModal.box.transporter,
-            lr_number: vehModal.box.lrNumber,
-            destination: vehModal.box.destination,
-          }}
+          initialVehicle={vehModal.box}
+          initialCapture={captureOf(vehModal.box)}
           onConfirm={(vehicleId, capture) => void confirmLoadDetails(vehicleId, capture)}
           onClose={() => setVehModal(null)}
         />

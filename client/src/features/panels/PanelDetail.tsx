@@ -10,6 +10,7 @@
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -60,9 +61,10 @@ export function PanelDetail() {
   const panel = panels.find((p) => p.id === id) ?? null;
   const panelOrders = orders.filter((o) => o.panelId === id);
   const needle = q.trim().toLowerCase();
+  const railRows = newestFirst(panels);
   const listed = needle
-    ? panels.filter((p) => `${p.panelCode} ${p.lines.map((l) => l.designName).join(" ")}`.toLowerCase().includes(needle))
-    : panels;
+    ? railRows.filter((p) => `${p.panelCode} ${p.lines.map((l) => l.designName).join(" ")}`.toLowerCase().includes(needle))
+    : railRows;
 
   const onSave = async (input: PanelInput) => {
     if (!panel) return;

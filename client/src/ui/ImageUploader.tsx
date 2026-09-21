@@ -1,7 +1,7 @@
 /* ============================================================
-   ImageUploader (#12) — pick + upload up to `max` images to
-   Catalyst File Store. Holds an array of file ids; previews via
-   the public design-image URL. Used on Design create + edit.
+   ImageUploader — ONE image (CR-181 Box Brand logo). Empty = dashed
+   click/drop tile; filled = preview with Replace / Remove. Uploads to
+   Catalyst File Store, holds the file id. Used by the masters form.
    ============================================================ */
 import { useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -9,80 +9,91 @@ import { toast } from "@/ui/Toast";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import type { DesignImage } from "@/features/masters/designsApi";
 
+const SIZE = 120;
+
 export function ImageUploader({
   value,
   onChange,
-  max = 5,
 }: {
-  value: DesignImage[];
-  onChange: (next: DesignImage[]) => void;
-  max?: number;
+  value: DesignImage | null;
+  onChange: (next: DesignImage | null) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const remaining = max - value.length;
+  const [over, setOver] = useState(false);
 
   const onPick = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const picked = Array.from(files).slice(0, remaining);
-    if (Array.from(files).length > remaining) {
-      toast.info(`Only ${max} images allowed — extra files skipped.`);
+    const f = files?.[0];
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      toast.error(`${f.name} is not an image`);
+      return;
     }
     setBusy(true);
-    const added: DesignImage[] = [];
-    for (const f of picked) {
-      if (!f.type.startsWith("image/")) {
-        toast.error(`${f.name} is not an image`);
-        continue;
-      }
-      try {
-        added.push(await uploadDesignImage(f));
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : `Upload failed: ${f.name}`);
-      }
+    try {
+      onChange(await uploadDesignImage(f));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Upload failed: ${f.name}`);
     }
     setBusy(false);
-    if (added.length) onChange([...value, ...added]);
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  const removeAt = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+  const tile: React.CSSProperties = {
+    width: SIZE,
+    height: SIZE,
+    borderRadius: 10,
+    border: `1px ${value ? "solid" : "dashed"} ${over ? "var(--accent)" : "var(--border-mid)"}`,
+    background: over ? "var(--accent-soft)" : "var(--panel-2)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    overflow: "hidden",
+    cursor: busy ? "wait" : "pointer",
+    color: "var(--dim)",
+    fontSize: "var(--t-sm)",
+    flexShrink: 0,
+  };
 
   return (
-    <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        {value.map((img, i) => (
-          <div key={img.id + i} style={{ position: "relative" }}>
-            <img
-              src={designImageUrl(img.id)}
-              alt={img.name || `design ${i + 1}`}
-              style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
-            />
-            <button
-              type="button"
-              className="btn"
-              title="Remove image"
-              onClick={() => removeAt(i)}
-              style={{ position: "absolute", top: -8, right: -8, width: 20, height: 20, padding: 0, borderRadius: "50%", lineHeight: "18px", background: "var(--panel)" }}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        {value.length === 0 && !busy && <span className="dim" style={{ fontSize: "var(--t-sm)" }}>No images yet.</span>}
-        {busy && <span className="dim" style={{ fontSize: "var(--t-sm)", alignSelf: "center" }}>Uploading…</span>}
+    <div
+      style={{ display: "flex", alignItems: "center", gap: 14 }}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); if (!busy) void onPick(e.dataTransfer.files); }}
+    >
+      <div style={tile} title={value ? "Click to replace" : "Click or drop an image"} onClick={() => !busy && inputRef.current?.click()}>
+        {value ? (
+          <img src={designImageUrl(value.id)} alt={value.name || "image"} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        ) : (
+          <>
+            <Icon name="upload" size={20} />
+            <span>{busy ? "Uploading…" : "Upload image"}</span>
+          </>
+        )}
       </div>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        disabled={busy || remaining <= 0}
-        onChange={(e) => void onPick(e.target.files)}
-      />
-      <span className="dim" style={{ marginLeft: 8, fontSize: "var(--t-sm)" }}>
-        {value.length}/{max} {remaining <= 0 ? "· limit reached" : ""}
-      </span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+        {value ? (
+          <>
+            <span className="dim" style={{ fontSize: "var(--t-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }} title={value.name}>
+              {busy ? "Uploading…" : value.name || "Image"}
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className="btn" disabled={busy} onClick={() => inputRef.current?.click()} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Icon name="refresh" size={12} /> Replace
+              </button>
+              <button type="button" className="btn" disabled={busy} onClick={() => onChange(null)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Icon name="trash" size={12} /> Remove
+              </button>
+            </div>
+          </>
+        ) : (
+          <span className="dim" style={{ fontSize: "var(--t-sm)" }}>PNG or JPG. Drag &amp; drop or click.</span>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => void onPick(e.target.files)} />
     </div>
   );
 }

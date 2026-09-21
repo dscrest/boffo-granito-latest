@@ -1,13 +1,15 @@
 /* Customer Sheet (/loading, 4th view) — the Excel-style customer loading
    sheet: pick one customer, every loaded line across all their SOs, grouped
-   by container with merged (rowSpan) container cells, auto-computed pallet
-   number ranges ("1 TO 16") and the Pallet master's A/B arrangements as the
-   PALLET-1 / PALLET-2 columns. Always editable in place (canEdit): load-detail
-   captures (P.O. / L.R. / truck / container / seals) + a per-line Box Brand
-   override stage into draft maps; Save/Cancel appear once dirty and save
+   by container with merged (rowSpan) container cells, pallet numbers (typed
+   Pallet No. wins, else the auto running range "1 TO 16" — CR-184) and a
+   typed Pallet type (CR-208). Box Brand is auto and read-only: production
+   line → the order's → the customer default.
+   Always editable in place (canEdit): load-detail captures (P.O. / L.R. /
+   truck as free text / container / seals) + per-line Pallet No. and
+   Pallet type stage into draft maps; Save/Cancel appear once dirty and save
    sequentially (ProductionTable idiom). Also embedded SO-scoped (`soFilter`)
-   as the Loading Workspace's sheet tab. */
-import { useEffect, useMemo, useState } from "react";
+   as the loading detail's "Loading Sheet" tab. */
+import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { EmptyState } from "@/ui/States";
@@ -16,7 +18,7 @@ import { update } from "@/lib/dataOps";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
 import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
-import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
+import { formatVehicleNumber, resolveVehicle } from "@/features/masters/vehiclesApi";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 import {
   boxLabel,
@@ -27,7 +29,7 @@ import {
   type PalPlanLine,
 } from "./palPlansApi";
 import {
-  palletRanges,
+  palletNumbers,
   resolveCustomerSheet,
   type BoxDraft,
   type LineDraft,
@@ -41,6 +43,9 @@ export function LoadingCustomerSheet({
   canEdit,
   onSaved,
   soFilter,
+  customerFilter,
+  onBoxDraft,
+  saveRef,
 }: {
   rows: Array<{ l: PalPlanLine; box?: LoadBox }>;
   canEdit: boolean;
@@ -48,8 +53,15 @@ export function LoadingCustomerSheet({
   /** Scope to one SalesOrder ROWID (Loading Workspace's sheet tab) —
       replaces the customer picker: rows filter by SO, picker hidden. */
   soFilter?: string;
+  /** Loading Session (CR-203): fix the customer, hide the picker. */
+  customerFilter?: string;
+  /** Live container-cell drafts — the session's duplicate-seal check reads them. */
+  onBoxDraft?: (drafts: Record<string, BoxDraft>) => void;
+  /** The host owns the Save button: receives save(); resolves true when nothing failed. */
+  saveRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }) {
-  const [customerId, setCustomerId] = usePersistedState("loading.customerSheet.customer", "");
+  const [pickedCustomer, setCustomerId] = usePersistedState("loading.customerSheet.customer", "");
+  const customerId = customerFilter ?? pickedCustomer;
 
   // Reference data: pallet arrangements + Box Brand names (cached fetches).
   const [palletById, setPalletById] = useState<Map<string, PalletRow>>(new Map());
@@ -90,12 +102,14 @@ export function LoadingCustomerSheet({
     return arr;
   }, [rows, customerId, soFilter]);
 
+  // Auto ranges per container (what the Pallet No. cell shows when nothing is typed).
   const rangesOf = (g: Group) =>
-    palletRanges(
+    palletNumbers(
       g.lines.map((l) => ({
         id: l.id,
         boxes: l.boxes,
         boxesPerPallet: palletById.get(l.palletId)?.boxesPerPallet || 0,
+        palletNo: "",
       })),
     );
 
@@ -106,12 +120,6 @@ export function LoadingCustomerSheet({
   const [boxDraft, setBoxDraft] = useState<Record<string, BoxDraft>>({});
   const [lineDraft, setLineDraft] = useState<Record<string, LineDraft>>({});
   const [soDraft, setSoDraft] = useState<Record<string, SoDraft>>({});
-  const [vehicles, setVehicles] = useState<VehicleRow[] | null>(null);
-  useEffect(() => {
-    if (canEdit && vehicles === null) {
-      void listVehicles().then((r) => setVehicles(r.ok ? r.vehicles : []));
-    }
-  }, [canEdit, vehicles]);
 
   const current = useMemo(
     () => ({
@@ -123,11 +131,13 @@ export function LoadingCustomerSheet({
             lrNumber: g.box.lrNumber,
             electronicSeal: g.box.electronicSeal,
             lineSeal: g.box.lineSeal,
-            vehicleId: g.box.vehicleId,
+            vehicleNumber: g.box.vehicleNumber,
           },
         ]),
       ),
-      lines: Object.fromEntries(groups.flatMap((g) => g.lines.map((l) => [l.id, l.boxBrandId]))),
+      lines: Object.fromEntries(
+        groups.flatMap((g) => g.lines.map((l) => [l.id, { palletNo: l.palletNo, palletType: l.palletType }])),
+      ),
       sos: Object.fromEntries(groups.flatMap((g) => g.lines.map((l) => [l.salesOrderId, l.poNumber]))),
     }),
     [groups],
@@ -146,8 +156,8 @@ export function LoadingCustomerSheet({
     clearDrafts();
   };
 
-  const save = async () => {
-    if (!resolved.dirty || saving) return;
+  const save = async (): Promise<boolean> => {
+    if (!resolved.dirty || saving) return !saving;
     setSaving(true);
     // ponytail: sequential per-record writes, no bulk endpoint — a failed row
     // stays drafted so Save can be retried for just the failures.
@@ -155,7 +165,19 @@ export function LoadingCustomerSheet({
     const failedLine: Record<string, LineDraft> = {};
     const failedSo: Record<string, SoDraft> = {};
     for (const o of resolved.boxOps) {
-      const r = await updateLoadBox(o.id, o.patch as LoadingCapture & { vehicle?: string });
+      // Truck No. is typed; resolve it to a Vehicle ROWID (master kept silently, CR-185).
+      const { vehicle_number, ...rest } = o.patch as LoadingCapture & { vehicle_number?: string };
+      const patch: LoadingCapture & { vehicle?: string } = rest;
+      if (vehicle_number !== undefined) {
+        const veh = await resolveVehicle({ vehicle_number });
+        if (!veh.ok) {
+          failedBox[o.id] = boxDraft[o.id];
+          toast.error(veh.error || "Could not save the vehicle");
+          continue;
+        }
+        if (veh.rowid) patch.vehicle = veh.rowid;
+      }
+      const r = await updateLoadBox(o.id, patch);
       if (!r.ok) {
         failedBox[o.id] = boxDraft[o.id];
         toast.error(r.error || "Could not save loading details");
@@ -165,7 +187,7 @@ export function LoadingCustomerSheet({
       const r = await update("PalletizationPlanLine", o.id, o.patch);
       if (!r.ok) {
         failedLine[o.id] = lineDraft[o.id];
-        toast.error(r.error || "Could not save the box brand");
+        toast.error(r.error || "Could not save the line");
       }
     }
     for (const o of resolved.soOps) {
@@ -184,7 +206,10 @@ export function LoadingCustomerSheet({
     if (resolved.soOps.length) invalidateOrders();
     invalidatePalPlans();
     onSaved();
+    return failures === 0;
   };
+  if (saveRef) saveRef.current = save;
+  useEffect(() => onBoxDraft?.(boxDraft), [boxDraft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- totals ----
   const allLines = groups.flatMap((g) => g.lines);
@@ -197,19 +222,12 @@ export function LoadingCustomerSheet({
     return s;
   }, 0);
 
-  const arrangement = (p: PalletRow | undefined, which: "a" | "b") => {
-    if (!p) return "—";
-    const boxes = which === "a" ? p.boxesPerPallet : p.bBoxesPerPallet;
-    const plts = which === "a" ? p.palletsPerContainer : p.bPalletsPerContainer;
-    return boxes > 0 && plts > 0 ? `${boxes} × ${plts}` : "—";
-  };
-
   const dim = { color: "var(--muted)" } as const;
 
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-        {!soFilter && (
+        {!soFilter && customerFilter === undefined && (
           <div style={{ minWidth: 260 }}>
             <Combobox
               value={customerId}
@@ -237,9 +255,11 @@ export function LoadingCustomerSheet({
             <button className="hbtn" style={{ height: 26, padding: "0 10px" }} disabled={saving} onClick={() => void cancelEdit()}>
               Cancel
             </button>
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px" }} disabled={saving} onClick={() => void save()}>
-              {saving ? "Saving…" : "Save"}
-            </button>
+            {!saveRef && (
+              <button className="hbtn primary" style={{ height: 26, padding: "0 10px" }} disabled={saving} onClick={() => void save()}>
+                {saving ? "Saving…" : "Save"}
+              </button>
+            )}
           </>
         )}
       </div>
@@ -247,30 +267,29 @@ export function LoadingCustomerSheet({
       {!customerId && !soFilter ? (
         <EmptyState title="Pick a customer" hint="The sheet shows all their orders' loadings, container-wise" />
       ) : groups.length === 0 ? (
-        <EmptyState title="Nothing loaded yet" hint="Lines appear here once palletised items are loaded into containers" />
+        <EmptyState title="Nothing loaded yet" hint="Lines appear here once palletized items are loaded into containers" />
       ) : (
         <div style={{ overflow: "auto" }}>
           {/* ponytail: no pager/column-picker — a fixed document-style sheet;
               rowSpan groups don't paginate cleanly and one customer's set is small. */}
-          <table className="tbl ruled">
+          <table className="tbl">
             <thead>
               <tr>
                 <th style={{ width: 34 }}>Sr</th>
+                <th>Design</th>
+                <th>Batch</th>
                 <th>P.O. No.</th>
                 <th>L.R. No.</th>
                 <th>Truck No.</th>
                 <th>Container No.</th>
                 <th>E-Seal No.</th>
                 <th>Line Seal No.</th>
-                <th>Box Brand</th>
-                <th>Design</th>
                 <th>Size</th>
                 <th>Finish</th>
-                <th>Batch</th>
+                <th>Box Brand</th>
                 <th>Pallet No.</th>
                 <th style={{ textAlign: "right" }}>Boxes</th>
-                <th title="Arrangement A: boxes per pallet × pallets">Pallet 1</th>
-                <th title="Arrangement B: boxes per pallet × pallets">Pallet 2</th>
+                <th>Pallet type</th>
               </tr>
             </thead>
             <tbody>
@@ -296,9 +315,8 @@ export function LoadingCustomerSheet({
                     : 0;
                   const poSpan = runStart ? (runLen === -1 || runLen === 0 ? g.lines.length - i : runLen) : 0;
                   const pallet = palletById.get(l.palletId);
-                  // Brand precedence (CR-162): line override → the order's Box Brand → customer default.
-                  const brandOverride = lineDraft[l.id]?.boxBrandId ?? l.boxBrandId;
-                  const effectiveBrand = brandOverride || l.soBoxBrandId || l.customerBoxBrandId;
+                  // Brand is auto (CR-208): production line → the order's Box Brand → customer default.
+                  const effectiveBrand = l.boxBrandId || l.soBoxBrandId || l.customerBoxBrandId;
                   return (
                     <tr key={l.id}>
                       {i === 0 && (
@@ -306,6 +324,14 @@ export function LoadingCustomerSheet({
                           {gi + 1}
                         </td>
                       )}
+                      {/* Design + Batch lead the row (user 2026-09-21); the merged cells follow. */}
+                      <td>
+                        {/* Design name alone — Size and Finish have their own columns (CR-183). */}
+                        <span className="clip" style={{ maxWidth: 220 }} title={l.designLabel}>
+                          {l.designName}
+                        </span>
+                      </td>
+                      <td className="nw mono">{l.batchNumber || "—"}</td>
                       {runStart && (
                         <td rowSpan={poSpan} style={{ verticalAlign: "middle" }}>
                           {canEdit ? (
@@ -329,18 +355,12 @@ export function LoadingCustomerSheet({
                           </td>
                           <td rowSpan={g.lines.length} style={{ verticalAlign: "middle" }}>
                             {canEdit ? (
-                              <select
-                                value={d.vehicle ?? g.box.vehicleId}
+                              <input
+                                value={d.vehicle_number ?? g.box.vehicleNumber}
+                                placeholder="e.g. GJ-01-AB-1234"
                                 style={{ width: "100%", minWidth: 110 }}
-                                onChange={(ev) => setBoxCell(g.box.id, { vehicle: ev.target.value })}
-                              >
-                                <option value="">—</option>
-                                {(vehicles ?? []).map((v) => (
-                                  <option key={v.id} value={v.id}>
-                                    {[v.vehicleNumber, v.driverName].filter(Boolean).join(" · ")}
-                                  </option>
-                                ))}
-                              </select>
+                                onChange={(ev) => setBoxCell(g.box.id, { vehicle_number: formatVehicleNumber(ev.target.value) })}
+                              />
                             ) : (
                               <span className="nw">{g.box.vehicleNumber || "—"}</span>
                             )}
@@ -356,45 +376,39 @@ export function LoadingCustomerSheet({
                           </td>
                         </>
                       )}
-                      <td>
-                        {canEdit ? (
-                          <select
-                            value={brandOverride}
-                            style={{ width: "100%", minWidth: 110 }}
-                            onChange={(ev) =>
-                              setLineDraft((p) => ({ ...p, [l.id]: { boxBrandId: ev.target.value } }))
-                            }
-                          >
-                            <option value="">
-                              {l.soBoxBrandId || l.customerBoxBrandId ? `Default · ${brandName(l.soBoxBrandId || l.customerBoxBrandId)}` : "—"}
-                            </option>
-                            {brands.map((b) => (
-                              <option key={b._id} value={b._id}>
-                                {b.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          /* grey = inherited customer default, normal = line override */
-                          <span className="nw" style={brandOverride ? undefined : dim}>
-                            {brandName(effectiveBrand) || "—"}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span className="clip" style={{ maxWidth: 220 }} title={l.designLabel}>
-                          {l.designLabel}
-                        </span>
-                      </td>
                       <td className="nw">{l.sizeCode || "—"}</td>
                       <td className="nw">{l.finish || "—"}</td>
-                      <td className="nw mono">{l.batchNumber || "—"}</td>
+                      <td className="nw">{brandName(effectiveBrand) || "—"}</td>
                       <td className="nw mono" title={pallet ? pallet.name : "Pallet spec unknown"}>
-                        {ranges.get(l.id) || "—"}
+                        {/* Pallet No.: typed wins, blank = the auto range (grey) — CR-184. */}
+                        {canEdit ? (
+                          <input
+                            value={lineDraft[l.id]?.palletNo ?? l.palletNo}
+                            placeholder={ranges.get(l.id) || "—"}
+                            style={{ width: "100%", minWidth: 90 }}
+                            onChange={(ev) =>
+                              setLineDraft((p) => ({ ...p, [l.id]: { ...p[l.id], palletNo: ev.target.value } }))
+                            }
+                          />
+                        ) : (
+                          <span style={l.palletNo.trim() ? undefined : dim}>{l.palletNo.trim() || ranges.get(l.id) || "—"}</span>
+                        )}
                       </td>
                       <td className="mono" style={{ textAlign: "right" }}>{l.boxes}</td>
-                      <td className="nw mono">{arrangement(pallet, "a")}</td>
-                      <td className="nw mono">{arrangement(pallet, "b")}</td>
+                      <td className="nw">
+                        {canEdit ? (
+                          <input
+                            value={lineDraft[l.id]?.palletType ?? l.palletType}
+                            placeholder="Pallet type"
+                            style={{ width: "100%", minWidth: 90 }}
+                            onChange={(ev) =>
+                              setLineDraft((p) => ({ ...p, [l.id]: { ...p[l.id], palletType: ev.target.value } }))
+                            }
+                          />
+                        ) : (
+                          l.palletType || "—"
+                        )}
+                      </td>
                     </tr>
                   );
                 });
@@ -406,7 +420,7 @@ export function LoadingCustomerSheet({
                   Total{totalPallets > 0 ? ` · ${totalPallets} pallets` : ""}
                 </td>
                 <td className="mono" style={{ textAlign: "right" }}>{totalBoxes}</td>
-                <td colSpan={2} />
+                <td />
               </tr>
             </tfoot>
           </table>

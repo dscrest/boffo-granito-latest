@@ -9,7 +9,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { nextCustomerCode } from "@/lib/seq";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
@@ -24,25 +24,21 @@ import { ActivityLog } from "@/features/common/RecordDetail";
 import { DispatchTab } from "@/features/stages/DispatchTab";
 import { PanelsPanel } from "@/features/panels/PanelsPanel";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
-import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS, PartyForm } from "./PartyForm";
+import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS } from "./PartyForm";
 import {
   ADDRESS_FIELD_KEYS,
   cachedCustomers,
   composeAddress,
   composeExtraAddress,
   contactName,
-  createCustomer,
   deleteCustomer,
   emptyAddress,
   listCustomers,
   parseAddresses,
   setAdditionalAddresses,
   setCustomerActive,
-  updateCustomer,
-  type CustomerInput,
   type CustomerRow,
   type ExtraAddress,
-  type PaymentTermOption,
 } from "./customersApi";
 
 /** [label, value, isUnset] — unset fields read "Not set" (dimmed) rather than a bare dash. */
@@ -217,22 +213,14 @@ export function CustomerDetail() {
   // Seed from cache so switching customers never flashes a skeleton.
   const [customers, setCustomers] = useState<CustomerRow[] | null>(() => cachedCustomers());
   // Pick-list options the edit form needs — listCustomers() already returns them.
-  const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>([]);
-  const [salesPersons, setSalesPersons] = useState<PaymentTermOption[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
   const [addingAddr, setAddingAddr] = useState(false);
   const [editingAddr, setEditingAddr] = useState<number | null>(null);
 
   const refresh = () =>
     listCustomers().then((res) => {
       setCustomers(res.ok ? res.customers : (cachedCustomers() ?? []));
-      if (res.ok) {
-        setPaymentTerms(res.paymentTerms);
-        setSalesPersons(res.salesPersons);
-      }
     });
   useEffect(() => {
     void refresh();
@@ -262,40 +250,10 @@ export function CustomerDetail() {
   // 10 most recent transactions, shown beside Primary Details.
   const recent = poRows.sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? "")).slice(0, 10);
   const needle = q.trim().toLowerCase();
+  const railRows = newestFirst(customers);
   const listed = needle
-    ? customers.filter((c) => `${c.name} ${c.code} ${c.country}`.toLowerCase().includes(needle))
-    : customers;
-
-  const onSave = async (input: CustomerInput) => {
-    if (!party) return;
-    const res = await updateCustomer(party.id, input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setEditing(false);
-    toast.success("Customer updated");
-    // The URL is keyed by code — follow a code change or the page 404s.
-    const newCode = input.code.trim().toUpperCase();
-    if (newCode !== party.code) {
-      navigate(`/parties/${encodeURIComponent(newCode)}`, { replace: true });
-    }
-    await refresh();
-  };
-
-  // Clone: same details into a fresh customer (new code), user edits then saves.
-  const onClone = async (input: CustomerInput) => {
-    const res = await createCustomer(input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setCloning(false);
-    toast.success("Customer created");
-    navigate(`/parties/${encodeURIComponent(input.code.trim().toUpperCase())}`);
-    await refresh();
-  };
+    ? railRows.filter((c) => `${c.name} ${c.code} ${c.country}`.toLowerCase().includes(needle))
+    : railRows;
 
   const onDelete = async () => {
     if (!party) return;
@@ -373,9 +331,9 @@ export function CustomerDetail() {
 
   const moreItems = [
     ...(party
-      ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes?new=${encodeURIComponent(party.name)}`) }]
+      ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes/new?customer=${encodeURIComponent(party.name)}`) }]
       : []),
-    ...(can("customers", "create") && party ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("customers", "create") && party ? [{ label: "Clone", onClick: () => navigate(`/parties/${encodeURIComponent(party.code)}/clone`) }] : []),
     ...(can("customers", "edit") && party
       ? [{ label: party.active ? "Mark as Inactive" : "Mark as Active", onClick: () => void onToggleActive() }]
       : []),
@@ -384,49 +342,6 @@ export function CustomerDetail() {
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {editing && party && (
-        <PartyForm
-          paymentTerms={paymentTerms}
-          salesPersons={salesPersons}
-          isEdit
-          initial={{
-            code: party.code,
-            name: party.name,
-            country_code: party.countryCode,
-            currency: party.currency,
-            payment_term: party.paymentTermId,
-            box_brand: party.boxBrandId,
-            port_of_discharge: party.portOfDischarge,
-            address: party.address,
-            active: party.active,
-            ...party.extras,
-          }}
-          onSave={(input) => void onSave(input)}
-          onClose={() => setEditing(false)}
-        />
-      )}
-
-      {cloning && party && (
-        <PartyForm
-          paymentTerms={paymentTerms}
-          salesPersons={salesPersons}
-          initial={{
-            code: nextCustomerCode((customers ?? []).map((c) => c.code)),
-            name: party.name,
-            country_code: party.countryCode,
-            currency: party.currency,
-            payment_term: party.paymentTermId,
-            box_brand: party.boxBrandId,
-            port_of_discharge: party.portOfDischarge,
-            address: party.address,
-            active: true,
-            ...party.extras,
-          }}
-          onSave={(input) => void onClone(input)}
-          onClose={() => setCloning(false)}
-        />
-      )}
-
       {addingAddr && party && (
         <AddressModal onSave={(a) => void onAddAddress(a)} onClose={() => setAddingAddr(false)} />
       )}
@@ -511,7 +426,7 @@ export function CustomerDetail() {
                   {party.name}
                 </div>
                 {can("customers", "edit") && (
-                  <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit customer">
+                  <button className="hbtn" onClick={() => navigate(`/parties/${encodeURIComponent(party.code)}/edit`)} disabled={busy} title="Edit customer">
                     <Icon name="edit" size={13} />
                     Edit
                   </button>

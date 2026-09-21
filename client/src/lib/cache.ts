@@ -39,23 +39,26 @@ export function createListCache<R extends { ok: boolean }>(
 ): ListCache<R> {
   let snapshot: { value: R; ts: number } | null = null;
   let inflight: Promise<R> | null = null;
+  let gen = 0; // bumped by invalidate() — a fetch started before it must not repopulate the cache
   const listeners = new Set<Listener>();
   const notify = () => listeners.forEach((l) => l());
 
   function fetchAndCache(): Promise<R> {
     if (inflight) return inflight;
-    inflight = fetcher()
+    const g = gen;
+    const p: Promise<R> = fetcher()
       .then((r) => {
-        if (r.ok) {
+        if (r.ok && g === gen) {
           snapshot = { value: r, ts: Date.now() };
           notify();
         }
         return r;
       })
       .finally(() => {
-        inflight = null;
+        if (inflight === p) inflight = null;
       });
-    return inflight;
+    inflight = p;
+    return p;
   }
 
   return {
@@ -63,6 +66,8 @@ export function createListCache<R extends { ok: boolean }>(
     isFresh: () => !!snapshot && Date.now() - snapshot.ts < ttl,
     invalidate() {
       snapshot = null;
+      inflight = null;
+      gen++;
       notify();
     },
     patch(fn) {

@@ -12,6 +12,7 @@
    ============================================================ */
 import { listAll, op, remove, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
+import { invalidateOrders } from "@/features/orders/ordersApi";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -43,6 +44,14 @@ export const PAL_LINE_STATUS_LABEL: Record<PalLineStatus, string> = {
   ReadyToLoad: "Ready for Loading",
 };
 
+/** Displayed line status. A line's own status stops at ReadyToLoad; once its
+ *  container (or legacy pre-box plan) is dispatched it reads "Palletization
+ *  Completed". In an open container it is still "Ready for Loading". */
+export function palLineStatusLabel(l: { status: PalLineStatus }, boxStatus?: string, planStatus?: string): string {
+  if (boxStatus === "Dispatched" || planStatus === "Completed") return "Palletization Completed";
+  return boxStatus ? PAL_LINE_STATUS_LABEL.ReadyToLoad : PAL_LINE_STATUS_LABEL[l.status];
+}
+
 export interface PalPlanLine {
   id: string; // PalletizationPlanLine ROWID
   salesOrderId: string;
@@ -50,6 +59,7 @@ export interface PalPlanLine {
   orderItemId: string;
   designId: string;
   designLabel: string;
+  designName: string; // Design.design_name alone — prints show this, not the composite (CR-183)
   palletId: string;
   palletName: string;
   palletCapacity: number; // container capacity: A + B arrangements, as in palletsApi.totalBoxesPerContainer (0 = unknown)
@@ -69,7 +79,9 @@ export interface PalPlanLine {
   customerBoxBrandId: string; // Customer.box_brand default ("" = none)
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
   batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
-  palletGroup: string; // shared physical pallet group ("" = none) — legacy mixed pallets, shows the Mix Batch marker
+  palletGroup: string;
+  palletNo: string; // manual pallet number/range typed on the Loading Sheet ("" = auto range) — CR-184 // shared physical pallet group ("" = none) — legacy mixed pallets, shows the Mix Batch marker
+  palletType: string; // manual pallet type typed on the Loading Sheet ("" = blank) — CR-208
   createdTime: string; // line CREATEDTIME — age anchor (auto-enqueue creates the line right after production)
 }
 
@@ -263,7 +275,10 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     listAll("LoadBox", { order: "ROWID asc" }),
     listAll("Finish", { columns: ["name"] }),
   ]);
-  if (!plans.ok) return { ok: false, plans: [], boxes: [], error: plans.error };
+  // ANY failed read fails the load — a swallowed lines/lookup failure rendered
+  // an empty board with no error (and got cached).
+  const failed = [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes].find((r) => !r.ok);
+  if (failed) return { ok: false, plans: [], boxes: [], error: failed.error };
 
   const vehicleById = new Map<string, { number: string; driver: string; mobile: string }>();
   (vehicles.rows || []).forEach((v) =>
@@ -287,10 +302,12 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   const sizeCodeById = new Map<string, string>();
   (sizes.rows || []).forEach((s) => sizeCodeById.set(String(s.ROWID), str(s.code)));
   const designLabel = new Map<string, string>();
+  const designNameById = new Map<string, string>();
   const designSize = new Map<string, string>(); // Design ROWID → Size ROWID
   const designFinish = new Map<string, string>(); // Design ROWID → Finish ROWID
   (designs.rows || []).forEach((d) => {
     designLabel.set(String(d.ROWID), str(d.unique_name) || str(d.design_name));
+    designNameById.set(String(d.ROWID), str(d.design_name));
     designSize.set(String(d.ROWID), str(d.size));
     designFinish.set(String(d.ROWID), str(d.finish));
   });
@@ -359,6 +376,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       orderItemId: str(l.order_item),
       designId,
       designLabel: designLabel.get(designId) || "—",
+      designName: designNameById.get(designId) || designLabel.get(designId) || "—",
       palletId,
       palletName: palletName.get(palletId) || "—",
       palletCapacity: palletCap.get(palletId) || 0,
@@ -379,6 +397,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       loadBoxId: str(l.load_box),
       batchNumber: str(l.batch_number),
       palletGroup: str(l.pallet_group),
+      palletNo: str(l.pallet_no),
+      palletType: str(l.pallet_type),
       createdTime: str(l.CREATEDTIME),
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
@@ -432,10 +452,25 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   return { ok: true, plans: result, boxes };
 }
 
+/** Order number + customer of a loading's SO (CR-174 order): any pal-plan line
+    of that SO first — joined from SalesOrder/Customer here, so it never depends
+    on the orders cache — then the orders cache for plan-only loadings. */
+export function soHeadOf(
+  soId: string,
+  lines: PalPlanLine[],
+  orders: { salesOrderId?: string; orderNumber?: string; poNumber?: string; party?: string }[],
+): { so: string; customer: string } {
+  const line = lines.find((l) => l.salesOrderId === soId && l.customerName);
+  if (line) return { so: line.soNumber, customer: line.customerName };
+  const o = orders.find((x) => x.salesOrderId === soId);
+  return { so: o?.orderNumber || o?.poNumber || "", customer: o?.party || "" };
+}
+
 /* Mutations invalidate the cache so the next listPalPlans() refetches. */
 function bust<T>(p: Promise<T>): Promise<T> {
   return p.then((r) => {
     cache.invalidate();
+    invalidateOrders(); // most pal/loading routes recount OrderItem counters + stage
     return r;
   });
 }

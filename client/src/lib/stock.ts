@@ -47,16 +47,17 @@ export interface DesignStock {
   inProduction: number; // committed to production, not yet produced
   inProductionOrders: InProductionOrder[]; // that total, broken down per SO
   inLoading: number; // palletised, awaiting loading
-  available: number; // opening + produced − loaded
+  available: number; // opening + produced − loaded (physically on hand)
+  free: number; // available − boxes order items already own but have not loaded (CR-199)
 }
 
 /** Derive stock numbers for one design. Pass the full `orders`/`prodLogs`
     lists — filtering by design name happens here. */
 export function designStock(
   designName: string,
-  opts: { openingStock?: number; orders: Order[]; prodLogs: ProductionEntry[] },
+  opts: { openingStock?: number; allocated?: number; orders: Order[]; prodLogs: ProductionEntry[] },
 ): DesignStock {
-  const { openingStock = 0, orders, prodLogs } = opts;
+  const { openingStock = 0, allocated = 0, orders, prodLogs } = opts;
   // Key on the plain design_name — the shared stock key. Order.design is the
   // full unique label (name · size · finish) for display, so match on
   // Order.designName (plain), which lines up with ProductionEntry.design.
@@ -67,7 +68,9 @@ export function designStock(
   const loadedTot = ords.reduce((s, o) => s + o.loadedQty, 0);
   // Make-to-stock output has no SO line, so add it straight off the log.
   const stockProduced = logs.reduce((s, e) => (e.independent ? s + e.producedSoFar : s), 0);
-  const producedTot = soProduced + stockProduced;
+  // An allocation moves stock boxes onto an SO line: they now sit in soProduced
+  // AND in the stock output (or opening) they came from — count them once.
+  const producedTot = soProduced + stockProduced - allocated;
 
   // In production = every open production line's remaining (requested − produced
   // so far). Completed lines net to 0; requires a real ProductionLog entry, so a
@@ -102,5 +105,6 @@ export function designStock(
     inProductionOrders,
     inLoading: ords.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
     available: openingStock + producedTot - loadedTot,
+    free: Math.max(0, openingStock + producedTot - loadedTot - ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.loadedQty), 0)),
   };
 }

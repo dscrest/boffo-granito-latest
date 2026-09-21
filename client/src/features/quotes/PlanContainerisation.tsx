@@ -12,17 +12,21 @@
      pallets/container × boxes/pallet = boxes per container.
    · Weight Fitting — each container has a Ton capacity (default 28 t,
      editable) and boxes-per-container = floor(tonCapacity·1000 /
-     boxWeightKg) from the format's per-box weight (snapshotted from
-     the Size master).
+     boxWeightKg) from the Item's per-box weight (Size default, per-item
+     override), falling back to the Pallet format's.
    Packing is strictly item-wise, in line order (line 1
    first): every container starts with a single item, so raising an
    item's quantity refills its own partial container before opening a
    new one — it never spills into another item's container on its own.
    On top of that auto-pack the user can MOVE boxes between containers
-   (drag a card onto another, or the Adjust panel's Move suggestions),
-   which may mix items in one container; fill is then fractional —
-   each item's boxes against its own capacity, as on the dispatch
-   board. Moves are session-only: reopening the page re-packs.
+   (⇄ Move on an item inside a container, drag a card onto another, or
+   the Adjust panel's Move suggestions), which may mix items in one
+   container; fill is then fractional — each item's boxes against its
+   own capacity, as on the dispatch board. A move is a ROW operation:
+   the moved boxes become their own row sharing a `group` with the
+   target container's rows, and grouped rows pack into one container.
+   A saved multi-line container reseeds as grouped rows, so merges
+   survive Save + reopen.
 
    Items are fully editable here: change the item, edit the quantity
    (no cap) and rate, add brand-new items, or remove lines. Save
@@ -42,7 +46,7 @@ import { fmt } from "@/lib/format";
 import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "@/data";
 import { update } from "@/lib/dataOps";
 import { useMasters } from "@/features/masters/useMasters";
-import { listPallets, cachedPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listPallets, cachedPallets, palletsForSize, widthOf, type PalletRow } from "@/features/masters/palletsApi";
 import { listBatchStock, cachedBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import type { DesignRow } from "@/features/masters/designsApi";
 import { cachedOrders, invalidateOrders, listOrders, soStatusLabel, SO_STATUS_CHIP } from "@/features/orders/ordersApi";
@@ -62,29 +66,30 @@ const EPS = 1e-6;
 const DEFAULT_TON_CAPACITY = 28;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-// Leading dimension of a size string ("300x600 - GVT…" → "300") — same
-// matcher as PalPlanForm's per-line pallet-size filtering.
-const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
 
 /** Reopen a saved plan as editable row groups (design → one entry per row):
  *  each plan line starts a new group, except an auto-overflow continuation —
  *  previous container is single-line, full, same design + pallet, and the line
  *  opens its container — which merges back into the previous group. So a
  *  deliberate clone split (300+200, first container partial) survives reopen,
- *  while a plain overflow (400 filling C1 + 100) reseeds as one row. */
+ *  while a plain overflow (400 filling C1 + 100) reseeds as one row. Lines of
+ *  a MIXED container (>1 lines) each become a row carrying that container's
+ *  `group`, so grouped packing rebuilds the merge exactly. */
 // ponytail: a split whose first part exactly fills a container merges back to one row — it repacks to the identical plan, only the visual row split is lost
 function planRowGroups(plan: ContainerPlan | null) {
-  const groups = new Map<string, { qty: number; palletId: string }[]>();
+  const groups = new Map<string, { qty: number; palletId: string; group?: string; over?: boolean }[]>();
   const containers = plan?.containers ?? [];
   containers.forEach((c, i) => {
+    // An overridden (>100%) container reseeds grouped + over even when single-line (CR-196).
+    const mixed = c.lines.length > 1 || !!c.over;
     c.lines.forEach((ln, j) => {
       const list = groups.get(ln.design) ?? [];
       const prev = i > 0 ? containers[i - 1] : undefined;
       const overflow =
-        j === 0 && prev?.lines.length === 1 && prev.fillPct >= 100 &&
+        !mixed && j === 0 && prev?.lines.length === 1 && !prev.over && prev.fillPct >= 100 &&
         prev.lines[0].design === ln.design && (prev.lines[0].palletId || "") === (ln.palletId || "");
       if (overflow && list.length) list[list.length - 1].qty += ln.boxes;
-      else list.push({ qty: ln.boxes, palletId: ln.palletId || "" });
+      else list.push({ qty: ln.boxes, palletId: ln.palletId || "", ...(mixed ? { group: `C${c.no ?? i + 1}` } : {}), ...(c.over ? { over: true } : {}) });
       groups.set(ln.design, list);
     });
   });
@@ -112,6 +117,8 @@ interface DraftLine {
   description: string; // preserved
   palletId: string; // chosen pallet ROWID ("" = auto best-size match)
   ordered?: number; // original quote qty for this row (reference only; undefined for new lines)
+  group?: string; // rows sharing a group pack into ONE (mixed) container — set by a Move
+  over?: boolean; // manual override: the group's container may exceed 100% (CR-196)
 }
 
 interface ResolvedLine {
@@ -123,6 +130,8 @@ interface ResolvedLine {
   qty: number;
   rate: number;
   ordered?: number;
+  group?: string;
+  over?: boolean;
   boxWeightKg: number; // per box
   tonnes: number; // qty * boxWeightKg / 1000 (0 when weight unknown)
   palletId: string;
@@ -142,15 +151,8 @@ interface Seg {
   idx: number;
   boxes: number;
 }
-/** A manual "move N boxes of a line from container A to B", layered on the auto-pack. */
-interface BoxMove {
-  key: string; // DraftLine key
-  from: number; // container positions in the compacted list the user saw
-  to: number;
-  boxes: number;
-}
 interface PackedContainer {
-  segs: Seg[]; // one seg per item; >1 after manual moves (mixed container)
+  segs: Seg[]; // one seg per item; >1 for a merged (mixed) container
   fill: number; // Σ per-seg boxes / that line's capacity — ≤ 1 by construction
   capTons: number; // weight mode: this container's weight cap (override or global default) · boxes mode: derived from the owner line
   capBoxes: number; // owner (first) line's capacity in this container — per-item fits come from fitBoxesIn
@@ -195,11 +197,10 @@ function ContainerisePlanner({
   const [capByIdx, setCapByIdx] = useState<Record<number, number>>({}); // per-container ton overrides, by position
   // Editable plan lines — the local source of truth; seeded from the quote.
   const [draftLines, setDraftLines] = useState<DraftLine[]>([]);
-  // Manual box moves (session-only) + drag/prompt state for the move flow.
-  const [moves, setMoves] = useState<BoxMove[]>([]);
+  // Drag/prompt state for the move flow (the move itself edits draftLines).
   const [dragFrom, setDragFrom] = useState<number | null>(null); // dragged container position
   const [overIdx, setOverIdx] = useState<number | null>(null); // drop-target highlight
-  const [movePrompt, setMovePrompt] = useState<{ from: number; to: number } | null>(null);
+  const [movePrompt, setMovePrompt] = useState<{ from: number; to: number; key: string; over?: boolean } | null>(null);
   const [moveCount, setMoveCount] = useState(0);
   const promptRef = useModalA11y(() => setMovePrompt(null));
 
@@ -229,7 +230,6 @@ function ContainerisePlanner({
     const saved = parseContainerPlan(savedPlan);
     // Saved plans reopen in their own mode; pre-mode plans were weight-packed.
     setMode(saved ? (saved.mode ?? "weight") : "boxes");
-    setMoves([]);
     const g = saved?.tonCapacity && saved.tonCapacity > 0 ? saved.tonCapacity : DEFAULT_TON_CAPACITY;
     setTonCapacity(g);
     const caps: Record<number, number> = {};
@@ -244,7 +244,7 @@ function ContainerisePlanner({
     const tonKg = Math.max(1, tonCapacity) * 1000;
     return draftLines.map((dl, idx) => {
       const color = LINE_COLORS[idx % LINE_COLORS.length];
-      const base = { key: dl.key, idx, item: dl.item, qty: Math.max(0, dl.qty), rate: dl.rate, ordered: dl.ordered, color };
+      const base = { key: dl.key, idx, item: dl.item, qty: Math.max(0, dl.qty), rate: dl.rate, ordered: dl.ordered, group: dl.group, over: dl.over, color };
       const fail = (reason: string, extra: Partial<ResolvedLine> = {}): ResolvedLine => ({
         ...base,
         sku: "",
@@ -268,16 +268,21 @@ function ContainerisePlanner({
       const d: DesignRow | undefined = designRows.find((x) => x.uniqueName === dl.item || x.designName === dl.item);
       if (!d) return fail("item not found in Item master");
 
-      // Pallet specs offered = exact size match, else same size WIDTH (PalPlanForm rule).
+      // Pallet specs offered = the item's own size first, then the shared size rule
+      // (palletsForSize: same WxH, size-less always). ponytail: a size with NO
+      // same-size pallet still falls back to the width so old plans keep packing.
       const w = widthOf(d.sizeLabel);
       const exact = pallets.filter((p) => p.sizeId && p.sizeId === d.sizeId);
-      const wide = pallets.filter((p) => !exact.includes(p) && (!p.sizeId || !w || widthOf(p.sizeLabel) === w));
-      const opts = [...exact, ...wide].filter((p) => p.boxesPerPallet > 0);
+      const sized = palletsForSize(pallets, d.sizeLabel).filter((p) => !exact.includes(p));
+      const wide = exact.length || sized.some((p) => p.sizeId) ? [] : pallets.filter((p) => p.sizeId && !sized.includes(p) && (!w || widthOf(p.sizeLabel) === w));
+      const opts = [...exact, ...sized, ...wide].filter((p) => p.boxesPerPallet > 0);
       const palletOptions = opts.map((p) => ({ value: p.id, label: p.name }));
       if (opts.length === 0) return fail("no Pallet format for this size", { designId: d.id, boxWeightKg: d.boxWeightKg, tonnes: base.qty * (d.boxWeightKg || 0) / 1000 });
 
       const chosen = opts.find((p) => p.id === dl.palletId) || opts[0];
-      const boxWeightKg = chosen.boxWeightKg || d.boxWeightKg;
+      // CR-190: the Item's (overridable) box weight wins; the Pallet format's is the fallback —
+      // same order as the server loading-capacity check.
+      const boxWeightKg = d.boxWeightKg || chosen.boxWeightKg;
       const tonnes = base.qty * boxWeightKg / 1000;
       const capacityBoxes =
         mode === "boxes"
@@ -287,7 +292,7 @@ function ContainerisePlanner({
         const reason =
           mode === "boxes"
             ? `no pallets/container on Pallet format “${chosen.name}”`
-            : boxWeightKg > 0 ? "box heavier than container capacity" : "no box weight — set it on the Size/Item master";
+            : boxWeightKg > 0 ? "box heavier than container capacity" : "no box weight — set it on the Item (or Size) master";
         return fail(reason, {
           designId: d.id,
           boxWeightKg,
@@ -322,11 +327,10 @@ function ContainerisePlanner({
      order. Boxes mode: capacity from the item's Pallet-format boxes-per-
      container. Weight mode: each container (by position) fills to its own ton
      capacity (global default or capByIdx override), converted to boxes by the
-     item's box weight. Manual moves are then applied on top — moving boxes
-     into another container mixes items there, and fill becomes fractional
-     (each line's boxes / that line's own capacity). Stale moves (positions or
-     lines that no longer exist, or targets without room) are clamped/skipped
-     so line edits degrade gracefully instead of hard-resetting. ---- */
+     item's box weight. Rows sharing a `group` (a Move's result) pack into one
+     container, mixing items there — fill becomes fractional (each line's
+     boxes / that line's own capacity); a grouped qty beyond the free space
+     spills item-wise, so edits degrade gracefully. ---- */
   const containers = useMemo<PackedContainer[]>(() => {
     const capTonsAt = (pos: number) => Math.max(1, capByIdx[pos] ?? tonCapacity);
     const byIdx = (idx: number) => lines.find((x) => x.idx === idx);
@@ -343,31 +347,11 @@ function ContainerisePlanner({
         return l ? s + x.boxes / Math.max(1, lineCapIn(l, pos)) : s;
       }, 0);
 
-    // Baseline: strictly item-wise, line order.
-    let list: { segs: Seg[] }[] = packItemWise(lines, (idx, pos) => {
+    // Item-wise in line order; grouped rows share one container.
+    const list: { segs: Seg[] }[] = packItemWise(lines, (idx, pos) => {
       const l = byIdx(idx);
       return l ? lineCapIn(l, pos) : 0;
     }).map((segs) => ({ segs }));
-
-    // Layer manual moves on top. Positions refer to the compacted list the
-    // user saw when the move was made, so compact after every application.
-    for (const m of moves) {
-      const l = lines.find((x) => x.key === m.key);
-      const src = list[m.from];
-      const dst = list[m.to];
-      if (!l || !src || !dst || m.from === m.to) continue;
-      const seg = src.segs.find((s) => s.idx === l.idx);
-      if (!seg) continue;
-      const room = Math.floor((1 - fillOf(dst, m.to)) * lineCapIn(l, m.to) + EPS);
-      const take = Math.min(m.boxes, seg.boxes, Math.max(0, room));
-      if (take < 1) continue;
-      seg.boxes -= take;
-      src.segs = src.segs.filter((s) => s.boxes > 0);
-      const dseg = dst.segs.find((s) => s.idx === l.idx);
-      if (dseg) dseg.boxes += take;
-      else dst.segs.push({ idx: l.idx, boxes: take });
-      list = list.filter((c) => c.segs.length > 0);
-    }
 
     return list.map((c, pos) => {
       const owner = byIdx(c.segs[0]?.idx);
@@ -379,7 +363,7 @@ function ContainerisePlanner({
         capTons: mode === "boxes" ? (owner ? capBoxes * owner.boxWeightKg / 1000 : 0) : capTonsAt(pos),
       };
     });
-  }, [lines, mode, tonCapacity, capByIdx, moves]);
+  }, [lines, mode, tonCapacity, capByIdx]);
 
   // Remaining to plan per ITEM — ordered boxes not yet in the Boxes (plan)
   // column across all rows of that item (a cloned split mustn't double-count).
@@ -419,6 +403,23 @@ function ContainerisePlanner({
         : l.boxWeightKg > 0 ? Math.floor((c.capTons * 1000) / l.boxWeightKg) : l.capacityBoxes;
     return Math.max(0, Math.floor((1 - c.fill) * cap + EPS));
   };
+  // Open the move prompt for line `key` sitting in container `from`; `to`
+  // defaults to the first other container with room (the prompt lets you change it).
+  const openMove = (from: number, key: string, to?: number) => {
+    const l = lines.find((x) => x.key === key);
+    const seg = containers[from]?.segs.find((s) => s.idx === l?.idx);
+    if (!l || !seg) return;
+    const roomy = containers.findIndex((_, i) => i !== from && fitBoxesIn(l, i) > 0);
+    // Nothing has room → still open, pre-ticked for the manual override (CR-196).
+    const target = to ?? (roomy >= 0 ? roomy : containers.findIndex((_, i) => i !== from));
+    if (target < 0 || target === from) {
+      toast.error(`No other container to move ${l.item} into`);
+      return;
+    }
+    const fit = fitBoxesIn(l, target);
+    setMoveCount(fit < 1 ? seg.boxes : Math.min(seg.boxes, fit));
+    setMovePrompt({ from, to: target, key, over: fit < 1 });
+  };
   // Dragging a card moves its last seg's item (the movable one on mixed cards).
   const movableSegOf = (i: number) => containers[i]?.segs[containers[i].segs.length - 1];
   const dragLine = dragFrom != null ? lineOf(movableSegOf(dragFrom)?.idx) : undefined;
@@ -426,27 +427,45 @@ function ContainerisePlanner({
     const from = dragFrom;
     setDragFrom(null);
     setOverIdx(null);
-    if (from == null || from === to) return;
-    const seg = movableSegOf(from);
-    const l = seg ? lineOf(seg.idx) : undefined;
-    if (!seg || !l) return;
-    const fit = fitBoxesIn(l, to);
-    if (fit < 1) {
-      toast.error(`C${to + 1} has no room for ${l.item}`);
-      return;
-    }
-    setMoveCount(Math.min(seg.boxes, fit));
-    setMovePrompt({ from, to });
+    if (from == null || from === to || !dragLine) return;
+    openMove(from, dragLine.key, to);
   };
-  const promptSeg = movePrompt ? movableSegOf(movePrompt.from) : undefined;
-  const promptLine = promptSeg ? lineOf(promptSeg.idx) : undefined;
+  const promptLine = movePrompt ? lines.find((x) => x.key === movePrompt.key) : undefined;
+  const promptSeg = movePrompt && promptLine ? containers[movePrompt.from]?.segs.find((s) => s.idx === promptLine.idx) : undefined;
   const promptFit = movePrompt && promptLine ? fitBoxesIn(promptLine, movePrompt.to) : 0;
-  const maxMove = promptSeg ? Math.min(promptSeg.boxes, promptFit) : 0;
+  const maxMove = promptSeg ? (movePrompt?.over ? promptSeg.boxes : Math.min(promptSeg.boxes, promptFit)) : 0;
   const effMove = Math.max(0, Math.min(moveCount, maxMove));
+  const promptTargets = movePrompt && promptLine
+    ? containers.map((_, i) => ({ value: String(i), label: `C${i + 1} · can take ${fmt(fitBoxesIn(promptLine, i))} boxes` })).filter((_, i) => i !== movePrompt.from)
+    : [];
+
+  /* Move = row edit: the moved boxes become a row sharing the target
+     container's `group` (minted on the target's owner row if it has none —
+     splitting that row when only its last, partial container is the target).
+     ponytail: moving out of a FULL container of a row that also has a partial one repacks the row, so the boxes effectively leave the partial — totals right, arrangement differs */
+  const moveBoxes = (from: number, to: number, key: string, n: number, over = false) => {
+    const owner = lineOf(containers[to]?.segs[0]?.idx);
+    const ownerSeg = containers[to]?.segs[0];
+    if (!owner || !ownerSeg || n < 1 || from === to) return;
+    const group = owner.group || nextKey();
+    setDraftLines((ls) => {
+      const split = (arr: DraftLine[], k: string, boxes: number, g: string) =>
+        arr.flatMap((l) => {
+          if (l.key !== k) return [l];
+          if (boxes >= l.qty) return [{ ...l, group: g }];
+          return [{ ...l, qty: l.qty - boxes }, { ...l, key: nextKey(), qty: boxes, group: g, ordered: undefined }];
+        });
+      const withTarget = owner.group ? ls : split(ls, owner.key, ownerSeg.boxes, group);
+      // Override is group-level: packing is line-ordered, so a row-level flag
+      // would let whichever row packs second get clamped and spill.
+      const moved = split(withTarget, key, n, group);
+      return over ? moved.map((l) => (l.group === group ? { ...l, over: true } : l)) : moved;
+    });
+    setSelected(to);
+  };
   const confirmMove = () => {
     if (!movePrompt || !promptLine || effMove < 1) return;
-    setMoves((ms) => [...ms, { key: promptLine.key, from: movePrompt.from, to: movePrompt.to, boxes: effMove }]);
-    setSelected(movePrompt.to);
+    moveBoxes(movePrompt.from, movePrompt.to, promptLine.key, effMove, !!movePrompt.over && effMove > promptFit);
     setMovePrompt(null);
   };
 
@@ -466,7 +485,8 @@ function ContainerisePlanner({
         });
         return {
           no: i + 1,
-          fillPct: Math.min(100, Math.round(c.fill * 100)),
+          fillPct: Math.round(c.fill * 100),
+          ...(c.fill > 1 + EPS ? { over: true } : {}),
           pallets: segLines.reduce((s, x) => s + x.pallets, 0),
           boxes: segLines.reduce((s, x) => s + x.boxes, 0),
           tonnes: round1(tonnesIn(c)),
@@ -519,11 +539,8 @@ function ContainerisePlanner({
     const r = rows[idx];
     if (r) setLine(r.key, { qty: Math.max(0, Number(raw) || 0) });
   };
-  // Mode switch re-packs under different capacities — manual moves don't carry over.
-  const switchMode = (m: "boxes" | "weight") => {
-    setMode(m);
-    setMoves([]);
-  };
+  // Mode switch re-packs under different capacities; grouped rows just overflow if they no longer fit.
+  const switchMode = (m: "boxes" | "weight") => setMode(m);
   // Per-container ton override; setting it back to the global default clears it (inherits).
   const setCap = (i: number, raw: string) =>
     setCapByIdx((p) => {
@@ -581,7 +598,7 @@ function ContainerisePlanner({
       moveIns.push({
         headline: `Move ${fmt(cand.n)} boxes of ${cand.l.item} from C${cand.from + 1}`,
         detail: `C${sel + 1} can take ${fmt(cand.n)} boxes of ${cand.l.item} — fills it to ${cand.newPct}%.`,
-        apply: () => setMoves((ms) => [...ms, { key: cand.l.key, from: cand.from, to: sel, boxes: cand.n }]),
+        apply: () => moveBoxes(cand.from, sel, cand.l.key, cand.n),
       });
     }
   }
@@ -804,8 +821,9 @@ function ContainerisePlanner({
           {containers.map((c, i) => {
             const cells = cellsOf(c);
             const empties = emptyCellsOf(c, cells.length);
-            const pct = Math.min(100, Math.round(c.fill * 100));
+            const pct = Math.round(c.fill * 100);
             const full = c.fill >= 1 - EPS;
+            const overFull = c.fill > 1 + EPS;
             const active = i === sel;
             const boxesIn = c.segs.reduce((s, x) => s + x.boxes, 0);
             const mixed = c.segs.length > 1;
@@ -829,7 +847,7 @@ function ContainerisePlanner({
               >
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "0 2px" }}>
                   <span className="mono dim" style={{ fontSize: "var(--t-xs)" }}>{docNo} · C{i + 1}</span>
-                  <span className="mono" style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: full ? "var(--c-green)" : "var(--c-amber)" }}>{pct}%</span>
+                  <span className="mono" style={{ fontSize: "var(--t-sm)", fontWeight: 600, color: overFull ? "var(--c-red)" : full ? "var(--c-green)" : "var(--c-amber)" }} title={overFull ? "Manual override — beyond 100%" : undefined}>{pct}%{overFull ? " · Override" : ""}</span>
                 </div>
                 <div
                   style={{
@@ -946,6 +964,11 @@ function ContainerisePlanner({
                     <span className="mono" style={{ fontSize: "var(--t-sm)", fontWeight: 600, width: 96, textAlign: "right" }}>
                       {fmt(s.boxes)} boxes
                     </span>
+                    {canSave && nContainers > 1 && (
+                      <button className="btn" style={{ whiteSpace: "nowrap" }} onClick={() => openMove(sel, l.key)} title={`Move boxes of ${l.item} into another container`}>
+                        ⇄ Move
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1011,7 +1034,7 @@ function ContainerisePlanner({
               ))}
               {balanced && (
                 <div style={{ padding: "10px 12px", border: "1px solid var(--c-green)", borderRadius: 6, color: "var(--c-green)", fontWeight: 600, fontSize: "var(--t-md)" }}>
-                  Load is balanced — every container ships full.
+                  Load is balanced — every container ships full{containers.some((c) => c.fill > 1 + EPS) ? " (some overridden beyond 100%)" : ""}.
                 </div>
               )}
             </div>
@@ -1019,19 +1042,33 @@ function ContainerisePlanner({
         )}
       </div>
 
-      {/* Move prompt — quantity + fit hint, opened by dropping a card on another. */}
+      {/* Move prompt — target + quantity + fit hint; opened by ⇄ Move or by dropping a card on another. */}
       {movePrompt && promptSeg && promptLine && (
         <div className="modal-backdrop">
           <div ref={promptRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
             <div className="df-head">
               <div className="ico"><Icon name="truck" size={18} /></div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600 }}>Move into C{movePrompt.to + 1}</div>
+                <div style={{ fontWeight: 600 }}>Move boxes</div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{promptLine.item} · from C{movePrompt.from + 1}</div>
               </div>
               <button className="btn x" onClick={() => setMovePrompt(null)} title="Close" tabIndex={-1}>✕</button>
             </div>
             <div className="df-body">
+              <label className="form-field">
+                <span className="lbl">Into container</span>
+                <Combobox
+                  value={String(movePrompt.to)}
+                  options={promptTargets}
+                  onChange={(v) => {
+                    const to = Number(v);
+                    const fit = fitBoxesIn(promptLine, to);
+                    setMovePrompt({ ...movePrompt, to, over: movePrompt.over || fit < 1 });
+                    setMoveCount(fit < 1 ? promptSeg.boxes : Math.min(promptSeg.boxes, fit));
+                  }}
+                  ariaLabel="Target container"
+                />
+              </label>
               <label className="form-field">
                 <span className="lbl">Boxes to move</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1049,6 +1086,15 @@ function ContainerisePlanner({
               <div style={{ fontSize: "var(--t-sm)", marginTop: 4, fontWeight: 600, color: promptFit < promptSeg.boxes ? "var(--c-amber)" : "var(--c-green)" }}>
                 C{movePrompt.to + 1} can take {fmt(promptFit)} boxes of {promptLine.item}
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: "var(--t-sm)", cursor: "pointer" }}>
+                <input type="checkbox" checked={!!movePrompt.over} onChange={(e) => setMovePrompt({ ...movePrompt, over: e.target.checked })} style={{ margin: 0 }} />
+                Override — fill beyond 100%
+              </label>
+              {movePrompt.over && effMove > promptFit && (
+                <div style={{ fontSize: "var(--t-sm)", marginTop: 4, color: "var(--c-red)", fontWeight: 600 }}>
+                  C{movePrompt.to + 1} will exceed 100% — planning anyway
+                </div>
+              )}
             </div>
             <div className="df-foot">
               <div style={{ flex: 1 }} />
@@ -1120,11 +1166,11 @@ export function PlanContainerisation() {
         // Reopen on the saved plan's row groups (boxes + pallet per group) so a
         // cloned split (300+200) survives re-seed; Ordered rides the first row.
         const groups = planRowGroups(parseContainerPlan(quote.containerPlan));
-        return quote.lines.flatMap((l) => {
+        return quote.lines.flatMap<Omit<DraftLine, "key">>((l) => {
           const base = { item: l.item, rate: l.rate, discount: l.discount, description: l.description || "" };
           const gs = groups.get(l.item);
           if (!gs?.length) return [{ ...base, qty: l.qty, palletId: "", ordered: l.qty }];
-          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, ordered: k === 0 ? l.qty : undefined }));
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, group: g.group, over: g.over, ordered: k === 0 ? l.qty : undefined }));
         });
       })()}
       seedKey={`${quote.id}:${quote.modifiedTime}`}
@@ -1228,24 +1274,24 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
         // Reopen on the saved plan's row groups (boxes + pallet per group), not
         // the raw OrderItems — otherwise every mount/save re-seed reverts the
         // user's plan edits and collapses a cloned split back into one row.
-        // ponytail: manual box moves aren't restored — a moved plan repacks item-wise and may show "Save" once
+        // ponytail: a merged container reseeds with its lines in OrderItem order, so the planJson may differ in line order from the saved one and show "Save" once
         const plan = parseContainerPlan(head.containerPlan);
         const groups = planRowGroups(plan);
         const emitted = new Set<string>();
-        const out = items.flatMap((o) => {
+        const out = items.flatMap<Omit<DraftLine, "key">>((o) => {
           const item = o.design || o.designName; // o.design hydrates as unique_name || design_name — must match itemOptions keys
           const base = { item, rate: o.rate || 0, discount: o.discount || 0, description: o.description || "" };
           const gs = groups.get(item);
           if (!gs?.length) return [{ ...base, qty: plan ? 0 : o.orderQty, palletId: o.palletId || "", ordered: o.orderQty }];
           if (emitted.has(item)) return [];
           emitted.add(item);
-          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId || o.palletId || "", ordered: k === 0 ? o.orderQty : undefined }));
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId || o.palletId || "", group: g.group, over: g.over, ordered: k === 0 ? o.orderQty : undefined }));
         });
         // Planner-added designs that live only in the plan (no OrderItem) used
         // to drop silently on reopen — seed them as reference-less rows.
         for (const [design, gs] of groups) {
           if (emitted.has(design)) continue;
-          for (const g of gs) out.push({ item: design, qty: g.qty, rate: 0, discount: 0, description: "", palletId: g.palletId, ordered: undefined });
+          for (const g of gs) out.push({ item: design, qty: g.qty, rate: 0, discount: 0, description: "", palletId: g.palletId, group: g.group, over: g.over, ordered: undefined });
         }
         return out;
       })()}

@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { DateInput } from "@/ui/DateInput";
-import { useModalA11y } from "@/ui/useModalA11y";
+import { FormPage, useFormSave } from "@/ui/FormPage";
 import {
   docTotals,
   lineTotals,
@@ -18,7 +18,7 @@ import {
   type TaxType,
 } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { composeAddress, composeExtraAddress, parseAddresses, type CustomerRow } from "@/features/masters/customersApi";
+import { AddressPair, defaultAddresses } from "@/features/common/AddressPair";
 import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
@@ -54,21 +54,6 @@ const toLine = (l: LineDraft): QuoteLine => ({
   discount: Number(l.discount) || 0,
   description: l.description,
 });
-
-/* The customer's addresses of one kind: the primary billing or shipping
-   column set plus any same-typed extra addresses added from the customer
-   detail screen. */
-function customerAddresses(cust: CustomerRow | undefined, kind: "billing" | "shipping"): string[] {
-  if (!cust) return [];
-  const primary =
-    kind === "billing"
-      ? composeAddress(cust.extras, "billing") || cust.address
-      : composeAddress(cust.extras, "shipping");
-  const extras = parseAddresses(cust.extras.additional_addresses)
-    .filter((a) => a.type === kind)
-    .map(composeExtraAddress);
-  return [...new Set([primary, ...extras].filter(Boolean))];
-}
 
 let _seq = 0;
 const newId = () =>
@@ -110,7 +95,8 @@ export function QuoteForm({
   /** Clone mode: `initial` prefills every field, but this saves as a NEW quote
       (fresh id/number, Draft status, no SO link) — not an edit of the source. */
   clone?: boolean;
-  onSave: (q: Quote) => void;
+  /** Persists; the form stays on screen (with everything typed) until the caller navigates away. */
+  onSave: (q: Quote) => void | Promise<void>;
   onClose: () => void;
 }) {
   const editing = !!initial && !clone;
@@ -151,7 +137,9 @@ export function QuoteForm({
   // for this quote (saved on the Quote row).
   const [fx, setFx] = useState(() => (initial?.exchangeRate ? String(initial.exchangeRate) : "1"));
 
+  const form = useFormSave(onClose);
   const setHead = (k: keyof Head, val: string) => {
+    form.touch();
     // Auto-fill from the Customer master when a known customer is picked:
     // ALL customer fields carry over — addresses, payment term, currency
     // and the customer's own sales person (falls back to logged-in user).
@@ -161,8 +149,7 @@ export function QuoteForm({
     setH((p) => {
       const next = { ...p, [k]: val };
       if (cust) {
-        const billing = composeAddress(cust.extras, "billing") || cust.address;
-        const shipping = composeAddress(cust.extras, "shipping") || billing;
+        const { billing, shipping } = defaultAddresses(cust);
         if (billing) next.address = billing;
         if (shipping) next.shippingAddress = shipping;
         if (cust.paymentTermLabel) next.paymentTerm = cust.paymentTermLabel;
@@ -176,15 +163,6 @@ export function QuoteForm({
 
   // Box Brand options — DB-sourced from the Brand master, with logos (CR-181; same hook as PartyForm / OrderForm).
   const boxBrands = useBoxBrands();
-
-  // Pick-list of the selected customer's addresses of one kind. The current
-  // value stays selectable even when it's not on the master (legacy quotes /
-  // free text) — a Combobox renders blank when its value is missing.
-  const addressOptions = (current: string, kind: "billing" | "shipping") => {
-    const all = customerAddresses(customers.find((x) => x.name === h.customer), kind);
-    if (current && !all.includes(current)) all.unshift(current);
-    return all.map((a) => ({ value: a, label: a }));
-  };
 
   // Preset customer (deep-link): re-pick it once the customer master loads
   // so the existing setHead branch fills the address too.
@@ -207,10 +185,15 @@ export function QuoteForm({
     }
   }, [salesPersons, editing]);
 
-  const setLine = (i: number, k: keyof LineDraft, val: string) =>
+  const setLine = (i: number, k: keyof LineDraft, val: string) => {
+    form.touch();
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
+  };
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  const removeLine = (i: number) => {
+    form.touch();
+    setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  };
 
   const validLines = lines.map(toLine).filter((l) => l.item && l.qty > 0);
   const charge = useMemo(
@@ -235,12 +218,15 @@ export function QuoteForm({
       return;
     }
     const party = parties.find((x) => x.name === h.customer);
+    void form.run(() => save(party?.code));
+  };
+  const save = (partyCode?: string) =>
     onSave({
       ...h,
       exchangeRate: Number(fx) || 1,
       id: editing ? initial!.id : newId().slice(0, 6).toUpperCase(),
       quoteNo: editing ? initial!.quoteNo : `QT/2026-27/${String(nextSeq).padStart(3, "0")}`,
-      partyCode: party?.code ?? initial?.partyCode ?? "",
+      partyCode: partyCode ?? initial?.partyCode ?? "",
       soNumber: editing ? initial?.soNumber ?? null : null,
       docDiscount: charge.docDiscount,
       adjustment: charge.adjustment,
@@ -249,27 +235,25 @@ export function QuoteForm({
       taxAmount: totals.taxAmt,
       lines: validLines,
     });
-  };
-
-  const panelRef = useModalA11y(onClose);
 
   return (
-    <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="quote" size={18} />
-          </div>
-          <div>
-            <div className="ttl">{editing ? `Edit Quote · ${initial!.quoteNo}` : clone ? "Clone Quote" : "New Quote"}</div>
-            <div className="sub2">{clone ? `Copy of ${initial!.quoteNo}` : ""}</div>
-          </div>
-          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
-            ✕
-          </button>
-        </div>
-
-        <div className="df-body">
+    <FormPage
+      title={editing ? "Edit Quote" : clone ? "Clone Quote" : "New Quote"}
+      sub={editing ? initial!.quoteNo : clone ? `Copy of ${initial!.quoteNo}` : ""}
+      busy={form.busy}
+      onCancel={() => void form.cancel()}
+      onSave={submit}
+      note={
+        showErrors && missing ? (
+          <span className="field-err">
+            {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
+          </span>
+        ) : (
+          "* Indicates a mandatory field"
+        )
+      }
+    >
+        <div>
           <div className="form-section">
             <div className="form-section-title">Quote Details</div>
             <div className="form-grid">
@@ -355,29 +339,12 @@ export function QuoteForm({
               )}
               {/* #16: Status removed from the form — set via the status bar on
                   QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
-              {/* Billing/shipping picked from the customer's addresses (primary
-                  billing + shipping + extras added on the customer detail page);
-                  free text still allowed for one-off addresses. */}
-              <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Billing Address</span>
-                <Combobox
-                  value={h.address}
-                  options={addressOptions(h.address, "billing")}
-                  onChange={(v) => setHead("address", v)}
-                  onCreate={(v) => setHead("address", v)}
-                  placeholder="Select or type the billing address…"
-                />
-              </div>
-              <div className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Shipping Address</span>
-                <Combobox
-                  value={h.shippingAddress}
-                  options={addressOptions(h.shippingAddress, "shipping")}
-                  onChange={(v) => setHead("shippingAddress", v)}
-                  onCreate={(v) => setHead("shippingAddress", v)}
-                  placeholder="Select or type the shipping address…"
-                />
-              </div>
+              <AddressPair
+                customer={customers.find((x) => x.name === h.customer)}
+                billing={h.address}
+                shipping={h.shippingAddress}
+                onChange={(kind, v) => setHead(kind === "billing" ? "address" : "shippingAddress", v)}
+              />
             </div>
           </div>
 
@@ -387,8 +354,8 @@ export function QuoteForm({
             <div className="ord-lines">
               <div className="ord-line ord-line-head qt-line">
                 <span>Item</span>
-                <span>Qty</span>
-                <span>Rate</span>
+                <span>Qty (boxes)</span>
+                <span>Rate / box</span>
                 <span>Disc %</span>
                 <span>Sub Total</span>
                 <span />
@@ -473,15 +440,15 @@ export function QuoteForm({
           <div className="form-section">
             <div className="form-section-title">Remarks &amp; Notes</div>
             <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Remarks</span>
                 <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Customer Notes</span>
                 <textarea rows={2} value={h.customerNotes} onChange={(e) => setHead("customerNotes", e.target.value)} placeholder="Notes shown to the customer" />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Terms &amp; Conditions</span>
                 <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
               </label>
@@ -489,25 +456,6 @@ export function QuoteForm({
           </div>
         </div>
 
-        <div className="df-foot">
-          <span className="df-req-note">
-            {showErrors && missing ? (
-              <span className="field-err">
-                {validLines.length === 0 ? "Add at least one line with an item + quantity" : "Fill the required fields above"}
-              </span>
-            ) : (
-              "* Indicates a mandatory field"
-            )}
-          </span>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="hbtn primary" onClick={submit}>
-            <Icon name="check" size={13} />
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormPage>
   );
 }

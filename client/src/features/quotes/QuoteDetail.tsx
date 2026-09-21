@@ -17,6 +17,7 @@
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
@@ -27,29 +28,23 @@ import { fmt, fmtDateTime } from "@/lib/format";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import { QuoteForm } from "./QuoteForm";
 import { QuotePrint } from "./QuotePrint";
 import { ContainerPlanCard } from "./ContainerPlanCard";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
 import { listPalPlans } from "@/features/stages/palPlansApi";
-import { OrderForm, type OrderDraft } from "@/features/orders/OrderForm";
-import { invalidateOrders, soStatusLabel } from "@/features/orders/ordersApi";
+import { soStatusLabel } from "@/features/orders/ordersApi";
 import {
   STATUS_CHIP,
   STATUS_LABEL,
   convertible,
-  quoteToInput,
 } from "./QuotesTable";
 import {
   cachedQuotes,
-  convertQuote,
-  createQuote,
   deleteQuote,
   ensureShareToken,
   invalidateQuotes,
   listQuotes,
   setQuoteStatus,
-  updateQuoteWithItems,
 } from "./quotesApi";
 
 /* Details rows, in display order. `key` is the localStorage toggle id.
@@ -65,7 +60,6 @@ const FIELDS: FieldDef[] = [
   { key: "salesperson", label: "Salesperson", value: (q) => q.salesperson || "—" },
   { key: "boxBrand", label: "Box Brand", value: (q) => q.boxBrandLabel || "—" },
   { key: "paymentTerm", label: "Payment Term", value: (q) => q.paymentTerm || "—" },
-  { key: "portOfDischarge", label: "Port of Discharge", value: (q) => q.portOfDischarge || "—" },
   { key: "currency", label: "Currency", value: (q) => q.currency },
   { key: "soNumber", label: "Sales Order", value: (q) => q.soNumber || "—" },
   { key: "customer", label: "Customer", value: (q) => q.customer || "—" },
@@ -96,10 +90,7 @@ export function QuoteDetail() {
   const [pdfErr, setPdfErr] = useState<string | null>(null);
   const [listQ, setListQ] = useState("");
 
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [converting, setConverting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   /* Same show/hide + reorder control as the list grids; legacy hidden-only
@@ -167,7 +158,7 @@ export function QuoteDetail() {
   // #16: Zoho-Books-style status transitions from the top bar (no form open).
   // Server-side state machine (/quote-status) validates every move.
   const changeStatus = async (next: QuoteStatus, label: string, opts?: { askReason?: boolean; reasonRequired?: boolean }) => {
-    if (!quote) return;
+    if (!quote || busy) return; // a fast second click must not fire a second transition
     let reason = "";
     if (opts?.askReason) {
       const r = await promptDialog({
@@ -245,88 +236,8 @@ export function QuoteDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote?.id, quote?.modifiedTime]);
 
-  const onEditSave = async (q: Quote) => {
-    setEditing(false);
-    setBusy(`Updating ${q.quoteNo}…`);
-    const res = await updateQuoteWithItems(q.id, quoteToInput(q));
-    if (!res.ok) {
-      setBusy(null);
-      setError(res.error || "Update failed");
-      toast.error(res.error || "Update failed");
-      return;
-    }
-    setBusy(null);
-    toast.success(`Quote ${q.quoteNo} updated`);
-    invalidateQuotes();
-    await load();
-  };
-
-  // Clone: same header + lines into a fresh Draft quote (new number, no SO
-  // link). QuoteForm.clone resets the identity fields; we just create + go.
-  const onCloneSave = async (q: Quote) => {
-    setCloning(false);
-    setBusy(`Creating ${q.quoteNo}…`);
-    const res = await createQuote(quoteToInput(q));
-    if (!res.ok) {
-      setBusy(null);
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setBusy(null);
-    toast.success(`Quote ${q.quoteNo} created`);
-    invalidateQuotes();
-    if (res.rowid) navigate(`/quotes/${encodeURIComponent(res.rowid)}`);
-    // Same-route navigation reuses this component — reload so the new id resolves.
-    await load();
-  };
-
-  // Convert via the shared OrderForm (convert mode). The server re-derives
-  // Full/Partial from what's actually left; mode here only tags the remarks.
-  const onConvert = async (d: OrderDraft) => {
-    if (!quote || busy) return;
-    const lines = d.lines.map((l) => ({
-      item: l.design,
-      qty: parseInt(l.ordered_qty_boxes, 10) || 0,
-      rate: parseFloat(l.rate) || 0,
-      pallet: l.pallet || "",
-      discount: parseFloat(l.discount) || 0,
-      description: l.description || "",
-    }));
-    const req = new Map<string, number>();
-    for (const l of lines) req.set(l.item, (req.get(l.item) || 0) + l.qty);
-    const isFull = quote.lines.every((l) => {
-      const rem = Math.max(0, (l.qty || 0) - (l.converted || 0));
-      return rem === 0 || (req.get(l.item) || 0) >= rem;
-    });
-    setBusy("Converting…");
-    const res = await convertQuote(quote.id, isFull ? "Full" : "Partial", lines, {
-      po_number: d.po_number,
-      box_brand: d.box_brand,
-      order_date: d.order_date,
-      shipment_date: d.shipment_date,
-      payment_term: d.payment_term,
-      salesperson: d.salesperson,
-      customer_notes: d.customer_notes,
-      terms: d.terms,
-      remarks: d.remarks,
-      // #17: doc-level discount removed from SOs — never inherit the quote's.
-      discount: 0,
-      adjustment: Number(d.adjustment) || 0,
-      tax_type: d.taxType,
-      tax_pct: Number(d.taxPct) || 0,
-    });
-    setBusy(null);
-    if (!res.ok) {
-      toast.error(res.error || "Convert failed");
-      return;
-    }
-    setConverting(false);
-    toast.success(`Quote converted to ${res.data?.order_number || "Sales Order"}`);
-    invalidateQuotes();
-    invalidateOrders();
-    // Land on the new Sales Order's detail page (not the list).
-    navigate(`/orders/${res.rowid}`);
-  };
+  // Edit / Clone / Convert open the form pages (CR-219).
+  const formUrl = (mode: "edit" | "clone") => `/quotes/${encodeURIComponent(quote?.id || "")}/${mode}`;
 
   const onDelete = async () => {
     if (!quote) return;
@@ -374,13 +285,14 @@ export function QuoteDetail() {
   const canConvert = convertible(quote.status);
 
   const needle = listQ.trim().toLowerCase();
+  const railRows = newestFirst(quotes);
   const listed = needle
-    ? quotes.filter((x) => `${x.quoteNo} ${x.customer}`.toLowerCase().includes(needle))
-    : quotes;
+    ? railRows.filter((x) => `${x.quoteNo} ${x.customer}`.toLowerCase().includes(needle))
+    : railRows;
 
   const moreItems = [
-    ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => setConverting(true) }] : []),
-    ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => navigate(`/orders/new?quote=${encodeURIComponent(quote?.id || "")}`) }] : []),
+    ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }] : []),
     { label: "Plan Containerisation", onClick: () => navigate(`/quotes/${quote.id}/containerise`) },
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
@@ -390,26 +302,7 @@ export function QuoteDetail() {
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {editing && (
-        <QuoteForm nextSeq={0} initial={quote} onSave={onEditSave} onClose={() => setEditing(false)} />
-      )}
-      {cloning && quote && (
-        <QuoteForm
-          nextSeq={quotes.length + 1}
-          initial={quote}
-          clone
-          onSave={onCloneSave}
-          onClose={() => setCloning(false)}
-        />
-      )}
       {printing && <QuotePrint quote={quote} onClose={() => setPrinting(false)} />}
-      {converting && (
-        <OrderForm
-          convert={{ quote }}
-          onClose={() => setConverting(false)}
-          onSave={(d: OrderDraft) => void onConvert(d)}
-        />
-      )}
 
       {/* Quote list — fixed viewport height with its OWN scroll, sticky while
           the detail scrolls. Drag the bottom-right corner to resize the width. */}
@@ -520,6 +413,11 @@ export function QuoteDetail() {
               </button>
             </>
           )}
+          {canConvert && (
+            <button className="hbtn primary" disabled={!!busy} onClick={() => navigate(`/orders/new?quote=${encodeURIComponent(quote?.id || "")}`)} title="Create a sales order from this quote">
+              <Icon name="check" size={13} /> Convert to Sales Order
+            </button>
+          )}
           {quote.status === "Accepted" && (
             <button
               className="hbtn"
@@ -536,7 +434,7 @@ export function QuoteDetail() {
               <Icon name="check" size={13} /> Submit for Approval
             </button>
           )}
-          <button className="hbtn" disabled={!!busy} onClick={() => setEditing(true)} title="Edit quote">
+          <button className="hbtn" disabled={!!busy} onClick={() => navigate(formUrl("edit"))} title="Edit quote">
             <Icon name="edit" size={13} /> Edit
           </button>
           <MoreMenu items={moreItems} />

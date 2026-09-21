@@ -155,7 +155,7 @@ export function Dashboard() {
             {range === "week" ? "This week ✓" : "This week"}
           </button>
           {can("orders", "create") && (
-            <button className="hbtn primary" onClick={() => { location.hash = "#/byorder?new=1"; }}>
+            <button className="hbtn primary" onClick={() => { location.hash = "#/orders/new"; }}>
               <Icon name="plus" size={13} />
               New Order
             </button>

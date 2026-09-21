@@ -242,6 +242,8 @@ export function convertQuote(
     order_date?: string;
     shipment_date?: string;
     salesperson?: string;
+    address?: string;
+    shipping_address?: string;
     customer_notes?: string;
     terms?: string;
     remarks?: string;

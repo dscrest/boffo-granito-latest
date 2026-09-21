@@ -23,6 +23,18 @@ export function palletRanges(
   return out;
 }
 
+/** Pallet No. per line: a typed value (PalletizationPlanLine.pallet_no) wins,
+    else the auto running range (CR-184).
+    ponytail: the auto cursor ignores manual rows; renumber-around-manual if asked. */
+export function palletNumbers(
+  lines: Array<{ id: string; boxes: number; boxesPerPallet: number; palletNo: string }>,
+): Map<string, string> {
+  const auto = palletRanges(lines);
+  const out = new Map<string, string>();
+  for (const l of lines) out.set(l.id, l.palletNo.trim() || auto.get(l.id) || "");
+  return out;
+}
+
 /* ---- staged drafts → server ops -------------------------------- */
 
 /** Container-level captures (same LoadBox fields the Confirm Load modal writes). */
@@ -31,17 +43,19 @@ export type BoxDraft = {
   lr_number?: string;
   electronic_seal?: string;
   line_seal?: string;
-  vehicle?: string; // Vehicle ROWID ("" = leave as-is; picking is id-valued)
+  vehicle_number?: string; // typed registration; the save resolves it to a Vehicle ROWID (CR-185)
 };
 export type BoxCurrent = {
   containerNumber: string;
   lrNumber: string;
   electronicSeal: string;
   lineSeal: string;
-  vehicleId: string;
+  vehicleNumber: string;
 };
-/** Per-line Box Brand override ("" = clear back to the customer default). */
-export type LineDraft = { boxBrandId?: string };
+/** Per-line edits: the manual Pallet No. ("" = back to the auto range) and the
+    typed Pallet type (CR-208). Box Brand is auto/read-only — no draft. */
+export type LineDraft = { palletNo?: string; palletType?: string };
+export type LineCurrent = { palletNo: string; palletType: string };
 /** Order-level PO number (shared across every loading of that SO). */
 export type SoDraft = { poNumber?: string };
 
@@ -52,14 +66,14 @@ const BOX_KEYS: Array<[keyof BoxDraft, keyof BoxCurrent]> = [
   ["lr_number", "lrNumber"],
   ["electronic_seal", "electronicSeal"],
   ["line_seal", "lineSeal"],
-  ["vehicle", "vehicleId"],
+  ["vehicle_number", "vehicleNumber"],
 ];
 
 /** Diff drafts against current values; only changed, trimmed keys are emitted. */
 export function resolveCustomerSheet(
   current: {
     boxes: Record<string, BoxCurrent>;
-    lines: Record<string, string>; // line id → current boxBrandId
+    lines: Record<string, LineCurrent>;
     sos: Record<string, string>; // SO id → current poNumber
   },
   drafts: {
@@ -76,6 +90,8 @@ export function resolveCustomerSheet(
     for (const [draftKey, curKey] of BOX_KEYS) {
       const v = d[draftKey];
       if (v == null) continue; // untouched cell
+      // A blanked vehicle is "leave as-is" — the server rejects an empty vehicle.
+      if (draftKey === "vehicle_number" && !v.trim()) continue;
       if (v.trim() !== cur[curKey]) patch[draftKey] = v.trim();
     }
     if (Object.keys(patch).length) boxOps.push({ id, patch });
@@ -83,12 +99,11 @@ export function resolveCustomerSheet(
 
   const lineOps: SheetOp[] = [];
   for (const [id, d] of Object.entries(drafts.lines)) {
-    const v = d.boxBrandId;
-    if (v == null) continue;
-    if (v !== (current.lines[id] ?? "")) {
-      // "" clears the override → null unsets the FK (Catalyst rejects "").
-      lineOps.push({ id, patch: { box_brand: v || null } });
-    }
+    const cur = current.lines[id] ?? { palletNo: "", palletType: "" };
+    const patch: Record<string, unknown> = {};
+    if (d.palletNo != null && d.palletNo.trim() !== cur.palletNo) patch.pallet_no = d.palletNo.trim();
+    if (d.palletType != null && d.palletType.trim() !== cur.palletType) patch.pallet_type = d.palletType.trim();
+    if (Object.keys(patch).length) lineOps.push({ id, patch });
   }
 
   const soOps: SheetOp[] = [];

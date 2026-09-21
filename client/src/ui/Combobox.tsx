@@ -38,6 +38,7 @@ export function Combobox({
   ariaLabel,
   maxVisible = MAX_VISIBLE,
   clearable = true,
+  disabled = false,
 }: {
   value: string;
   options: ComboOption[];
@@ -56,6 +57,8 @@ export function Combobox({
       required field that must never be emptied (save-time `invalid` still
       guards the rest). */
   clearable?: boolean;
+  /** Read-only + out of the tab order (e.g. shipping country while "same as billing"). */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -203,6 +206,7 @@ export function Combobox({
       <input
         className={invalid ? "combo-input error" : "combo-input"}
         role="combobox"
+        disabled={disabled}
         aria-label={ariaLabel}
         aria-expanded={open}
         aria-autocomplete="list"
@@ -228,7 +232,7 @@ export function Combobox({
           setActive(-1);
         }}
       />
-      {showClear && (
+      {showClear && !disabled && (
         <button
           type="button"
           className="combo-clear"

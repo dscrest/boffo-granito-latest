@@ -1,8 +1,8 @@
 /* By Order — grouped view. Ported verbatim from prototype/by-order.jsx.
    Now the primary orders list (All Orders commented, #21): carries New Order
    create (#8) + a choosable filter (#20). */
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { SplitBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
@@ -13,12 +13,8 @@ import { useOrders } from "./useOrders";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
 import { AdvanceButton } from "./AdvanceButton";
-import { OrderForm, type OrderDraft } from "./OrderForm";
 import { ViewToggle } from "./ViewToggle";
-import { draftToInput } from "./OrdersTable";
-import { createSalesOrder } from "./ordersApi";
 import { OrdersFilter, applyOrderFilter, EMPTY_FILTER } from "./OrdersFilter";
-import { toast } from "@/ui/Toast";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 
 interface Totals {
@@ -50,31 +46,6 @@ export function ByOrderView() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // #20: shared choosable filter (Customer / PO / Stage) + free-text search.
   const [filter, setFilter] = usePersistedState("orders.byorder.filter", EMPTY_FILTER);
-  const [showForm, setShowForm] = useState(false);
-
-  // #8: deep-link from Dashboard "New Order" (/byorder?new=1) opens the form directly.
-  const [searchParams, setSearchParams] = useSearchParams();
-  useEffect(() => {
-    if (searchParams.get("new") === "1") {
-      if (can("orders", "create")) setShowForm(true);
-      searchParams.delete("new");
-      setSearchParams(searchParams, { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const onSaveOrder = async (dr: OrderDraft) => {
-    const res = await createSalesOrder(draftToInput(dr));
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowForm(false);
-    toast.success(`Order ${res.data?.order_number ?? ""} created`);
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
-  };
 
   // Filter + search applied before grouping (shared with the Pipeline).
   const fOrders = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
@@ -118,7 +89,7 @@ export function ByOrderView() {
 
   // Newest sales order first (ROWIDs are chronological).
   const visible = useMemo(
-    () => [...groups].sort((a, b) => Number(b.salesOrderId) - Number(a.salesOrderId)),
+    () => [...groups].sort((a, b) => b.salesOrderId.localeCompare(a.salesOrderId, undefined, { numeric: true })),
     [groups],
   );
 
@@ -137,7 +108,6 @@ export function ByOrderView() {
 
   return (
     <div>
-      {showForm && <OrderForm onSave={onSaveOrder} onClose={() => setShowForm(false)} />}
 
       {/* Single-row toolbar: Filter · Search · Collapse · View · New Order.
          Export moved into the More (⋮) menu. */}
@@ -154,7 +124,7 @@ export function ByOrderView() {
           <>
             <ViewToggle />
             {can("orders", "create") && (
-              <button className="hbtn primary" onClick={() => setShowForm(true)}>
+              <button className="hbtn primary" onClick={() => navigate("/orders/new")}>
                 <Icon name="plus" size={13} />
                 New Order
               </button>

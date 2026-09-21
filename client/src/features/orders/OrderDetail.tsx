@@ -9,21 +9,23 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
-import { STAGES, type Order, type Quote } from "@/data";
+import { type Order, type Quote } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
 import { QuotePrint } from "@/features/quotes/QuotePrint";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { createSalesOrder, deleteSalesOrder, listOrders, setOrderStatus, shippingStage, updateSalesOrderWithItems, soStatusLabel, SO_STATUS_CHIP } from "./ordersApi";
-import { OrderForm, type OrderDraft } from "./OrderForm";
-import { draftToInput } from "./OrdersTable";
+import { deleteSalesOrder, listOrders, loadStatus, palStatus, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
-import { listPalPlans, PAL_LINE_STATUS_LABEL } from "@/features/stages/palPlansApi";
+import { listPalPlans, palLineStatusLabel } from "@/features/stages/palPlansApi";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
-import { ProductionForm } from "@/features/stages/ProductionForm";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
-import { NewLoadingModal } from "@/features/stages/NewLoadingModal";
-import { invalidateProductionLogs, listProductionLogs, requestProduction, stageChip, type ProductionEntry, type ProductionRequestInput } from "@/features/stages/productionApi";
+import { groupReady } from "@/features/stages/newLoadingRows";
+import { deallocateStock, listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
+import { AllocateStockModal } from "./AllocateStockModal";
+import { ChangeStatusModal } from "./ChangeStatusModal";
+import { useOrders } from "./useOrders";
+import { useStockLookup } from "@/features/masters/LineStock";
+import { lineSupplies } from "@/lib/needProduction";
 import { useMasters } from "@/features/masters/useMasters";
 
 // Boxes produced on THIS order still waiting to be palletised — drives the
@@ -32,47 +34,77 @@ import { useMasters } from "@/features/masters/useMasters";
 // In Production / Available columns from this page).
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 
-/* One meaningful header status. Approval/terminal statuses (Draft, Pending
-   Approval, Rejected, Cancelled) show as-is. An active order (Confirmed /
-   InProgress) instead shows where its stock actually is: produced-and-waiting
-   → "Ready for Palletisation", otherwise the bottleneck line stage
-   ("In Production", "Loading", …); falls back to the plain status before any
-   work is recorded. Replaces the old two-chip (status + derived) display. */
-function soDisplayStatus(
-  status: string,
-  items: Order[],
-  readyForPalletisation: boolean,
-): { label: string; cls: string } {
-  const base = { label: soStatusLabel(status), cls: SO_STATUS_CHIP[status] || "q-draft" };
-  if (status !== "Confirmed" && status !== "InProgress") return base;
-  // Loading/dispatch wins over everything: once boxes are on a vehicle, the
-  // order reads by its shipping state (shared shippingStage derivation).
-  const ship = shippingStage(items);
-  if (ship && ship.rank >= 4) return ship;
-  const remaining = items.reduce((s, o) => s + toPalletise(o), 0);
-  if (readyForPalletisation) return { label: `Ready for Palletisation — ${remaining} left`, cls: "q-accepted" };
-  // Partial: some boxes already palletised but produced stock still waits — come back to finish.
-  if (remaining > 0 && items.some((o) => o.palletizedQty > 0)) return { label: "Partially palletised", cls: "q-accepted" };
-  const workStarted = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
-  if (!workStarted) return base;
-  const stage = STAGES[Math.min(...items.map((o) => Math.max(0, STAGES.findIndex((s) => s.id === o.stage))))];
-  return { label: stage.label, cls: "q-sent" };
-}
-
-function SoProduction({ salesOrderId }: { salesOrderId: string }) {
+function SoProduction({ salesOrderId, onChanged }: { salesOrderId: string; onChanged: () => void }) {
   const [rows, setRows] = useState<ProductionEntry[] | null>(null);
+  // Stock allocated to this order (CR-199) — the production-first supply trail.
+  const [allocs, setAllocs] = useState<AllocEntry[]>([]);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     let alive = true;
     void listProductionLogs().then((res) => {
-      if (alive) setRows(res.ok ? res.entries.filter((e) => e.salesOrderId === salesOrderId) : []);
+      if (!alive) return;
+      setRows(res.ok ? res.entries.filter((e) => e.salesOrderId === salesOrderId) : []);
+      setAllocs(res.ok ? res.allocEntries.filter((a) => a.salesOrderId === salesOrderId) : []);
     });
     return () => {
       alive = false;
     };
-  }, [salesOrderId]);
+  }, [salesOrderId, tick]);
+  const onDeallocate = async (a: AllocEntry) => {
+    if (!(await confirmDialog({ title: "De-allocate stock", message: `Return ${fmt(a.qtyBoxes)} boxes of ${a.design}${a.batchNumber ? ` (batch ${a.batchNumber})` : ""} to free stock?`, confirmLabel: "De-allocate", danger: true }))) return;
+    const res = await deallocateStock(a.id);
+    if (!res.ok) {
+      toast.error(res.error || "Could not de-allocate");
+      return;
+    }
+    toast.success(`${fmt(a.qtyBoxes)} boxes returned to free stock`);
+    setTick((t) => t + 1);
+    onChanged();
+  };
 
   if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading production…</div>;
   return (
+    <>
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Allocated on</th>
+              <th>Design</th>
+              <th>Batch</th>
+              <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+              <th>By</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {allocs.map((a) => (
+              <tr key={a.id}>
+                <td className="mono muted nw">{a.createdTime.slice(0, 10) || "—"}</td>
+                <td><span className="design-name">{a.design}</span></td>
+                <td className="nw">{a.batchNumber ? <span className="chip mono">{a.batchNumber}</span> : <span className="dim">—</span>}</td>
+                <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(a.qtyBoxes)}</td>
+                <td className="muted nw">{a.performedBy || "—"}</td>
+                <td style={{ textAlign: "right" }}>
+                  {can("stages", "edit") && (
+                    <button type="button" className="btn ord-rm" title="De-allocate — return these boxes to free stock" onClick={() => void onDeallocate(a)}>✕</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {allocs.length === 0 && (
+              <tr>
+                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                  No stock allocated to this order yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {rows.length > 0 && (
     <div className="card">
       <div style={{ overflow: "auto" }}>
         <table className="tbl">
@@ -114,17 +146,12 @@ function SoProduction({ salesOrderId }: { salesOrderId: string }) {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>
-                  No production requested against this order yet.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
     </div>
+    )}
+    </>
   );
 }
 
@@ -162,10 +189,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
           .map((l) => {
             // Same derivation as the board's stageOf: box status wins, then the line's own status.
             const box = l.loadBoxId ? boxById.get(l.loadBoxId) : undefined;
-            const status = box
-              ? box.status === "Dispatched" ? "Dispatched" : "In Dispatch"
-              : p.status === "Completed" ? "Dispatched" // legacy pre-box dispatched plans
-                : PAL_LINE_STATUS_LABEL[l.status];
+            const status = palLineStatusLabel(l, box?.status, p.status);
             return {
               key: l.id,
               pal: p.palNumber,
@@ -190,7 +214,7 @@ function SoPalletisation({ salesOrderId }: { salesOrderId: string }) {
     };
   }, [salesOrderId]);
 
-  if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading palletisation…</div>;
+  if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading palletization…</div>;
   const totalBoxes = rows.reduce((s, r) => s + r.boxes, 0);
   const totalPallets = rows.reduce((s, r) => s + (r.pallets ?? 0), 0);
   return (
@@ -287,12 +311,17 @@ export function OrderDetail() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [statusBusy, setStatusBusy] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
-  const [prod, setProd] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [sendLoad, setSendLoad] = useState(false);
-  const [newLoad, setNewLoad] = useState(false); // CR-175: New Loading from palletised stock
+  // CR-175/203: New Loading from palletised stock = the Loading Session page, this SO only.
+  const newLoading = () => navigate(`/loading/new?so=${encodeURIComponent(head?.salesOrderId || "")}`);
+  const [allocating, setAllocating] = useState(false); // CR-199: Allocate Stock
+  const [changingStatus, setChangingStatus] = useState(false); // CR-231: manual status + reason
+  // CR-200 supply status per line — every open order shares each item's free
+  // stock first-come, so it needs ALL orders, not just this one's lines.
+  const { orders: everyOrder } = useOrders();
+  const stockFor = useStockLookup();
+  const supplyById = lineSupplies(everyOrder, stockFor);
   const [listQ, setListQ] = useState("");
   const { customers } = useMasters();
 
@@ -316,6 +345,22 @@ export function OrderDetail() {
     if (!head) return [];
     return head.salesOrderId ? orders.filter((o) => o.salesOrderId === head.salesOrderId) : [head];
   }, [orders, head]);
+  // Boxes New Loading could take right now (same groupReady the Loading Session
+  // uses); null = not known yet, so the button is never greyed on a guess.
+  const [readyToLoad, setReadyToLoad] = useState<number | null>(null);
+  const soIdForReady = head?.salesOrderId || "";
+  useEffect(() => {
+    if (!soIdForReady) return;
+    let alive = true;
+    void listPalPlans().then((r) => {
+      if (!alive || !r.ok) return;
+      const bands = groupReady(r.plans.flatMap((p) => p.lines), (l) => l.salesOrderId === soIdForReady);
+      setReadyToLoad(bands.reduce((n, b) => n + b.designs.reduce((m, d) => m + d.ready, 0), 0));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [soIdForReady, orders]);
 
 
   if (loading && !head) {
@@ -333,7 +378,15 @@ export function OrderDetail() {
 
   // Status managed here (like quotes) — not in the order form.
   const status = head.status || "Confirmed";
-  const display = soDisplayStatus(status, items, readyForPalletisation);
+  // Header chip = the order LIFECYCLE, the very function the Orders grid uses
+  // (CR-233) — palletization / loading progress are their own fields below.
+  const display = soLiveStatus(status, items);
+  // Header + Items-card actions follow what has actually happened to the order.
+  const workStarted = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0 || o.dispatchedQty > 0);
+  const canAllocate =
+    !!head.salesOrderId && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit") && items.some((o) => o.producedQty < o.orderQty);
+  const noStockReason =
+    totalAvail > 0 ? "" : items.every((o) => o.palletizedQty >= o.orderQty) ? "Nothing left to palletize" : "Allocate stock to this order first";
   const changeStatus = async (next: string, label: string, reason?: string) => {
     if (!head.salesOrderId || statusBusy) return;
     setStatusBusy(true);
@@ -359,63 +412,15 @@ export function OrderDetail() {
     void changeStatus("Rejected", "Sales order rejected", reason);
   };
 
-  // Editable until any work is recorded (server enforces the same guard with
-  // a 409); editing a pending/approved order resets it to Draft.
-  const workRecorded = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0);
-  // InProgress included: a production REQUEST doesn't record any work qty, so the
-  // order stays editable while a request is pending (server enforces the same —
-  // it blocks only on recorded quantities, not on status).
-  const editable =
-    can("orders", "edit") && !workRecorded && ["Draft", "PendingApproval", "Confirmed", "InProgress"].includes(status);
+  // Editable even after work is recorded (CR-232: lines are edited in place —
+  // the form + server hold a worked line to its item and its shipped boxes).
+  // Before any work, editing a pending/approved order resets it to Draft.
+  const editable = can("orders", "edit") && !["Cancelled", "Rejected"].includes(status);
   // Edit stays visible on every order (consistency); when locked, explain why.
-  const editLockReason = workRecorded
-    ? "Can't edit — production/work already recorded"
-    : `Can't edit — order is ${status}`;
+  const editLockReason = `Can't edit — order is ${soStatusLabel(status)}`;
 
-  const onEditSave = async (dr: OrderDraft) => {
-    if (!head.salesOrderId) return;
-    const res = await updateSalesOrderWithItems(head.salesOrderId, draftToInput(dr));
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setEditing(false);
-    toast.success("Order updated");
-    await load();
-  };
-
-  // Clone: same header + lines into a fresh order. draftToInput already blanks
-  // the SO number and status, so createSalesOrder makes a clean Draft.
-  const onCloneSave = async (dr: OrderDraft) => {
-    const res = await createSalesOrder(draftToInput(dr));
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setCloning(false);
-    toast.success(`Order ${res.data?.order_number ?? ""} created`);
-    if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
-    // Same-route navigation reuses this component — reload so the new id resolves.
-    await load();
-  };
-
-  const onProdSave = async (input: ProductionRequestInput) => {
-    setProd(false);
-    const res = await requestProduction(input);
-    if (!res.ok) {
-      toast.error(res.error || "Production request failed");
-      return;
-    }
-    const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
-    toast.success(`Production request sent for approval — ${total} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
-    invalidateProductionLogs();
-    // Land on the new production record instead of reloading this SO page.
-    // The production detail keys order-linked batches by `so-<salesOrderId>`
-    // (see productionDetailKey), not the raw request_group.
-    if (head.salesOrderId) navigate(`/prod/${encodeURIComponent(`so-${head.salesOrderId}`)}`);
-    else await load();
-  };
+  // Edit / Clone open the Sales Order form page (CR-219).
+  const formUrl = (mode: "edit" | "clone") => `/orders/${encodeURIComponent(orderId)}/${mode}`;
 
   const onDelete = async () => {
     if (!head.salesOrderId) return;
@@ -441,15 +446,24 @@ export function OrderDetail() {
     { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
     // Stage omitted — the order's status is the header chip, not repeated here.
+    // Where the boxes are — same helpers as the grid columns (CR-233).
+    { key: "palStatus", label: "Palletization Status", value: palStatus(items).label },
+    { key: "loadStatus", label: "Loading Status", value: loadStatus(items).label },
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
     { key: "boxBrand", label: "Box Brand", value: head.boxBrandLabel || head.boxBranding || "—" },
+    // Same commercial facts the Quote detail shows (detail-page consistency).
+    { key: "paymentTerm", label: "Payment Term", value: head.paymentTerm || "—" },
+    { key: "currency", label: "Currency", value: head.currency || "—" },
+    { key: "totalBoxes", label: "Total Boxes", value: fmt(items.reduce((s, o) => s + o.orderQty, 0)) },
+    { key: "netTotal", label: "Net Total", value: head.totalAmount ? `${head.currency || ""} ${fmt(head.totalAmount)}`.trim() : "—" },
   ];
 
   // Left panel: one row per Sales Order (orders is per-line-item), filtered.
   const soHeads = [...new Map(orders.map((o) => [o.salesOrderId || o.id, o])).values()]
-    .sort((a, b) => Number(b.salesOrderId || b.id) - Number(a.salesOrderId || a.id));
+    // ROWIDs exceed Number precision (CR-238) — compare as numeric strings.
+    .sort((a, b) => (b.salesOrderId || b.id).localeCompare(a.salesOrderId || a.id, undefined, { numeric: true }));
   const needle = listQ.trim().toLowerCase();
   const listed = needle
     ? soHeads.filter((x) => `${x.orderNumber} ${x.poNumber} ${x.party}`.toLowerCase().includes(needle))
@@ -525,13 +539,13 @@ export function OrderDetail() {
           status === "Rejected" && head.rejectReason
             ? `Rejected: ${head.rejectReason}`
             : readyForPalletisation
-              ? `${totalAvail} boxes produced and waiting to be palletised`
+              ? `${totalAvail} boxes produced and waiting to be palletized`
               : undefined,
       }}
       actions={
         <>
           {can("orders", "edit") && (
-            <button className="hbtn" disabled={statusBusy || !editable} onClick={() => setEditing(true)} title={editable ? "Edit header & line items" : editLockReason}>
+            <button className="hbtn" disabled={statusBusy || !editable} onClick={() => navigate(formUrl("edit"))} title={editable ? "Edit header & line items" : editLockReason}>
               <Icon name="edit" size={13} /> Edit
             </button>
           )}
@@ -550,7 +564,7 @@ export function OrderDetail() {
               </button>
             </>
           )}
-          {status === "Confirmed" && can("orders", "edit") && (
+          {status === "Confirmed" && !workStarted && can("orders", "edit") && (
             <button className="hbtn primary" disabled={statusBusy} onClick={() => void changeStatus("InProgress", "Order sent to customer")} title="Mark as Sent — the salesperson has acknowledged this order to the customer">
               <Icon name="check" size={13} /> Mark as Sent
             </button>
@@ -568,27 +582,31 @@ export function OrderDetail() {
               // Palletization" and Production's button (unified entry, items
               // pre-shown), scoped to this SO.
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
-                ? [{ label: "Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
+                ? [{ label: "Palletization", onClick: () => navigate(`/packing/new?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
                 : []),
               // New Loading (CR-175): this SO's palletised stock into a container —
               // same modal as /loading's New Loading, SO preset.
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
-                ? [{ label: "New Loading", onClick: () => setNewLoad(true) }]
+                ? [{ label: "New Loading", onClick: newLoading }]
                 : []),
-              // Always offered post-approval — production may be logged even on a
-              // fully-produced order (CR); the form's hint columns show coverage.
-              ...(!["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit")
-                ? [{ label: "Record New Production", onClick: () => setProd(true) }]
+              // Allocate Stock (CR-199): hand free stock to this order's lines.
+              ...(canAllocate
+                ? [{ label: "Allocate Stock", onClick: () => setAllocating(true) }]
                 : []),
+              // ponytail: "Record New Production" retired here (CR-198) — production is
+              // recorded to stock on /prod, then allocated to this order (Allocate Stock).
               ...(head.salesOrderId && can("orders", "edit")
                 ? [{ label: "Plan Containerisation", onClick: () => navigate(`/orders/${head.salesOrderId}/containerise`) }]
                 : []),
               { label: "Print Order", onClick: () => setPrinting(true) },
+              ...(head.salesOrderId && can("orders", "edit")
+                ? [{ label: "Change Status", onClick: () => setChangingStatus(true) }]
+                : []),
               ...((status === "Confirmed" || status === "InProgress") && can("orders", "edit")
                 ? [{ label: "Cancel Order", danger: true, onClick: () => void changeStatus("Cancelled", "Order cancelled") }]
                 : []),
               ...(head.salesOrderId && can("orders", "create")
-                ? [{ label: "Clone", onClick: () => setCloning(true) }]
+                ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }]
                 : []),
               ...(can("orders", "delete")
                 ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }]
@@ -609,7 +627,7 @@ export function OrderDetail() {
       extraTabs={
         head.salesOrderId
           ? [
-              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} /> },
+              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onChanged={() => void load()} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
               {
                 id: "containers",
@@ -644,15 +662,24 @@ export function OrderDetail() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <span style={{ fontWeight: 600 }}>Items</span>
           <span className="muted" style={{ fontSize: 14 }}>
-            {totalAvail} boxes to palletise
+            {totalAvail} boxes to palletize
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             {/* Both send paths (this button and the header More → Palletization)
                open the same PalPlan screen scoped to this order. */}
+            {/* Stock is waiting to be claimed — the one action that unblocks the rest. */}
+            {/* Per line, not the header label — allocating one line moves the header
+               on while another line still has free stock to claim. */}
+            {canAllocate && items.some((o) => ["Stock ready", "Partial stock"].includes(supplyById.get(o.id)?.status ?? "")) && (
+              <button className="btn primary" onClick={() => setAllocating(true)} title="Hand free stock to this order's lines">
+                Allocate Stock
+              </button>
+            )}
             <button
               className="btn"
               disabled={totalAvail === 0 || !head.salesOrderId}
-              onClick={() => navigate(`/packing?fromOrder=${encodeURIComponent(head.salesOrderId!)}`)}
+              onClick={() => navigate(`/packing/new?fromOrder=${encodeURIComponent(head.salesOrderId!)}`)}
+              title={noStockReason || "Plan this order's produced boxes onto pallets"}
             >
               Send to Palletization
             </button>
@@ -661,9 +688,9 @@ export function OrderDetail() {
             {can("stages", "edit") && !["Draft", "PendingApproval"].includes(status) && (
               <button
                 className="btn"
-                disabled={!head.salesOrderId || items.every((o) => o.orderQty - o.palletizedQty <= 0)}
+                disabled={!head.salesOrderId || totalAvail === 0}
                 onClick={() => setSendLoad(true)}
-                title="Send items straight to the loading board — no palletization step"
+                title={noStockReason || "Send items straight to the loading board — no palletization step"}
               >
                 Send to Loading
               </button>
@@ -672,9 +699,9 @@ export function OrderDetail() {
             {can("stages", "edit") && !["Draft", "PendingApproval"].includes(status) && (
               <button
                 className="btn"
-                disabled={!head.salesOrderId}
-                onClick={() => setNewLoad(true)}
-                title="Start a loading from this order's palletised stock"
+                disabled={!head.salesOrderId || readyToLoad === 0}
+                onClick={newLoading}
+                title={readyToLoad === 0 ? "Nothing ready for loading" : "Start a loading from this order's palletized stock"}
               >
                 New Loading
               </button>
@@ -689,6 +716,8 @@ export function OrderDetail() {
                 <th>Size</th>
                 <th>Finish</th>
                 <th className="num" style={{ textAlign: "right" }}>Ordered</th>
+                <th className="num" style={{ textAlign: "right" }}>Allocated</th>
+                <th>Supply</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
               </tr>
             </thead>
@@ -699,6 +728,13 @@ export function OrderDetail() {
                   <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
                   <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
                   <td className="num mono">{fmt(o.orderQty)}</td>
+                  <td className="num mono">{fmt(o.producedQty)}</td>
+                  <td className="nw">
+                    {(() => {
+                      const sp = supplyById.get(o.id);
+                      return sp ? <span className="chip" style={{ color: sp.color }} title={sp.label}>{codeOf(sp.label)}</span> : <span className="dim">—</span>;
+                    })()}
+                  </td>
                   <td className="num mono">{fmt(o.palletizedQty)}</td>
                 </tr>
               ))}
@@ -718,7 +754,9 @@ export function OrderDetail() {
             quoteNo: head.orderNumber || head.poNumber,
             customer: head.party,
             partyCode: head.partyCode,
-            address: customers.find((c) => c.code === head.partyCode)?.address || "",
+            // The SO's own addresses (CR-221); older orders fall back to the customer master.
+            address: head.address || customers.find((c) => c.code === head.partyCode)?.address || "",
+            shippingAddress: head.shippingAddress || "",
             quoteDate: head.orderDate,
             expiryDate: head.dueDate,
             paymentTerm: head.paymentTerm || "",
@@ -739,15 +777,6 @@ export function OrderDetail() {
           onClose={() => setPrinting(false)}
         />
       )}
-      {editing && <OrderForm initial={items} onSave={(d) => void onEditSave(d)} onClose={() => setEditing(false)} />}
-      {cloning && <OrderForm initial={items} clone onSave={(d) => void onCloneSave(d)} onClose={() => setCloning(false)} />}
-      {prod && head.salesOrderId && (
-        <ProductionForm
-          presetSalesOrderId={head.salesOrderId}
-          onSave={onProdSave}
-          onClose={() => setProd(false)}
-        />
-      )}
       {sendLoad && head.salesOrderId && (
         <SendToLoadingModal
           presetSalesOrderId={head.salesOrderId}
@@ -758,11 +787,21 @@ export function OrderDetail() {
           onClose={() => setSendLoad(false)}
         />
       )}
-      {newLoad && head.salesOrderId && (
-        <NewLoadingModal
-          presetSalesOrderId={head.salesOrderId}
-          onDone={() => { setNewLoad(false); void load(); }}
-          onClose={() => setNewLoad(false)}
+      {changingStatus && head.salesOrderId && (
+        <ChangeStatusModal
+          title={[head.orderNumber || head.poNumber, head.party].filter(Boolean).join("  ·  ")}
+          salesOrderId={head.salesOrderId}
+          current={status}
+          onDone={() => void load()}
+          onClose={() => setChangingStatus(false)}
+        />
+      )}
+      {allocating && head.salesOrderId && (
+        <AllocateStockModal
+          title={[head.orderNumber || head.poNumber, head.party].filter(Boolean).join("  ·  ")}
+          items={items}
+          onDone={() => void load()}
+          onClose={() => setAllocating(false)}
         />
       )}
     </RecordDetail>

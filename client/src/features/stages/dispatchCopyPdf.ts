@@ -9,6 +9,7 @@ import type { Content, ContentText, TDocumentDefinitions } from "pdfmake/interfa
 import { downloadPdf } from "@/lib/pdf";
 import { COMPANY, QP, logoDataUrl, prettyDate } from "@/features/quotes/quoteTemplate";
 import type { LoadBox, PalPlan, PalPlanLine } from "./palPlansApi";
+import { palletNumbers } from "./customerSheetEdit";
 
 /* Same page metrics as quotePdf: design at 794px width, A4 → 0.75 scale. */
 const M = 33;
@@ -38,20 +39,21 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
   const logo = await logoDataUrl();
   const label = box.vehicleNumber || `Container ${box.boxNumber}`;
   const total = entries.reduce((s, { l }) => s + l.boxes, 0);
+  // Design name only (CR-183); Pallet = typed number, else the auto range (CR-184).
+  const palletNos = palletNumbers(entries.map(({ l }) => l));
 
   const lineRow = ({ l }: { l: PalPlanLine }, i: number): Content[] => [
     { ...td(String(i + 1).padStart(2, "0")), color: QP.dim },
     {
       stack: [
-        { text: l.itemCode, fontSize: 8.5, bold: true, color: QP.ink },
-        { text: l.designLabel, fontSize: 7, color: QP.dim },
+        { text: l.designName, fontSize: 8.5, bold: true, color: QP.ink },
         ...(l.batchNumber ? [{ text: `Batch ${l.batchNumber}`, fontSize: 7, color: QP.dim }] : []),
       ],
       margin: [0, 4, 0, 4],
     } as Content,
     td(l.customerName || "—"),
     td(l.soNumber || "—"),
-    td(l.palletName && l.palletName !== "—" ? l.palletName : "—"),
+    td(palletNos.get(l.id) || "—"),
     { ...td(nfmt(l.boxes), true), bold: true, color: QP.ink },
   ];
 
@@ -140,7 +142,7 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
           headerRows: 1,
           widths: [18, "*", 110, 74, 64, 44],
           body: [
-            [th("#"), th("Product / Design"), th("Customer"), th("Sales Order"), th("Pallet"), th("Boxes", true)],
+            [th("#"), th("Design"), th("Customer"), th("Sales Order"), th("Pallet No."), th("Boxes", true)],
             ...entries.map(lineRow),
           ],
         },

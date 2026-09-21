@@ -12,6 +12,7 @@
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -21,24 +22,19 @@ import { fmt } from "@/lib/format";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
-import { PalPlanForm } from "./PalPlanForm";
 import { DispatchTab } from "./DispatchTab";
 import { STATUS_CHIP } from "./PalPlans";
 import {
   cachedLoadBoxes,
   cachedPalPlans,
-  createPalPlan,
   deletePalPlan,
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
   oiProgressOf,
-  planToInput,
-  updatePalPlan,
-  PAL_LINE_STATUS_LABEL,
+  palLineStatusLabel,
   type LoadBox,
   type PalPlan,
-  type PalPlanInput,
 } from "./palPlansApi";
 
 type DetailTab = "items" | "dispatch" | "timeline" | "activity";
@@ -55,8 +51,6 @@ export function PalPlanDetail() {
   const [boxes, setBoxes] = useState<LoadBox[]>(() => cachedLoadBoxes() ?? []);
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
   const [tab, setTab] = useState<DetailTab>("items");
 
   const load = async () => {
@@ -90,32 +84,6 @@ export function PalPlanDetail() {
 
   const oiProgress = useMemo(() => oiProgressOf(plan?.lines || []), [plan]);
 
-  const onEditSave = async (input: PalPlanInput) => {
-    if (!plan) return;
-    setEditing(false);
-    const res = await updatePalPlan(plan.id, input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    toast.success("Palletization plan updated");
-    invalidatePalPlans();
-    await load();
-  };
-
-  const onCloneSave = async (input: PalPlanInput) => {
-    setCloning(false);
-    const res = await createPalPlan(input);
-    if (!res.ok) {
-      toast.error(res.error || "Clone failed");
-      return;
-    }
-    toast.success(`Cloned to ${res.data?.pal_number || `#${res.rowid}`}`);
-    invalidatePalPlans();
-    const newId = res.data?.ROWID || res.rowid;
-    if (newId) navigate(`/packing/${encodeURIComponent(newId)}`);
-  };
-
   const onDelete = async () => {
     if (!plan) return;
     if (!(await confirmDialog({ message: `Delete palletization plan ${plan.palNumber}? This cannot be undone.`, danger: true }))) return;
@@ -136,7 +104,7 @@ export function PalPlanDetail() {
 
   const onPrintPacking = () => {
     if (!plan) return;
-    if (!plan.lines.some((l) => l.status === "ReadyToLoad" || l.loadBoxId)) { toast.error("No palletised items yet"); return; }
+    if (!plan.lines.some((l) => l.status === "ReadyToLoad" || l.loadBoxId)) { toast.error("No palletized items yet"); return; }
     void import("./packingReportPdf").then((m) => m.downloadPackingReportForPlan(plan));
   };
 
@@ -160,7 +128,7 @@ export function PalPlanDetail() {
   const editLock = plan.status === "Completed" ? "Completed plans can't be edited" : "";
 
   const moreItems = [
-    ...(can("stages", "create") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("stages", "create") ? [{ label: "Clone", onClick: () => navigate(`/packing/${encodeURIComponent(plan?.id || "")}/clone`) }] : []),
     { label: "Print Palletization slip", onClick: onPrint },
     { label: "Print Packing Report", onClick: onPrintPacking },
     ...(can("stages", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
@@ -168,19 +136,17 @@ export function PalPlanDetail() {
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {editing && <PalPlanForm initial={plan} onSave={(i) => void onEditSave(i)} onClose={() => setEditing(false)} />}
-      {cloning && <PalPlanForm initial={plan} clone onSave={(i) => void onCloneSave(i)} onClose={() => setCloning(false)} />}
 
       {/* Plan list — sticky, resizable, own scroll (mirrors Quote detail). */}
       <DetailRail
         placeholder="Search plans…"
         currentId={id}
-        items={plans.map((x) => ({
+        items={newestFirst(plans).map((x) => ({
           id: x.id,
           to: `/packing/${x.id}`,
           title: x.palNumber,
-          subtitle: [x.customerNames.join(", "), x.vehicleNumber, PAL_STATUS_LABEL[x.status]].filter(Boolean).join("  ·  "),
-          searchText: x.soNumbers.join(" "),
+          subtitle: [x.vehicleNumber, PAL_STATUS_LABEL[x.status]].filter(Boolean).join("  ·  "),
+          searchText: [...x.soNumbers, ...x.customerNames].join(" "),
         }))}
       />
 
@@ -193,7 +159,7 @@ export function PalPlanDetail() {
               <span className={`chip palstatus ${STATUS_CHIP[plan.status]}`}>{PAL_STATUS_LABEL[plan.status]}</span>
             </div>
             {can("stages", "edit") && (
-              <button className="hbtn" disabled={!!editLock} onClick={() => setEditing(true)} title={editLock || "Edit plan"}>
+              <button className="hbtn" disabled={!!editLock} onClick={() => navigate(`/packing/${encodeURIComponent(plan?.id || "")}/edit`)} title={editLock || "Edit plan"}>
                 <Icon name="edit" size={13} /> Edit
               </button>
             )}
@@ -208,7 +174,7 @@ export function PalPlanDetail() {
 
           {/* Tabs: palletise items · dispatch · timeline · activity */}
           <div className="row" style={{ display: "flex", gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
-            <button style={tabStyle(tab === "items")} onClick={() => setTab("items")}>Palletise items</button>
+            <button style={tabStyle(tab === "items")} onClick={() => setTab("items")}>Palletize items</button>
             <button style={tabStyle(tab === "dispatch")} onClick={() => setTab("dispatch")}>Dispatch</button>
             <button style={tabStyle(tab === "timeline")} onClick={() => setTab("timeline")}>Timeline</button>
             <button style={tabStyle(tab === "activity")} onClick={() => setTab("activity")}>Activity</button>
@@ -249,7 +215,8 @@ export function PalPlanDetail() {
                           const done = l.status === "ReadyToLoad" || !!l.loadBoxId;
                           const prog = oiProgress.get(l.orderItemId);
                           const partial = !done && prog && prog.done > 0 && prog.done < prog.total;
-                          const chipCls = l.status === "ReadyToLoad" ? "p-ready" : l.status === "Palletizing" ? "p-palletized" : "p-planning";
+                          const label = partial ? "Partially palletized" : palLineStatusLabel(l, box?.status, plan.status);
+                          const chipCls = label === "Palletization Completed" ? "p-completed" : l.status === "ReadyToLoad" ? "p-ready" : l.status === "Palletizing" ? "p-palletized" : "p-planning";
                           return (
                             <tr key={l.id}>
                               <td className="mono">{l.itemCode}</td>
@@ -257,8 +224,8 @@ export function PalPlanDetail() {
                               <td className="muted mono">{l.sizeCode || "—"}</td>
                               <td className="muted">{l.palletName}</td>
                               <td>
-                                <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`} title={partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status]}>
-                                  {codeOf(partial ? "Partially palletised" : PAL_LINE_STATUS_LABEL[l.status])}
+                                <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`} title={label}>
+                                  {codeOf(label)}
                                 </span>
                               </td>
                               <td className="muted">

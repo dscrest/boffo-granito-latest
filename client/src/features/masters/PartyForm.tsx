@@ -9,10 +9,10 @@
    The customer code is system-assigned (CUS-00001…, lib/seq) and
    read-only here. Reuses shared form/modal CSS (df-*, form-*).
    ============================================================ */
-import React, { useEffect, useState } from "react";
+import React, { useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
-import { useModalA11y } from "@/ui/useModalA11y";
+import { FormPage, useFormSave } from "@/ui/FormPage";
 import { storedAuth } from "@/lib/auth";
 import { useMasters } from "./useMasters";
 import { BoxBrandPreview, useBoxBrands } from "./boxBrands";
@@ -196,7 +196,7 @@ export function PartyForm({
   salesPersons: PaymentTermOption[];
   initial?: Partial<CustomerInput>;
   isEdit?: boolean;
-  onSave: (c: CustomerInput) => void;
+  onSave: (c: CustomerInput) => void | Promise<void>;
   onClose: () => void;
 }) {
   // Cache-first master read — costs nothing when the caller already loaded it.
@@ -302,7 +302,7 @@ export function PartyForm({
     // Keep the legacy one-line `address` (quote/order autofill reads it):
     // composed from billing parts, falling back to whatever was typed before.
     const composed = composeAddress(extras, "billing");
-    onSave({
+    void form.run(() => onSave({
       name: v.name.trim() || x.company_name.trim(),
       code: v.code,
       // Derived from billing country; legacy code kept when the name is
@@ -315,10 +315,15 @@ export function PartyForm({
       address: composed || v.address,
       active: v.active,
       ...extras,
-    });
+    }));
   };
 
-  const panelRef = useModalA11y(onClose);
+  // Many setters feed this form (fields, phones, contacts, same-as-billing) — a state
+  // snapshot against the first render is the one place that catches them all.
+  const form = useFormSave(onClose);
+  const snapshot = JSON.stringify([v, x, workPhone, mobile, contacts, sameAsBilling]);
+  const pristine = useRef(snapshot);
+  if (snapshot !== pristine.current) form.touch();
 
   const addressColumn = (prefix: "billing" | "shipping", disabled: boolean) => (
     <div style={{ display: "grid", gap: 8 }}>
@@ -326,11 +331,10 @@ export function PartyForm({
         const key = `${prefix}_${k}` as keyof CustomerExtras;
         if (k === "country") {
           return (
-            // Combobox has no disabled prop — block interaction via the wrapper
-            // (the shipping column is already dimmed while "same as billing").
-            <div key={key} className="form-field" style={disabled ? { pointerEvents: "none" } : undefined}>
+            <div key={key} className="form-field">
               <span className="lbl">{ADDRESS_LABELS[k]}</span>
               <Combobox
+                disabled={disabled}
                 value={x[key]}
                 options={COUNTRY_NAME_OPTIONS}
                 onChange={(val) => {
@@ -391,28 +395,24 @@ export function PartyForm({
   );
 
   return (
-    <div className="modal-backdrop">
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        className="modal-panel card df-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="flag" size={18} />
-          </div>
-          <div>
-            <div className="ttl">{isEdit ? "Edit Customer" : "New Customer"}</div>
-            <div className="sub2">Customer master</div>
-          </div>
-          <button className="btn x" style={{ marginLeft: "auto" }} onClick={onClose} title="Close" tabIndex={-1}>
-            ✕
-          </button>
-        </div>
-
-        <div className="df-body">
+    <FormPage
+      title={isEdit ? "Edit Customer" : "New Customer"}
+      sub={isEdit ? initial?.code : ""}
+      busy={form.busy}
+      saveDisabled={blocked}
+      onCancel={() => void form.cancel()}
+      onSave={submit}
+      note={
+        <>
+          * Indicates a mandatory field
+          {contactBad && (
+            <span style={{ marginLeft: 12 }}>
+              Contact Persons tab: each contact needs a first name, valid email and a phone number
+            </span>
+          )}
+        </>
+      }
+    >
           <div className="form-section">
             <div className="form-section-title">Customer</div>
             <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -557,26 +557,22 @@ export function PartyForm({
             <div className="form-grid">
               <label className="form-field">
                 <span className="lbl">Currency</span>
-                <select value={v.currency} onChange={(e) => set("currency", e.target.value)}>
-                  <option value=""></option>
-                  {/* The saved value stays selectable even if its master row is gone. */}
-                  {[...new Set([...currencyCodes(currencies), ...(v.currency ? [v.currency] : [])])].map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                {/* The saved value stays selectable even if its master row is gone. */}
+                <Combobox
+                  value={v.currency}
+                  onChange={(val) => set("currency", val)}
+                  placeholder="Search currency…"
+                  options={[...new Set([...currencyCodes(currencies), ...(v.currency ? [v.currency] : [])])].map((c) => ({ value: c, label: c }))}
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Payment Term</span>
-                <select value={v.payment_term} onChange={(e) => set("payment_term", e.target.value)}>
-                  <option value=""></option>
-                  {paymentTerms.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={v.payment_term}
+                  onChange={(val) => set("payment_term", val)}
+                  placeholder="Search payment term…"
+                  options={paymentTerms.map((t) => ({ value: t.id, label: t.label }))}
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Default Box Brand</span>
@@ -594,14 +590,12 @@ export function PartyForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Sales Person</span>
-                <select value={x.handling_person} onChange={(e) => setExtra("handling_person", e.target.value)}>
-                  <option value=""></option>
-                  {salesPersons.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={x.handling_person}
+                  onChange={(val) => setExtra("handling_person", val)}
+                  placeholder="Search sales person…"
+                  options={salesPersons.map((s) => ({ value: s.id, label: s.label }))}
+                />
               </label>
               <label className="form-field">
                 <span className="lbl">Active</span>
@@ -735,24 +729,6 @@ export function PartyForm({
             </button>
           </div>
           )}
-        </div>
-
-        <div className="df-foot">
-          <span className="df-req-note">* Indicates a mandatory field</span>
-          {contactBad && (
-            <span style={{ fontSize: 13, color: "var(--c-red)" }}>
-              Contact Persons tab: each contact needs a first name, valid email and a phone number
-            </span>
-          )}
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="hbtn primary" disabled={blocked} onClick={submit}>
-            <Icon name="check" size={13} />
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormPage>
   );
 }

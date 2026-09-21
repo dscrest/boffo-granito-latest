@@ -3,6 +3,7 @@
    container). Generation runs the data-ops saga, which numbers the
    invoice from TransactionSeries and totals the loaded batch lines.
    ============================================================ */
+import { newestFirst } from "@/lib/dates";
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -190,7 +191,7 @@ export function Invoices() {
                 </tr>
               </thead>
               <tbody>
-                {pager.slice(rows).map((r) => (
+                {pager.slice(newestFirst(rows)).map((r) => (
                   <tr key={r.id}>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.invoiceNumber}</td>
                     {visible.map((c) => (

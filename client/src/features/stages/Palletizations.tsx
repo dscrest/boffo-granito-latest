@@ -23,11 +23,11 @@ import { fmt, fmtDateTime } from "@/lib/format";
 import { PalletPackForm } from "./PalletPackForm";
 import { closePallet, combineLeftovers, listPalletisations, type ClosePalletInput, type CombineLeftoversInput, type PalletisationRow } from "./palletisationApi";
 
-const statusLabel = (r: PalletisationRow) => (r.loaded ? "Loaded" : "Palletised");
+const statusLabel = (r: PalletisationRow) => (r.loaded ? "Loaded" : "Palletized");
 
 const TABS = [
   { id: "all", label: "All" },
-  { id: "Palletised", label: "Palletised" },
+  { id: "Palletized", label: "Palletized" },
   { id: "Loaded", label: "Loaded" },
 ];
 
@@ -86,7 +86,7 @@ export function Palletizations() {
     const res = await listPalletisations();
     setLoading(false);
     if (!res.ok) {
-      setError(res.error || "Failed to load palletisations");
+      setError(res.error || "Failed to load palletizations");
       return;
     }
     setError(null);
@@ -116,8 +116,8 @@ export function Palletizations() {
     for (const input of inputs) {
       const res = await closePallet(input);
       if (!res.ok) {
-        setError(res.error || "Palletisation failed");
-        toast.error(res.error || "Palletisation failed");
+        setError(res.error || "Palletization failed");
+        toast.error(res.error || "Palletization failed");
         void load();
         return;
       }
@@ -136,7 +136,7 @@ export function Palletizations() {
       boxes += res.data?.boxes_packed ?? 0;
     }
     closeForm();
-    toast.success(`Palletised — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
+    toast.success(`Palletized — ${done} pallet${done > 1 ? "s" : ""} · ${boxes} boxes.`);
     void load();
   };
 
@@ -146,7 +146,7 @@ export function Palletizations() {
       { key: "so", label: "Sales Order", type: "text", get: (r) => r.soLabel },
       { key: "design", label: "Design", type: "multiselect", options: opts((r) => r.design), get: (r) => r.design },
       { key: "pallet", label: "Pallet", type: "multiselect", options: opts((r) => r.pallet), get: (r) => r.pallet },
-      { key: "status", label: "Status", type: "multiselect", options: ["Palletised", "Loaded"], get: statusLabel },
+      { key: "status", label: "Status", type: "multiselect", options: ["Palletized", "Loaded"], get: statusLabel },
       { key: "boxes", label: "Boxes", type: "numrange", get: (r) => r.boxes },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime || "" },
     ];
@@ -248,7 +248,7 @@ export function Palletizations() {
                         <EmptyState
                           icon="palette"
                           title="No palletizations yet"
-                          hint="Palletise produced boxes with New Palletization"
+                          hint="Palletize produced boxes with New Palletization"
                           action={
                             can("stages", "create") ? (
                               <button className="hbtn primary" onClick={() => setShowForm(true)}>

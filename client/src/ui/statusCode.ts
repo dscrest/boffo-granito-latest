@@ -17,12 +17,13 @@ const CODE: Record<string, string> = {
   // Shipping stage / palletization / loading
   dispatched: "DSP",
   "partially dispatched": "PD",
+  "partially completed": "PCO", // PC is PartiallyConverted
   "in loading": "IL",
   "ready for loading": "RFL",
-  "partially palletised": "PP",
-  "ready for palletisation": "RFP",
+  "partially palletized": "PP",
   "ready for palletization": "RFP",
   "in palletization": "INP",
+  "palletization completed": "PCM",
   "in dispatch": "IND",
   "ready for dispatch": "RFD",
   empty: "EMP",
@@ -32,6 +33,11 @@ const CODE: Record<string, string> = {
   palletised: "PLT",
   loaded: "LD",
   "on hand": "OH",
+  // Supply (production-first, CR-200)
+  allocated: "ALC",
+  "stock ready": "SR",
+  "partial stock": "PSK",
+  "need production": "NP",
   // Production
   "new request": "NR",
   "in production": "IPR",

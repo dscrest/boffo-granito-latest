@@ -1,16 +1,18 @@
 /* ============================================================
-   Design (Item) edit / clone — modal form, consistent with every other
-   master (Size/Pallet/Customer edit in a modal, not a page). Reuses the
-   shared <DesignFields> core. Save → updateDesign (edit) / createDesign
-   (clone). Hosted inline over the item detail via idProp/onClose/onSaved;
-   also still mounts standalone on the /design/:id/edit|clone routes.
-   Delete lives on the item detail's More menu, not here.
+   Item (Design) form page (CR-220) — the ONE Item form, a full page:
+     /design/new            create
+     /design/:id/edit       edit
+     /design/:id/clone      clone into a new item
+   Reuses the shared <DesignFields> core. Save → createDesign (new /
+   clone) or updateDesign (edit), then lands on the saved item.
+   Images and Delete live on the item detail, not here.
    ============================================================ */
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { useModalA11y } from "@/ui/useModalA11y";
+import { EmptyState } from "@/ui/States";
+import { can } from "@/lib/auth";
+import { FormPage, useFormSave } from "@/ui/FormPage";
 import {
   DesignFields,
   blankDesign,
@@ -40,26 +42,15 @@ const EMPTY_LOOKUPS: DesignLookups = {
   partyBrandSeq: {},
 };
 
-export function DesignEdit({
-  clone,
-  idProp,
-  onClose,
-  onSaved,
-}: {
-  clone?: boolean;
-  idProp?: string;
-  onClose?: () => void;
-  onSaved?: (id: string) => void;
-} = {}) {
-  const { id: idParam = "" } = useParams();
-  const id = idProp ?? idParam;
+export function DesignEdit({ clone }: { clone?: boolean } = {}) {
+  const { id = "" } = useParams();
+  const creating = !id || !!clone; // new or clone → createDesign
   const navigate = useNavigate();
   const [v, setV] = useState<DesignValues>(blankDesign());
   const [images, setImages] = useState<DesignImage[]>([]);
   const [lookups, setLookups] = useState<DesignLookups>(EMPTY_LOOKUPS);
   const [row, setRow] = useState<DesignRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,10 +61,11 @@ export function DesignEdit({
       if (!live) return;
       setLoading(false);
       if (!res.ok) {
-        setError(res.error || "Failed to load design");
+        setError(res.error || "Failed to load item");
         return;
       }
       setLookups(res.lookups);
+      if (!id) return; // new item: blank form, lookups only
       const found = res.designs.find((d) => d.id === id) ?? null;
       setRow(found);
       if (found) {
@@ -89,99 +81,77 @@ export function DesignEdit({
         }
         setV(seed);
         setImages(clone ? [] : found.images);
-      } else setError("Design not found.");
+      }
     })();
     return () => {
       live = false;
     };
   }, [id]);
 
-  const set = (k: keyof DesignValues, val: string) => setV((p) => ({ ...p, [k]: val }));
+  const close = () => navigate(id ? `/design/${id}` : "/design");
+  const form = useFormSave(close);
+  const set = (k: keyof DesignValues, val: string) => {
+    form.touch();
+    setV((p) => ({ ...p, [k]: val }));
+  };
   const missing = missingRequired(v);
 
   // Errors stay hidden until the first submit attempt, then update live.
   const [showErrors, setShowErrors] = useState(false);
 
-  const onSave = async () => {
-    if (missing) {
-      setShowErrors(true);
-      return;
-    }
+  const save = async () => {
+    // #12: images are managed on the item detail screen, not at creation.
     const input = toDesignInput(v, lookups, images);
     // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
-    // A clone is a new row, so it must not match ANY existing item (no self-exclude).
+    // A new/cloned item must not match ANY existing item (no self-exclude).
     const dup = (cachedDesigns() || []).find(
-      (d) => (clone || d.id !== id) && d.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase(),
+      (d) => (creating || d.id !== id) && d.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase(),
     );
     if (dup) {
       toast.error(`An item named "${input.unique_name}" already exists`);
       return;
     }
-    setBusy(true);
     setError(null);
-    const res = clone ? await createDesign(input) : await updateDesign(id, input);
-    setBusy(false);
+    const res = creating ? await createDesign(input) : await updateDesign(id, input);
     if (!res.ok) {
       setError(res.error || "Save failed");
       toast.error(res.error || "Save failed");
       return;
     }
-    toast.success(clone ? "Item created" : "Design updated");
-    const savedId = (clone ? res.rowid : id) ?? id;
-    if (onSaved) onSaved(savedId);
-    else navigate(`/design/${savedId}`);
+    toast.success(creating ? "Item created" : "Item updated");
+    // Land on the saved record; replace so Back never returns to a spent form.
+    navigate(`/design/${(creating ? res.rowid : id) ?? id}`, { replace: true });
+  };
+  const submit = () => {
+    if (missing) {
+      setShowErrors(true);
+      return;
+    }
+    void form.run(save);
   };
 
-  // Close returns to the host (inline) or the detail/list (standalone route).
-  const close = () => (onClose ? onClose() : navigate(clone ? "/design" : `/design/${id}`));
-  const panelRef = useModalA11y(close);
+  if (!can("items", creating ? "create" : "edit")) {
+    return <EmptyState title="No access" hint="You don't have permission for this" />;
+  }
+  if (loading) return <div className="dim">Loading…</div>;
+  if (id && !row) return <EmptyState title="Item not found" hint={error || undefined} />;
 
-  // Edit and clone share one modal presentation — uniform with the other
-  // masters. They differ only in title, field mode, and save target.
   return (
-    <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="tile" size={18} />
-          </div>
-          <div>
-            <div className="ttl">
-              {loading ? "Loading…" : row ? `${clone ? "Clone" : "Edit"} ${row.designName}` : "Item not found"}
-            </div>
-            <div className="sub2">Item master</div>
-          </div>
-          <button className="btn x" onClick={close} title="Close" tabIndex={-1}>
-            ✕
-          </button>
-        </div>
-
-        {error && (
-          <div className="df-body" style={{ color: "var(--c-red)" }}>
-            {error}
-          </div>
-        )}
-
-        {row && (
-          <>
-            <div className="df-body">
-              <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode={clone ? "create" : "edit"} />
-            </div>
-            <div className="df-foot">
-              <span className="df-req-note">
-                {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
-              </span>
-              <button className="btn" disabled={busy} onClick={close}>
-                Cancel
-              </button>
-              <button className="hbtn primary" disabled={busy} onClick={() => void onSave()}>
-                <Icon name="check" size={13} />
-                {busy ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    <FormPage
+      title={!id ? "New Item" : clone ? "Clone Item" : "Edit Item"}
+      sub={row ? (clone ? `Copy of ${row.designName}` : row.designName) : ""}
+      busy={form.busy}
+      onCancel={() => void form.cancel()}
+      onSave={submit}
+      note={
+        <>
+          {showErrors && missing ? <span className="field-err">Fill the required fields above</span> : "* Indicates a mandatory field"}
+          <span className="df-fx-note">ƒx Indicates a formula field (auto-calculated)</span>
+        </>
+      }
+    >
+      {error && <div className="field-err" style={{ marginBottom: 10 }}>{error}</div>}
+      <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode={creating ? "create" : "edit"} />
+    </FormPage>
   );
 }

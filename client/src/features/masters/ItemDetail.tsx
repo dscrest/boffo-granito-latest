@@ -11,6 +11,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { can, isAdmin } from "@/lib/auth";
 import { update } from "@/lib/dataOps";
@@ -20,7 +21,7 @@ import { confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
-import { cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
+import { cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
 import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { designStock, openingStockFor } from "@/lib/stock";
 import { OpeningStockForm } from "./OpeningStockForm";
@@ -33,7 +34,7 @@ import { ImageManager } from "@/features/common/ImageManager";
 import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
 import { NumberInput } from "../../ui/NumberInput";
-import { DesignEdit } from "./DesignEdit";
+import { computeWeights, rowToValues } from "./DesignForm";
 
 /* Overview/Stock tab button style (mirrors RecordDetail.tabStyle). */
 function tabStyle(active: boolean) {
@@ -52,11 +53,6 @@ function tabStyle(active: boolean) {
 /* Related-orders "Party" panel hidden per 2026-07 request — flip to true to
    restore the Party / Order Qty / Stage table + open-quantity line. */
 const SHOW_PARTY_PANEL = false;
-
-/* STUB: Zoho Books field mapping — blocked on the Books item reference.
-   HSN Code / Tax Preference / Inventory Account / Valuation Method removed
-   per 2026-07 request; only Unit remains as a placeholder row. */
-const ZOHO_STUB_FIELDS = ["Unit"];
 
 /** One label/number row in the stock summary. When onClick is given and the
     number is non-zero it renders as a link that opens the drill-down. */
@@ -129,8 +125,6 @@ export function ItemDetail() {
   const [designs, setDesigns] = useState<DesignRow[] | null>(() => cachedDesigns());
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false); // status toggle / delete
-  const [editing, setEditing] = useState(false); // inline edit modal (uniform with other masters)
-  const [cloning, setCloning] = useState(false); // inline clone modal
   const [stockEdit, setStockEdit] = useState(false); // inline Opening-stock edit
   const [stockVal, setStockVal] = useState("");
   const [stockReason, setStockReason] = useState(""); // required when a locked value is re-edited (admin)
@@ -184,9 +178,10 @@ export function ItemDetail() {
   if (designs === null) return <SkeletonRows rows={6} />;
 
   const needle = q.trim().toLowerCase();
+  const railRows = newestFirst(designs);
   const listed = needle
-    ? designs.filter((d) => `${d.uniqueName || d.designName} ${d.sku}`.toLowerCase().includes(needle))
-    : designs;
+    ? railRows.filter((d) => `${d.uniqueName || d.designName} ${d.sku}`.toLowerCase().includes(needle))
+    : railRows;
 
   const orders = design ? allOrders.filter((o) => o.design === design.designName) : [];
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
@@ -195,7 +190,7 @@ export function ItemDetail() {
   // transaction line-item rows and Reports. Batch-tracked items read opening from
   // their opening rows (openingByDesign); singular items from accounting_stock.
   const openingStock = openingStockFor(design, openingByDesign);
-  const stock = designStock(design?.designName ?? "", { openingStock, orders: allOrders, prodLogs });
+  const stock = designStock(design?.designName ?? "", { openingStock, allocated: cachedAllocByDesign().get(design?.designName ?? ""), orders: allOrders, prodLogs });
   const inProduction = stock.inProduction;
   const inLoading = stock.inLoading;
   const availableStock = stock.available;
@@ -209,10 +204,10 @@ export function ItemDetail() {
   // In production uses the shared per-SO drill-down (designStock.inProductionOrders),
   // so the popup matches Order detail / Production form everywhere.
   const bdInLoading: StockBreakdown<Order> = {
-    title: "In loading", note: "Palletised boxes waiting to be loaded — across every open order for this item.",
+    title: "In loading", note: "Palletized boxes waiting to be loaded — across every open order for this item.",
     rows: orders.filter((o) => o.palletizedQty - o.loadedQty > 0),
     columns: [orderCol, custCol,
-      { head: "Palletised", num: true, val: (o) => fmt(o.palletizedQty) },
+      { head: "Palletized", num: true, val: (o) => fmt(o.palletizedQty) },
       { head: "Loaded", num: true, val: (o) => fmt(o.loadedQty) },
       { head: "In loading", num: true, val: (o) => fmt(Math.max(0, o.palletizedQty - o.loadedQty)) }],
   };
@@ -301,7 +296,7 @@ export function ItemDetail() {
   };
 
   const moreItems = [
-    ...(can("items", "create") && design ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("items", "create") && design ? [{ label: "Clone", onClick: () => navigate(`/design/${design.id}/clone`) }] : []),
     ...(can("items", "edit") && design
       ? [{ label: design.status === "Inactive" || design.status === "Discontinued" ? "Mark as Active" : "Mark as Inactive", onClick: () => void onToggleStatus() }]
       : []),
@@ -322,27 +317,6 @@ export function ItemDetail() {
       )}
       {ipOpen && design && (
         <InProductionModal label={design.designName} total={inProduction} orders={stock.inProductionOrders} onClose={() => setIpOpen(false)} />
-      )}
-      {editing && design && (
-        <DesignEdit
-          idProp={design.id}
-          onClose={() => setEditing(false)}
-          onSaved={() => {
-            setEditing(false);
-            void refresh();
-          }}
-        />
-      )}
-      {cloning && design && (
-        <DesignEdit
-          clone
-          idProp={design.id}
-          onClose={() => setCloning(false)}
-          onSaved={(newId) => {
-            setCloning(false);
-            navigate(`/design/${newId}`);
-          }}
-        />
       )}
       {/* Shrunk item list (#13.4) — fixed viewport height with its OWN scroll
           (the page never scrolls with it), sticky while the detail scrolls.
@@ -427,7 +401,7 @@ export function ItemDetail() {
                   {design.uniqueName || design.designName}
                 </div>
                 {can("items", "edit") && (
-                  <button className="hbtn" onClick={() => setEditing(true)} title="Edit item">
+                  <button className="hbtn" onClick={() => navigate(`/design/${design.id}/edit`)} title="Edit item">
                     <Icon name="edit" size={13} />
                     Edit
                   </button>
@@ -539,12 +513,17 @@ export function ItemDetail() {
                   label="Coverage / box"
                   value={design.coverageSqm ? `${design.coverageSqm} m² · ${design.coverageSqft} ft²` : "—"}
                 />
+                {/* CR-190: box weight (Size default, per-item override) + derived per-piece / per-m². */}
+                <DetailRow
+                  label="Box weight"
+                  value={(() => {
+                    if (!design.boxWeightKg) return "—";
+                    const w = computeWeights(rowToValues(design));
+                    return [`${design.boxWeightKg} kg`, w.perPc && `${w.perPc} kg/pc`, w.perSqm && `${w.perSqm} kg/m²`].filter(Boolean).join(" · ");
+                  })()}
+                />
                 <DetailRow label="Created" value={fmtLocalDateTime(design.createdTime)} />
                 <DetailRow label="Modified" value={fmtLocalDateTime(design.modifiedTime)} />
-                {/* STUB: Zoho Books mapping — blocked on reference. */}
-                {ZOHO_STUB_FIELDS.map((f) => (
-                  <DetailRow key={f} label={f} value="—" dim />
-                ))}
               </div>
 
               {/* Inventory Image Upload (#12): positional slots over image_urls. */}

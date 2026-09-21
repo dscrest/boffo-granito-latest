@@ -12,6 +12,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import type { DesignImage } from "@/features/masters/designsApi";
+import { ImageLightbox } from "./ImageLightbox";
 
 export const MAX_IMAGES = 5;
 
@@ -277,51 +278,8 @@ export function ImageManager({
         {images.length}/{MAX_IMAGES}
       </div>
 
-      {/* Image lightbox (2026-07 request): view + prev/next across all images. */}
-      {viewer !== null && images[viewer] && (
-        <div
-          onClick={() => setViewer(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
-          <button
-            className="btn x"
-            onClick={(e) => { e.stopPropagation(); setViewer(null); }}
-            title="Close"
-            style={{ position: "absolute", top: 16, right: 16 }}
-          >
-            ✕
-          </button>
-          {images.length > 1 && (
-            <button
-              className="btn"
-              onClick={(e) => { e.stopPropagation(); setViewer((v) => (v === null ? 0 : (v - 1 + images.length) % images.length)); }}
-              title="Previous"
-              style={{ position: "absolute", left: 16, width: 40, height: 40, fontSize: 22, lineHeight: 1 }}
-            >
-              ‹
-            </button>
-          )}
-          <img
-            src={designImageUrl(images[viewer].id)}
-            alt={images[viewer].name || `Image ${viewer + 1}`}
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "88vw", maxHeight: "84vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}
-          />
-          {images.length > 1 && (
-            <button
-              className="btn"
-              onClick={(e) => { e.stopPropagation(); setViewer((v) => (v === null ? 0 : (v + 1) % images.length)); }}
-              title="Next"
-              style={{ position: "absolute", right: 16, bottom: "50%", width: 40, height: 40, fontSize: 22, lineHeight: 1 }}
-            >
-              ›
-            </button>
-          )}
-          <div style={{ position: "absolute", bottom: 16, color: "#fff", fontSize: "var(--t-sm)" }}>
-            {viewer + 1} / {images.length}
-          </div>
-        </div>
-      )}
+      {/* Image lightbox (2026-07 request): view + prev/next across all images — shared since CR-192. */}
+      {viewer !== null && <ImageLightbox images={images} index={viewer} onIndex={setViewer} onClose={() => setViewer(null)} />}
     </>
   );
 }

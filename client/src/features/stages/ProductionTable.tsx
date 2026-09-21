@@ -1,4 +1,6 @@
-/* Production — one row per production (request_group), styled like the Sales
+/* CR-236: Grid + Sheet are FLAT — one row per logged batch (batchRows); the
+   line-level cells (qty, status, +, checkbox) render on a job's first row only.
+   Production — one row per production (request_group), styled like the Sales
    Orders master grid (ColumnPicker, advanced filter, footer pager). A row is a
    whole order's production request through its lifecycle: PendingApproval →
    Approved → Produced (or Rejected). Individual item lines live inside the
@@ -22,8 +24,9 @@ import { fmt, fmtDateTime, pct } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
-import { effectiveRequested, hasOps, resolveSheetEdit, type SheetDraft, type SheetOps } from "./productionSheetEdit";
-import { ProductionForm } from "./ProductionForm";
+import { batchRows, effectiveRequested, hasOps, resolveSheetEdit, type SheetDraft, type SheetOps } from "./productionSheetEdit";
+import { MoreMenu } from "@/features/common/DetailBits";
+import { ToProduce } from "./ToProduce";
 import { ProductionImport } from "./ProductionImport";
 import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
 import { ProductionKanban, type ProductionGroupBy } from "./ProductionKanban";
@@ -36,15 +39,14 @@ import {
   productionDetailKey,
   recordProduction,
   recordProductionLines,
-  requestProduction,
   setProductionStage,
   updateProductionLine,
   stageChip,
   PRODUCTION_STAGE_ORDER,
   PRODUCTION_STAGE_META,
   type ProductionEntry,
+  type ProductionRecordRow,
   type ProductionRequestGroup,
-  type ProductionRequestInput,
   type ProductionStage,
 } from "./productionApi";
 
@@ -86,6 +88,9 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
         ),
     },
     { key: "date", label: "Date", className: "mono muted nw", render: (g) => (g.date || "").slice(0, 10) || "—" },
+    // Batch-level columns — the grid cell loop renders these per batch row.
+    { key: "batch", label: "Batch", className: "mono nw", render: () => null },
+    { key: "mfg", label: "Mfg Date", className: "mono muted nw", render: () => null },
     {
       key: "stage",
       label: "Status",
@@ -165,7 +170,7 @@ export function ProductionTable() {
   const navigate = useNavigate();
   // View opens on whatever Settings → Default view says, then persists for the
   // session (board stays board until switched back).
-  const [view, setView] = useViewState<"grid" | "board" | "sheet">("production.view", "grid", "board");
+  const [view, setView] = useViewState<"grid" | "board" | "sheet" | "demand">("production.view", "grid", "board");
   // Filter follows the view: board → All (see everything), grid → Pending (hide
   // the completed pile). Seeded from the opening view so a board reload starts on All.
   const [tab, setTab] = useState(() => (view === "board" ? "all" : "pending"));
@@ -194,9 +199,7 @@ export function ProductionTable() {
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as ProductionGroupBy)) as ProductionGroupBy[]);
   const [query, setQuery] = usePersistedState("production.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("production.criteria", {});
-  const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   // Logging output (the `+` on a card, or dragging a remaining card → Completed)
@@ -217,8 +220,9 @@ export function ProductionTable() {
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
-  // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID.
-  const { ordered, visible, hidden, toggle, move } = useColumns("productionGroupColumns.v2", COLS, ["items", "created", "modified"]);
+  // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
+  // .v3 (CR-236): Batch + Mfg Date columns.
+  const { ordered, visible, hidden, toggle, move } = useColumns("productionGroupColumns.v3", COLS, ["items", "created", "modified"]);
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -252,22 +256,6 @@ export function ProductionTable() {
     [entries],
   );
 
-  const onRequest = async (input: ProductionRequestInput) => {
-    setShowForm(false);
-    setSaving(true);
-    const res = await requestProduction(input);
-    setSaving(false);
-    if (!res.ok) {
-      toast.error(res.error || "Production request failed");
-      return;
-    }
-    const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
-    toast.success(`Production recorded — ${fmt(total)} boxes · ${res.data?.lines ?? input.lines.length} item(s)`);
-    invalidateProductionLogs();
-    setTab("pending");
-    await load();
-  };
-
   const filterFields = useMemo<FilterField<ProductionRequestGroup>[]>(() => {
     const opts = (get: (r: ProductionRequestGroup) => string) => [...new Set(groups.map(get).filter(Boolean))].sort();
     return [
@@ -295,7 +283,6 @@ export function ProductionTable() {
 
   const sort = useSortRows(filtered, prodSortVal, "created", -1); // newest first by default
   const pager = usePagination(filtered.length, "productionPageSize", `${tab}|${query}|${JSON.stringify(criteria)}`);
-  const pageRows = pager.slice(sort.sorted);
   // One-level section key for the sheet from the selected group dimensions.
   // Declared before sheetSorted, which calls it inside its useMemo (TDZ else).
   const groupKeyOf = (g: ProductionRequestGroup): string =>
@@ -370,7 +357,6 @@ export function ProductionTable() {
 
   // Log output on a line. The server auto-steps the Kanban stage
   // (New → InProduction, full coverage → Completed).
-  const onRecord = (g: ProductionRequestGroup) => setRecordEntry(g.entries[0]);
   const onRecordSave = async (results: RecordOutputResult[]) => {
     setRecordEntry(null);
     // ponytail: singles loop is sequential + non-atomic; form caps Σ ≤ remaining
@@ -399,6 +385,60 @@ export function ProductionTable() {
     invalidateProductionLogs();
     await load();
   };
+
+  // CR-235: the ONE "+" menu on every production row/card (same idiom as
+  // DispatchBoard.plusMenuItems) — always 3 items, inapplicable ones greyed.
+  const plusMenuItems = (e: ProductionEntry) => {
+    const left = Math.max(0, e.qtyRequested - e.producedSoFar);
+    return [
+      {
+        label: "Start Production",
+        disabled: e.stage !== "New",
+        title: e.stage !== "New" ? "Already started" : "Move to In Production",
+        onClick: () => void commitStage(e, "InProduction"),
+      },
+      {
+        label: "Log Production",
+        disabled: left === 0,
+        title: left === 0 ? "Nothing left to produce on this line" : `Log a batch (${fmt(left)} to make)`,
+        onClick: () => setRecordEntry(e),
+      },
+      {
+        label: "Complete Production",
+        disabled: e.stage === "Completed",
+        title: e.stage === "Completed" ? "Already completed" : left > 0 ? `Log the last ${fmt(left)} boxes and complete` : "Mark completed",
+        onClick: () => void commitStage(e, "Completed"),
+      },
+    ];
+  };
+  const plusMenu = (e: ProductionEntry) => (
+    <span onClick={(ev) => ev.stopPropagation()}>
+      <MoreMenu kebab icon="plus" title="Production actions" items={plusMenuItems(e)} />
+    </span>
+  );
+
+  // Group band, shared by Grid and Sheet. `lead` = cells before the numerics.
+  const bandRow = (key: string, lead: number, nums: boolean, trail: number) => {
+    const tot = groupTotals.get(key) || { requested: 0, produced: 0 };
+    return (
+      <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
+        <td colSpan={lead}>
+          {key}
+          {!nums && <span className="mono" style={{ marginLeft: 10, fontWeight: 400 }}>{fmt(tot.produced)} / {fmt(tot.requested)} bx</span>}
+        </td>
+        {nums && (
+          <>
+            <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.requested)}</td>
+            <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.produced)}</td>
+            <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, tot.requested - tot.produced))}</td>
+            <td colSpan={trail} />
+          </>
+        )}
+      </tr>
+    );
+  };
+  const batchCell = (rec: ProductionRecordRow | null) => rec?.batchNumber || <span className="dim">—</span>;
+  const mfgCell = (rec: ProductionRecordRow | null) => (rec?.productionDate || "").slice(0, 10) || <span className="dim">—</span>;
 
   // ---- Sheet view: edit mode (bulk qty + status, committed on Save) ----
   const setCell = (id: string, k: "inProd" | "qty", v: string) =>
@@ -431,7 +471,7 @@ export function ProductionTable() {
 
   // Switching view snaps the filter back to that view's default (board=All;
   // grid/sheet=Pending). Leaving the sheet with staged edits asks first.
-  const changeView = async (v: "grid" | "board" | "sheet") => {
+  const changeView = async (v: "grid" | "board" | "sheet" | "demand") => {
     if (editMode && !(await leaveEdit())) return;
     setView(v);
     setTab(v === "board" ? "all" : "pending");
@@ -477,7 +517,7 @@ export function ProductionTable() {
   // One-level section key for the sheet from the selected group dimensions.
   // Bulk selection (same master-page convention as OrdersTable). `selected`
   // holds group keys and accumulates across pages.
-  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.group));
+  const allShownSelected = sheetRows.length > 0 && sheetRows.every((r) => selected.has(r.group));
   const toggleOne = (key: string) =>
     setSelected((p) => {
       const next = new Set(p);
@@ -487,8 +527,8 @@ export function ProductionTable() {
   const toggleAll = () =>
     setSelected((p) => {
       const next = new Set(p);
-      if (allShownSelected) pageRows.forEach((r) => next.delete(r.group));
-      else pageRows.forEach((r) => next.add(r.group));
+      if (allShownSelected) sheetRows.forEach((r) => next.delete(r.group));
+      else sheetRows.forEach((r) => next.add(r.group));
       return next;
     });
   const ids = useMemo(() => [...selected], [selected]);
@@ -525,7 +565,6 @@ export function ProductionTable() {
 
   return (
     <div>
-      {showForm && <ProductionForm onSave={onRequest} onClose={() => setShowForm(false)} />}
 
       {showImport && <ProductionImport onDone={() => { invalidateProductionLogs(); void load(); }} onClose={() => setShowImport(false)} />}
 
@@ -562,23 +601,26 @@ export function ProductionTable() {
         </span>
         <AdvancedFilterButton title="Production" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-          {(["grid", "sheet", "board"] as const).map((v) => (
+          {(["grid", "sheet", "board", "demand"] as const).map((v) => (
             <button
               key={v}
               type="button"
               onClick={() => void changeView(v)}
-              title={v === "grid" ? "Table view" : v === "sheet" ? "Sheet — inline edit qty & stage" : "Kanban board"}
+              title={v === "grid" ? "Table view" : v === "sheet" ? "Sheet — inline edit qty & stage" : v === "board" ? "Kanban board" : "To Produce — what open orders still need"}
               style={{
                 background: view === v ? "var(--accent-soft)" : "transparent",
                 color: view === v ? "var(--fg)" : "var(--muted)",
-                border: 0, padding: "4px 8px", cursor: "pointer", font: "inherit", display: "inline-flex", alignItems: "center",
+                border: 0, padding: "4px 8px", cursor: "pointer", font: "inherit", display: "inline-flex", alignItems: "center", gap: 5,
               }}
             >
-              <Icon name={v === "grid" ? "columns" : v === "sheet" ? "edit" : "kanban"} size={13} />
+              <Icon name={v === "grid" ? "columns" : v === "sheet" ? "edit" : v === "board" ? "kanban" : "factory"} size={13} />
+              {/* Grid/Sheet/Kanban are the app-wide standard icons; To Produce is a
+                  different dataset, so it alone carries its name. */}
+              {v === "demand" && <span style={{ fontSize: "var(--t-sm)" }}>To Produce</span>}
             </button>
           ))}
         </div>
-        {(view === "board" || view === "sheet") && (
+        {view !== "demand" && (
           <ColumnPicker
             columns={groupCols}
             hidden={groupHidden}
@@ -628,19 +670,27 @@ export function ProductionTable() {
           </button>
         )}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={saving} onClick={() => setShowForm(true)}>
+          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/record")}>
+            <Icon name="columns" size={13} />
+            Record Production
+          </button>
+        )}
+        {canEdit && (
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/new")}>
             <Icon name="plus" size={13} />
-            {saving ? "Saving…" : "Record New Production"}
+            Start New Production
           </button>
         )}
       </div>
       )}
 
-      {view === "board" ? (
+      {view === "demand" ? (
+        <ToProduce query={query} canEdit={canEdit} onProduce={(lines) => navigate("/prod/new", { state: { lines } })} />
+      ) : view === "board" ? (
         loading && entries.length === 0 ? (
           <SkeletonRows rows={6} />
         ) : (
-          <ProductionKanban groups={filtered} groupBy={groupBy} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} onRecord={onRecord} />
+          <ProductionKanban groups={filtered} groupBy={groupBy} canEdit={canEdit} onMove={(g, stage) => void onMove(g, stage)} plusItems={plusMenuItems} />
         )
       ) : view === "sheet" ? (
         <div className="card">
@@ -653,6 +703,8 @@ export function ProductionTable() {
                   <tr>
                     <SortTh id="code" label="Production ID" sort={sort} />
                     <th>Design</th>
+                    <th>Batch</th>
+                    <th>Mfg Date</th>
                     <th>Order</th>
                     <th>Customer</th>
                     {/* In Production = the plan qty (qty_requested) — editable in
@@ -674,16 +726,7 @@ export function ProductionTable() {
                         const key = groupKeyOf(g);
                         if (key !== prevKey) {
                           prevKey = key;
-                          const tot = groupTotals.get(key) || { requested: 0, produced: 0 };
-                          out.push(
-                            <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
-                              <td colSpan={4}>{key}</td>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.requested)}</td>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(tot.produced)}</td>
-                              <td className="num mono" style={{ textAlign: "right" }}>{fmt(Math.max(0, tot.requested - tot.produced))}</td>
-                              <td colSpan={canEdit ? 2 : 1} />
-                            </tr>,
-                          );
+                          out.push(bandRow(key, 6, true, canEdit ? 2 : 1));
                         }
                       }
                       const d = (editMode && draft[e.id]) || {};
@@ -694,16 +737,18 @@ export function ProductionTable() {
                       const bad = rowErr ? { borderColor: "var(--c-red)" } : undefined;
                       const locked = e.producedSoFar > 0; // /production-update refuses a qty change after output
                       const detail = `/prod/${encodeURIComponent(productionDetailKey(e))}`;
-                      out.push(
-                        <tr key={g.group}>
+                      batchRows(e).forEach((rec, i) => out.push(
+                        <tr key={`${g.group}-${i}`}>
                           <td className="mono">
                             <Link className="linkish" to={detail} title="View production">{g.code}</Link>
                           </td>
                           <td><span className="design-name">{g.designSummary}</span></td>
+                          <td className="mono nw">{batchCell(rec)}</td>
+                          <td className="mono muted nw">{mfgCell(rec)}</td>
                           <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
                           <td>{g.customer || (g.independent ? "—" : "")}</td>
                           <td className="num mono" style={{ textAlign: "right" }}>
-                            {editMode ? (
+                            {i > 0 ? null : editMode ? (
                               <NumberInput
                                 value={d.inProd ?? String(e.qtyRequested)}
                                 disabled={locked}
@@ -716,7 +761,7 @@ export function ProductionTable() {
                             )}
                           </td>
                           <td className="num mono" style={{ textAlign: "right" }}>
-                            {editMode ? (
+                            {editMode && i === 0 ? (
                               <NumberInput
                                 value={d.qty ?? ""}
                                 placeholder={e.producedSoFar ? fmt(e.producedSoFar) : "0"}
@@ -724,15 +769,16 @@ export function ProductionTable() {
                                 style={{ width: "100%", textAlign: "right", ...bad }}
                                 title={rowErr || (e.producedSoFar ? `Boxes produced now — adds to the ${fmt(e.producedSoFar)} already recorded` : "Boxes produced now")}
                               />
-                            ) : e.producedSoFar ? (
-                              <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span>
+                            ) : (rec ? rec.qtyBoxes : e.producedSoFar) ? (
+                              // Legacy plan rows carry output with no record child → show the line total.
+                              <span style={{ color: "var(--c-green)" }}>{fmt(rec ? rec.qtyBoxes : e.producedSoFar)}</span>
                             ) : (
                               <span className="dim">—</span>
                             )}
                           </td>
-                          <td className="num mono" style={{ textAlign: "right" }}>{remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
+                          <td className="num mono" style={{ textAlign: "right" }}>{i > 0 ? null : remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
                           <td>
-                            {canEdit ? (
+                            {i > 0 ? null : canEdit ? (
                               // In edit mode the Status select stages; outside it commits
                               // on change (and Completed-with-remaining opens the dialog).
                               <select
@@ -754,27 +800,17 @@ export function ProductionTable() {
                           {canEdit && (
                             <td>
                               {/* The Produced column is the capture while editing —
-                                  the dialog stays for batch-specific entry. */}
-                              {editMode ? null : (
-                              <button
-                                type="button"
-                                className="btn x"
-                                title={remaining > 0 ? `Record output (${fmt(remaining)} to make)` : "Record output"}
-                                aria-label="Record output"
-                                onClick={() => setRecordEntry(e)}
-                              >
-                                <Icon name="plus" size={13} />
-                              </button>
-                              )}
+                                  the + menu stays for batch-specific entry. */}
+                              {editMode || i > 0 ? null : plusMenu(e)}
                             </td>
                           )}
                         </tr>,
-                      );
+                      ));
                     }
                     if (!loading && sheetRows.length === 0) {
                       out.push(
                         <tr key="empty">
-                          <td colSpan={canEdit ? 9 : 8}><EmptyState title="No matching results" hint="Try a different filter" /></td>
+                          <td colSpan={canEdit ? 11 : 10}><EmptyState title="No matching results" hint="Try a different filter" /></td>
                         </tr>,
                       );
                     }
@@ -801,33 +837,51 @@ export function ProductionTable() {
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
+                  {canEdit && <th style={{ width: 44 }} />}
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((g) => {
-                  const detail = `/prod/${encodeURIComponent(productionDetailKey(g.entries[0]))}`;
-                  return (
-                  <tr
-                    key={g.group}
-                    tabIndex={0}
-                    onClick={() => navigate(detail)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(detail); }}
-                    style={{ cursor: "pointer", background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
-                  >
-                    <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />
-                    </td>
-                    {visible.map((c) => (
-                      <td key={c.key} className={c.className} style={c.style}>
-                        {c.render!(g)}
-                      </td>
-                    ))}
-                  </tr>
-                  );
-                })}
+                {(() => {
+                  // Line-level columns: shown on a job's first batch row only.
+                  const LINE_KEYS = new Set(["stage", "requested", "remaining", "progress", "items"]);
+                  const out: ReactNode[] = [];
+                  let prevKey: string | null = null;
+                  for (const g of sheetRows) {
+                    const e = g.entries[0];
+                    if (groupBy.length && groupKeyOf(g) !== prevKey) {
+                      prevKey = groupKeyOf(g);
+                      out.push(bandRow(prevKey, visible.length + 1 + (canEdit ? 1 : 0), false, 0));
+                    }
+                    const detail = `/prod/${encodeURIComponent(productionDetailKey(e))}`;
+                    batchRows(e).forEach((rec, i) => out.push(
+                      <tr
+                        key={`${g.group}-${i}`}
+                        tabIndex={0}
+                        onClick={() => navigate(detail)}
+                        onKeyDown={(ev) => { if (ev.key === "Enter" && ev.target === ev.currentTarget) navigate(detail); }}
+                        style={{ cursor: "pointer", background: selected.has(g.group) ? "var(--accent-soft)" : undefined }}
+                      >
+                        <td style={{ textAlign: "center" }} onClick={(ev) => ev.stopPropagation()}>
+                          {i === 0 && <input type="checkbox" checked={selected.has(g.group)} onChange={() => toggleOne(g.group)} />}
+                        </td>
+                        {visible.map((c) => (
+                          <td key={c.key} className={c.className} style={c.style}>
+                            {c.key === "batch" ? batchCell(rec)
+                              : c.key === "mfg" ? mfgCell(rec)
+                              : c.key === "produced" && rec ? <span style={{ color: "var(--c-green)" }}>{fmt(rec.qtyBoxes)}</span>
+                              : i > 0 && LINE_KEYS.has(c.key) ? null
+                              : c.render!(g)}
+                          </td>
+                        ))}
+                        {canEdit && <td>{i === 0 && plusMenu(e)}</td>}
+                      </tr>,
+                    ));
+                  }
+                  return out;
+                })()}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 1}>
+                    <td colSpan={visible.length + 1 + (canEdit ? 1 : 0)}>
                       {groups.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (
@@ -837,8 +891,8 @@ export function ProductionTable() {
                           hint="Send items for production from a Sales Order, or start a request here"
                           action={
                             canEdit ? (
-                              <button className="hbtn primary" onClick={() => setShowForm(true)}>
-                                Record New Production
+                              <button className="hbtn primary" onClick={() => navigate("/prod/new")}>
+                                Start New Production
                               </button>
                             ) : undefined
                           }

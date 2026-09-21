@@ -191,7 +191,7 @@ items view, reports view+export, no delete, no approve). Live seeds: `catalyst-m
 | sqft_per_box | double(4) | added 2026-07-09 · **computed on save** = `sqm_per_box * 10.7639` |
 | remark | varchar(255) | added 2026-07-09 (requested 1000, Catalyst capped at 255) |
 
-Size is the single source of truth for per-box packing data. `Pallet.coverage_sqm/coverage_sqft/box_weight_kg` and `Design.width_mm/length_mm/pcs_per_box/box_weight_kg` are **auto-filled snapshots** of the picked Size — never hand-entered.
+Size is the single source of truth for per-box packing data. `Pallet.coverage_sqm/coverage_sqft` and `Design.width_mm/length_mm/pcs_per_box` are **auto-filled snapshots** of the picked Size — never hand-entered. `box_weight_kg` on both is the exception (CR-133 Pallet, CR-190 Item): the Size value is the default, a typed override is kept by the Size-edit fan-out; `/resync-size-snapshots` still overwrites it.
 
 Values (`code` → width×length mm): 75x600, 98x600, 98x1200, 198x1200, 200x1200, 300x600, 400x1200, 600x600, 600x900, 600x1200, 800x800, 800x1600, 1200x1200, 1200x2780, 400x400.
 
@@ -331,7 +331,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | sku | varchar(100) | auto: `DesignShortCode-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand]` from stored `seq_code`s (PB segment only when set); uniqueness enforced once short codes are filled |
 | party_brand_name | varchar(255) | free text; picked from PartyBrand master (creatable) |
 | pcs_per_box | int | |
-| box_weight_kg | double | nullable → uncalibrated for fit |
+| box_weight_kg | double | nullable → uncalibrated for fit; Size default, per-item override on the Item form (CR-190); read first by planning + loading (Pallet weight = fallback) |
 | coverage_sqm | double | |
 | coverage_sqft | double | |
 | random_faces | int | |
@@ -433,7 +433,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | po_number | varchar(100) | |
 | order_date | date | |
 | port_of_discharge | varchar(255) | |
-| status | varchar(50) | born "Draft" on create AND convert (server ignores client status) |
+| status | varchar(50) | born "Draft" on create AND convert (server ignores client status). Values: Draft, PendingApproval, Confirmed, InProgress, Cancelled, Rejected + auto roll-up (CR-230/233) PartiallyCompleted, Completed (InPalletization / InLoading were valid only for a few hours on 2026-09-21 — display maps them to In Progress) |
 | currency | varchar(10) | |
 | exchange_rate | double(4dp) | INR per 1 unit; copied from the source quote on convert (added 2026-07-13) |
 | remarks | text(10000) | |
@@ -442,6 +442,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | customer | FK → Customer | SET-NULL |
 | payment_term | FK → PaymentTerm | SET-NULL |
 | address | text(10000) | |
+| shipping_address | text(10000) | CR-221 — edited on the SO form; carried from the quote on convert. Created 2026-09-19 (column id 69851000000291143). |
 | manual_so_number | varchar(50) | blank→copy auto, set→never overwrite |
 | shipment_date | date | |
 | salesperson | varchar(160) | |
@@ -516,9 +517,10 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | order_item | bigint | OrderItem ROWID — null on independent (logical FK) |
 | batch_number | varchar(40) | production batch `<prefix><sep>YYYY-MM<sep>NNN` (defaults `B/YYYY-MM/NNN`; prefix/separator/start admin-set via AppSetting `batch_series_*`) — series per ITEM per calendar month, on `record` rows; blank on save → server auto-mints (`nextBatchNumber(catalyst, designId)`, design+month-scoped MAX-scan) — format changed 2026-09-04, configurable 2026-09-08; added 2026-08-07 |
 | shade | varchar(60) | RETIRED 2026-08-29 (batch is the only tracked dimension; never populated in live data). Column kept, nothing reads or writes it — added 2026-08-07 |
+| box_brand | bigint | **CR-197 — created on live 2026-09-18 (column id 69851000000293004, search-indexed).** Logical FK → Brand (the "Box Brand" master): the carton the boxes were packed in. Set on `record` rows by `/production-record` + `/production-record-lines` (one brand per item section of Record Output), copied onto `alloc` rows, and inherited by the `PalletizationPlanLine.box_brand` that `autoEnqueuePalletization` inserts. Nullable; every reader/writer tolerates its absence. |
 | second_stage | boolean | **RETIRED 2026-08-25** — no longer read or written. Was: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` instead of `Planning`. Removed because it silently kept production output out of "Ready for Palletization" (the flag was sticky per batch). Column left in place; old rows keep their value. |
 
-Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **Auto-enqueue:** confirming a SalesOrder (`/so-status` → `Confirmed`) inserts one `plan` row per order item (`request_group="so-{soId}"`, `qty_requested=ordered_qty_boxes`), deduped on `order_item` so re-confirm never doubles up.
+Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`|`alloc`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **`alloc` rows (CR-199, 2026-09-18):** a stock allocation — `design`, `batch_number`, `order_item`, `sales_order`, `qty_boxes`, `status="Allocated"`, `stage="Completed"`, `qty_requested=0`, no `parent_log`. A **claim, never supply**: written by `POST /allocate-stock` (bumps `OrderItem.produced_qty_boxes`, then `autoEnqueuePalletization`), soft-deleted by `POST /deallocate-stock/:rowid`. Any reader summing supply must skip it; any reader listing production jobs must skip it (`productionApi` does both). **Auto-enqueue RETIRED by CR-198:** confirming a SalesOrder used to insert one `plan` row per order item (`request_group="so-{soId}"`); `enqueueSoProduction` now early-returns. Rows created before 2026-09-18 remain and still record order-linked.
 
 **Batch-wise routes (added 2026-08-11):**
 - `POST /production-record-lines/:rowid` — record several batches at once against a plan line (batch-tracked items): one `record` child row per batch (blank batch auto-minted), OrderItem bumped once for the sum, inserts compensated on failure.
@@ -618,6 +620,8 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | palletised_batch | FK → PalletisedBatch | nullable; forward hook (Loading-stage link, deferred) |
 | load_box | FK → LoadBox | SET-NULL · added 2026-07-27; set only via `/pal-line-box` (Ready line → box). Optional `boxes` in the body = partial load: the line SPLITS (loaded part + a Ready remainder line) |
 | box_brand | FK → Brand | SET-NULL · per-line carton-brand override on the /loading Customer Sheet (`""`/null = inherit Customer.box_brand); written via generic PUT; NOT carried through `/pal-line-box` partial splits (overrides are set post-boxing) — added 2026-09-10; repointed BoxBrand→Brand 2026-09-11 |
+| pallet_no | varchar(60) | manual pallet number/range typed on the Loading Sheet (`""` = auto running range "1 TO 16"); written via generic PATCH; printed on the Dispatch Entry / Dispatch Copy; NOT carried through `/pal-line-box` partial splits — added 2026-09-14 (CR-184), column 69851000000277499 |
+| pallet_type | varchar(60) | manual pallet type typed on the Loading Sheet (`""` = blank); written via generic PATCH; not carried through line splits — added 2026-09-19 (CR-208), column 69851000000293012 |
 | deleted_at | datetime | soft delete |
 
 ### LoadBox (69851000000089442) — added 2026-07-27 (cross-plan vehicle slots)
@@ -650,14 +654,17 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | deleted_at | datetime | soft delete |
 
 ### Vehicle — added 2026-07-23
-Truck master feeding the Assign Vehicle / dispatch pickers (LoadBox.vehicle,
-PalletizationPlan legacy flow). In the generic-CRUD ALLOWED set; registration
-auto-formatted client-side (`formatVehicleNumber` → `SS-DD-L(L)-NNNN`).
+Truck master behind LoadBox.vehicle (and the PalletizationPlan legacy flow). Since
+CR-185 (2026-09-14) the user never picks from it: loading screens take the vehicle as
+free text and `resolveVehicle()` (client) finds the row by formatted number, updates
+driver/mobile if typed and different, else creates it. In the generic-CRUD ALLOWED set;
+registration auto-formatted client-side (`formatVehicleNumber` → `SS-DD-L(L)-NNNN`).
+No server natural key — the client match is the only dedupe.
 | Column | Type | Notes |
 |---|---|---|
-| vehicle_number | varchar(50) | truck registration (natural key) |
-| driver_name | varchar(100) | |
-| mobile_number | varchar(30) | |
+| vehicle_number | varchar(50) | truck registration (natural key, client-enforced) |
+| driver_name | varchar(100) | optional since CR-185 |
+| mobile_number | varchar(30) | optional since CR-185 |
 | deleted_at | datetime | soft delete |
 
 ---

@@ -26,10 +26,14 @@ export function useOrders(): UseOrders {
 
   useEffect(() => {
     // Only adopt non-null snapshots — invalidate() notifies with an empty
-    // cache and we don't want a flash of zero rows mid-refetch.
+    // cache and we don't want a flash of zero rows mid-refetch. A null
+    // snapshot means a mutation elsewhere: refetch (deduped by the cache) so a
+    // mounted screen repaints; the fresh snapshot arrives through this same
+    // subscription.
     const unsub = subscribeOrders(() => {
       const c = cachedOrders();
       if (c) setOrders(c);
+      else void listOrders();
     });
     void listOrders().then((res) => {
       setLoading(false);

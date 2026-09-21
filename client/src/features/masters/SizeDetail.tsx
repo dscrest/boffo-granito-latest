@@ -8,6 +8,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -17,15 +18,11 @@ import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedPallets, DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { SizeForm } from "./SizeForm";
-import { PalletForm } from "./PalletForm";
 import {
   cachedPallets,
-  createPallet,
   invalidatePallets,
   listPallets,
-  type PalletInput,
   type PalletRow,
-  type SizeOption,
 } from "./palletsApi";
 import { invalidateDesigns } from "./designsApi";
 import { cachedSizes, createSize, deleteSize, listSizes, updateSize, type SizeInput, type SizeRow } from "./sizesApi";
@@ -63,18 +60,15 @@ export function SizeDetail() {
   // Pallets are read-only here — only to show the ones pointing at this size.
   const [pallets, setPallets] = useState<PalletRow[] | null>(() => cachedPallets());
   // Size master options, as the pallet form wants them — listPallets() already returns these.
-  const [sizeOpts, setSizeOpts] = useState<SizeOption[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cloning, setCloning] = useState(false);
-  const [creatingPallet, setCreatingPallet] = useState(false);
 
   const refresh = () => listSizes().then((res) => setSizes(res.ok ? res.sizes : (cachedSizes() ?? [])));
   const refreshPallets = () =>
     listPallets().then((res) => {
       setPallets(res.ok ? res.pallets : (cachedPallets() ?? []));
-      if (res.ok) setSizeOpts(res.sizes);
     });
   useEffect(() => {
     void refresh();
@@ -88,13 +82,13 @@ export function SizeDetail() {
   // Pallet.size is an FK to Size — the relation is already on every pallet row.
   const linked = pallets && pallets.filter((p) => p.sizeId === id);
   const needle = q.trim().toLowerCase();
+  const railRows = newestFirst(sizes);
   const listed = needle
-    ? sizes.filter((s) => `${s.code} ${s.tileType} ${s.seqCode}`.toLowerCase().includes(needle))
-    : sizes;
+    ? railRows.filter((s) => `${s.code} ${s.tileType} ${s.seqCode}`.toLowerCase().includes(needle))
+    : railRows;
 
   // Distinct types already saved, fed to the form so the picker can create-on-save.
   const tileTypes = [...new Set(sizes.map((s) => s.tileType).filter(Boolean))].sort();
-  const palletTypes = [...new Set((pallets ?? []).map((p) => p.palletType).filter(Boolean))].sort();
 
   const onSave = async (input: SizeInput) => {
     if (!size) return;
@@ -147,22 +141,8 @@ export function SizeDetail() {
     navigate("/sizes");
   };
 
-  // A pallet spec is always a spec *for a size* — offer the create right here,
-  // with this size locked in and its per-box packing data already mirrored.
-  const onCreatePallet = async (input: PalletInput) => {
-    const res = await createPallet(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setCreatingPallet(false);
-    toast.success("Pallet saved");
-    await refreshPallets();
-  };
-
   const moreItems = [
-    { label: "Create Pallet", onClick: () => setCreatingPallet(true) },
+    { label: "Create Pallet", onClick: () => navigate(`/pallets/new?size=${encodeURIComponent(size?.id || "")}`) },
     ...(can("items", "create") && size ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
     ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
@@ -206,22 +186,6 @@ export function SizeDetail() {
         />
       )}
 
-      {creatingPallet && size && (
-        <PalletForm
-          lockSize
-          sizeOptions={sizeOpts}
-          palletTypes={palletTypes}
-          initial={{
-            size: size.id,
-            pallet_size_label: size.code,
-            coverage_sqm: size.sqmPerBox,
-            coverage_sqft: size.sqftPerBox,
-            box_weight_kg: size.boxWeightKg,
-          }}
-          onSave={onCreatePallet}
-          onClose={() => setCreatingPallet(false)}
-        />
-      )}
 
       {/* Size list — fixed viewport height with its OWN scroll, sticky while
           the detail scrolls. Drag the bottom-right corner to resize the width. */}

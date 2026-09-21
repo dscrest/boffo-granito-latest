@@ -31,7 +31,7 @@ export function resolvePalSheetEdit(
 
   if (donorId) {
     // Top-up: same gate as the + menu — target must be In Palletization on a pallet.
-    if (l.status !== "Palletizing" || !l.palletId) return { ops: {}, error: "Start palletisation first" };
+    if (l.status !== "Palletizing" || !l.palletId) return { ops: {}, error: "Start palletization first" };
     const donor = donors.find((x) => x.id === donorId);
     if (!donor) return { ops: {}, error: "That batch is no longer available" };
     if (qty == null || qty <= 0) return { ops: {}, error: "Enter the boxes to move from that batch" };

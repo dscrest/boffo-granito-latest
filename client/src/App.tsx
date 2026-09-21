@@ -27,6 +27,13 @@ const PlanSoContainerisation = lazy(() => import("@/features/quotes/PlanContaine
 const Approvals = lazy(() => import("@/features/quotes/Approvals").then((m) => ({ default: m.Approvals })));
 const Kanban = lazy(() => import("@/features/pipeline/Kanban").then((m) => ({ default: m.Kanban })));
 const ByOrderView = lazy(() => import("@/features/orders/ByOrderView").then((m) => ({ default: m.ByOrderView })));
+const PalPlanFormPage = lazy(() => import("@/features/stages/PalPlanFormPage").then((m) => ({ default: m.PalPlanFormPage })));
+const PalletFormPage = lazy(() => import("@/features/masters/PalletFormPage").then((m) => ({ default: m.PalletFormPage })));
+const PartyFormPage = lazy(() => import("@/features/masters/PartyFormPage").then((m) => ({ default: m.PartyFormPage })));
+const ProductionLogSheet = lazy(() => import("@/features/stages/ProductionLogSheet").then((m) => ({ default: m.ProductionLogSheet })));
+const ProductionFormPage = lazy(() => import("@/features/stages/ProductionFormPage").then((m) => ({ default: m.ProductionFormPage })));
+const OrderFormPage = lazy(() => import("@/features/orders/OrderFormPage").then((m) => ({ default: m.OrderFormPage })));
+const QuoteFormPage = lazy(() => import("@/features/quotes/QuoteFormPage").then((m) => ({ default: m.QuoteFormPage })));
 const OrdersTable = lazy(() => import("@/features/orders/OrdersTable").then((m) => ({ default: m.OrdersTable })));
 const PurchaseOrders = lazy(() => import("@/features/stages/PurchaseOrders").then((m) => ({ default: m.PurchaseOrders })));
 const Production = lazy(() => import("@/features/stages/Production").then((m) => ({ default: m.Production })));
@@ -44,6 +51,8 @@ const PalPlanDetail = lazy(() => import("@/features/stages/PalPlanDetail").then(
 // /loading = the dedicated batch-wise loading & dispatch page (LoadBox dock),
 // split out of the Dispatch Control Board in the 2026-08-22 declutter.
 const LoadingBay = lazy(() => import("@/features/stages/LoadingBay").then((m) => ({ default: m.LoadingBay })));
+const LoadingPlanPage = lazy(() => import("@/features/stages/LoadingPlanPage").then((m) => ({ default: m.LoadingPlanPage })));
+const LoadingSession = lazy(() => import("@/features/stages/LoadingSession").then((m) => ({ default: m.LoadingSession })));
 const LoadingDetail = lazy(() => import("@/features/stages/LoadingDetail").then((m) => ({ default: m.LoadingDetail })));
 const LoadPlanner = lazy(() => import("@/features/stages/LoadPlanner").then((m) => ({ default: m.LoadPlanner })));
 const DesignMaster = lazy(() => import("@/features/masters/DesignMaster").then((m) => ({ default: m.DesignMaster })));
@@ -364,21 +373,37 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/quotes" element={<Quotes />} />
+            {/* CR-219: form pages — declared before the :id detail routes */}
+            <Route path="/quotes/new" element={<QuoteFormPage />} />
+            <Route path="/quotes/:id/edit" element={<QuoteFormPage />} />
+            <Route path="/quotes/:id/clone" element={<QuoteFormPage />} />
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/quotes/:id/containerise" element={<PlanContainerisation />} />
             <Route path="/kanban" element={<Kanban />} />
             <Route path="/byorder" element={<ByOrderView />} />
             <Route path="/orders" element={<OrdersTable />} />
 
+            <Route path="/orders/new" element={<OrderFormPage />} />
+            <Route path="/orders/:id/edit" element={<OrderFormPage />} />
+            <Route path="/orders/:id/clone" element={<OrderFormPage />} />
             <Route path="/orders/:id/containerise" element={<PlanSoContainerisation />} />
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="/po/:id" element={<PurchaseOrderDetail />} />
+            {/* CR-220: form pages — declared before the :id detail routes */}
+            <Route path="/design/new" element={<DesignEdit />} />
             <Route path="/design/:id/edit" element={<DesignEdit />} />
             <Route path="/design/:id/clone" element={<DesignEdit clone />} />
             <Route path="/design/:id" element={<ItemDetail />} />
+            <Route path="/parties/new" element={<PartyFormPage />} />
+            <Route path="/parties/:id/edit" element={<PartyFormPage />} />
+            <Route path="/parties/:id/clone" element={<PartyFormPage />} />
             <Route path="/parties/:id" element={<CustomerDetail />} />
             <Route path="/po" element={<PurchaseOrders />} />
             <Route path="/prod" element={<Production />} />
+            <Route path="/prod/new" element={<ProductionFormPage />} />
+            <Route path="/prod/record" element={<ProductionLogSheet />} />
+            <Route path="/prod/:id/edit" element={<ProductionFormPage />} />
+            <Route path="/prod/:id/clone" element={<ProductionFormPage />} />
             <Route path="/prod/:id" element={<ProductionDetail />} />
             <Route path="/qc" element={<QC />} />
             <Route path="/containers" element={<Containers />} />
@@ -388,15 +413,26 @@ export default function App() {
             <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
             {/* CR-170: Ready for Loading renders on /loading, not here. */}
             <Route path="/palletizing" element={<PalPlans stages={["Palletizing"]} />} />
+            <Route path="/packing/new" element={<PalPlanFormPage />} />
+            <Route path="/packing/:id/edit" element={<PalPlanFormPage />} />
+            <Route path="/packing/:id/clone" element={<PalPlanFormPage />} />
             <Route path="/packing/:id" element={<PalPlanDetail />} />
             <Route path="/loading" element={<LoadingBay />} />
-            <Route path="/loading/:id" element={<LoadingDetail />} />
+            <Route path="/loading/new" element={<LoadingSession />} />
+            {/* CR-227 trial: spreadsheet-style New Loading, beside the session. */}
+            <Route path="/loading/plan" element={<LoadingPlanPage />} />
+            <Route path="/loading/:id/plan" element={<LoadingPlanPage />} />
+          <Route path="/loading/:id/session" element={<LoadingSession />} />
+          <Route path="/loading/:id" element={<LoadingDetail />} />
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/reports" element={<ReportsHome />} />
             <Route path="/reports/:id" element={<ReportView />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/stock" element={<StockDetails />} />
             <Route path="/pallets" element={<Pallets />} />
+            <Route path="/pallets/new" element={<PalletFormPage />} />
+            <Route path="/pallets/:id/edit" element={<PalletFormPage />} />
+            <Route path="/pallets/:id/clone" element={<PalletFormPage />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
             <Route path="/panels" element={<Panels />} />
             <Route path="/panels/:id" element={<PanelDetail />} />

@@ -6,7 +6,7 @@
    ============================================================ */
 import { listAll, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
-import { createMaster } from "./mastersApi";
+import { createMaster, updateMaster } from "./mastersApi";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -68,10 +68,47 @@ async function fetchVehicles(): Promise<{ ok: boolean; vehicles: VehicleRow[]; e
   return { ok: true, vehicles };
 }
 
-/** Create a Vehicle (all three fields required) → returns the new ROWID. */
+/** Create a Vehicle (number required; driver/mobile optional) → returns the new ROWID. */
 export function createVehicle(input: VehicleInput): Promise<OpResult> {
   return createMaster("Vehicle", { ...input }).then((r) => {
     cache.invalidate();
     return r;
   });
+}
+
+/** Typed vehicle → Vehicle ROWID, with the master maintained silently (CR-185):
+    the registration is matched by formatted number; a match is updated with
+    any typed driver/mobile that differ (LoadBox displays come from the master
+    join, so the master must follow what was typed); no match → created.
+    Empty number → "" (callers omit `vehicle` from the patch). The user never
+    sees the master — free text is the whole UX. */
+export async function resolveVehicle(input: {
+  vehicle_number: string;
+  driver_name?: string;
+  mobile_number?: string;
+}): Promise<{ ok: boolean; rowid: string; error?: string }> {
+  const reg = formatVehicleNumber(input.vehicle_number);
+  if (!reg) return { ok: true, rowid: "" };
+  const driver = (input.driver_name || "").trim();
+  const mobile = (input.mobile_number || "").trim();
+  // No server natural key on Vehicle — this client match is the only dedupe,
+  // so never trust a stale list.
+  cache.invalidate();
+  const list = await listVehicles();
+  if (!list.ok) return { ok: false, rowid: "", error: list.error };
+  const found = list.vehicles.find((v) => formatVehicleNumber(v.vehicleNumber) === reg);
+  if (found) {
+    const patch: Record<string, string> = {};
+    if (driver && driver !== found.driverName) patch.driver_name = driver;
+    if (mobile && mobile !== found.mobile) patch.mobile_number = mobile;
+    if (Object.keys(patch).length) {
+      const r = await updateMaster("Vehicle", found.id, patch);
+      cache.invalidate();
+      if (!r.ok) return { ok: false, rowid: "", error: r.error };
+    }
+    return { ok: true, rowid: found.id };
+  }
+  const r = await createVehicle({ vehicle_number: reg, driver_name: driver, mobile_number: mobile });
+  if (!r.ok || !r.rowid) return { ok: false, rowid: "", error: r.error || "Could not save the vehicle" };
+  return { ok: true, rowid: r.rowid };
 }

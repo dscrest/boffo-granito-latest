@@ -1,9 +1,12 @@
 /* ============================================================
-   Panel Order form — a customer orders one showcase Panel × qty.
+   Panel Order form — a customer orders showcase Panels × qty.
+   Multi-pick (CR-193): one Save = one PanelOrder row per picked
+   panel, sharing customer / date / sales person, so each panel
+   still dispatches on its own against cut-piece stock.
    Sales Person defaults to the logged-in user (grey, auto); Order
-   Date defaults to today. After picking Panel + Qty the form shows
-   the cut-piece requirement vs on-hand, so the operator already
-   knows whether it will dispatch directly or needs a cutting job.
+   Date defaults to today. The cut-piece requirement across ALL
+   picked panels is shown vs on-hand, so the operator already knows
+   whether the sale dispatches directly or needs cutting jobs.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -15,18 +18,19 @@ import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { cachedCustomers, listCustomers, type CustomerRow } from "@/features/masters/customersApi";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
+import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
 import { cachedCutStock, listCutStock, stockKey, type PanelOrderInput } from "./panelOrdersApi";
 import { PanelPickerModal } from "./PanelPickerModal";
 
+type Pick = { panelId: string; qty: number };
+
 export function PanelOrderForm({
-  presetPanelId,
   onSave,
   onClose,
 }: {
-  /** Pre-select a panel (e.g. New Order from a panel detail page). */
-  presetPanelId?: string;
-  onSave: (input: PanelOrderInput) => void;
+  /** One input per picked panel — the caller creates one order row each. */
+  onSave: (inputs: PanelOrderInput[]) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [customers, setCustomers] = useState<CustomerRow[]>(() => cachedCustomers() ?? []);
@@ -35,10 +39,10 @@ export function PanelOrderForm({
   const [salesperson, setSalesperson] = useState(() => currentSalespersonName(cachedSalesPersons() ?? []));
 
   const [customer, setCustomer] = useState("");
-  const [panelId, setPanelId] = useState(presetPanelId ?? "");
-  const [qty, setQty] = useState(1);
+  const [picks, setPicks] = useState<Pick[]>([]);
   const [orderDate, setOrderDate] = useState(todayISO());
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void listCustomers().then((r) => r.ok && setCustomers(r.customers));
@@ -51,24 +55,44 @@ export function PanelOrderForm({
     () => customers.filter((c) => c.active).map((c) => ({ value: c.id, label: c.name, hint: c.code || undefined })),
     [customers],
   );
-  const panel = panels.find((p) => p.id === panelId);
-  // Requirement preview: need = line qty × order qty, against current on-hand.
-  const preview = useMemo(
-    () =>
-      (panel?.lines ?? []).map((l) => {
-        const need = l.qty * qty;
-        const have = stock.get(stockKey(l.designId, l.cutSizeId)) ?? 0;
-        return { key: l.id, label: `${l.designName} · ${l.cutSizeName}`, need, have, short: need > have };
-      }),
-    [panel, qty, stock],
-  );
+  const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
+
+  const togglePick = (id: string) =>
+    setPicks((p) => (p.some((x) => x.panelId === id) ? p.filter((x) => x.panelId !== id) : [...p, { panelId: id, qty: 1 }]));
+  const setQty = (id: string, qty: number) => setPicks((p) => p.map((x) => (x.panelId === id ? { ...x, qty } : x)));
+
+  // Requirement preview across every picked panel: need = Σ line qty × order
+  // qty per (design, cut size), against current on-hand — all rows draw from
+  // the same stock, so the aggregate is the honest check.
+  const preview = useMemo(() => {
+    const acc = new Map<string, { label: string; need: number }>();
+    for (const { panelId, qty } of picks) {
+      for (const l of panelById.get(panelId)?.lines ?? []) {
+        const key = stockKey(l.designId, l.cutSizeId);
+        const cur = acc.get(key) ?? { label: `${l.designName} · ${l.cutSizeName}`, need: 0 };
+        cur.need += l.qty * qty;
+        acc.set(key, cur);
+      }
+    }
+    return [...acc].map(([key, v]) => {
+      const have = stock.get(key) ?? 0;
+      return { key, ...v, have, short: v.need > have };
+    });
+  }, [picks, panelById, stock]);
   const covered = preview.length > 0 && preview.every((p) => !p.short);
 
-  const canSave = !!customer && !!panelId && qty > 0;
+  const canSave = !!customer && picks.length > 0 && picks.every((p) => p.qty > 0);
 
-  const submit = () => {
-    if (!canSave) return;
-    onSave({ panel: panelId, customer, qty, salesperson, order_date: orderDate });
+  // The caller writes one row per panel, one after another — hold Save for
+  // the whole run so a second click can't start a second set of orders.
+  const submit = async () => {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await onSave(picks.map((p) => ({ panel: p.panelId, customer, qty: p.qty, salesperson, order_date: orderDate })));
+    } finally {
+      setSaving(false);
+    }
   };
 
   // With the picker stacked on top, both modals' document-level Esc handlers
@@ -103,18 +127,18 @@ export function PanelOrderForm({
               </label>
               <label className="form-field">
                 <span className="lbl">
-                  Panel<span className="req"> *</span>
+                  Panels<span className="req"> *</span>
                 </span>
-                <button type="button" className="picker-trigger" onClick={() => setPickerOpen(true)} aria-label="Panel" aria-haspopup="dialog">
-                  {panel ? <span className="val">{panel.panelCode}</span> : <span className="ph">Select panel…</span>}
+                <button type="button" className="picker-trigger" onClick={() => setPickerOpen(true)} aria-label="Panels" aria-haspopup="dialog">
+                  {picks.length ? (
+                    <span className="val">
+                      {picks.length} panel{picks.length > 1 ? "s" : ""} selected
+                    </span>
+                  ) : (
+                    <span className="ph">Select panels…</span>
+                  )}
                   <Icon name="search" size={13} />
                 </button>
-              </label>
-              <label className="form-field">
-                <span className="lbl">
-                  Qty (panels)<span className="req"> *</span>
-                </span>
-                <NumberInput min={1} value={qty || ""} onChange={(e) => setQty(Number(e.target.value) || 0)} placeholder="e.g. 1" />
               </label>
               <label className="form-field">
                 <span className="lbl">Order Date</span>
@@ -133,6 +157,40 @@ export function PanelOrderForm({
             </div>
           </div>
 
+          {/* CR-192/193: the picked panels as the rep sees them in the showcase — thumb zooms over all images. */}
+          {picks.length > 0 && (
+            <div className="form-section">
+              <div className="form-section-title">Panels</div>
+              {picks.map(({ panelId, qty }) => {
+                const p = panelById.get(panelId);
+                if (!p) return null;
+                const meta = [p.panelSize && `Panel: ${p.panelSize}`, p.vinylSize && `Vinyl: ${p.vinylSize}`, p.lines.map((l) => l.designName).join(", ")]
+                  .filter(Boolean)
+                  .join("  ·  ");
+                return (
+                  <div key={panelId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+                    <ImageThumb images={p.images} size={56} alt={p.panelCode} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="mono" style={{ fontWeight: 600 }}>{p.panelCode}</div>
+                      <div className="dim" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={meta}>
+                        {meta || "No details yet"}
+                      </div>
+                    </div>
+                    <label className="form-field" style={{ width: 110, flex: "0 0 auto" }}>
+                      <span className="lbl">
+                        Qty<span className="req"> *</span>
+                      </span>
+                      <NumberInput min={1} value={qty || ""} onChange={(e) => setQty(panelId, Number(e.target.value) || 0)} placeholder="e.g. 1" />
+                    </label>
+                    <button type="button" className="btn x" title="Remove panel" aria-label={`Remove ${p.panelCode}`} onClick={() => togglePick(panelId)}>
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {preview.length > 0 && (
             <div className="form-section">
               <div className="form-section-title">Cut Piece Stock Check</div>
@@ -146,7 +204,7 @@ export function PanelOrderForm({
                 </div>
               ))}
               <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
-                {covered ? "Stock covers this order — it can dispatch directly." : "Short on cut pieces — the order will need a cutting job."}
+                {covered ? "Stock covers these panels — they can dispatch directly." : "Short on cut pieces — some panels will need a cutting job."}
               </div>
             </div>
           )}
@@ -157,14 +215,14 @@ export function PanelOrderForm({
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="hbtn primary" onClick={submit} disabled={!canSave}>
+          <button className="hbtn primary" onClick={() => void submit()} disabled={!canSave || saving}>
             <Icon name="check" size={13} />
             Save
           </button>
         </div>
 
         {pickerOpen && (
-          <PanelPickerModal panels={panels} selectedId={panelId} onSelect={setPanelId} onClose={() => setPickerOpen(false)} />
+          <PanelPickerModal panels={panels} selectedIds={picks.map((p) => p.panelId)} onToggle={togglePick} onClose={() => setPickerOpen(false)} />
         )}
       </div>
     </div>

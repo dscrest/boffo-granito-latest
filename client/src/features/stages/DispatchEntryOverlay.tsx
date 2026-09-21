@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
 import { fmt } from "@/lib/format";
 import { shareLoadBox, type LoadBox, type PalPlan, type PalPlanLine } from "./palPlansApi";
+import { palletNumbers } from "./customerSheetEdit";
 
 type Entry = { p: PalPlan; l: PalPlanLine };
 
@@ -50,6 +51,8 @@ export function DispatchEntryOverlay({ box, entries, onClose }: { box: LoadBox; 
   }, [box.id]);
 
   const totalBoxes = entries.reduce((s, { l }) => s + l.boxes, 0);
+  // Pallet = typed number, else the auto range (CR-184); Item = design name only (CR-183).
+  const palletNos = palletNumbers(entries.map(({ l }) => l));
   const date = (box.dispatchDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
 
   return createPortal(
@@ -109,8 +112,8 @@ export function DispatchEntryOverlay({ box, entries, onClose }: { box: LoadBox; 
         <table className="dentry-table">
           <thead>
             <tr>
-              <th>Pallet</th>
-              <th>Item</th>
+              <th>Pallet No.</th>
+              <th>Design</th>
               <th>Customer · SO</th>
               <th>Batch</th>
               <th style={{ textAlign: "right" }}>Boxes</th>
@@ -119,8 +122,8 @@ export function DispatchEntryOverlay({ box, entries, onClose }: { box: LoadBox; 
           <tbody>
             {entries.map(({ l }) => (
               <tr key={l.id}>
-                <td className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</td>
-                <td>{l.designLabel}</td>
+                <td className="mono" style={{ fontWeight: 600 }}>{palletNos.get(l.id) || "—"}</td>
+                <td>{l.designName}</td>
                 <td>
                   {l.customerName || "—"}
                   <div className="dentry-dim mono">{l.soNumber || "—"}</div>

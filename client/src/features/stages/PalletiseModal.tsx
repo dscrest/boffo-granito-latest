@@ -101,7 +101,7 @@ export function PalletiseModal({
         <div className="df-head">
           <div className="ico"><Icon name="package" size={18} /></div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600 }}>Palletise · {lines.length} item{lines.length === 1 ? "" : "s"}</div>
+            <div style={{ fontWeight: 600 }}>Palletize · {lines.length} item{lines.length === 1 ? "" : "s"}</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
@@ -155,7 +155,7 @@ export function PalletiseModal({
                         onChange={(e) => setBoxesByLine((p) => ({ ...p, [l.id]: e.target.value }))}
                         placeholder="0"
                         style={{ width: 84, textAlign: "right" }}
-                        aria-label={`${l.designLabel} boxes to palletise`}
+                        aria-label={`${l.designLabel} boxes to palletize`}
                         className={showErrors && boxesOf(l) <= 0 ? "error" : undefined}
                       />
                       {moving < l.boxes && (
@@ -197,10 +197,10 @@ export function PalletiseModal({
         </div>
 
         <div className="df-foot">
-          <span className="df-req-note">
+          <span className="df-req-note info">
             {showErrors && (missingPallet > 0 || missingBoxes > 0) ? (
               <span className="field-err">
-                {missingPallet > 0 ? "Choose a pallet for every item" : "Enter the boxes to palletise for every item"}
+                {missingPallet > 0 ? "Choose a pallet for every item" : "Enter the boxes to palletize for every item"}
               </span>
             ) : (
               `${fmt(totalBoxes)} boxes · ${lines.length} item${lines.length === 1 ? "" : "s"} → ${toLabel}`
@@ -209,7 +209,7 @@ export function PalletiseModal({
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="hbtn primary" disabled={busy} onClick={submit}>
             <Icon name="check" size={13} />
-            {busy ? "Saving…" : "Palletise"}
+            {busy ? "Saving…" : "Palletize"}
           </button>
         </div>
       </div>

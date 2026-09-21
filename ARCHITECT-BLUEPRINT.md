@@ -281,6 +281,7 @@ Every screen is one of three shapes. Build them once, clone the shape everywhere
   never to a random or previously-selected one.
 
 ### C. Form page (`QuoteForm`, `OrderForm`, `DesignForm`, `PartyForm`, stage forms…)
+- **Every create/edit form is a routed full page** (CR-219/220/222: Quote, Sales Order, Item, Pallet, Customer, Production, Palletization) on the ONE shell `ui/FormPage.tsx` — `FormPage` (`.page-head` + sections + sticky `.session-foot`) and `useFormSave` (awaited Save with busy guard, Cancel confirms only after an edit). A thin `*FormPage` route component loads, persists and lands on the saved record. Stage-action dialogs (Record Output, QC, Complete, Import, Palletise) and the Size / Panel forms are still modals.
 - **No negative numbers.** Pick lists are **Combobox-only**, DB-sourced.
 - Required marker rendered **in-box** + a legend explaining it.
 - **Grey field = auto/derived**, white = typable. Derived fields carry a `ƒx` calc marker.

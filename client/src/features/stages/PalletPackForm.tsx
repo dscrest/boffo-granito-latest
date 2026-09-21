@@ -17,7 +17,7 @@ import { DateInput } from "@/ui/DateInput";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import {
   listPalletizable,
   packRemaindersIntoMixed,
@@ -28,8 +28,6 @@ import {
 } from "./palletisationApi";
 import { NumberInput } from "../../ui/NumberInput";
 
-// Leading dimension of a size string ("300x600 - GVT…" / "300x300" → "300").
-const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
 
 export function PalletPackForm({
   onSave,
@@ -94,16 +92,8 @@ export function PalletPackForm({
 
   const order = useMemo(() => orders.find((o) => o.salesOrderId === orderId) || null, [orders, orderId]);
 
-  // Pallet specs offered for a line = those whose size WIDTH matches the item's
-  // (item 300x300 → any 300-series pallet). Size-agnostic pallets always show.
-  const palletsForItem = (it: PalletizableItem) => {
-    const w = widthOf(it.sizeCode);
-    return pallets.filter((p) => {
-      if (!p.sizeId) return true;
-      const pw = widthOf(p.sizeLabel);
-      return !w || !pw || pw === w;
-    });
-  };
+  // Pallet specs offered for a line = the shared size rule (exact size; size-less always show).
+  const palletsForItem = (it: PalletizableItem) => palletsForSize(pallets, it.sizeCode);
 
   // Seed per-line Need Palletization (default = ordered qty) + pallet whenever
   // the chosen order changes, honouring any preselect / preset from the caller.
@@ -220,7 +210,7 @@ export function PalletPackForm({
             <Icon name="palette" size={18} />
           </div>
           <div style={{ flex: 1 }}>
-            <div className="ttl">Palletise</div>
+            <div className="ttl">Palletize</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
             ✕
@@ -235,7 +225,7 @@ export function PalletPackForm({
             </div>
           )}
           {!loading && !error && orders.length === 0 && (
-            <div className="muted" style={{ padding: 8 }}>No sales orders available to palletise.</div>
+            <div className="muted" style={{ padding: 8 }}>No sales orders available to palletize.</div>
           )}
 
           {!loading && orders.length > 0 && (
@@ -289,7 +279,7 @@ export function PalletPackForm({
                         <th>Design</th>
                         <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                         <th className="num" style={{ textAlign: "right", width: 130 }}>Need Palletization</th>
-                        <th className="num" style={{ textAlign: "right" }}>Palletised</th>
+                        <th className="num" style={{ textAlign: "right" }}>Palletized</th>
                         {/* Wide enough for the full pallet name on one line
                             (the combo popup matches the control width). */}
                         <th style={{ minWidth: 320 }}>Pallet</th>

@@ -96,7 +96,7 @@ const conserve = (rows: ReturnType<typeof deriveBatchStock>, designId = "D1") =>
   const rows = deriveBatchStock([S({ batch: "B1", qty: 100, date: "2026-08-01" })], [C({ boxes: 30 })]);
   assert.strictEqual(rowOf(rows, "")!.palletised, 30);
   assert.strictEqual(rowOf(rows, "")!.loaded, 0);
-  assert.strictEqual(rowOf(rows, "B1")!.current, 100, "palletised-only never nets stock");
+  assert.strictEqual(rowOf(rows, "B1")!.current, 100, "palletized-only never nets stock");
   conserve(rows);
 }
 
@@ -119,3 +119,29 @@ const conserve = (rows: ReturnType<typeof deriveBatchStock>, designId = "D1") =>
 }
 
 console.log("batch stock derive check: OK");
+
+// ---- Free stock (CR-199) -------------------------------------------------
+{
+  const { reservedByBatch, freeOf } = await import("./batchStockDerive.ts");
+  const row = (batch: string, current: number) => ({ designId: "D1", batch, current });
+  const claim = (batch: string, orderItemId: string, qty: number) => ({ designId: "D1", batch, orderItemId, qty });
+
+  // An allocation not yet loaded reserves its batch; other batches stay free.
+  let r = reservedByBatch([claim("B1", "oi1", 300)], []);
+  assert.strictEqual(freeOf(row("B1", 1000), r), 700);
+  assert.strictEqual(freeOf(row("B2", 500), r), 500);
+
+  // Fully loaded allocation: `current` already dropped, so nothing is reserved twice.
+  r = reservedByBatch([claim("B1", "oi1", 300)], [{ orderItemId: "oi1", batch: "B1", boxes: 300 }]);
+  assert.strictEqual(freeOf(row("B1", 700), r), 700);
+
+  // A blank-batch load nets the order item's claims FIFO.
+  r = reservedByBatch([claim("B1", "oi1", 300), claim("B2", "oi1", 200)], [{ orderItemId: "oi1", batch: "", boxes: 350 }]);
+  assert.strictEqual(r.get("D1|B1") ?? 0, 0);
+  assert.strictEqual(r.get("D1|B2"), 150);
+
+  // Another order item's loads never release my reservation; "" bucket works; never negative.
+  r = reservedByBatch([claim("", "oi1", 100)], [{ orderItemId: "oi2", batch: "", boxes: 100 }]);
+  assert.strictEqual(freeOf(row("", 60), r), 0);
+  console.log("free-stock check OK");
+}

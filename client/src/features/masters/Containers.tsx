@@ -8,6 +8,7 @@
    • NO inline row actions — row-click opens the edit form.
    • Bulk select (checkboxes) → bulk delete on selection.
    ============================================================ */
+import { newestFirst } from "@/lib/dates";
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -117,7 +118,7 @@ export function Containers() {
   }, [rows, query, statusF]);
 
   const pager = usePagination(filtered.length, "containersPageSize", `${query}|${statusF}`);
-  const pageRows = pager.slice(filtered);
+  const pageRows = pager.slice(newestFirst(filtered));
   const statusOptions = useMemo(() => [...new Set(rows.map((r) => r.status).filter(Boolean))].sort(), [rows]);
 
   const onSave = async (input: ContainerInput) => {

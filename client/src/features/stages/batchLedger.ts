@@ -23,7 +23,7 @@ import type { LoadBox, PalPlan } from "./palPlansApi";
 // line kept in step is the cheaper trade. Change both together.
 const labelOf = (b: LoadBox) => b.loadNumber || b.vehicleNumber || `Container ${b.boxNumber}`;
 
-export type BatchStage = "On hand" | "Palletised" | "Loaded" | "Dispatched";
+export type BatchStage = "On hand" | "Palletized" | "Loaded" | "Dispatched";
 
 export interface BatchMoveRow {
   key: string;
@@ -65,7 +65,7 @@ export function batchLedger(stock: BatchStockRow[], plans: PalPlan[], boxes: Loa
       const k = keyOf(l.designId, l.batchNumber);
       const s = byBatch.get(k);
       consumed.set(k, (consumed.get(k) || 0) + l.boxes);
-      const stage: BatchStage = !box ? "Palletised" : box.status === "Dispatched" ? "Dispatched" : "Loaded";
+      const stage: BatchStage = !box ? "Palletized" : box.status === "Dispatched" ? "Dispatched" : "Loaded";
       rows.push({
         key: `line-${l.id}`,
         batchNumber: l.batchNumber,

@@ -3,7 +3,7 @@
    the quantity caps are testable without React (productionSheetEdit.test.ts).
    The server is still the source of truth; this is the pre-flight that keeps
    Save disabled instead of firing a 409. */
-import type { ProductionEntry, ProductionStage } from "./productionApi";
+import type { ProductionEntry, ProductionRecordRow, ProductionStage } from "./productionApi";
 
 /** What the user typed in one sheet row (empty string = untouched cell). */
 export type SheetDraft = { inProd?: string; qty?: string; stage?: ProductionStage };
@@ -60,3 +60,9 @@ export function resolveSheetEdit(e: ProductionEntry, d: SheetDraft): { ops: Shee
 export function hasOps(ops: SheetOps): boolean {
   return ops.qtyRequested != null || ops.record != null || ops.stage != null;
 }
+
+/** Flat grid rows (CR-236): one per logged batch; a job with no output yet
+    still gets one row (null). Line-level cells render on row 0 only, so
+    totals must keep summing jobs, never these rows. */
+export const batchRows = (e: ProductionEntry): (ProductionRecordRow | null)[] =>
+  e.records.length ? e.records : [null];

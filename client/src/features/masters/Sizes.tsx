@@ -13,6 +13,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
@@ -131,7 +132,7 @@ export function Sizes() {
   }, [rows, query]);
 
   const pager = usePagination(filtered.length, "sizesPageSize", query);
-  const pageRows = pager.slice(filtered);
+  const pageRows = pager.slice(newestFirst(filtered));
 
   const onCreate = async (input: SizeInput) => {
     const res = await createSize(input);

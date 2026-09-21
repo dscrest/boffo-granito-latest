@@ -52,4 +52,18 @@ assert.strictEqual(ip([line({ producedSoFar: 100 })]), 400, "auto job with outpu
 assert.strictEqual(ip([line({ stage: "InProduction" })]), 500, "auto job dragged out of New counts");
 assert.strictEqual(ip([line({ requestGroup: "PR-1-x" })]), 500, "manual PR- request counts from creation");
 
+// CR-199 allocation: 30 stock boxes allocated to an SO line appear in BOTH the
+// line's producedQty and the independent output — `allocated` nets the double
+// count, so on-hand is unchanged while free drops by the allocation.
+{
+  const so = [{ designName: "TILE-A", design: "TILE-A", orderQty: 50, producedQty: 30, loadedQty: 0, palletizedQty: 0 }] as any;
+  const a = designStock("TILE-A", { openingStock: N, allocated: 30, orders: so, prodLogs });
+  assert.strictEqual(a.available, N + M, "allocating must not change on-hand");
+  assert.strictEqual(a.free, N + M - 30, "free drops by the allocated boxes");
+  so[0].loadedQty = 30; // allocation shipped: on-hand and the claim both fall
+  const l = designStock("TILE-A", { openingStock: N, allocated: 30, orders: so, prodLogs });
+  assert.strictEqual(l.available, N + M - 30);
+  assert.strictEqual(l.free, N + M - 30, "a loaded allocation is not reserved twice");
+}
+
 console.log("stock invariant check: OK (available =", s.available, ", inProduction =", s.inProduction, ")");

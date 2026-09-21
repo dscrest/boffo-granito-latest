@@ -160,7 +160,7 @@ export async function downloadTodaysPackingReport(plans: PalPlan[]): Promise<num
   // The generic list endpoint only accepts ONE `col = 'value'` clause
   // (assertWhere) — filter status + day client-side.
   const res = await listAll("StatusTransition", { where: `entity_type = 'PalletizationPlanLine'` });
-  if (!res.ok || res.truncated) throw new Error(res.error || "Failed to load palletisation activity");
+  if (!res.ok || res.truncated) throw new Error(res.error || "Failed to load palletization activity");
   const today = new Date().toDateString();
   const ids = new Set<string>();
   for (const t of res.rows || []) {

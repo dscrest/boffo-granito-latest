@@ -4,10 +4,10 @@
    green/yellow/red signal so the user can gauge production/delivery at a glance.
    One derivation basis (lib/stock.ts) across every form.
    ============================================================ */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
-import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
+import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { designStock, openingStockFor, type DesignStock } from "@/lib/stock";
 import { fmt } from "@/lib/format";
@@ -24,10 +24,22 @@ export function useStockLookup(): (designName: string) => DesignStock {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
     void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
   }, []);
+  // First row per name — same pick as the old designRows.find().
+  const designByName = useMemo(() => {
+    const m = new Map<string, (typeof designRows)[number]>();
+    for (const dr of designRows) if (!m.has(dr.designName)) m.set(dr.designName, dr);
+    return m;
+  }, [designRows]);
+  // Built once per RENDER, on first use — not once per design. Deliberately not
+  // memoized across renders: the alloc cache changes without any state here
+  // changing (an allocation busts it), so a cross-render memo would go stale.
+  // ponytail: the returned fn is still a fresh closure each render, so callers'
+  // useMemo([stockFor]) never hits; fix by moving allocs into state if it lags.
+  let allocBy: Map<string, number> | undefined;
   return (designName: string) => {
-    const d = designRows.find((dr) => dr.designName === designName);
-    const opening = openingStockFor(d, openingByDesign);
-    return designStock(designName, { openingStock: opening, orders, prodLogs });
+    const opening = openingStockFor(designByName.get(designName), openingByDesign);
+    allocBy ??= cachedAllocByDesign();
+    return designStock(designName, { openingStock: opening, allocated: allocBy.get(designName), orders, prodLogs });
   };
 }
 

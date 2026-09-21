@@ -4,9 +4,8 @@
    Reuses the shared form/modal CSS (df-*, form-*).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
-import { useModalA11y } from "@/ui/useModalA11y";
+import { FormPage, useFormSave } from "@/ui/FormPage";
 import type { PalletInput, SizeOption } from "./palletsApi";
 import { NumberInput } from "../../ui/NumberInput";
 
@@ -62,12 +61,19 @@ export function PalletForm({
   lockSize?: boolean;
   initial?: PalletFormInitial;
   isEdit?: boolean;
-  onSave: (input: PalletInput) => void;
+  onSave: (input: PalletInput) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [v, setV] = useState<PalletInput>({ ...blank, ...initial });
-  const setStr = (k: keyof PalletInput, val: string) => setV((p) => ({ ...p, [k]: val }));
-  const setNum = (k: keyof PalletInput, val: string) => setV((p) => ({ ...p, [k]: Number(val) || 0 }));
+  const form = useFormSave(onClose);
+  const setStr = (k: keyof PalletInput, val: string) => {
+    form.touch();
+    setV((p) => ({ ...p, [k]: val }));
+  };
+  const setNum = (k: keyof PalletInput, val: string) => {
+    form.touch();
+    setV((p) => ({ ...p, [k]: Number(val) || 0 }));
+  };
 
   // Size comes from the Size master (FK in v.size). The label drives the name +
   // pallet_size_label. Legacy rows with only a pallet_size_label (no FK) keep
@@ -126,7 +132,7 @@ export function PalletForm({
 
   const submit = () => {
     if (!canSave) return;
-    onSave({
+    void form.run(() => onSave({
       ...v,
       name: v.name.trim(),
       packing_details: packing,
@@ -136,28 +142,24 @@ export function PalletForm({
       coverage_sqm: coverageSqm,
       coverage_sqft: coverageSqft,
       box_weight_kg: boxWeightKg,
-    });
+    }));
   };
 
-  const panelRef = useModalA11y(onClose);
-
   return (
-    <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="palette" size={18} />
-          </div>
-          <div>
-            <div className="ttl">{isEdit ? "Edit Pallet" : "New Pallet"}</div>
-            <div className="sub2">Pallet master</div>
-          </div>
-          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
-            ✕
-          </button>
-        </div>
-
-        <div className="df-body">
+    <FormPage
+      title={isEdit ? "Edit Pallet" : "New Pallet"}
+      sub={isEdit ? initial?.name : ""}
+      busy={form.busy}
+      saveDisabled={!canSave}
+      onCancel={() => void form.cancel()}
+      onSave={submit}
+      note={
+        <>
+          * Indicates a mandatory field
+          <span className="df-fx-note">ƒx Indicates a formula field (auto-calculated)</span>
+        </>
+      }
+    >
           <div className="form-section">
             <div className="form-section-title">Identity</div>
             <div className="form-grid">
@@ -182,6 +184,7 @@ export function PalletForm({
                       // Explicit size pick re-fills the box weight from that size
                       // (the operator can still type over it afterwards).
                       const opt = sizeOptions.find((o) => o.id === val);
+                      form.touch();
                       setV((p) => ({ ...p, size: val, box_weight_kg: opt?.boxWeightKg || 0 }));
                     }}
                     placeholder="Search size…"
@@ -377,22 +380,6 @@ export function PalletForm({
               </label>
             </div>
           </div>
-        </div>
-
-        <div className="df-foot">
-          <span className="df-req-note">
-            * Indicates a mandatory field
-            <span className="df-fx-note">ƒx Indicates a formula field (auto-calculated)</span>
-          </span>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="hbtn primary" onClick={submit} disabled={!canSave}>
-            <Icon name="check" size={13} />
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormPage>
   );
 }

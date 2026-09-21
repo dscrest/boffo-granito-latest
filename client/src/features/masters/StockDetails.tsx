@@ -53,7 +53,7 @@ const STOCK_COLUMNS: ColumnDef<BatchStockRow>[] = [
     className: "mono",
     render: (r) =>
       r.batchNumber || (
-        <span className="dim" title="Unattributed — legacy production, non-batched stock, and boxes palletised before recording">—</span>
+        <span className="dim" title="Unattributed — legacy production, non-batched stock, and boxes palletized before recording">—</span>
       ),
   },
   {

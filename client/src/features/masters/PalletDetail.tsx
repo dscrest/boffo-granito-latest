@@ -4,13 +4,14 @@
    Edit / More (Delete) / ✕, grouped detail sections, Activity log.
 
    Like Size there is no dedicated edit *page*, so Edit opens the
-   shared PalletForm modal in place.
+   Pallet form page (/pallets/:id/edit, CR-220).
 
    Values a pallet doesn't carry read "Not set" rather than a bare
    dash — a labelled blank says more than a hyphen.
    ============================================================ */
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -19,19 +20,14 @@ import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { AssociatedOrders, DetailRow, MoreMenu } from "@/features/common/DetailBits";
-import { PalletForm } from "./PalletForm";
 import {
   cachedPalletOrders,
   cachedPallets,
-  createPallet,
   deletePallet,
   listPalletOrders,
   listPallets,
-  updatePallet,
-  type PalletInput,
   type PalletOrder,
   type PalletRow,
-  type SizeOption,
 } from "./palletsApi";
 
 /* lib/format's fmt() rounds to whole numbers — coverage (1.44 m²) needs decimals. */
@@ -58,20 +54,16 @@ export function PalletDetail() {
   const navigate = useNavigate();
   // Seed from cache so switching pallets / returning to the tab never flashes a skeleton.
   const [pallets, setPallets] = useState<PalletRow[] | null>(() => cachedPallets());
-  const [sizes, setSizes] = useState<SizeOption[]>([]);
   // Read-only here — which orders were packed on each pallet (PalletisedBatch).
   const [palletOrders, setPalletOrders] = useState<Record<string, PalletOrder[]> | null>(() =>
     cachedPalletOrders(),
   );
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
 
   const refresh = () =>
     listPallets().then((res) => {
       setPallets(res.ok ? res.pallets : (cachedPallets() ?? []));
-      if (res.ok) setSizes(res.sizes);
     });
   const refreshOrders = () =>
     listPalletOrders().then((res) => setPalletOrders(res.ok ? res.byPallet : (cachedPalletOrders() ?? {})));
@@ -87,38 +79,10 @@ export function PalletDetail() {
   // null while the batch fetch is in flight; [] once we know this pallet has none.
   const linkedOrders = palletOrders && (palletOrders[id] ?? []);
   const needle = q.trim().toLowerCase();
+  const railRows = newestFirst(pallets);
   const listed = needle
-    ? pallets.filter((p) => `${p.name} ${p.sizeLabel} ${p.palletType}`.toLowerCase().includes(needle))
-    : pallets;
-
-  // Distinct types already saved, fed to the form so the picker can create-on-save.
-  const palletTypes = [...new Set(pallets.map((p) => p.palletType).filter(Boolean))].sort();
-
-  const onSave = async (input: PalletInput) => {
-    if (!pallet) return;
-    const res = await updatePallet(pallet.id, input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setEditing(false);
-    toast.success("Pallet updated");
-    await refresh();
-  };
-
-  // Clone: same spec into a fresh pallet, user edits then saves.
-  const onClone = async (input: PalletInput) => {
-    const res = await createPallet(input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setCloning(false);
-    toast.success("Pallet created");
-    if (res.rowid) navigate(`/pallets/${encodeURIComponent(res.rowid)}`);
-    await refresh();
-  };
+    ? railRows.filter((p) => `${p.name} ${p.sizeLabel} ${p.palletType}`.toLowerCase().includes(needle))
+    : railRows;
 
   const onDelete = async () => {
     if (!pallet) return;
@@ -144,63 +108,13 @@ export function PalletDetail() {
   // saga (PalletisedBatch), a second record of boxes the live PalPlan/LoadBox
   // flow also counts — palletise from /packing instead.
   const moreItems = [
-    ...(can("items", "create") && pallet ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("items", "create") && pallet ? [{ label: "Clone", onClick: () => navigate(`/pallets/${encodeURIComponent(pallet.id)}/clone`) }] : []),
     ...(can("items", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {editing && pallet && (
-        <PalletForm
-          palletTypes={palletTypes}
-          sizeOptions={sizes}
-          isEdit
-          initial={{
-            name: pallet.name,
-            packing_details: pallet.packingDetails,
-            size: pallet.sizeId,
-            pallet_type: pallet.palletType,
-            // Carries the "WxL" tile label the form parses back into Width/Length.
-            pallet_size_label: pallet.palletSizeLabel || pallet.sizeLabel,
-            coverage_sqm: pallet.coverageSqm,
-            coverage_sqft: pallet.coverageSqft,
-            box_weight_kg: pallet.boxWeightKg,
-            boxes_per_pallet: pallet.boxesPerPallet,
-            pallets_per_container: pallet.palletsPerContainer,
-            empty_pallet_weight_kg: pallet.emptyWeightKg,
-            b_boxes_per_pallet: pallet.bBoxesPerPallet,
-            b_pallets_per_container: pallet.bPalletsPerContainer,
-            b_pallet_weight: pallet.bPalletWeightKg,
-            remarks: pallet.remarks,
-          }}
-          onSave={onSave}
-          onClose={() => setEditing(false)}
-        />
-      )}
 
-      {cloning && pallet && (
-        <PalletForm
-          palletTypes={palletTypes}
-          sizeOptions={sizes}
-          initial={{
-            size: pallet.sizeId,
-            pallet_type: pallet.palletType,
-            pallet_size_label: pallet.palletSizeLabel || pallet.sizeLabel,
-            coverage_sqm: pallet.coverageSqm,
-            coverage_sqft: pallet.coverageSqft,
-            box_weight_kg: pallet.boxWeightKg,
-            boxes_per_pallet: pallet.boxesPerPallet,
-            pallets_per_container: pallet.palletsPerContainer,
-            empty_pallet_weight_kg: pallet.emptyWeightKg,
-            b_boxes_per_pallet: pallet.bBoxesPerPallet,
-            b_pallets_per_container: pallet.bPalletsPerContainer,
-            b_pallet_weight: pallet.bPalletWeightKg,
-            remarks: pallet.remarks,
-          }}
-          onSave={onClone}
-          onClose={() => setCloning(false)}
-        />
-      )}
 
       {/* Pallet list — fixed viewport height with its OWN scroll, sticky while
           the detail scrolls. Drag the bottom-right corner to resize the width. */}
@@ -285,7 +199,7 @@ export function PalletDetail() {
                   {pallet.name}
                 </div>
                 {can("items", "edit") && (
-                  <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit pallet">
+                  <button className="hbtn" onClick={() => navigate(`/pallets/${encodeURIComponent(pallet.id)}/edit`)} disabled={busy} title="Edit pallet">
                     <Icon name="edit" size={13} />
                     Edit
                   </button>

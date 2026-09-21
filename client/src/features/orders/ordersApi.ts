@@ -122,6 +122,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       salesOrderId: str(it.sales_order),
       orderNumber: so ? str(so.order_number) : "",
       poNumber: so ? str(so.po_number) : "",
+      customerId: custId,
       partyCode: custCode.get(custId) || "",
       party: custName.get(custId) || "",
       country: iso,
@@ -170,6 +171,8 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       boxBrandLabel: so ? brandName.get(str(so.box_brand)) || "" : "",
       shipmentDate: so ? str(so.shipment_date) : "",
       customerNotes: so ? str(so.customer_notes) : "",
+      address: so ? str(so.address) : "",
+      shippingAddress: so ? str(so.shipping_address) : "",
       terms: so ? str(so.terms) : "",
       totalAmount: so ? num(so.total_amount) : 0,
       containerPlan: so ? str(so.container_plan) : "",
@@ -198,8 +201,9 @@ export interface NewSalesOrderInput {
   currency: string;
   exchange_rate?: number;
   remarks: string;
-  /** Omit to leave the stored address untouched (the SO form doesn't edit it). */
+  /** Billing / shipping address (CR-221). Omit to leave the stored value untouched. */
   address?: string;
+  shipping_address?: string;
   salesperson: string;
   /** Brand ROWID from the Box Brand master ("" = none). */
   box_brand: string;
@@ -209,7 +213,8 @@ export interface NewSalesOrderInput {
   adjustment: number;
   tax_type: string;
   tax_pct: number;
-  lines: { item: string; qty: number; rate: number; pallet?: string; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
+  /** `id` = existing OrderItem ROWID (edit in place, CR-232); absent = new line. */
+  lines: { id?: string; item: string; qty: number; rate: number; pallet?: string; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
 }
 
 /* SO status chips reuse the quote-status palette (no new CSS). Shared by
@@ -221,6 +226,11 @@ export const SO_STATUS_CHIP: Record<string, string> = {
   InProgress: "q-sent",
   Cancelled: "q-rejected",
   Rejected: "q-rejected",
+  // Auto roll-up (CR-230/233): dispatch closes the order. In* = CR-230-window fallback only.
+  InPalletization: "q-sent",
+  InLoading: "q-accepted",
+  PartiallyCompleted: "q-partial",
+  Completed: "q-converted",
 };
 export const SO_STATUS_LABEL: Record<string, string> = {
   PendingApproval: "Pending Approval",
@@ -228,32 +238,60 @@ export const SO_STATUS_LABEL: Record<string, string> = {
   // mandate 2026-07-20: post-approval label is "Approved", not "Confirmed").
   Confirmed: "Approved",
   InProgress: "In Progress",
+  InPalletization: "In Palletization",
+  InLoading: "In Loading",
+  PartiallyCompleted: "Partially Completed",
 };
+/** Every SO status, in lifecycle order — filter + manual Change Status lists. */
+export const SO_STATUSES = [
+  "Draft", "PendingApproval", "Confirmed", "InProgress", "PartiallyCompleted", "Completed", "Cancelled", "Rejected",
+];
 export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
 
-/** Derived shipping stage of an SO from its items' recounted counters
-    (palletized/loaded/dispatched — see server recountOrderItems). The most
-    advanced state wins; null = no shipping activity yet. `rank` orders the
-    stages for sorting and for "shipping state wins the header chip" checks
-    (rank ≥ 4 = in loading or beyond). Shared by the Orders grid and detail. */
-export function shippingStage(items: Order[]): { label: string; cls: string; rank: number } | null {
-  const sum = (f: (o: Order) => number) => items.reduce((s, o) => s + f(o), 0);
-  const ordered = sum((o) => o.orderQty);
-  const dispatched = sum((o) => o.dispatchedQty);
-  if (dispatched > 0)
-    return dispatched >= ordered
-      ? { label: "Dispatched", cls: "q-accepted", rank: 6 }
-      : { label: `Partially Dispatched — ${ordered - dispatched} left`, cls: "q-sent", rank: 5 };
-  if (sum((o) => o.loadedQty) > 0) return { label: "In Loading", cls: "q-accepted", rank: 4 };
-  const palletized = sum((o) => o.palletizedQty);
-  // Produced boxes still waiting to be palletised (come-back-later signal).
-  const waiting = sum((o) => Math.max(0, o.producedQty - o.palletizedQty));
-  if (palletized > 0)
-    return waiting > 0
-      ? { label: "Partially palletised", cls: "q-accepted", rank: 2 }
-      : { label: "Ready for Loading", cls: "q-accepted", rank: 3 };
-  if (waiting > 0) return { label: `Ready for Palletisation — ${waiting}`, cls: "q-accepted", rank: 1 };
-  return null;
+export interface SoChip { key: string; label: string; cls: string; title?: string; ratio: number }
+const sumOf = (items: Order[], f: (o: Order) => number) => items.reduce((s, o) => s + f(o), 0);
+
+/** THE status an SO reads by — one function for the grid AND the detail header
+    so they can never disagree. Order LIFECYCLE only (CR-233): approval states,
+    then Partially Completed — n left / Completed once boxes are dispatched.
+    Dispatched counters win over a stored status that is merely behind; a stored
+    status AHEAD of the counters is a manual override (CR-231) and is kept.
+    Palletization / loading progress live in palStatus / loadStatus instead. */
+export function soLiveStatus(status: string, items: Order[]): SoChip {
+  const ordered = sumOf(items, (o) => o.orderQty);
+  const dispatched = sumOf(items, (o) => o.dispatchedQty);
+  const left = ordered - dispatched;
+  const active = ["Confirmed", "InProgress", "InPalletization", "InLoading", "PartiallyCompleted"].includes(status);
+  const key = active && dispatched > 0 ? (left <= 0 ? "Completed" : "PartiallyCompleted")
+    : status === "InPalletization" || status === "InLoading" ? "InProgress" // CR-230-window rows
+    : status;
+  const label = soStatusLabel(key) + (key === "PartiallyCompleted" && left > 0 ? ` — ${left} left` : "");
+  return { key, label, cls: SO_STATUS_CHIP[key] || "q-draft", ratio: ordered ? dispatched / ordered : 0 };
+}
+
+/** Palletization progress of an SO (grid column + detail field): palletised vs ordered boxes. */
+export function palStatus(items: Order[]): SoChip {
+  const ordered = sumOf(items, (o) => o.orderQty);
+  const done = sumOf(items, (o) => o.palletizedQty);
+  const ratio = ordered ? done / ordered : 0;
+  const title = `${done} of ${ordered} boxes palletized`;
+  if (done <= 0) return { key: "Not Started", label: "Not Started", cls: "q-draft", title, ratio };
+  if (done < ordered) return { key: "Partial", label: `Partial — ${done} of ${ordered}`, cls: "q-sent", title, ratio };
+  return { key: "Completed", label: "Completed", cls: "q-converted", title, ratio };
+}
+
+/** Loading progress of an SO: loaded vs ordered boxes; Dispatched once every box has left. */
+export function loadStatus(items: Order[]): SoChip {
+  const ordered = sumOf(items, (o) => o.orderQty);
+  const loaded = sumOf(items, (o) => o.loadedQty);
+  const dispatched = sumOf(items, (o) => o.dispatchedQty);
+  const ratio = ordered ? (loaded + dispatched) / (2 * ordered) : 0; // dispatched sorts after merely loaded
+  const title = `${loaded} of ${ordered} boxes loaded · ${dispatched} dispatched`;
+  if (loaded <= 0) return { key: "Not Started", label: "Not Started", cls: "q-draft", title, ratio };
+  if (loaded < ordered) return { key: "Partial", label: `Partial — ${loaded} of ${ordered}`, cls: "q-sent", title, ratio };
+  return dispatched >= ordered
+    ? { key: "Dispatched", label: "Dispatched", cls: "q-converted", title, ratio }
+    : { key: "Loaded", label: "Loaded", cls: "q-accepted", title, ratio };
 }
 
 /* Mutations invalidate the cache so the next listOrders() refetches. */
@@ -268,8 +306,9 @@ export function createSalesOrder(input: NewSalesOrderInput) {
   return bust(op<{ ROWID: string; order_number: string }>("so-with-items", input));
 }
 
-/** Update header + replace line items (mirror of updateQuoteWithItems).
-    Server 409s once any work is recorded; PendingApproval/Confirmed → Draft. */
+/** Update header + line items in place (CR-232: lines carry their OrderItem
+    `id`). Editable after work is recorded — a worked line keeps its item and
+    can't drop below its palletised/loaded/dispatched boxes. */
 export function updateSalesOrderWithItems(salesOrderId: string, input: NewSalesOrderInput) {
   return bust(op<{ ROWID: string }>(`update-so-with-items/${salesOrderId}`, input));
 }
@@ -290,13 +329,24 @@ export function deleteOrderItem(orderItemId: string) {
 /** Change SO status through the server-side state machine (/so-status —
     validates the transition, requires approval rights for verdicts, logs a
     StatusTransition row, and notifies the salesperson). */
-export function setOrderStatus(salesOrderId: string, status: string, reason?: string) {
-  const p = bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason }));
+export function setOrderStatus(salesOrderId: string, status: string, reason?: string, manual?: boolean) {
+  // manual (CR-231): any status, reason mandatory — skips the transition table.
+  const p = bust(op<{ ROWID: string; status: string }>(`so-status/${salesOrderId}`, { status, reason, manual }));
   // Confirmation auto-enqueues the order's items into the production waitlist
   // server-side, so the production cache is stale. Dynamic import breaks the
   // ordersApi↔productionApi cycle (a static import TDZ-crashes at module init).
   if (status === "Confirmed")
     void p.then(() => import("@/features/stages/productionApi").then((m) => m.invalidateProductionLogs()));
+  // Cancelling hands allocated stock back server-side (CR-199): alloc rows go,
+  // queue cards shrink, free stock rises — every one of those caches is stale.
+  if (status === "Cancelled")
+    void p.then(() =>
+      Promise.all([
+        import("@/features/stages/productionApi").then((m) => m.invalidateProductionLogs()),
+        import("@/features/stages/palPlansApi").then((m) => m.invalidatePalPlans()),
+        import("@/features/stages/batchStockApi").then((m) => m.invalidateBatchStock()),
+      ]),
+    );
   return p;
 }
 

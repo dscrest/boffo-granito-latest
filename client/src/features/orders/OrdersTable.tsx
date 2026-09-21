@@ -4,9 +4,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
@@ -18,18 +17,20 @@ import { fmt, fmtDateTime, isRowId } from "@/lib/format";
 /** User-friendly SO number, never the raw ROWID fallback. */
 const soLabel = (r: SORow) => (r.head.orderNumber && !isRowId(r.head.orderNumber) ? r.head.orderNumber : "—");
 import { type Order } from "@/data";
-import { OrderForm, type OrderDraft } from "./OrderForm";
+import type { OrderDraft } from "./OrderForm";
 import { ViewToggle } from "./ViewToggle";
 import {
   cachedOrders,
-  createSalesOrder,
   deleteSalesOrder,
   listOrders,
   setOrderStatus,
-  shippingStage,
+  loadStatus,
+  palStatus,
+  soLiveStatus,
   soStatusLabel,
-  SO_STATUS_CHIP,
+  SO_STATUSES,
   type NewSalesOrderInput,
+  type SoChip,
 } from "./ordersApi";
 
 /** One grid row = one SalesOrder: the first hydrated line item carries the
@@ -39,6 +40,12 @@ interface SORow {
   head: Order;
   items: Order[];
 }
+
+// The status the row reads by — shared by the chip, the filter and the sort.
+const statusKey = (r: SORow) => soLiveStatus(r.head.status || "Confirmed", r.items).key;
+const soChip = (c: SoChip, title?: string) => (
+  <span className={`chip qstatus nw ${c.cls}`} title={title ?? c.title}>{c.label}</span>
+);
 
 export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   return {
@@ -53,8 +60,8 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     currency: dr.currency,
     exchange_rate: dr.exchange_rate,
     remarks: dr.remarks,
-    // address omitted, not "" — the form doesn't edit it, and data-ops leaves
-    // an unsent address alone (a converted SO inherits its quote's).
+    address: dr.address,
+    shipping_address: dr.shipping_address,
     salesperson: dr.salesperson,
     box_brand: dr.box_brand,
     customer_notes: dr.customer_notes,
@@ -64,6 +71,7 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     tax_type: dr.taxType,
     tax_pct: parseFloat(dr.taxPct) || 0,
     lines: dr.lines.map((l) => ({
+      id: l.id, // edit in place (CR-232); undefined on create/clone
       item: l.design,
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,
       rate: parseFloat(l.rate) || 0,
@@ -104,24 +112,14 @@ function soColumns(): ColumnDef<SORow>[] {
       key: "status",
       label: "Status",
       render: (r) => {
+        // Same function as the SO detail header — order lifecycle, full words (CR-233).
         const s = r.head.status || "Confirmed";
-        return (
-          <span className={`chip qstatus ${SO_STATUS_CHIP[s] || "q-draft"}`} title={s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : soStatusLabel(s)}>
-            {codeOf(soStatusLabel(s))}
-          </span>
-        );
+        return soChip(soLiveStatus(s, r.items), s === "Rejected" && r.head.rejectReason ? `Rejected: ${r.head.rejectReason}` : undefined);
       },
     },
-    {
-      // Derived from the items' recounted counters — the process-truth chip
-      // ("where is this order's stock right now"), next to the approval status.
-      key: "shipStage",
-      label: "Shipping Stage",
-      render: (r) => {
-        const st = shippingStage(r.items);
-        return st ? <span className={`chip qstatus ${st.cls}`} title={st.label}>{codeOf(st.label)}</span> : "—";
-      },
-    },
+    // Where the order's boxes are (CR-233) — from the items' recounted counters.
+    { key: "palStatus", label: "Palletization Status", render: (r) => soChip(palStatus(r.items)) },
+    { key: "loadStatus", label: "Loading Status", render: (r) => soChip(loadStatus(r.items)) },
     { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },
     { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.head.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.head.modifiedTime) },
@@ -138,8 +136,9 @@ function soSortVal(r: SORow, k: string): string | number {
     case "items": return r.items.length;
     case "qty": return r.items.reduce((s, o) => s + o.orderQty, 0);
     case "total": return r.head.totalAmount || 0;
-    case "status": return r.head.status || "Confirmed";
-    case "shipStage": return shippingStage(r.items)?.rank ?? 0;
+    case "status": return statusKey(r);
+    case "palStatus": return palStatus(r.items).ratio;
+    case "loadStatus": return loadStatus(r.items).ratio;
     case "salesperson": return r.head.salesperson || "";
     case "created": return r.head.createdTime || "";
     case "modified": return r.head.modifiedTime || "";
@@ -147,14 +146,13 @@ function soSortVal(r: SORow, k: string): string | number {
   }
 }
 
-const STATUS_TABS = ["all", "Draft", "PendingApproval", "Confirmed", "InProgress", "Cancelled"] as const;
+const STATUS_TABS = ["all", ...SO_STATUSES.filter((s) => s !== "Rejected")];
 
 export function OrdersTable() {
   const navigate = useNavigate();
   const [tab, setTab] = usePersistedState<string>("orders.tab", "all");
   const [query, setQuery] = usePersistedState("orders.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("orders.criteria", {});
-  const [showForm, setShowForm] = useState(false);
   const COLS = useMemo(() => soColumns(), []);
   // Fresh storage key (old ordersTableColumns prefs were per-line-item columns).
   const { ordered, visible, hidden, toggle, move } = useColumns("soGridColumns", COLS, ["created", "modified"]);
@@ -162,7 +160,6 @@ export function OrdersTable() {
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [loading, setLoading] = useState(() => cachedOrders() == null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
 
   // Bulk selection (same master-page convention as QuotesTable/DesignMaster).
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -198,21 +195,6 @@ export function OrdersTable() {
     return [...bySo.values()].sort((a, b) => Number(b.id) - Number(a.id));
   }, [orders]);
 
-  const onSave = async (dr: OrderDraft) => {
-    setShowForm(false);
-    setSaving(true);
-    const res = await createSalesOrder(draftToInput(dr));
-    setSaving(false);
-    if (!res.ok) {
-      setError(res.error || "Save failed");
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    toast.success(`Order ${res.data?.order_number ?? ""} created`);
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/orders/${encodeURIComponent(res.rowid)}`);
-  };
-
   // Advanced search fields (magnifier button) — options DB-sourced from rows.
   const filterFields = useMemo<FilterField<SORow>[]>(() => {
     const opts = (get: (r: SORow) => string) => [...new Set(rows.map(get).filter(Boolean))].sort();
@@ -220,7 +202,9 @@ export function OrdersTable() {
       { key: "soNo", label: "SO Number", type: "text", get: (r) => r.head.orderNumber || "" },
       { key: "po", label: "PO Number", type: "text", get: (r) => r.head.poNumber },
       { key: "party", label: "Customer", type: "multiselect", options: opts((r) => r.head.party), get: (r) => r.head.party },
-      { key: "status", label: "Status", type: "multiselect", options: opts((r) => r.head.status || ""), get: (r) => r.head.status || "" },
+      { key: "status", label: "Status", type: "multiselect", options: opts((r) => soStatusLabel(statusKey(r))), get: (r) => soStatusLabel(statusKey(r)) },
+      { key: "palStatus", label: "Palletization Status", type: "multiselect", options: opts((r) => palStatus(r.items).key), get: (r) => palStatus(r.items).key },
+      { key: "loadStatus", label: "Loading Status", type: "multiselect", options: opts((r) => loadStatus(r.items).key), get: (r) => loadStatus(r.items).key },
       { key: "total", label: "Total", type: "numrange", get: (r) => r.head.totalAmount || 0 },
       { key: "date", label: "Order Date Between", type: "daterange", get: (r) => r.head.orderDate },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.head.createdTime || "" },
@@ -230,7 +214,7 @@ export function OrdersTable() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base = rows.filter((r) => {
-      if (tab !== "all" && (r.head.status || "Confirmed") !== tab) return false;
+      if (tab !== "all" && statusKey(r) !== tab) return false;
       if (!q) return true;
       return `${r.head.orderNumber} ${r.head.poNumber} ${r.head.party}`.toLowerCase().includes(q);
     });
@@ -263,16 +247,25 @@ export function OrdersTable() {
 
   const onBulkStatus = async () => {
     if (!bulkStatus) return;
+    // CR-231: a manual status change (any status) always records why.
+    const reason = await promptDialog({
+      title: "Change Status",
+      message: `Reason for marking ${ids.length} order${ids.length === 1 ? "" : "s"} ${soStatusLabel(bulkStatus)}:`,
+      placeholder: "Reason",
+      confirmLabel: "Save",
+      required: true,
+    });
+    if (reason == null) return;
     setBulkBusy(true);
     let done = 0;
     let failed = 0;
     for (const id of ids) {
-      const res = await setOrderStatus(id, bulkStatus);
+      const res = await setOrderStatus(id, bulkStatus, reason, true);
       if (res.ok) done += 1;
       else failed += 1;
     }
     setBulkBusy(false);
-    if (failed) toast.error(`${done} updated, ${failed} failed (invalid transitions are rejected)`);
+    if (failed) toast.error(`${done} updated, ${failed} failed (approval rights are still required)`);
     else toast.success(`${done} order${done === 1 ? "" : "s"} marked ${soStatusLabel(bulkStatus)}`);
     setSelected(new Set());
     setBulkStatus("");
@@ -298,11 +291,10 @@ export function OrdersTable() {
   };
 
   const tabCount = (id: string) =>
-    id === "all" ? rows.length : rows.filter((r) => (r.head.status || "Confirmed") === id).length;
+    id === "all" ? rows.length : rows.filter((r) => statusKey(r) === id).length;
 
   return (
     <div>
-      {showForm && <OrderForm onSave={onSave} onClose={() => setShowForm(false)} />}
 
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
@@ -316,10 +308,9 @@ export function OrdersTable() {
             <>
               <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)} disabled={bulkBusy} title="Bulk status change">
                 <option value="">Change status…</option>
-                <option value="PendingApproval">Submit for Approval</option>
-                <option value="Confirmed">Approve (Confirmed)</option>
-                <option value="InProgress">Start Progress</option>
-                <option value="Cancelled">Cancelled</option>
+                {SO_STATUSES.map((s) => (
+                  <option key={s} value={s}>{soStatusLabel(s)}</option>
+                ))}
               </select>
               <button className="btn" onClick={() => void onBulkStatus()} disabled={!bulkStatus || bulkBusy}>
                 Apply
@@ -360,9 +351,9 @@ export function OrdersTable() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           <ViewToggle />
           {can("orders", "create") && (
-            <button className="hbtn primary" disabled={saving} onClick={() => setShowForm(true)} title="New Order">
+            <button className="hbtn primary" onClick={() => navigate("/orders/new")} title="New Order">
               <Icon name="plus" size={13} />
-              {saving ? "Saving…" : "New Order"}
+              New Order
             </button>
           )}
         </div>
@@ -421,7 +412,7 @@ export function OrdersTable() {
                         hint="Create one from a Quote (Convert) or via New Order"
                         action={
                           can("orders", "create") ? (
-                            <button className="hbtn primary" onClick={() => setShowForm(true)}>
+                            <button className="hbtn primary" onClick={() => navigate("/orders/new")}>
                               New Order
                             </button>
                           ) : undefined

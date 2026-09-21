@@ -205,9 +205,8 @@ function MasterEditor({
               />
             ) : f.type === "image" ? (
               <ImageUploader
-                max={1}
-                value={vals[f.key] ? [{ id: vals[f.key], name: "" }] : []}
-                onChange={(next) => set(f.key, next[0]?.id ?? "")}
+                value={vals[f.key] ? { id: vals[f.key], name: "" } : null}
+                onChange={(next) => set(f.key, next?.id ?? "")}
               />
             ) : (
               <input

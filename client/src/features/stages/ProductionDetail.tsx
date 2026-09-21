@@ -24,11 +24,10 @@ import { fmt, fmtDateTime, fmtLocalDate, pct } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 import type { CSSProperties } from "react";
 import { useMasters } from "@/features/masters/useMasters";
+import { useBoxBrands } from "@/features/masters/boxBrands";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
-import { ProductionForm } from "./ProductionForm";
 import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
-import { ProductionEditForm } from "./ProductionEditForm";
 import { ProductionCompleteForm, type ProductionCompleteResult } from "./ProductionCompleteForm";
 import {
   cachedProductionLogs,
@@ -39,7 +38,6 @@ import {
   listProductionLogs,
   recordProduction,
   recordProductionLines,
-  requestProduction,
   setProductionStage,
   stageChip,
   PRODUCTION_STAGE_ORDER,
@@ -47,7 +45,6 @@ import {
   type ProductionEntry,
   type ProductionStage,
   type ProductionRequestGroup,
-  type ProductionRequestInput,
 } from "./productionApi";
 
 type FieldDef = ColumnDef<ProductionRequestGroup> & { value: (g: ProductionRequestGroup) => string; wide?: boolean };
@@ -70,13 +67,12 @@ export function ProductionDetail() {
   const { id = "" } = useParams();
   const groupId = decodeURIComponent(id);
   const navigate = useNavigate();
+  const { brands } = useBoxBrands();
 
   const [entries, setEntries] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
   const [tab, setTab] = useState<"details" | "prodlog" | "activity">("details");
   const [listQ, setListQ] = useState("");
-  const [cloning, setCloning] = useState(false);
-  const [editing, setEditing] = useState(false);
   // All lines shown in one Record Output modal ("Record all") or just one.
   const [recordEntries, setRecordEntries] = useState<ProductionEntry[] | null>(null);
   const [logItemFilter, setLogItemFilter] = useState("");
@@ -108,28 +104,6 @@ export function ProductionDetail() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const onCloneSave = async (input: ProductionRequestInput) => {
-    // Order-linked clones land back on the same SO's production; independent
-    // clones get their own request-batch group (res.rowid = new request_group).
-    const target = group && !group.independent ? group.group : undefined;
-    setCloning(false);
-    setBusy("Creating…");
-    const res = await requestProduction(input);
-    setBusy(null);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    const total = input.lines.reduce((s, l) => s + l.qty_requested, 0);
-    toast.success(`Production recorded — ${fmt(total)} boxes`);
-    invalidateProductionLogs();
-    // Independent clones key by their new request_group (groupProductionByOrder's
-    // fallback), not the row id.
-    const dest = target ?? res.data?.request_group ?? res.rowid;
-    if (dest) navigate(`/prod/${encodeURIComponent(dest)}`);
-    await load();
-  };
 
   const onRecordSave = async (results: RecordOutputResult[]) => {
     setRecordEntries(null);
@@ -195,12 +169,6 @@ export function ProductionDetail() {
     await load();
   };
 
-  const onEditSave = async () => {
-    setEditing(false);
-    invalidateProductionLogs();
-    await load();
-  };
-
   const onDelete = async () => {
     if (!group) return;
     const reversal = producedBoxes > 0 ? ` ${fmt(producedBoxes)} produced boxes will be subtracted from the order.` : "";
@@ -262,26 +230,17 @@ export function ProductionDetail() {
     // Hand produced boxes to palletization (order-linked only — palletization
     // keys on OrderItem+SO; independent make-to-stock has no order to scope to).
     ...(!group.independent && group.salesOrderId && producedBoxes > 0
-      ? [{ label: "Send to Palletization", onClick: () => navigate(`/packing?fromOrder=${encodeURIComponent(group.salesOrderId)}`) }]
+      ? [{ label: "Send to Palletization", onClick: () => navigate(`/packing/new?fromOrder=${encodeURIComponent(group.salesOrderId)}`) }]
       : []),
-    ...(can("stages", "edit") ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("stages", "edit") ? [{ label: "Clone", onClick: () => navigate(`/prod/${encodeURIComponent(groupId)}/clone`) }] : []),
     ...(can("stages", "delete") && !palletised ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {cloning && (
-        <ProductionForm
-          presetSalesOrderId={group.independent ? undefined : group.salesOrderId}
-          presetDesignId={group.independent ? group.entries[0]?.designId : undefined}
-          onSave={onCloneSave}
-          onClose={() => setCloning(false)}
-        />
-      )}
       {recordEntries && (
         <RecordOutputForm entries={recordEntries} onSave={onRecordSave} onClose={() => setRecordEntries(null)} />
       )}
-      {editing && <ProductionEditForm group={group} onSaved={onEditSave} onClose={() => setEditing(false)} />}
       {completeOpen && group && <ProductionCompleteForm group={group} onSave={onCompleteSave} onClose={() => setCompleteOpen(false)} />}
 
       {/* Production list — resizable, sticky, own scroll (mirrors OrderDetail). */}
@@ -375,7 +334,7 @@ export function ProductionDetail() {
             {/* Edit is always visible (detail-page standard); editing the
                 requested qty is only safe before any output is recorded. */}
             {can("stages", "edit") && (
-              <button className="hbtn" disabled={recorded} onClick={() => setEditing(true)} title={recorded ? "Output already recorded — quantities are locked" : "Edit production"}>
+              <button className="hbtn" disabled={recorded} onClick={() => navigate(`/prod/${encodeURIComponent(groupId)}/edit`)} title={recorded ? "Output already recorded — quantities are locked" : "Edit production"}>
                 <Icon name="edit" size={13} /> Edit
               </button>
             )}
@@ -440,6 +399,7 @@ export function ProductionDetail() {
                   <thead>
                     <tr>
                       <th>Design</th>
+                      <th>Batch</th>
                       <th>Size / Finish</th>
                       <th>Status</th>
                       <th className="num" style={{ textAlign: "right" }}>Requested</th>
@@ -463,6 +423,11 @@ export function ProductionDetail() {
                             <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
                               On hand {fmt(stockFor(e.design).available)} boxes
                             </div>
+                          </td>
+                          <td className="nw">
+                            {e.records.length
+                              ? [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))].map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>)
+                              : <span className="dim">—</span>}
                           </td>
                           <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
                           <td><span className="chip" style={{ color: lineState.color }} title={lineState.label}>{codeOf(lineState.label)}</span></td>
@@ -503,7 +468,7 @@ export function ProductionDetail() {
                 </div>
                 {group.produced >= group.ordered && (
                   <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 8 }}>
-                    Production complete — this order is ready for palletisation.
+                    Production complete — this order is ready for palletization.
                   </div>
                 )}
               </div>
@@ -532,6 +497,7 @@ export function ProductionDetail() {
                     <th>Date</th>
                     <th>Design</th>
                     <th>Batch</th>
+                    <th>Box Brand</th>
                     <th>Size / Finish</th>
                     <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                     <th>By</th>
@@ -547,6 +513,7 @@ export function ProductionDetail() {
                         <td className="mono">{fmtLocalDate(r.productionDate || r.createdTime)}</td>
                         <td><span className="design-name">{r.design}</span></td>
                         <td className="mono">{r.batchNumber || "—"}</td>
+                        <td className="dim">{brands.find((b) => b._id === r.boxBrandId)?.name || "—"}</td>
                         <td className="dim">{[r.size, r.finish].filter(Boolean).join(" · ") || "—"}</td>
                         <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.qtyBoxes)}</td>
                         <td className="dim">{r.performedBy || "—"}</td>

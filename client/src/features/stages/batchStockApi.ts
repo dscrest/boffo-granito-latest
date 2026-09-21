@@ -29,7 +29,7 @@
 import { listAll, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listPalPlans, subscribePalPlans } from "./palPlansApi";
-import { deriveBatchStock, type ConsumeIn, type SupplyIn } from "./batchStockDerive";
+import { deriveBatchStock, freeOf, reservedByBatch, type ClaimIn, type ConsumeIn, type LoadedIn, type SupplyIn } from "./batchStockDerive";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -48,6 +48,8 @@ export interface BatchStockRow {
   dispatched: number;
   current: number; // max(0, opening + produced − loaded)
   over: number; // consumption this row's supply could not cover — anomaly
+  reserved: number; // claimed by order items (order-linked output + allocations), not yet loaded
+  free: number; // max(0, current − reserved) — what Allocate Stock may still hand out (CR-199)
 }
 
 const cache = createListCache(fetchBatchStock);
@@ -84,7 +86,7 @@ export function listBatchStock(): Promise<BatchStockResult> {
 
 async function fetchBatchStock(): Promise<BatchStockResult> {
   const [logs, designs, sizes, palPlans, pbatches, plines, loadings, items] = await Promise.all([
-    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date"] }),
+    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "is_batched", "accounting_stock"] }),
     listAll("Size", { columns: ["code"] }),
     listPalPlans(),
@@ -115,6 +117,10 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
 
   // ---- Supply --------------------------------------------------
   const supply: SupplyIn[] = [];
+  // Claims = boxes an order item already owns: order-linked output (record /
+  // legacy plan rows) and stock allocations (entry_type "alloc" — a claim only,
+  // never supply, so allocating does not inflate on-hand).
+  const claims: ClaimIn[] = [];
   const openingByDesign = new Map<string, number>();
   for (const r of logs.rows || []) {
     const type = str(r.entry_type);
@@ -122,6 +128,9 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     const qty = num(r.qty_boxes);
     if (qty <= 0 || !designId) continue;
     const date = str(r.production_date).slice(0, 10);
+    const oi = str(r.order_item);
+    if (oi && (type === "record" || type === "alloc" || type === "plan"))
+      claims.push({ designId, batch: type === "plan" ? "" : str(r.batch_number), orderItemId: oi, qty });
     if (type === "record") {
       supply.push({ designId, batch: str(r.batch_number), qty, kind: "produced", date });
     } else if (type === "opening") {
@@ -142,6 +151,9 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
 
   // ---- Consumption ---------------------------------------------
   const consumption: ConsumeIn[] = [];
+  // ponytail: legacy single-design containers carry no order item, so their
+  // loads never release a claim — historic, fully-dispatched data only.
+  const loadedByOi: LoadedIn[] = [];
   // LIVE — plan lines carry the batch; the LoadBox carries the status.
   if (palPlans.ok) {
     const boxById = new Map(palPlans.boxes.map((b) => [b.id, b]));
@@ -156,6 +168,7 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
           loaded: !!box,
           dispatched: box?.status === "Dispatched",
         });
+        if (box && l.orderItemId) loadedByOi.push({ orderItemId: l.orderItemId, batch: l.batchNumber, boxes: l.boxes });
       }
     }
   }
@@ -181,10 +194,12 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
         const designId = oiDesign.get(str(l.order_item)) || "";
         if (!designId) continue; // no design to attribute to — data anomaly
         consumption.push({ designId, batch: str(l.batch_number), boxes: num(l.boxes), loaded: true, dispatched });
+        loadedByOi.push({ orderItemId: str(l.order_item), batch: str(l.batch_number), boxes: num(l.boxes) });
       }
     }
   }
 
+  const reserved = reservedByBatch(claims, loadedByOi);
   const rows: BatchStockRow[] = deriveBatchStock(supply, consumption).map((r) => ({
     designId: r.designId,
     designName: dName.get(r.designId) || r.designId,
@@ -199,6 +214,8 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     dispatched: r.dispatched,
     current: r.current,
     over: r.over,
+    reserved: r.current - freeOf(r, reserved),
+    free: freeOf(r, reserved),
   }));
   return { ok: true, rows, openingByDesign };
 }

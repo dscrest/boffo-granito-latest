@@ -30,7 +30,7 @@ import { designStock, openingStockFor, type InProductionOrder } from "@/lib/stoc
 import { cachedBatchStock, cachedOpeningByDesign, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import { batchLedger, type BatchMoveRow } from "@/features/stages/batchLedger";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
-import { cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
+import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import {
   boxFill,
   boxLabel,
@@ -527,7 +527,7 @@ function StockReport() {
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
       const opening = openingStockFor(d, openingByDesign);
-      const s = designStock(d.designName, { openingStock: opening, orders, prodLogs });
+      const s = designStock(d.designName, { openingStock: opening, allocated: cachedAllocByDesign().get(d.designName), orders, prodLogs });
       return {
         key: d.id,
         label: d.designName || "—",
@@ -753,7 +753,7 @@ function ReadyReport() {
   return (
     <ReportShell
       title="Ready Pallets"
-      subtitle="Palletised and waiting — not yet in a loading"
+      subtitle="Palletized and waiting — not yet in a loading"
       kpis={kpis}
       filter={{ title: "ready pallets", fields, criteria, onChange: setCriteria }}
       csv={{
@@ -806,7 +806,7 @@ function ReadyReport() {
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ padding: 0 }}>
-                      <EmptyState icon="truck" title="No pallets waiting" hint="Palletise a line on the Palletization board to see it here." />
+                      <EmptyState icon="truck" title="No pallets waiting" hint="Palletize a line on the Palletization board to see it here." />
                     </td>
                   </tr>
                 )}
@@ -1243,7 +1243,7 @@ function BatchStockReport() {
           { header: "Mfg date", value: (r) => r.mfgDate },
           { header: "Opening", value: (r) => r.opening },
           { header: "Produced", value: (r) => r.produced },
-          { header: "Palletised", value: (r) => r.palletised },
+          { header: "Palletized", value: (r) => r.palletised },
           { header: "Dispatched", value: (r) => r.dispatched },
           { header: "On hand", value: (r) => r.current },
           { header: "Over-consumed", value: (r) => r.over },
@@ -1265,7 +1265,7 @@ function BatchStockReport() {
                   <SortTh id="mfg" label="Mfg date" sort={sort} />
                   <SortTh id="opening" label="Opening" sort={sort} className="num" style={numTh} />
                   <SortTh id="produced" label="Produced" sort={sort} className="num" style={numTh} />
-                  <SortTh id="palletised" label="Palletised" sort={sort} className="num" style={numTh} />
+                  <SortTh id="palletised" label="Palletized" sort={sort} className="num" style={numTh} />
                   <SortTh id="dispatched" label="Dispatched" sort={sort} className="num" style={numTh} />
                   <SortTh id="current" label="On hand" sort={sort} className="num" style={numTh} />
                 </tr>
@@ -1277,7 +1277,7 @@ function BatchStockReport() {
                       <Link className="linkish clip" to={`/design/${r.designId}?tab=stock`} title={r.designLabel}>{r.designLabel}</Link>
                     </td>
                     <td>{r.sizeCode ? <span className="chip size">{r.sizeCode}</span> : <span className="dim">—</span>}</td>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{r.batchNumber || <span className="dim" title="Unattributed — legacy production, non-batched stock, and boxes palletised before recording">—</span>}</td>
+                    <td className="mono" style={{ color: "var(--fg)" }}>{r.batchNumber || <span className="dim" title="Unattributed — legacy production, non-batched stock, and boxes palletized before recording">—</span>}</td>
                     <td className="mono muted">{r.mfgDate || "—"}</td>
                     <td className="num mono">{fmt(r.opening)}</td>
                     <td className="num mono">{fmt(r.produced)}</td>
@@ -1347,7 +1347,7 @@ function BatchMovementReport() {
     () => [
       { key: "item", label: "Item", type: "select", options: distinct(allRows.map((r) => r.itemLabel)), get: (r) => r.itemLabel },
       { key: "batch", label: "Batch", type: "text", get: (r) => r.batchNumber },
-      { key: "stage", label: "Stage", type: "multiselect", options: ["On hand", "Palletised", "Loaded", "Dispatched"], get: (r) => r.stage },
+      { key: "stage", label: "Stage", type: "multiselect", options: ["On hand", "Palletized", "Loaded", "Dispatched"], get: (r) => r.stage },
       { key: "customer", label: "Customer", type: "select", options: distinct(allRows.map((r) => r.customerName)), get: (r) => r.customerName },
       { key: "so", label: "Order", type: "select", options: distinct(allRows.map((r) => r.soNumber)), get: (r) => r.soNumber },
     ],
@@ -1399,7 +1399,7 @@ function BatchMovementReport() {
   return (
     <ReportShell
       title="Batch Movement"
-      subtitle="Where each production batch went — palletised, loaded, dispatched, on hand"
+      subtitle="Where each production batch went — palletized, loaded, dispatched, on hand"
       kpis={kpis}
       date={{ value: date, onChange: setDate }}
       filter={{ title: "batch movement", fields, criteria, onChange: setCriteria }}
@@ -2060,8 +2060,8 @@ export const REPORTS: ReportDef[] = [
   { id: "production-batches", title: "Production Batches", subtitle: "Boxes produced per batch — list or item × date matrix", icon: "factory", Component: BatchReport },
   { id: "stock", title: "Live Stock", subtitle: "Opening + produced − loaded, per design", icon: "package", Component: StockReport },
   { id: "stock-batch", title: "Batch-wise Stock", subtitle: "On-hand boxes per item and batch", icon: "package", Component: BatchStockReport },
-  { id: "batch-movement", title: "Batch Movement", subtitle: "Where each batch went — palletised, loaded, dispatched, on hand", icon: "factory", Component: BatchMovementReport },
-  { id: "ready", title: "Ready Pallets", subtitle: "Palletised and waiting, not yet in a loading", icon: "truck", Component: ReadyReport },
+  { id: "batch-movement", title: "Batch Movement", subtitle: "Where each batch went — palletized, loaded, dispatched, on hand", icon: "factory", Component: BatchMovementReport },
+  { id: "ready", title: "Ready Pallets", subtitle: "Palletized and waiting, not yet in a loading", icon: "truck", Component: ReadyReport },
   { id: "pal-status", title: "Palletization Status", subtitle: "Every plan and how far its boxes have moved", icon: "truck", Component: PalStatusReport },
   { id: "loading-status", title: "Loading & Dispatch", subtitle: "Every loading, its container, vehicle and seals", icon: "truck", Component: LoadingStatusReport },
   { id: "dispatch-register", title: "Dispatch Register", subtitle: "Every dispatched line — date, container, customer, item, batch", icon: "orders", Component: DispatchRegisterReport },

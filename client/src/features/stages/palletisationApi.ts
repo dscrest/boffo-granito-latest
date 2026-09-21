@@ -38,6 +38,8 @@ export interface PalletizableItem {
 export interface PalletizableOrder {
   salesOrderId: string; // SalesOrder ROWID → close-pallet sales_order
   label: string; // "PO-123 · Acme"
+  customerId: string; // SalesOrder.customer ROWID ("" when unset) — New Palletization rail (CR-223)
+  customerName: string;
   portOfDischarge: string; // destination for container matching ("" when unset)
   items: PalletizableItem[];
 }
@@ -143,6 +145,8 @@ async function fetchPalletizable(opts?: { includeOrderId?: string }): Promise<{
       byOrder.set(soId, {
         salesOrderId: soId,
         label: party ? `${po} · ${party}` : po,
+        customerId: so ? str(so.customer) : "",
+        customerName: party,
         portOfDischarge: so ? str(so.port_of_discharge) : "",
         items: [],
       });
@@ -227,7 +231,7 @@ async function fetchLoadableBatches(): Promise<{
 /* ---- all palletised batches (the /packing "Palletization" list) ----
    A palletised batch is the simple indicator that boxes are on a pallet in the
    warehouse; loading may follow immediately or months later. Status is derived:
-   "Loaded" once a ContainerLoading row references the batch, else "Palletised". */
+   "Loaded" once a ContainerLoading row references the batch, else "Palletized". */
 export interface PalletisationRow {
   id: string; // PalletisedBatch ROWID
   salesOrderId: string;

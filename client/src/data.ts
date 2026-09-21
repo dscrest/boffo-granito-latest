@@ -35,6 +35,8 @@ export interface Order {
   salesOrderId?: string; // SalesOrder ROWID (real data); used to scope palletization
   orderNumber?: string; // SalesOrder.order_number (SO/FY/NNN) — the primary display identifier
   poNumber: string;
+  /** SalesOrder.customer ROWID — scopes the loading page's direct-items section. */
+  customerId?: string;
   partyCode: string;
   party: string;
   country: string;
@@ -58,7 +60,8 @@ export interface Order {
   pallets: number;
   stage: string;
   /** SalesOrder.status — Draft | PendingApproval | Confirmed | InProgress |
-      Cancelled | Rejected (state machine in /so-status; status bar on OrderDetail). */
+      Cancelled | Rejected (state machine in /so-status), plus the server's auto
+      roll-up (CR-230): InPalletization | InLoading | PartiallyCompleted | Completed. */
   status?: string;
   /** Reason captured when the order was rejected (shown on the status hover). */
   rejectReason?: string;
@@ -86,6 +89,9 @@ export interface Order {
   boxBrandLabel?: string;
   shipmentDate?: string;
   customerNotes?: string;
+  /** SalesOrder.address (billing) / shipping_address — edited on the SO form since CR-221. */
+  address?: string;
+  shippingAddress?: string;
   terms?: string;
   totalAmount?: number;
   /** SalesOrder.container_plan — the SO's own plan JSON (snapshotted from the
@@ -236,7 +242,8 @@ export interface ContainerPlanLine {
 }
 export interface ContainerPlanContainer {
   no: number; // C1..Cn
-  fillPct: number;
+  fillPct: number; // may exceed 100 on a manual override (CR-196)
+  over?: boolean; // planner override: container deliberately packed beyond 100%
   pallets: number;
   boxes: number;
   tonnes?: number; // gross container weight (boxes * box weight); optional (older plans omit)
@@ -262,7 +269,7 @@ export function parseContainerPlan(raw: string | undefined | null): ContainerPla
 }
 
 /* ---- Loading-plan snapshot (LoadBox.load_plan JSON) — the per-loading plan:
-   written by NewLoadingModal on create; read as the "Planned" fallback on
+   written by SessionItemsStep on create; read as the "Planned" fallback on
    the /loading grid and LoadingDetail while nothing is loaded yet. ---- */
 export interface LoadPlanLine {
   so: string; // SalesOrder ROWID

@@ -247,24 +247,38 @@ async function seedOrders() {
   }
 }
 
+/* Production-first (CR-197…199): SO confirm no longer queues production jobs.
+   Produce to STOCK (independent job → batch records), then ALLOCATE those
+   batches to the order line — allocation is what feeds Ready for Palletization. */
 async function recordProduction() {
   S.produced = S.produced || {};
+  S.prodPlans = S.prodPlans || [];
   for (const s of SCEN) {
     if (S.produced[s.key]) continue;
     const so = S.orders[s.key];
-    // Confirming the SO already queued one 'plan' row per line — record against
-    // it; a second /production-log would blow the requested-vs-ordered cap.
-    const plans = rows(await get(`ProductionLog?where=sales_order=${so.id}&limit=100`))
-      .filter((p) => p.entry_type === "plan");
-    if (!plans.length) throw new Error(`No production plan rows for ${so.number}`);
-    // One batch row per chunk — batch_number left blank so the server mints B/FY/NNN.
-    await post(`production-record-lines/${plans[0].ROWID}`, {
+    const oi = rows(await get(`OrderItem?where=sales_order=${so.id}&limit=100`))[0];
+    if (!oi) throw new Error(`No order item on ${so.number}`);
+    const total = s.produce.reduce((a, b) => a + b, 0);
+    const job = await post("production-log", {
+      lines: [{ design: String(oi.design), qty_requested: total }],
+      performed_by: "ZZT seed",
+      note: `ZZT scenario ${s.key}`,
+    });
+    const planId = String(job.data.ids[0]);
+    S.prodPlans.push(planId); save(); // no sales_order on it — teardown finds it by id
+    // One batch row per chunk — batch_number left blank so the server mints it.
+    const rec = await post(`production-record-lines/${planId}`, {
       rows: s.produce.map((qty, i) => ({ qty_boxes: qty, mfg_date: plusDays(-2 - i), note: `ZZT batch ${i + 1}` })),
       shift: "A",
       performed_by: "ZZT seed",
     });
+    let room = Number(oi.ordered_qty_boxes) || 0; // allocation never exceeds the order
+    const alloc = rec.data.batch_numbers
+      .map((b, i) => { const n = Math.min(s.produce[i], room); room -= n; return { batch_number: b, qty_boxes: n }; })
+      .filter((r) => r.qty_boxes > 0);
+    await post("allocate-stock", { order_item: String(oi.ROWID), rows: alloc });
     S.produced[s.key] = true; save();
-    log(`· ${so.number} produced ${s.produce.join(" + ")} boxes`);
+    log(`· ${so.number} produced ${s.produce.join(" + ")} to stock → allocated ${alloc.map((r) => r.qty_boxes).join(" + ")}`);
   }
 }
 
@@ -409,6 +423,12 @@ async function teardown() {
     const prod = rows(await get(`ProductionLog?where=sales_order=${soId}&limit=200`));
     for (const p of prod.filter((x) => x.entry_type === "record")) await hard("ProductionLog", p.ROWID);
     for (const p of prod.filter((x) => x.entry_type !== "record")) await hard("ProductionLog", p.ROWID);
+  }
+  // Stock production jobs carry no sales_order — tracked by id at seed time.
+  for (const planId of S.prodPlans || []) {
+    const kids = rows(await get(`ProductionLog?where=parent_log=${planId}&limit=200`));
+    for (const k of kids) await hard("ProductionLog", k.ROWID);
+    await hard("ProductionLog", planId);
   }
   for (const soId of soIds) {
     const items = rows(await get(`OrderItem?where=sales_order=${soId}&limit=100`));

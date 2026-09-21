@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Container Loading — Unified loading sheet</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; font-family: Archivo, system-ui, sans-serif; background: #EFEFEA; color: #17181C; -webkit-font-smoothing: antialiased; }
+a { color: #15564A; }
+a:hover { color: #0E3D35; }
+input, select, button { font-family: inherit; }
+</style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #EFEFEA; overflow: hidden;">
+
+  <!-- top bar -->
+  <div style="height: 56px; flex-shrink: 0; background: #17181C; color: #FFFFFF; display: flex; align-items: center; gap: 20px; padding: 0 16px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D5D5CD" stroke-width="1.6" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="1"></rect><path d="M7 6v12M12 6v12M17 6v12"></path></svg>
+      <span style="font-size: 15px; font-weight: 600; letter-spacing: -0.01em;">Container Loading</span>
+    </div>
+    <span style="font-size: 12px; color: #9A9C9F;">Operations &nbsp;/&nbsp; Loading plan &nbsp;/&nbsp; 19 Sep</span>
+    <div style="flex-grow: 1;"></div>
+    <div style="display: flex; align-items: center; gap: 8px; background: #26282D; border: 1px solid #3A3D43; border-radius: 6px; padding: 5px 10px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500; color: #FFFFFF;">LS-2409-0142</span>
+      <span style="width: 1px; height: 12px; background: #4A4D54;"></span>
+      <span style="font-size: 12px; color: #C9CBCF;">3 customers · 4 sales orders</span>
+    </div>
+    <span style="font-size: 12px; color: #9A9C9F;">Gate 3 &nbsp;·&nbsp; 19 Sep, 20:34</span>
+    <div style="width: 30px; height: 30px; border-radius: 15px; background: #15564A; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center;">DS</div>
+  </div>
+
+  <!-- stepper -->
+  <div style="height: 52px; flex-shrink: 0; background: #FFFFFF; border-bottom: 1px solid #DEDED7; display: flex; align-items: center; padding: 0 16px; gap: 8px;">
+    <div style="display: flex; align-items: center; gap: 10px; background: #E4EFEA; border: 1px solid #C3DCD2; border-radius: 6px; padding: 7px 14px 7px 10px;">
+      <span style="width: 20px; height: 20px; border-radius: 10px; background: #15564A; color: #FFFFFF; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">1</span>
+      <span style="font-size: 13px; font-weight: 600; color: #123F36;">Plan &amp; select items</span>
+    </div>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9EA0A6" stroke-width="2" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
+    <a href="Vehicle.dc.html" style="display: flex; align-items: center; gap: 10px; border-radius: 6px; padding: 7px 14px 7px 10px; text-decoration: none; color: #5E626B;">
+      <span style="width: 20px; height: 20px; border-radius: 10px; border: 1px solid #C6C7C2; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">2</span>
+      <span style="font-size: 13px; font-weight: 500;">Vehicle &amp; loading</span>
+    </a>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9EA0A6" stroke-width="2" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
+    <a href="Seals.dc.html" style="display: flex; align-items: center; gap: 10px; border-radius: 6px; padding: 7px 14px 7px 10px; text-decoration: none; color: #5E626B;">
+      <span style="width: 20px; height: 20px; border-radius: 10px; border: 1px solid #C6C7C2; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center;">3</span>
+      <span style="font-size: 13px; font-weight: 500;">Seals &amp; documents</span>
+    </a>
+    <div style="flex-grow: 1;"></div>
+    <div style="display: flex; border: 1px solid #D5D5CD; border-radius: 6px; overflow: hidden;">
+      <span style="height: 30px; display: flex; align-items: center; padding: 0 12px; background: #17181C; color: #FFFFFF; font-size: 12px; font-weight: 600;">Sheet view</span>
+      <a href="Main.dc.html" style="height: 30px; display: flex; align-items: center; padding: 0 12px; background: #FFFFFF; color: #40434A; font-size: 12px; font-weight: 500; text-decoration: none;">Customer view</a>
+    </div>
+  </div>
+
+  <!-- toolbar -->
+  <div style="height: 46px; flex-shrink: 0; background: #F7F7F3; border-bottom: 1px solid #DEDED7; display: flex; align-items: center; gap: 8px; padding: 0 16px;">
+    <label style="position: relative; display: block; width: 220px;">
+      <span style="position: absolute; left: 9px; top: 8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7C7F86" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg></span>
+      <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">Search rows</span>
+      <input type="text" placeholder="Search item, SKU, batch, SO" style="width: 100%; box-sizing: border-box; height: 31px; padding: 0 10px 0 30px; border: 1px solid #D5D5CD; border-radius: 5px; font-size: 12px; background: #FFFFFF; color: #17181C;">
+    </label>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Customer: All ▾</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Sales order: 4 selected ▾</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Ready by: this week ▾</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #15564A; background: #E4EFEA; border-radius: 5px; font-size: 12px; font-weight: 600; color: #123F36; cursor: pointer;">Only pending ✓</button>
+    <div style="flex-grow: 1;"></div>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Fill down</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Freeze: 5 columns</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Columns</button>
+    <button type="button" style="height: 31px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Export</button>
+  </div>
+
+  <!-- cell / formula bar -->
+  <div style="height: 30px; flex-shrink: 0; background: #FFFFFF; border-bottom: 1px solid #DEDED7; display: flex; align-items: center;">
+    <span style="width: 74px; flex-shrink: 0; height: 100%; display: flex; align-items: center; justify-content: center; border-right: 1px solid #DEDED7; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500; color: #17181C;">{{active.ref}}</span>
+    <span style="width: 32px; flex-shrink: 0; height: 100%; display: flex; align-items: center; justify-content: center; border-right: 1px solid #DEDED7; font-size: 12px; font-style: italic; color: #5E626B;">fx</span>
+    <span style="padding: 0 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #40434A;">{{active.val}}</span>
+    <div style="flex-grow: 1;"></div>
+    <span style="padding-right: 14px; font-size: 11px; color: #5E626B;">Tab next · Enter down · Ctrl+D fill down · Ctrl+V paste block</span>
+  </div>
+
+  <!-- containers being built -->
+  <div style="height: 64px; flex-shrink: 0; background: #FFFFFF; border-bottom: 1px solid #CFCFC6; display: flex; align-items: center; gap: 10px; padding: 0 16px;">
+    <span style="font-size: 11px; font-weight: 600; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em; width: 74px;">Containers</span>
+    <sc-for list="{{containers}}" as="c" hint-placeholder-count="3">
+      <button type="button" onClick="{{c.pick}}" style="height: 46px; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 12px; border: 1px solid {{c.border}}; background: {{c.bg}}; border-radius: 7px; cursor: pointer; text-align: left; min-width: 208px;">
+        <span style="display: flex; align-items: center; gap: 7px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: #17181C;">{{c.id}}</span>
+          <span style="font-size: 11px; color: #5E626B;">{{c.type}}</span>
+          <span style="font-size: 11px; font-weight: 600; color: {{c.ink}};">{{c.note}}</span>
+        </span>
+        <span style="display: flex; align-items: center; gap: 7px;">
+          <span style="width: 96px; height: 5px; border-radius: 3px; background: #E7E7E0; display: block; position: relative; overflow: hidden;">
+            <span style="position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: {{c.ink}}; width: {{c.pct}};"></span>
+          </span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #40434A;">{{c.pallets}}/{{c.palCap}} pal · {{c.wt}} kg</span>
+        </span>
+      </button>
+    </sc-for>
+    <button type="button" onClick="{{addContainer}}" style="height: 46px; padding: 0 14px; border: 1px dashed #B9BBB4; background: transparent; border-radius: 7px; font-size: 12px; font-weight: 600; color: #15564A; cursor: pointer;">+ New container</button>
+  </div>
+
+  <!-- selection / merge bar -->
+  <div style="height: 38px; flex-shrink: 0; background: {{selBar.bg}}; border-bottom: 1px solid #CFCFC6; display: flex; align-items: center; gap: 10px; padding: 0 16px;">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="{{selBar.ink}}" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+    <span style="font-size: 12px; font-weight: 600; color: {{selBar.ink}};">{{selBar.text}}</span>
+    <span style="font-size: 12px; color: #5E626B;">{{selBar.hint}}</span>
+    <div style="flex-grow: 1;"></div>
+    <label style="display: flex; align-items: center; gap: 6px;">
+      <span style="font-size: 12px; color: #40434A;">Merge selected into</span>
+      <select value="{{mergeTarget}}" onChange="{{setMergeTarget}}" style="height: 28px; border: 1px solid #D5D5CD; border-radius: 5px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 0 6px; background: #FFFFFF; color: #17181C;">
+        <sc-for list="{{containerOpts}}" as="o" hint-placeholder-count="3">
+          <option value="{{o.id}}">{{o.label}}</option>
+        </sc-for>
+      </select>
+    </label>
+    <button type="button" onClick="{{mergeRows}}" style="height: 28px; padding: 0 12px; border: 0; background: #15564A; border-radius: 5px; font-size: 12px; font-weight: 600; color: #FFFFFF; cursor: pointer;">Merge rows</button>
+    <button type="button" onClick="{{clearSel}}" style="height: 28px; padding: 0 10px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 5px; font-size: 12px; color: #40434A; cursor: pointer;">Clear</button>
+  </div>
+
+  <!-- sheet -->
+  <div style="flex-grow: 1; background: #FFFFFF; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+
+    <!-- column letters -->
+    <div style="height: 22px; flex-shrink: 0; background: #E8E8E2; border-bottom: 1px solid #CFCFC6; display: grid; grid-template-columns: 34px 148px 96px 62px 196px 84px 112px 68px 68px 68px 94px 60px 76px 78px 112px 82px; font-size: 10px; font-weight: 600; color: #6E7178;">
+      <span style="border-right: 1px solid #D3D3CC;"></span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">A</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">B</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">C</span>
+      <span style="border-right: 2px solid #A9ABA4; display: flex; align-items: center; justify-content: center;">D</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">E</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">F</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">G</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">H</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">I</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center; background: #D6E4DD; color: #123F36;">J</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">K</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">L</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">M</span>
+      <span style="border-right: 1px solid #D3D3CC; display: flex; align-items: center; justify-content: center;">N</span>
+      <span style="display: flex; align-items: center; justify-content: center;">O</span>
+    </div>
+
+    <!-- header -->
+    <div style="height: 34px; flex-shrink: 0; background: #F1F1EC; border-bottom: 1px solid #CFCFC6; display: grid; grid-template-columns: 34px 148px 96px 62px 196px 84px 112px 68px 68px 68px 94px 60px 76px 78px 112px 82px; align-items: center; font-size: 11px; font-weight: 600; color: #40434A;">
+      <span style="height: 100%; border-right: 1px solid #DFDFD8;"></span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; gap: 4px; padding: 0 8px;">Customer <span style="color: #9A9C9F;">▾</span></span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; gap: 4px; padding: 0 8px;">SO no. <span style="color: #9A9C9F;">▾</span></span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; padding: 0 8px;">Ready</span>
+      <span style="height: 100%; border-right: 2px solid #A9ABA4; display: flex; align-items: center; gap: 4px; padding: 0 8px;">Item <span style="color: #9A9C9F;">▾</span></span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; padding: 0 8px;">Size</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; padding: 0 8px;">Batch</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Avail</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Ordered</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Pending</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; background: #DCE9E3; color: #123F36;">Qty to load</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Pallets</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Weight</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px;">Sqm</span>
+      <span style="height: 100%; border-right: 1px solid #DFDFD8; display: flex; align-items: center; padding: 0 8px;">Container</span>
+      <span style="height: 100%; display: flex; align-items: center; padding: 0 8px;">Status</span>
+    </div>
+
+    <!-- rows -->
+    <div style="flex-grow: 1; min-height: 0; overflow: hidden;">
+      <sc-for list="{{sheet}}" as="r" hint-placeholder-count="12">
+
+        <sc-if value="{{r.isGroup}}" hint-placeholder-val="{{true}}">
+          <div style="height: 28px; background: #F7F7F3; border-bottom: 1px solid #DFDFD8; display: flex; align-items: center; gap: 8px; padding-left: 8px;">
+            <span style="width: 16px; height: 16px; border: 1px solid #B9BBB4; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #40434A; background: #FFFFFF;">−</span>
+            <span style="font-size: 12px; font-weight: 700; color: #17181C; letter-spacing: -0.01em;">{{r.cust}}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #15564A;">{{r.so}}</span>
+            <span style="font-size: 11px; color: #5E626B;">{{r.meta}}</span>
+            <div style="flex-grow: 1;"></div>
+            <span style="font-size: 11px; color: #5E626B;">Subtotal</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: #17181C;">{{r.subQty}} box · {{r.subPal}} pal · {{r.subSqm}} sqm</span>
+            <button type="button" onClick="{{r.selectGroup}}" style="height: 22px; margin-right: 8px; padding: 0 8px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 4px; font-size: 11px; font-weight: 600; color: #15564A; cursor: pointer;">Select all</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{r.isLine}}" hint-placeholder-val="{{true}}">
+          <div style="height: 32px; display: grid; grid-template-columns: 34px 148px 96px 62px 196px 84px 112px 68px 68px 68px 94px 60px 76px 78px 112px 82px; align-items: stretch; border-bottom: 1px solid #ECECE5; background: {{r.bg}};">
+            <button type="button" onClick="{{r.toggle}}" aria-label="{{r.selLabel}}" style="height: 100%; border: 0; border-right: 1px solid #DFDFD8; background: {{r.numBg}}; font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: {{r.numInk}}; cursor: pointer; padding: 0;">{{r.n}}</button>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; padding: 0 8px; font-size: 12px; color: #5E626B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.cust}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #15564A;">{{r.so}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: #5E626B;">{{r.ship}}</span>
+
+            <span style="height: 100%; border-right: 2px solid #A9ABA4; display: flex; align-items: center; gap: 6px; padding: 0 8px; min-width: 0;">
+              <span style="font-size: 12px; font-weight: 600; color: #17181C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.item}}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #7C7F86; flex-shrink: 0;">{{r.sku}}</span>
+            </span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; padding: 0 8px; font-size: 11px; color: #40434A;">{{r.size}}</span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center;">
+              <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">{{r.batchLabel}}</span>
+              <select value="{{r.batch}}" onChange="{{r.setBatch}}" style="width: 100%; height: 100%; border: 0; background: transparent; padding: 0 4px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #17181C; cursor: pointer;">
+                <sc-for list="{{r.batches}}" as="b" hint-placeholder-count="2">
+                  <option value="{{b.code}}">{{b.label}}</option>
+                </sc-for>
+              </select>
+            </span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #40434A;">{{r.avail}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #5E626B;">{{r.ordered}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #40434A;">{{r.pending}}</span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; box-shadow: {{r.qtyRing}}; background: {{r.qtyBg}};">
+              <input type="text" inputmode="numeric" value="{{r.qtyStr}}" onChange="{{r.setQty}}" onFocus="{{r.focus}}" aria-label="{{r.qtyLabel}}" style="width: 100%; height: 100%; box-sizing: border-box; border: 0; background: transparent; padding: 0 8px; text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: #17181C;">
+            </span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{r.calcInk}};">{{r.pallets}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: {{r.calcInk}};">{{r.wt}}</span>
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center; justify-content: flex-end; padding: 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: {{r.calcInk}};">{{r.sqm}}</span>
+
+            <span style="height: 100%; border-right: 1px solid #ECECE5; display: flex; align-items: center;">
+              <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">{{r.cntLabel}}</span>
+              <select value="{{r.cnt}}" onChange="{{r.setCnt}}" style="width: 100%; height: 100%; border: 0; background: transparent; padding: 0 4px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 500; color: {{r.cntInk}}; cursor: pointer;">
+                <sc-for list="{{containerOpts}}" as="o" hint-placeholder-count="3">
+                  <option value="{{o.id}}">{{o.label}}</option>
+                </sc-for>
+              </select>
+            </span>
+
+            <span style="height: 100%; display: flex; align-items: center; padding: 0 8px;">
+              <span style="font-size: 10px; font-weight: 600; border-radius: 9px; padding: 2px 7px; color: {{r.statusInk}}; background: {{r.statusBg}};">{{r.status}}</span>
+            </span>
+          </div>
+        </sc-if>
+
+      </sc-for>
+
+      <!-- totals -->
+      <div style="height: 34px; display: grid; grid-template-columns: 34px 148px 96px 62px 196px 84px 112px 68px 68px 68px 94px 60px 76px 78px 112px 82px; align-items: center; background: #F1F1EC; border-top: 2px solid #A9ABA4; border-bottom: 1px solid #CFCFC6; font-size: 11px; font-weight: 700; color: #17181C;">
+        <span></span>
+        <span style="padding: 0 8px;">Total</span>
+        <span style="padding: 0 8px; font-weight: 500; color: #5E626B;">{{tot.orders}} SOs</span>
+        <span></span>
+        <span style="padding: 0 8px; font-weight: 500; color: #5E626B; border-right: 2px solid #A9ABA4; height: 100%; display: flex; align-items: center;">{{tot.lines}} lines assigned</span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+        <span style="text-align: right; padding: 0 8px; font-family: 'IBM Plex Mono', monospace;">{{tot.qty}}</span>
+        <span style="text-align: right; padding: 0 8px; font-family: 'IBM Plex Mono', monospace;">{{tot.pallets}}</span>
+        <span style="text-align: right; padding: 0 8px; font-family: 'IBM Plex Mono', monospace;">{{tot.wt}}</span>
+        <span style="text-align: right; padding: 0 8px; font-family: 'IBM Plex Mono', monospace;">{{tot.sqm}}</span>
+        <span style="padding: 0 8px; font-weight: 500; color: #5E626B;">{{tot.cnts}} containers</span>
+        <span></span>
+      </div>
+
+      <button type="button" style="width: 100%; height: 26px; border: 0; border-bottom: 1px solid #ECECE5; background: #FBFBF8; text-align: left; padding: 0 0 0 42px; font-size: 12px; font-weight: 600; color: #15564A; cursor: pointer;">+ Add row from another sales order</button>
+    </div>
+  </div>
+
+  <!-- footer -->
+  <div style="height: 64px; flex-shrink: 0; background: #FFFFFF; border-top: 1px solid #CFCFC6; display: flex; align-items: center; gap: 14px; padding: 0 16px;">
+    <span style="display: flex; flex-direction: column;">
+      <span style="font-size: 11px; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em;">Selected container</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600;">{{focus.id}} · {{focus.type}}</span>
+    </span>
+    <span style="width: 1px; height: 30px; background: #E2E2DB;"></span>
+    <span style="display: flex; flex-direction: column;">
+      <span style="font-size: 11px; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em;">Mix</span>
+      <span style="font-size: 13px; font-weight: 600;">{{focus.mix}}</span>
+    </span>
+    <span style="display: flex; flex-direction: column;">
+      <span style="font-size: 11px; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em;">Pallets</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600; color: {{focus.ink}};">{{focus.pallets}} / {{focus.palCap}}</span>
+    </span>
+    <span style="display: flex; flex-direction: column;">
+      <span style="font-size: 11px; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em;">Weight</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600;">{{focus.wt}} kg</span>
+    </span>
+    <span style="display: flex; flex-direction: column;">
+      <span style="font-size: 11px; color: #5E626B; text-transform: uppercase; letter-spacing: 0.04em;">Area</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 600;">{{focus.sqm}} sqm</span>
+    </span>
+    <div style="flex-grow: 1;"></div>
+    <button type="button" style="height: 44px; padding: 0 16px; border: 1px solid #D5D5CD; background: #FFFFFF; border-radius: 7px; font-size: 14px; font-weight: 500; color: #40434A; cursor: pointer;">Save plan</button>
+    <a href="Vehicle.dc.html" style="height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 20px; background: #15564A; border-radius: 7px; font-size: 14px; font-weight: 600; color: #FFFFFF; text-decoration: none;">
+      Save &amp; next: vehicle
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg>
+    </a>
+  </div>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      active: { ref: 'J4', val: '480' },
+      mergeTarget: 'CNT-2',
+      focus: 'CNT-1',
+      sel: { 'L3': true, 'L6': true, 'L7': true },
+      containers: [
+        { id: 'CNT-1', type: "20' GP", palCap: 20, wtCap: 27000 },
+        { id: 'CNT-2', type: "40' HC", palCap: 44, wtCap: 26000 },
+        { id: 'CNT-3', type: "20' GP", palCap: 20, wtCap: 27000 }
+      ],
+      rows: [
+        { id: 'L1', cust: 'Almeria Ceramica SL', so: 'SO-24188', ship: '22 Sep', item: 'Ivory Statuario', sku: 'GVT-6012-IV', size: '600x1200', batch: 'B-2409-A', batches: [{ code: 'B-2409-A', avail: 640 }, { code: 'B-2408-C', avail: 420 }], ordered: 960, pending: 960, qty: 480, perPal: 40, kg: 22.5, sqm: 1.44, cnt: 'CNT-1' },
+        { id: 'L2', cust: 'Almeria Ceramica SL', so: 'SO-24188', ship: '22 Sep', item: 'Carrara Bianco', sku: 'GVT-6060-CB', size: '600x600', batch: 'B-2409-B', batches: [{ code: 'B-2409-B', avail: 720 }, { code: 'B-2407-D', avail: 288 }], ordered: 576, pending: 576, qty: 288, perPal: 48, kg: 26, sqm: 1.44, cnt: 'CNT-1' },
+        { id: 'L3', cust: 'Almeria Ceramica SL', so: 'SO-24188', ship: '22 Sep', item: 'Arctic White wall', sku: 'CT-3060-AW', size: '300x600', batch: 'B-2408-C', batches: [{ code: 'B-2408-C', avail: 480 }, { code: 'B-2409-E', avail: 240 }], ordered: 300, pending: 300, qty: 120, perPal: 60, kg: 19, sqm: 1.44, cnt: 'CNT-1' },
+
+        { id: 'L4', cust: 'Almeria Ceramica SL', so: 'SO-24201', ship: '25 Sep', item: 'Basalt Slate', sku: 'GVT-6012-BS', size: '600x1200', batch: 'B-2409-G', batches: [{ code: 'B-2409-G', avail: 560 }], ordered: 520, pending: 520, qty: 320, perPal: 40, kg: 23.5, sqm: 1.44, cnt: 'CNT-2' },
+        { id: 'L5', cust: 'Almeria Ceramica SL', so: 'SO-24201', ship: '25 Sep', item: 'Terra Grigio', sku: 'PT-8080-TG', size: '800x800', batch: 'B-2409-A', batches: [{ code: 'B-2409-A', avail: 384 }, { code: 'B-2408-F', avail: 192 }], ordered: 416, pending: 416, qty: 416, perPal: 32, kg: 32, sqm: 1.92, cnt: 'CNT-2', short: true },
+
+        { id: 'L6', cust: 'Gulf Tile Trading LLC', so: 'SO-24205', ship: '24 Sep', item: 'Sahara Onyx', sku: 'GVT-8016-SO', size: '800x1600', batch: 'B-2409-K', batches: [{ code: 'B-2409-K', avail: 288 }], ordered: 240, pending: 240, qty: 144, perPal: 24, kg: 44, sqm: 2.56, cnt: 'CNT-2' },
+        { id: 'L7', cust: 'Gulf Tile Trading LLC', so: 'SO-24205', ship: '24 Sep', item: 'Desert Grey', sku: 'GVT-6060-DG', size: '600x600', batch: 'B-2409-L', batches: [{ code: 'B-2409-L', avail: 768 }], ordered: 672, pending: 672, qty: 288, perPal: 48, kg: 26, sqm: 1.44, cnt: 'CNT-2' },
+        { id: 'L8', cust: 'Gulf Tile Trading LLC', so: 'SO-24205', ship: '24 Sep', item: 'Sand Beige wall', sku: 'CT-3060-SB', size: '300x600', batch: 'B-2408-M', batches: [{ code: 'B-2408-M', avail: 540 }], ordered: 420, pending: 420, qty: 0, perPal: 60, kg: 19, sqm: 1.44, cnt: '' },
+
+        { id: 'L9', cust: 'Novara Surfaces Ltd', so: 'SO-24176', ship: '26 Sep', item: 'Calacatta Nero', sku: 'GVT-6012-CN', size: '600x1200', batch: 'B-2409-P', batches: [{ code: 'B-2409-P', avail: 400 }], ordered: 320, pending: 320, qty: 200, perPal: 40, kg: 22.5, sqm: 1.44, cnt: 'CNT-3' },
+        { id: 'L10', cust: 'Novara Surfaces Ltd', so: 'SO-24176', ship: '26 Sep', item: 'Oakwood Natural', sku: 'GVT-6060-OK', size: '600x600', batch: 'B-2408-Q', batches: [{ code: 'B-2408-Q', avail: 336 }], ordered: 288, pending: 288, qty: 0, perPal: 48, kg: 26, sqm: 1.44, cnt: '' }
+      ]
+    };
+  }
+
+  fmt(x, d) {
+    var dd = d || 0;
+    return Number(x).toLocaleString('en-US', { minimumFractionDigits: dd, maximumFractionDigits: dd });
+  }
+
+  patch(id, obj) {
+    var rows = this.state.rows.map(function (r) {
+      if (r.id !== id) return r;
+      return Object.assign({}, r, obj);
+    });
+    this.setState({ rows: rows });
+  }
+
+  calc(r) {
+    var pallets = r.qty > 0 ? Math.ceil(r.qty / r.perPal) : 0;
+    return { pallets: pallets, wt: r.qty * r.kg, sqm: r.qty * r.sqm };
+  }
+
+  renderVals() {
+    var self = this;
+    var rows = this.state.rows;
+
+    var load = {};
+    this.state.containers.forEach(function (c) { load[c.id] = { pal: 0, wt: 0, sqm: 0, custs: {} }; });
+    rows.forEach(function (r) {
+      if (!r.cnt || !load[r.cnt]) return;
+      var c = self.calc(r);
+      load[r.cnt].pal += c.pallets;
+      load[r.cnt].wt += c.wt;
+      load[r.cnt].sqm += c.sqm;
+      load[r.cnt].custs[r.cust] = true;
+    });
+
+    var containers = this.state.containers.map(function (c) {
+      var l = load[c.id];
+      var pct = Math.min(100, Math.round((l.pal / c.palCap) * 100));
+      var full = l.pal >= c.palCap;
+      var on = c.id === self.state.focus;
+      var names = Object.keys(l.custs);
+      return {
+        id: c.id, type: c.type, palCap: c.palCap,
+        pallets: l.pal, wt: self.fmt(l.wt),
+        pct: pct + '%',
+        ink: full ? '#15564A' : (pct > 0 ? '#40434A' : '#9A9C9F'),
+        note: full ? 'full' : (names.length > 1 ? names.length + ' customers' : (names.length === 1 ? '1 customer' : 'empty')),
+        bg: on ? '#E4EFEA' : '#FFFFFF',
+        border: on ? '#15564A' : '#D5D5CD',
+        pick: function () { self.setState({ focus: c.id }); }
+      };
+    });
+
+    var containerOpts = [{ id: '', label: '— none —' }].concat(this.state.containers.map(function (c) {
+      return { id: c.id, label: c.id + '  ' + c.type };
+    }));
+
+    var sheet = [];
+    var tot = { qty: 0, pal: 0, wt: 0, sqm: 0, lines: 0 };
+    var orders = {};
+    var usedCnt = {};
+    var groupKey = null;
+    var n = 0;
+
+    rows.forEach(function (r, i) {
+      var key = r.cust + '|' + r.so;
+      if (key !== groupKey) {
+        groupKey = key;
+        var sub = { qty: 0, pal: 0, sqm: 0, lines: 0 };
+        rows.forEach(function (x) {
+          if (x.cust + '|' + x.so !== key) return;
+          var c = self.calc(x);
+          sub.qty += x.qty; sub.pal += c.pallets; sub.sqm += c.sqm; sub.lines += 1;
+        });
+        sheet.push({
+          isGroup: true, isLine: false,
+          cust: r.cust, so: r.so,
+          meta: sub.lines + ' lines · ready ' + r.ship,
+          subQty: self.fmt(sub.qty), subPal: String(sub.pal), subSqm: self.fmt(sub.sqm, 2),
+          selectGroup: function () {
+            var sel = Object.assign({}, self.state.sel);
+            rows.forEach(function (x) { if (x.cust + '|' + x.so === key) sel[x.id] = true; });
+            self.setState({ sel: sel });
+          }
+        });
+      }
+
+      n += 1;
+      var c = self.calc(r);
+      var on = !!self.state.sel[r.id];
+      var batch = null;
+      for (var b = 0; b < r.batches.length; b++) { if (r.batches[b].code === r.batch) batch = r.batches[b]; }
+      if (!batch) batch = r.batches[0];
+      var short = r.qty > batch.avail;
+      var status = r.qty === 0 ? 'Not planned' : (short ? 'Short ' + self.fmt(r.qty - batch.avail) : (r.cnt ? 'Assigned' : 'Unassigned'));
+      var statusBg = '#F4F4EF', statusInk = '#5E626B';
+      if (status === 'Assigned') { statusBg = '#E4EFEA'; statusInk = '#123F36'; }
+      if (status === 'Unassigned') { statusBg = '#FBF0DE'; statusInk = '#8A4B04'; }
+      if (short) { statusBg = '#FBEDEA'; statusInk = '#7E241A'; }
+
+      if (r.qty > 0) { tot.qty += r.qty; tot.pal += c.pallets; tot.wt += c.wt; tot.sqm += c.sqm; tot.lines += 1; orders[r.so] = true; }
+      if (r.cnt) usedCnt[r.cnt] = true;
+
+      var rowNo = n;
+      sheet.push({
+        isGroup: false, isLine: true,
+        n: String(rowNo),
+        cust: r.cust, so: r.so, ship: r.ship, item: r.item, sku: r.sku, size: r.size,
+        batch: batch.code,
+        batches: r.batches.map(function (x) { return { code: x.code, label: x.code + '  ' + self.fmt(x.avail) }; }),
+        batchLabel: 'Batch for ' + r.item,
+        avail: self.fmt(batch.avail),
+        ordered: self.fmt(r.ordered),
+        pending: self.fmt(r.pending),
+        qtyStr: String(r.qty),
+        qtyLabel: 'Quantity to load, row ' + rowNo,
+        selLabel: 'Select row ' + rowNo,
+        cntLabel: 'Container for row ' + rowNo,
+        pallets: c.pallets > 0 ? String(c.pallets) : '—',
+        wt: r.qty > 0 ? self.fmt(c.wt) : '—',
+        sqm: r.qty > 0 ? self.fmt(c.sqm, 2) : '—',
+        cnt: r.cnt,
+        cntInk: r.cnt ? '#123F36' : '#9A9C9F',
+        calcInk: r.qty > 0 ? '#17181C' : '#9A9C9F',
+        status: status, statusBg: statusBg, statusInk: statusInk,
+        bg: on ? '#EDF4F1' : '#FFFFFF',
+        numBg: on ? '#15564A' : '#F1F1EC',
+        numInk: on ? '#FFFFFF' : '#7C7F86',
+        qtyRing: short ? 'inset 0 0 0 2px #9E2B1E' : 'none',
+        qtyBg: short ? '#FBEDEA' : '#F8FBF9',
+        toggle: function () {
+          var sel = Object.assign({}, self.state.sel);
+          if (sel[r.id]) { delete sel[r.id]; } else { sel[r.id] = true; }
+          self.setState({ sel: sel });
+        },
+        setQty: function (ev) {
+          var v = parseInt(String(ev.target.value).replace(/[^0-9]/g, ''), 10);
+          self.patch(r.id, { qty: isNaN(v) ? 0 : v });
+        },
+        focus: function () { self.setState({ active: { ref: 'J' + rowNo, val: String(r.qty) } }); },
+        setBatch: function (ev) { self.patch(r.id, { batch: ev.target.value }); },
+        setCnt: function (ev) { self.patch(r.id, { cnt: ev.target.value }); }
+      });
+    });
+
+    var selIds = Object.keys(this.state.sel);
+    var selOrders = {};
+    rows.forEach(function (r) { if (self.state.sel[r.id]) selOrders[r.so] = true; });
+    var nSel = selIds.length;
+    var nSelOrders = Object.keys(selOrders).length;
+
+    var fc = null;
+    this.state.containers.forEach(function (c) { if (c.id === self.state.focus) fc = c; });
+    if (!fc) fc = this.state.containers[0];
+    var fl = load[fc.id];
+    var fnames = Object.keys(fl.custs);
+
+    return {
+      containers: containers,
+      containerOpts: containerOpts,
+      sheet: sheet,
+      active: this.state.active,
+      mergeTarget: this.state.mergeTarget,
+      setMergeTarget: function (ev) { self.setState({ mergeTarget: ev.target.value }); },
+      selBar: {
+        bg: nSel > 0 ? '#EDF4F1' : '#FFFFFF',
+        ink: nSel > 0 ? '#123F36' : '#5E626B',
+        text: nSel > 0 ? nSel + ' rows selected from ' + nSelOrders + ' sales orders' : 'No rows selected',
+        hint: nSel > 0 ? '— they can go into one container together' : '— click a row number to select, or use Select all on a group'
+      },
+      mergeRows: function () {
+        var t = self.state.mergeTarget;
+        var next = self.state.rows.map(function (r) {
+          if (!self.state.sel[r.id]) return r;
+          return Object.assign({}, r, { cnt: t });
+        });
+        self.setState({ rows: next, focus: t, sel: {} });
+      },
+      clearSel: function () { self.setState({ sel: {} }); },
+      addContainer: function () {
+        var next = self.state.containers.slice();
+        next.push({ id: 'CNT-' + (next.length + 1), type: "20' GP", palCap: 20, wtCap: 27000 });
+        self.setState({ containers: next });
+      },
+      tot: {
+        qty: self.fmt(tot.qty),
+        pallets: String(tot.pal),
+        wt: self.fmt(tot.wt),
+        sqm: self.fmt(tot.sqm, 2),
+        lines: tot.lines,
+        orders: Object.keys(orders).length,
+        cnts: Object.keys(usedCnt).length
+      },
+      focus: {
+        id: fc.id, type: fc.type, palCap: fc.palCap,
+        pallets: fl.pal,
+        wt: self.fmt(fl.wt),
+        sqm: self.fmt(fl.sqm, 2),
+        mix: fnames.length === 0 ? 'empty' : (fnames.length === 1 ? '1 customer' : fnames.length + ' customers mixed'),
+        ink: fl.pal >= fc.palCap ? '#15564A' : '#17181C'
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

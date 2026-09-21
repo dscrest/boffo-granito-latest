@@ -16,3 +16,9 @@ export function addDays(fromISO: string, days: number): string {
   const off = base.getTimezoneOffset();
   return new Date(base.getTime() - off * 60_000).toISOString().slice(0, 10);
 }
+
+/** Newest record first — the house default order for every list and side rail.
+    Catalyst CREATEDTIME strings sort lexicographically. Returns a copy. */
+export function newestFirst<T extends { createdTime?: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""));
+}

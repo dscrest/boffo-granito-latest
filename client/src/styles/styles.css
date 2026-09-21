@@ -766,9 +766,6 @@ a { color: inherit; text-decoration: none; }
    the td: under auto table layout a cell is never laid out below its
    min-content width, so max-width on a nowrap td does nothing. Give a clipped
    value a title so the full text is still readable on hover. */
-/* Ruled grid — full black cell borders instead of the faint row separators. */
-.tbl.ruled th, .tbl.ruled td { border: 1px solid var(--fg); }
-.tbl.ruled tr:last-child td { border-bottom: 1px solid var(--fg); }
 .tbl td.nw { white-space: nowrap; }
 .tbl .clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1636,6 +1633,9 @@ a { color: inherit; text-decoration: none; }
 .modal-panel input,
 .modal-panel select,
 .modal-panel textarea,
+.form-page input,
+.form-page select,
+.form-page textarea,
 .qcplan input {
   width: 100%;
   box-sizing: border-box;
@@ -1652,14 +1652,16 @@ a { color: inherit; text-decoration: none; }
   appearance: none;
 }
 .form-field textarea,
-.modal-panel textarea {
+.modal-panel textarea,
+.form-page textarea {
   height: auto;
   min-height: 35px;
   padding: 7px 11px;
   resize: vertical;
 }
 .form-field select,
-.modal-panel select {
+.modal-panel select,
+.form-page select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
   background-repeat: no-repeat;
   background-position: right 10px center;
@@ -1810,6 +1812,46 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .picker-trigger .ph { color: var(--dim); }
 .picker-trigger > svg { color: var(--dim); flex-shrink: 0; }
 
+/* Panel picker cards (CR-192) — e-commerce tiles: image on top, code +
+   meta below. Selected = accent ring, like a picked Combobox option. */
+.panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.panel-card:hover { border-color: var(--accent); }
+.panel-card:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.panel-card.sel { border-color: var(--accent); background: var(--accent-soft); }
+.panel-card .img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: block;
+}
+.panel-card .img.none {
+  border-style: dashed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: var(--t-sm);
+}
+.panel-card .code { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-card .meta { font-size: var(--t-sm); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Combobox — searchable single-select (customer pickers) */
 .combo { position: relative; width: 100%; }
 .combo.grow { flex: 1; min-width: 0; } /* Combobox sharing a flex row with a preview (Box Brand logo, CR-181) */
@@ -1956,6 +1998,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .df-foot .spacer { flex: 1; }
 /* Persistent rule #11: the "* required" footer note is red in every form. */
 .df-req-note { font-size: var(--t-sm); color: var(--c-red); margin-right: auto; }
+/* Same footer slot carrying a neutral summary, not a required-field note. */
+.df-req-note.info { color: var(--muted); }
 /* Companion legend for ƒx formula fields — muted, not red. */
 .df-fx-note { display: block; color: var(--muted); }
 
@@ -2059,6 +2103,96 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .seg-btn { padding: 6px 16px; background: var(--panel); color: var(--fg-2); font-size: var(--t-md); border: 0; cursor: pointer; }
 .seg-btn + .seg-btn { border-left: 1px solid var(--border); }
 .seg-btn.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+/* Step strip + sticky footer — Loading Session page (CR-203) */
+.steps { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.steps .step {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px 6px 8px; border: 1px solid transparent; border-radius: 8px;
+  color: var(--muted); font-size: var(--t-md); text-decoration: none;
+}
+.steps .step + .step::before { content: "›"; margin: 0 8px 0 -8px; color: var(--faint); }
+.steps .step .n {
+  width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border-2);
+  display: inline-flex; align-items: center; justify-content: center; font-size: var(--t-xs); font-weight: 600;
+}
+.steps a.step:hover { background: var(--hover); color: var(--fg); }
+.steps .step.active { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); font-weight: 600; }
+.steps .step.active .n, .steps .step.done .n { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.steps .step.done { color: var(--fg-2); }
+.session-foot {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; padding: 12px 0;
+  background: var(--bg); border-top: 1px solid var(--border);
+}
+/* Transaction form pages — Sales Order / Quote (CR-219). Same sections as the old
+   modal, full width: the Design column gets the room so item names read in full. */
+.form-page .ord-line.qt-line { grid-template-columns: 3fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
+.form-page .ord-line.qt-line.so-line { grid-template-columns: 3fr 1.4fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
+/* Billing | Shipping side by side (CR-221) — a full-width row inside a .form-grid. */
+.addr-pair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 13px 14px; }
+@media (max-width: 900px) { .addr-pair { grid-template-columns: 1fr; } }
+/* Small forms (a few fields) keep a readable width instead of stretching. */
+.form-page.narrow { max-width: 760px; }
+/* Step 1 rail + pane fill the viewport; each side scrolls on its own (CR-204).
+   The session page becomes a column as tall as .main; the wrap takes the rest. */
+.main > div:has(> .session-fill) { height: 100%; display: flex; flex-direction: column; }
+.session-fill { flex: 1; min-height: 360px; }
+.session-fill .set-groups > *, .session-fill .pane-scroll > * { flex-shrink: 0; }
+.session-fill .set-rail, .session-fill .set-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.session-fill .set-search { flex-shrink: 0; }
+.session-fill .set-groups, .session-fill .pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.main:has(.session-fill)::after { height: 0; }
+
+/* Loading Plan sheet (CR-227, trial) — spreadsheet layout: toolbar, cell bar,
+   container strip, ruled grid with column letters. App tokens only. */
+.psheet { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.psheet-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.psheet-bar.tools { background: var(--panel-2); }
+.psheet-tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--t-sm); }
+.psheet-tbl th, .psheet-tbl td { height: 32px; padding: 0 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); white-space: nowrap; text-align: left; }
+.psheet-tbl th:last-child, .psheet-tbl td:last-child { border-right: 0; }
+.psheet-tbl thead th { position: sticky; top: 0; z-index: 3; background: var(--panel-2); font-weight: 600; color: var(--muted); }
+.psheet-tbl .num { text-align: right; }
+.psheet-tbl .gapc { width: 10px; min-width: 10px; padding: 0; background: var(--bg); border-bottom: 0; }
+.psheet-tbl th.qtyh { background: var(--accent-soft); color: var(--accent-ink); }
+.psheet-tbl .rn { width: 34px; padding: 0; text-align: center; font-size: 10px; color: var(--muted); background: var(--panel-2); }
+.psheet-tbl tr.on td { background: var(--accent-soft); }
+.psheet-tbl tr.on .rn { background: var(--accent); color: var(--accent-fg); }
+.psheet-tbl tr.blocked td:not(.cust) { opacity: 0.55; }
+.psheet-tbl .so { color: var(--accent-ink); }
+.psheet-tbl td.qty { padding: 0; width: 100px; background: var(--accent-soft); }
+.psheet-tbl td.qty input { width: 100%; height: 31px; border: 0; border-radius: 0; background: transparent; text-align: right; font-family: var(--font-mono); font-weight: 600; padding: 0 8px; box-shadow: none; }
+.psheet-tbl td.qty:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.psheet-tbl tr.band td { height: 30px; padding: 0; background: var(--panel-2); position: sticky; top: 32px; z-index: 2; }
+/* Customer stays put while the sheet scrolls: column pinned left, customer band pinned under the header. */
+/* ponytail: only Customer pins (left: 0) — the # gutter scrolls under it, so no column-width maths. */
+.psheet-tbl .cust { position: sticky; left: 0; z-index: 1; min-width: 160px; }
+.psheet-tbl tbody td.cust { background: var(--panel); }
+.psheet-tbl thead .cust, .psheet-tbl tfoot .cust { z-index: 4; }
+.psheet-tbl .band-in { display: flex; align-items: center; gap: 8px; padding: 0 8px; position: sticky; left: 0; }
+.psheet-tbl .band-in .so { font-weight: 700; }
+.psheet-tbl .fold { width: 16px; height: 16px; padding: 0; line-height: 1; border: 1px solid var(--border-2); border-radius: 3px; background: var(--panel); color: var(--muted); cursor: pointer; }
+.psheet-tbl tfoot td { position: sticky; bottom: 0; z-index: 3; background: var(--panel-2); border-top: 2px solid var(--border-2); font-weight: 700; }
+.psheet-tbl .st { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: var(--panel-2); color: var(--muted); }
+.psheet-tbl .st.ok { background: color-mix(in oklab, var(--c-green) 14%, transparent); color: var(--c-green); }
+.psheet-tbl .st.warn { background: color-mix(in oklab, var(--c-amber) 16%, transparent); color: var(--c-amber); }
+/* Record Production sheet (CR-244) — typed cells beyond Qty: the control fills the ruled cell, no skin of its own. */
+.psheet-tbl td.cellin { padding: 0; }
+.psheet-tbl td.cellin input { width: 100%; height: 31px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.psheet-tbl td.cellin:focus-within { box-shadow: inset 0 0 0 2px var(--accent); }
+.psheet-tbl td.bad, .psheet-tbl td.bad:focus-within { box-shadow: inset 0 0 0 2px var(--c-red); }
+.psheet-tbl td.bad input::placeholder { color: var(--c-red); }
+.psheet-tbl .rn.err { background: var(--c-red); color: #fff; }
+.psheet-tbl td.auto { background: var(--panel-2); color: var(--muted); }
+.psheet-tbl .rm { width: 30px; padding: 0; text-align: center; }
+.psheet-tbl .rm-x { border: 0; background: none; padding: 4px; color: var(--muted); cursor: pointer; display: inline-flex; }
+.psheet-tbl .rm-x:hover { color: var(--c-red); }
+.psheet-stats { display: flex; gap: 18px; }
+.psheet-stats > span { display: flex; flex-direction: column; }
+.psheet-stats i { font-style: normal; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.psheet-stats b { font-size: var(--t-xl); font-weight: 600; line-height: 1.15; }
 
 /* QC checklist cells */
 .qc-cell {
@@ -2229,6 +2363,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
    for a card, so the rail stacks on top and its groups wrap into a row. */
 @media (max-width: 900px) {
   .set-wrap { grid-template-columns: 1fr; }
+  .main > div:has(> .session-fill) { height: auto; }
+  .session-fill .set-groups, .session-fill .pane-scroll { overflow: visible; }
   .set-rail { border-right: 0; border-bottom: 1px solid var(--border); }
   .set-groups { flex-direction: row; flex-wrap: wrap; }
   .set-group { width: auto; }

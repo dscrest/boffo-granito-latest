@@ -3,6 +3,184 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-09-19 — New Loading is two steps; vehicle sits with the sheet (CR-225)
+
+- The "Vehicle & loading" step is gone. After **Select items** comes one step, **Seals, sheet & vehicle**:
+  the loading sheet first — type truck, container, seals and LR against the designs and boxes — and
+  below it the driver, mobile, container size, transporter, destination and supervisor for this container.
+- Same day: that lower details card is hidden for now — the step shows the sheet and the Checks card;
+  driver, transporter etc. are still editable from the loading's Edit.
+- LIVE 2026-09-19 (client deployed); browser drive and commit pending.
+
+## 2026-09-19 — New Palletization: customer on top, in-progress chip (CR-224)
+
+- `/packing/new` no longer has the left customer rail: **Customer** is a required pick list at the
+  top of the Plan section, and that customer's orders and designs list below it.
+- The "⚠ This order already has an open palletization (PAL/…)" banner is gone. A row whose item is
+  already on an open plan shows an amber **Palletization in progress** chip — no PAL number.
+- LIVE 2026-09-19 (client deployed); browser drive and commit pending.
+
+## 2026-09-19 — New Palletization starts from the customer (CR-223)
+
+**LIVE 2026-09-19 (functions + client).**
+
+- **New Palletization Plan** opens with a customer list on the left. Search the customer, pick
+  them, and every order of theirs with stock to palletize shows on the right.
+- Each design shows Order Qty, Produced, Available and the **batches** that production or stock
+  allocation has given that order line. Type the boxes per design and choose the pallet.
+- **One Save = one plan for that customer**, across as many of their orders as you like.
+- **Batches are assigned automatically, oldest first**, when the plan is saved — a hand-made plan
+  no longer loses its batch numbers.
+- Send to Palletization from a Sales Order, Edit and Clone look the same as before.
+
+---
+
+## 2026-09-19 — Loading Sheet columns (CR-208)
+
+**NOT deployed yet (client-only; LIVE column `PalletizationPlanLine.pallet_type` created).**
+
+- **Design comes first** on each line: Design, Size, Finish, Batch, Box Brand, Pallet No., Boxes, Pallet type.
+- **Pallet 2 is removed.** **Pallet type is typed by the user** — blank stays blank.
+- **Box Brand fills itself** from the production record, else the Sales Order (which takes it from
+  the quote), else the customer's default. It is no longer a dropdown on the sheet.
+
+---
+
+## 2026-09-19 — Security review fixes (CR-205…207)
+
+**NOT deployed yet (server-only, `functions/data-ops`).**
+
+- **Image uploads are raster-only.** The server checks the file's actual bytes — JPG, PNG, GIF,
+  WebP, BMP or AVIF. An SVG is refused. Images already stored keep working; the public image
+  link can no longer run script if someone opens it as a page.
+- **Permissions no longer depend on how a URL is capitalised.** A role without the right for a
+  business action (dispatch, create a Sales Order, …) is refused however the path is spelled.
+- **A Quote or Sales Order cannot be created already approved.** Both are created only through
+  their own forms' routes, where the starting status follows the approver rule; the generic
+  create also refuses the status columns it already refused on edit.
+
+---
+
+## 2026-09-18 — New Loading is a three-step page (CR-203)
+
+**DEPLOYED LIVE 2026-09-18 (client-only); browser drive and commit pending.**
+
+- **One page, three steps**: New Loading (toolbar, Sales Order detail, and Add Pallets on a
+  loading) opens a full page instead of a modal — **1 Select items** (the same customer rail and
+  pick list, plus a container-fill meter) → **2 Vehicle & loading** (vehicle, driver, container,
+  seals, transporter… beside what is in the container) → **3 Seals & sheet** (the Loading Sheet
+  for all of that customer's open containers, with a checks list). Each step saves with Save.
+- **Duplicate warning**: a container number or seal already recorded on another loading shows an
+  amber warning on step 3. It never blocks the save.
+- Dispatch is unchanged and stays on the loading's detail page.
+
+## 2026-09-18 — New Loading: customer rail, one pick list, batch pick (CR-201…202)
+
+**DEPLOYED LIVE 2026-09-18 (client-only); browser drive and commit pending.**
+
+- **Pick the customer on the left, load on the right** (CR-201): every order of the customer with
+  its designs — Design · Box Brand · Batch · Ready · Load — in one list. No Customer / Sales Order /
+  Container Size fields any more; container and vehicle details go in Assign Vehicle after Save.
+  Batches that are only partly palletised show greyed with the reason instead of disappearing.
+- **Choose the batches; the plan only helps** (CR-202): type a design quantity and it spreads
+  oldest-batch-first, then adjust any batch. Several designs and orders share the one container.
+  **Fill from plan** prefills an order's next planned container — designs outside the plan still load.
+
+## 2026-09-18 — Production first, then SO allocation; container override; customer-wide loading (CR-194…200)
+
+**DEPLOYED LIVE 2026-09-18 (column → function → client), commit pending; browser drive pending.**
+
+- **Production goes to stock** (CR-197/198): Record New Production is Item + Qty only; confirming
+  an SO no longer creates production jobs; the SO lost "Record New Production". Record Output
+  takes a **Box Brand** per item (prefilled from the orders waiting on it) and the Excel import
+  reads an optional Box Brand column.
+- **Allocate Stock** (CR-199): on the SO, pick free boxes per batch for each line. The allocation
+  is a claim (`alloc` row), not supply — on-hand is unchanged, **free** stock drops — and it feeds
+  Ready for Palletization exactly as a production record used to. De-allocate from the SO
+  Production tab until the boxes are palletised. Send-to-Loading only ships allocated boxes.
+- **Record New Production redesigned, same day** (CR-197 follow-up, client-only, LIVE): the form
+  IS the recording — lines first (**Item · Batch No. · Box Brand · Qty**), then Note / Recorded by /
+  Production date below. Save creates the job and records each line's output with its batch +
+  brand in one go (`productionApi.recordNewProduction`; the job auto-steps to Completed). Batch
+  No. is mandatory for batch-tracked items, auto-numbered otherwise; Box Brand prefills from the
+  orders waiting on the item. Record Output (`+`) still exists for legacy / partially recorded jobs.
+- **What to produce** (CR-200): every open order line shows Allocated / Stock ready / Partial
+  stock / In production / Need production; `/prod` has a **To Produce** view with the shortfall
+  and the carton brand wanted per item, which prefills a new production job.
+- **Overrides** (CR-195/196): a tick lets a container load — and the planner pack — beyond 100%.
+- **Loading by customer** (CR-194): New Loading starts from the customer and mixes all their
+  orders and designs into one container.
+- `scripts/seed-flow.mjs` now produces to stock and allocates (the old step needed SO-confirm jobs).
+
+## 2026-09-15 — Panel images at every sales touchpoint, several panels per sale (CR-192…193)
+
+**DEPLOYED LIVE 2026-09-15 (client-only deploy), commit pending.**
+
+- **Several panels in one sale** (CR-193): the picker tiles multi-select; the form lists each
+  picked panel with its thumb, a qty and a remove button; the stock check sums need across all
+  of them. Save writes one Panel Order row per panel with the shared customer, date and sales
+  person, so the board and the stock machine are unchanged and each panel dispatches on its own.
+
+- **Panel picker is an e-commerce tile grid**: each showcase panel shows its front-view image,
+  code, sizes and design names; the picked tile wears the accent ring. Search is unchanged.
+- **Order form shows the picked panel**: a thumb beside the picker and a **Panel** section with
+  every image; click any image for the lightbox with ‹ › across all of them.
+- **Thumbs everywhere else a rep meets a panel**: Panel Orders board cards and Sheet, a new
+  Image column on `/panels`, and both Showcase Panels tables (Item + Customer detail). Click
+  zooms, never navigates; no image = dashed placeholder.
+- Mechanism: the lightbox left `ImageManager` for a shared `ImageLightbox` / `ImageThumb`
+  (`features/common`). No server change — images were already in the panel list payload.
+
+## 2026-09-15 — Weight on the Item form, Item wins in planning, form regroup (CR-190…191)
+
+**DEPLOYED LIVE 2026-09-15 (client-only deploy), commit pending.**
+
+- **Box Weight (kg) on the Item** (CR-190): typable in Dimensions & Coverage, prefilled from the
+  picked Size (placeholder shows the Size value); a typed value is the item's own and survives
+  Size edits (CR-133 guard). Two ƒx fields beside it: **Weight / piece** = box ÷ pcs/box and
+  **Weight / m²** = box ÷ coverage m². Item detail Overview gets a **Box weight** row.
+- **Planning precedence flipped**: Weight Fitting in Plan Containerisation reads the Item's box
+  weight first, the Pallet format's as fallback — matching the server loading-capacity check
+  (which always used the Item weight). Before, the planner preferred the Pallet format's copy.
+- **Form regroup** (CR-191): Identity → Classification → Dimensions & Coverage (Width, Length,
+  Rate / ft², Rate / m², weight group) → **Misc** (Random Faces, Status, Batch-tracked item,
+  Opening Stock on edit). Numeric inputs on this form now use the house `NumberInput`.
+
+## 2026-09-14 (night) — Single-image upload tile on the Box Brand form (CR-189)
+
+**Built 2026-09-14, deploy pending.** Client-only.
+
+- The Box Brand master's **Image** field is a 120 px tile instead of a raw file input: click or
+  drop to upload, cover preview once set, **Replace** / **Remove** beside it. `ImageUploader`
+  is single-image only now; `ImageManager` (Item/Panel detail) is unchanged.
+
+## 2026-09-14 (night) — Container merging in Plan Containerisation (CR-188)
+
+**DEPLOYED LIVE 2026-09-14 (client-only deploy), commit pending.**
+
+- **⇄ Move on every item inside a container** (SO, Quote and Loading-tab planners): pick the
+  target container ("C3 · can take 240 boxes") and the quantity (defaults to the most that
+  fits). Drag-a-card and the Adjust panel's "Move here" suggestions use the same action.
+- **Merges persist.** A move splits the row and tags the moved boxes with the target
+  container's `group`; grouped rows pack into one container, and a saved mixed container
+  reseeds as grouped rows — so Save + reopen keeps the merge instead of re-packing item-wise
+  (the old session-only `moves` layer is gone). Plan JSON unchanged.
+
+## 2026-09-14 (night) — Loading Sheet: design name on prints, manual Pallet No., free-text vehicle, sheet look (CR-183…186)
+
+**DEPLOYED LIVE 2026-09-14 (client-only deploy; LIVE column `PalletizationPlanLine.pallet_no` created), commit pending.**
+
+- **Design name only on prints** (CR-183): Dispatch Entry, Dispatch Copy PDF and pallet QR
+  label print `design_name` alone — no composite unique name, no PAL code, no doubled size.
+  The Loading Sheet's Design cell follows (it has Size/Finish columns).
+- **Manual Pallet No.** (CR-184): typable on the Loading Sheet; typed wins, blank = auto
+  range (grey); same value on the two dispatch prints.
+- **Vehicle as free text** (CR-185): Vehicle Number / Driver / Mobile are plain inputs in
+  Assign Vehicle / Edit Load Details, the new-container form and the sheet's Truck No.;
+  `resolveVehicle()` keeps the Vehicle master in sync without the user seeing it.
+- **Sheet look** (CR-186): standard rounded house grid (the black-bordered `ruled` variant
+  is deleted); "Pallet 1" → "Pallet type".
+
 ## 2026-09-14 (evening) — SO tab trims, totals bar, rail order, batch on SO Palletization, Box Brand image (CR-177…182)
 
 **DEPLOYED LIVE 2026-09-14 (LIVE column + client), committed c1d6400.**
@@ -11,6 +189,9 @@
 - **Totals bar** (CR-178): on /packing and /palletizing the bar under the grid reads
   *Total · N pallets · N boxes* when nothing is ticked (both views, every viewer); the
   "Tick items…" hint and the Sheet's tfoot Total row are gone on these pages.
+  - **CR-187 (2026-09-14 night, deploy pending):** the Sheet's totals moved back into a
+    column-aligned tfoot (pallets in the first column, Boxes/Ordered/Completed/Remaining
+    under their headers); the bar's idle text now shows in Kanban only.
 - **Rails** (CR-179): `/packing/:id` and `/loading/:id` sibling rows read *customer · status*
   above and the PAL/LOAD code below.
 - **SO Palletization tab** (CR-180): Batch column (mono chip) after Design.

@@ -3,7 +3,9 @@
    planner (PlanContainerisation).
    Item-wise pack: each container starts with a single item, in line order;
    a line that exceeds one container's capacity spawns extra containers.
-   Manual moves/DnD stay in the planner — this is just the baseline.
+   Lines sharing a `group` pack into ONE container (a merged/mixed container,
+   fractional fill: each line's boxes against its own capacity); whatever
+   doesn't fit there continues item-wise.
    ============================================================ */
 
 export const PACK_EPS = 1e-6;
@@ -19,15 +21,37 @@ export interface PackSeg {
  * overflow spawns the next container. `capOf(idx, pos)` is the boxes one
  * container at position `pos` can hold of line `idx` on its own (pallet-format
  * capacity in boxes mode; ton cap / box weight in weight mode). A line whose
- * capacity is < 1 is skipped (unpackable).
+ * capacity is < 1 is skipped (unpackable). A grouped line first fills its
+ * group's container (created by the first grouped line, at the position it
+ * reaches in line order) up to the free fraction; the remainder packs item-wise.
+ * An `over` grouped line (CR-196 manual override) ignores the free fraction and
+ * lands whole — the container may exceed 100%.
  */
 export function packItemWise(
-  lines: { idx: number; qty: number }[],
+  lines: { idx: number; qty: number; group?: string; over?: boolean }[],
   capOf: (idx: number, pos: number) => number,
 ): PackSeg[][] {
   const list: PackSeg[][] = [];
+  const byGroup = new Map<string, number>(); // group → container position
   for (const l of lines) {
     let left = l.qty;
+    if (l.group && left > 0 && capOf(l.idx, byGroup.get(l.group) ?? list.length) >= 1) {
+      let pos = byGroup.get(l.group);
+      if (pos == null) {
+        pos = list.length;
+        list.push([]);
+        byGroup.set(l.group, pos);
+      }
+      const c = list[pos];
+      const fill = c.reduce((s, x) => s + x.boxes / Math.max(1, capOf(x.idx, pos!)), 0);
+      const take = l.over ? left : Math.min(left, Math.max(0, Math.floor((1 - fill) * capOf(l.idx, pos) + PACK_EPS)));
+      if (take > 0) {
+        const seg = c.find((x) => x.idx === l.idx);
+        if (seg) seg.boxes += take;
+        else c.push({ idx: l.idx, boxes: take });
+        left -= take;
+      }
+    }
     while (left > 0) {
       const cap = capOf(l.idx, list.length);
       if (cap < 1) break;

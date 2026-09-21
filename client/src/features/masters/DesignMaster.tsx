@@ -12,6 +12,7 @@
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
@@ -23,13 +24,10 @@ import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterFie
 import { finishClass, fmtDateTime } from "@/lib/format";
 import { can, canUpdate } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { DesignForm } from "./DesignForm";
 import {
   bulkDeleteDesigns,
   bulkUpdateDesigns,
-  createDesign,
   listDesigns,
-  type DesignInput,
   type DesignLookups,
   type DesignRow,
 } from "./designsApi";
@@ -200,7 +198,6 @@ export function DesignMaster() {
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("design.criteria", {});
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { ordered, visible, hidden, toggle, move } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
-  const [showNew, setShowNew] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -257,7 +254,7 @@ export function DesignMaster() {
   }, [rows, query, criteria, filterFields]);
 
   const pager = usePagination(filtered.length, "designPageSize", `${query}|${JSON.stringify(criteria)}`);
-  const pageRows = pager.slice(filtered);
+  const pageRows = pager.slice(newestFirst(filtered));
 
   // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
@@ -276,29 +273,6 @@ export function DesignMaster() {
       else pageRows.forEach((r) => next.add(r.id));
       return next;
     });
-
-  const onCreate = async (input: DesignInput) => {
-    // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
-    const dup = rows.find((r) => r.uniqueName.trim().toLowerCase() === input.unique_name.trim().toLowerCase());
-    if (dup) {
-      toast.error(`An item named "${input.unique_name}" already exists`);
-      return; // keep the modal open so the entry can be fixed
-    }
-    setNotice("Saving design…");
-    const res = await createDesign(input);
-    if (!res.ok) {
-      // Keep the modal open — closing here would discard everything typed.
-      setNotice(null);
-      setError(res.error || "Save failed");
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowNew(false);
-    setNotice(`Design saved (#${res.rowid}).`);
-    toast.success("Design saved");
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/design/${encodeURIComponent(res.rowid)}`);
-  };
 
   const ids = useMemo(() => [...selected], [selected]);
 
@@ -339,7 +313,6 @@ export function DesignMaster() {
     /* Same shell as Sizes: column fills the scrollport so the grid footer
        sits on the window edge — no dead band above or below the table. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
-      {showNew && <DesignForm lookups={lookups} onSave={onCreate} onClose={() => setShowNew(false)} />}
       {showBulk && (
         <BulkEditModal
           count={ids.length}
@@ -385,7 +358,7 @@ export function DesignMaster() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/design/new")}>
               <Icon name="plus" size={13} />
               New Item
             </button>
@@ -448,7 +421,7 @@ export function DesignMaster() {
                         title="No items yet"
                         hint="Add your first item with New Item"
                         action={
-                          <button className="hbtn primary" onClick={() => setShowNew(true)}>
+                          <button className="hbtn primary" onClick={() => navigate("/design/new")}>
                             New Item
                           </button>
                         }

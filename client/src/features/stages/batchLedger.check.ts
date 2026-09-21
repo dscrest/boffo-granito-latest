@@ -68,7 +68,7 @@ const sum = (rows: { boxes: number }[]) => rows.reduce((s, r) => s + r.boxes, 0)
     [box(), box({ id: "BX2", status: "Dispatched", dispatchDate: "2026-08-20" })],
   );
   const by = (s: string) => sum(rows.filter((r) => r.stage === s));
-  assert.strictEqual(by("Palletised"), 30, "ReadyToLoad with no box = Palletised");
+  assert.strictEqual(by("Palletized"), 30, "ReadyToLoad with no box = Palletized");
   assert.strictEqual(by("Loaded"), 20, "line in an Open box = Loaded");
   assert.strictEqual(by("Dispatched"), 25, "line in a Dispatched box = Dispatched");
   assert.strictEqual(by("On hand"), 25, "queue lines stay on hand (100 − 30 − 20 − 25)");
@@ -93,13 +93,13 @@ const sum = (rows: { boxes: number }[]) => rows.reduce((s, r) => s + r.boxes, 0)
 {
   // Split pair, same batch: 40 ReadyToLoad + 60 still Planning → nothing loadable.
   const partial = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning" })] as never);
-  assert.strictEqual(partial.size, 0, "partially palletised batch → not loadable");
+  assert.strictEqual(partial.size, 0, "partially palletized batch → not loadable");
   // Whole batch ReadyToLoad → both slices loadable.
   const full = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60 })] as never);
   assert.deepStrictEqual([...full].sort(), ["L1", "L2"], "complete batch → all lines loadable");
   // A boxed sibling counts as done — the remaining slice may load.
   const boxed = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning", loadBoxId: "BX1" })] as never);
-  assert.deepStrictEqual([...boxed], ["L1"], "boxed sibling counts as palletised");
+  assert.deepStrictEqual([...boxed], ["L1"], "boxed sibling counts as palletized");
 }
 
 console.log("batch ledger check: OK");

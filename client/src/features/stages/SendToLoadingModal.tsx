@@ -7,7 +7,7 @@
    Container-first like the load modal: the shared ContainerPicker chooses an
    open container (or mints a new one with its details) so the items land in a
    real container, not a nameless box. With presetBoxId the target is fixed.
-   Per item the send is capped at ordered − palletized, mirroring the server.
+   Per item the send is capped at min(ordered, produced/allocated) − palletized, mirroring the server.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -16,7 +16,6 @@ import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
-import { listVehicles, type VehicleRow } from "@/features/masters/vehiclesApi";
 import { cachedOrders, listOrders, soStatusLabel } from "@/features/orders/ordersApi";
 import {
   ContainerPicker,
@@ -37,7 +36,10 @@ import {
   type PalPlan,
 } from "./palPlansApi";
 
-const remainingOf = (o: Order) => Math.max(0, o.orderQty - o.palletizedQty);
+// CR-199: only boxes the order owns (produced/allocated) can be sent — mirrors the server cap.
+export const remainingOf = (o: Order) => Math.max(0, Math.min(o.orderQty, o.producedQty) - o.palletizedQty);
+/** Past approval and not terminal — the only orders whose items can be sent. */
+export const soSendable = (o: Order) => !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(o.status || "");
 
 export function SendToLoadingModal({
   presetSalesOrderId,
@@ -67,7 +69,6 @@ export function SendToLoadingModal({
   const [sel, setSel] = useState<string>(presetBoxId || NO_CONTAINER);
   const [draft, setDraft] = useState<ContainerDraft>(newContainerDraft);
   const [showErrors, setShowErrors] = useState(false);
-  const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
 
   useEffect(() => {
     void listOrders().then((r) => r.ok && setOrders(r.orders));
@@ -76,7 +77,6 @@ export function SendToLoadingModal({
       setPlans(r.plans);
       setLoadBoxes(r.boxes);
     });
-    void listVehicles().then((r) => r.ok && setVehicles(r.vehicles));
   }, []);
 
   const openBoxes = loadBoxes.filter((b) => b.status === "Open");
@@ -93,7 +93,7 @@ export function SendToLoadingModal({
     const heads = new Map<string, { o: Order; remaining: number }>();
     for (const o of orders) {
       if (!o.salesOrderId) continue;
-      if (["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(o.status || "")) continue;
+      if (!soSendable(o)) continue;
       const cur = heads.get(o.salesOrderId) || { o, remaining: 0 };
       cur.remaining += remainingOf(o);
       heads.set(o.salesOrderId, cur);
@@ -135,7 +135,7 @@ export function SendToLoadingModal({
     let box = presetBoxId || (sel === NO_CONTAINER ? "" : sel);
     let label = boxName || "";
     if (newContainer) {
-      const details = await draftToCreateInput(draft, vehicles);
+      const details = await draftToCreateInput(draft);
       const created = details ? await createLoadBox(details) : null;
       if (!created?.ok || !created.data?.ROWID) {
         setBusy(false);
@@ -242,7 +242,7 @@ export function SendToLoadingModal({
               })}
               {items.length === 0 && (
                 <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "8px 0" }}>
-                  Every item on this order is already palletised or sent to loading.
+                  Every item on this order is already palletized or sent to loading.
                 </div>
               )}
             </div>

@@ -16,6 +16,11 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
+import { Combobox } from "@/ui/Combobox";
+import { useBoxBrands } from "@/features/masters/boxBrands";
+import { useStockLookup } from "@/features/masters/LineStock";
+import { useOrders } from "@/features/orders/useOrders";
+import { demandByDesign } from "@/lib/needProduction";
 import { useMasters } from "@/features/masters/useMasters";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
@@ -31,7 +36,7 @@ import { NumberInput } from "../../ui/NumberInput";
     items emit one single per line (parent loops /production-record). */
 export type RecordOutputPayload =
   | { singles: ProductionRecordInput[] }
-  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string } };
+  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string; box_brand?: string } };
 
 export type RecordOutputResult = { entry: ProductionEntry; payload: RecordOutputPayload; total: number };
 
@@ -63,6 +68,28 @@ export function RecordOutputForm({
   };
 
   const [saving, setSaving] = useState(false);
+  // Box Brand the boxes are packed in — one per item section (CR-197).
+  const { options: brandOpts } = useBoxBrands();
+  const [brandById, setBrandById] = useState<Record<string, string>>({});
+  // Box Brand follows the orders (CR-200): an order-linked line takes its SO's
+  // brand; stock production takes the brand most in demand among the open
+  // orders still waiting on that item. A prefill only — the user can change it.
+  const { orders } = useOrders();
+  const stockFor = useStockLookup();
+  useEffect(() => {
+    if (!orders.length) return;
+    const demand = demandByDesign(orders, stockFor);
+    setBrandById((cur) => {
+      const next = { ...cur };
+      for (const e of entries) {
+        if (next[e.id] !== undefined) continue; // already prefilled or user-touched
+        const own = e.orderItemId ? orders.find((o) => o.id === e.orderItemId)?.boxBrandId : "";
+        next[e.id] = own || demand.find((d) => d.designName === e.design)?.brands.find((b) => b.boxBrandId)?.boxBrandId || "";
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stockFor is a fresh closure each render
+  }, [orders, entries]);
   const panelRef = useModalA11y(onClose);
 
   // One rows map for both modes (mfg date · qty · remark each, + New Batch,
@@ -122,7 +149,7 @@ export function RecordOutputForm({
       total <= 0 ||
       total > capFor(entry) ||
       rowsById[entry.id].some(
-        (r, i) => (parseInt(r.qty, 10) || 0) <= 0 || (batched && (!r.batch.trim() || dupKind(entry, r, i) !== null)),
+        (r, i) => (parseInt(r.qty, 10) || 0) <= 0 || (batched && dupKind(entry, r, i) !== null),
       )
     );
   };
@@ -145,7 +172,7 @@ export function RecordOutputForm({
           return {
             entry,
             total,
-            payload: { batches: { rows: lines, performed_by: loggedBy } },
+            payload: { batches: { rows: lines, performed_by: loggedBy, box_brand: brandById[entry.id] || undefined } },
           };
         }
         const singles: ProductionRecordInput[] = rows.map((r) => ({
@@ -153,6 +180,7 @@ export function RecordOutputForm({
           production_date: r.date,
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
+          box_brand: brandById[entry.id] || undefined,
         }));
         return { entry, total, payload: { singles } };
       });
@@ -198,6 +226,16 @@ export function RecordOutputForm({
                   }}
                 >
                   {!entry.orderItemId && <span className="chip">Make-to-stock</span>}
+                  <label className="form-field" style={{ minWidth: 220, margin: 0 }}>
+                    <span className="lbl">Box Brand</span>
+                    <Combobox
+                      value={brandById[entry.id] || ""}
+                      options={brandOpts}
+                      onChange={(v) => setBrandById((m) => ({ ...m, [entry.id]: v }))}
+                      placeholder="Pick a box brand…"
+                      ariaLabel={`${entry.design} box brand`}
+                    />
+                  </label>
                   <span style={{ display: "flex", gap: 14, marginLeft: "auto" }}>
                     <Count label="Requested" value={entry.qtyRequested} />
                     {/* Committed output only — the typed rows below show up in "Left to add". */}
@@ -210,11 +248,25 @@ export function RecordOutputForm({
                   </span>
                 </div>
 
+                {/* CR-237: what this line already has, so a new batch isn't a guess. */}
+                {entry.records.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="lbl" style={{ marginBottom: 4 }}>Already logged</div>
+                    {entry.records.map((r) => (
+                      <div key={r.id} className="mono" style={{ display: "flex", gap: 14, fontSize: "var(--t-sm)", padding: "2px 0" }}>
+                        <span style={{ minWidth: 130 }}>{r.batchNumber || "—"}</span>
+                        <span className="dim">{(r.productionDate || "").slice(0, 10) || "—"}</span>
+                        <span style={{ marginLeft: "auto", color: "var(--c-green)" }}>{fmt(r.qtyBoxes)} boxes</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {/* Batch table — column headers once, bare inputs per row (the row
                     labels are the header). Non-batched items drop the Batch column. */}
                 <div className="ord-lines">
                   <div className={`ord-line batch-line${isBatched ? "" : " no-batch"} ord-line-head`}>
-                    {isBatched && <span>Batch No.<span className="req"> *</span></span>}
+                    {isBatched && <span>Batch No.</span>}
                     <span>Mfg date</span>
                     <span>Qty (boxes)<span className="req"> *</span></span>
                     <span>Remark</span>
@@ -229,7 +281,7 @@ export function RecordOutputForm({
                             <input
                               value={r.batch}
                               onChange={(e) => setRow(entry.id, i, "batch", e.target.value)}
-                              placeholder="e.g. B/26-27/001"
+                              placeholder="Auto-numbered if blank"
                               aria-label={`${entry.design} batch number, row ${i + 1}`}
                               aria-invalid={!!dup}
                               autoFocus={ei === 0 && i === 0}

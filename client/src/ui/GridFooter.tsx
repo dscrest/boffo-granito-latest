@@ -5,7 +5,7 @@
    • useSortRows + <SortTh>: click-a-header asc/desc sorting.
    Same idiom as ColumnPicker's hidden-column sets.
    ============================================================ */
-import { useEffect, useMemo, useState, type ReactNode, type ThHTMLAttributes } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type ThHTMLAttributes } from "react";
 
 const PAGE_SIZES = [10, 25, 50, 100];
 const DEFAULT_SIZE = 25;
@@ -120,8 +120,28 @@ function pageWindow(page: number, pageCount: number): number[] {
     Fixed to the viewport bottom (user mandate 2026-07-13: "Fixed footer.
     Always.") — .grid-footer in styles.css; one per page. */
 export function GridFooter(p: Pager) {
+  // The grid card always reaches down to this bar, however few rows it has
+  // (user mandate 2026-09-21). Done here so every grid gets it: the card's top
+  // varies per page (page-head, filter bar), so CSS alone can't know the height.
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const card = ref.current?.closest<HTMLElement>(".card");
+    const main = card?.closest<HTMLElement>(".main");
+    if (!card || !main) return;
+    const fit = () => {
+      const top = card.getBoundingClientRect().top + main.scrollTop; // top within the scroll area
+      // 64 = the scroll room .main reserves for this fixed bar (styles.css
+      // `.main:has(.grid-footer)::after`) — match it so a short grid never scrolls.
+      card.style.minHeight = `${Math.max(0, window.innerHeight - top - 64)}px`;
+    };
+    fit();
+    // No deps on purpose: re-fit on every render, since a bulk bar swapping in or
+    // a filter bar wrapping above the card moves its top.
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  });
   return (
-    <div className="grid-footer">
+    <div className="grid-footer" ref={ref}>
       <span className="muted mono" style={{ fontSize: "var(--t-sm)" }}>
         {p.from}–{p.to} of {p.total}
       </span>

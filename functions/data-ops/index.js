@@ -433,6 +433,18 @@ function resolveOptional(map, name, label) {
 }
 
 /** Finite number ≥ 0. */
+/* Box Brand captured at production (CR-197): blank → null, else must be a real
+   Brand row. Callers spread it only when set, so rows stay insertable on a
+   Data Store that predates the ProductionLog.box_brand column. */
+async function brandOrNull(catalyst, v) {
+  const id = String(v == null ? "" : v).trim();
+  if (!id) return null;
+  if (!/^\d+$/.test(id)) throw badRequest("Invalid box brand");
+  const hit = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Brand WHERE ROWID = ${id}`))[0];
+  if (!hit) throw badRequest("Box brand not found");
+  return id;
+}
+
 function nonNeg(n, label) {
   const v = Number(n);
   if (!Number.isFinite(v) || v < 0) throw badRequest(`${label} must be a number ≥ 0`);
@@ -547,10 +559,15 @@ function docCompute(lineSubtotal, body) {
    BEFORE the auth guard so <img src> works without a token (images
    can't send the X-App-Token header). Read-only, streams bytes.
    ---------------------------------------------------------------- */
+// svg stays ONLY so files stored before the upload allowlist still render; new
+// uploads are raster-only (sniffImage) and every response below is sandboxed.
 const EXT_MIME = {
   jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
-  gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml",
+  gif: "image/gif", webp: "image/webp", bmp: "image/bmp", avif: "image/avif",
+  svg: "image/svg+xml",
 };
+
+const { sniffImage } = require("./lib/sniffImage");
 app.get("/public/design-image/:fileId", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -566,6 +583,10 @@ app.get("/public/design-image/:fileId", async (req, res) => {
     const stream = await folder.getFileStream(req.params.fileId);
     res.set("Content-Type", mime);
     res.set("Cache-Control", "public, max-age=86400");
+    // This URL is same-origin with the app: opened as a page, the bytes must
+    // never run script (a legacy SVG would). sandbox = opaque origin, no JS.
+    res.set("X-Content-Type-Options", "nosniff");
+    res.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
     stream.pipe(res);
   } catch (err) {
     res.status(404).json({ ok: false, error: "Image not found" });
@@ -788,13 +809,21 @@ app.post("/upload/design-image", async (req, res) => {
     if (!data) throw badRequest("No image data");
     // Preserve the uploaded filename (req 2026-07-08): keep spaces, parens,
     // and unicode; strip only path separators and control chars for safety.
-    const safeName =
+    let safeName =
       String(name || "image.jpg")
         .replace(/[\\/\x00-\x1f]/g, "")
         .trim() || "image.jpg";
     const buf = Buffer.from(String(data), "base64");
     if (!buf.length) throw badRequest("Empty image");
     if (buf.length > 8 * 1024 * 1024) throw badRequest("Image exceeds 8MB");
+    // Raster images only, judged by content — an SVG/HTML payload served from
+    // the public route would run script on the app origin.
+    const kind = sniffImage(buf);
+    if (!kind) throw badRequest("Only JPG, PNG, GIF, WebP, BMP or AVIF images can be uploaded");
+    // The serve route types the response from the stored extension, so the
+    // extension must tell the truth about the bytes.
+    const ext = safeName.includes(".") ? safeName.split(".").pop().toLowerCase() : "";
+    if (EXT_MIME[ext] !== EXT_MIME[kind]) safeName = `${safeName}.${kind}`;
     tmpPath = pathlib.join(os.tmpdir(), `${crypto.randomBytes(8).toString("hex")}-${safeName}`);
     fs.writeFileSync(tmpPath, buf);
     const catalyst = init(req);
@@ -1129,6 +1158,12 @@ app.post("/quote-status/:rowid", async (req, res) => {
    works alongside this. Called on the PendingApproval→Confirmed transition
    AND for SOs born Confirmed (approver bypass at create/convert). */
 async function enqueueSoProduction(catalyst, ds, soId) {
+  // ponytail: RETIRED by CR-198 (production-first) — the factory produces to
+  // stock and stock is allocated to the SO (/allocate-stock), so confirming an
+  // SO no longer creates production jobs. Body + call sites kept for rollback:
+  // delete this return to restore. Existing open so-… jobs keep working.
+  return;
+  // eslint-disable-next-line no-unreachable
   const items = rowList(
     await catalyst.zcql().executeZCQLQuery(
       `SELECT ROWID, design, ordered_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
@@ -1170,6 +1205,8 @@ const SO_TRANSITIONS = {
   Cancelled: ["Confirmed"],
   Rejected: ["PendingApproval"], // resubmit a rejected order straight for approval
 };
+// Every SO status: the approval machine above + the auto roll-up ones (CR-230, lib/soStatus).
+const SO_STATUSES = [...Object.keys(SO_TRANSITIONS), "PartiallyCompleted", "Completed"];
 
 app.post("/so-status/:rowid", async (req, res) => {
   try {
@@ -1178,10 +1215,11 @@ app.post("/so-status/:rowid", async (req, res) => {
     const soId = req.params.rowid;
     const to = String((req.body || {}).status || "");
     const reason = String((req.body || {}).reason || "").trim();
+    const manual = !!(req.body || {}).manual;
 
     const result = await withOpLog(
       catalyst,
-      { table_name: "SalesOrder", operation: "status", payload: { ROWID: soId, status: to, reason } },
+      { table_name: "SalesOrder", operation: "status", payload: { ROWID: soId, status: to, reason, manual } },
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
@@ -1192,7 +1230,15 @@ app.post("/so-status/:rowid", async (req, res) => {
         const so = rows[0];
 
         const from = String(so.status || "Draft");
-        if (!(SO_TRANSITIONS[from] || []).includes(to))
+        // CR-231: a manual change may jump to ANY status, but must say why.
+        // Jumping an unapproved order past approval still needs an approver.
+        if (manual) {
+          if (!SO_STATUSES.includes(to)) throw badRequest(`Unknown sales order status: ${to}`);
+          if (!reason) throw badRequest("A reason is required to change the status manually");
+          const unapproved = (s) => ["Draft", "PendingApproval", "Rejected"].includes(s);
+          if (unapproved(from) && !unapproved(to) && to !== "Cancelled" && !canApprove(req, "SalesOrder"))
+            throw badRequest("Your role cannot approve sales orders", 403);
+        } else if (!(SO_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move sales order from ${from} to ${to}`, 409);
         if (from === "PendingApproval" && !canApprove(req, "SalesOrder"))
           throw badRequest("Your role cannot approve or reject sales orders", 403);
@@ -1204,7 +1250,8 @@ app.post("/so-status/:rowid", async (req, res) => {
           to === "Rejected" ? { ROWID: soId, status: to, reject_reason: reason } : { ROWID: soId, status: to },
         );
         await logTransition(catalyst, {
-          entity_type: "SalesOrder", entity_rowid: soId, from_status: from, to_status: to, note: reason,
+          entity_type: "SalesOrder", entity_rowid: soId, from_status: from, to_status: to,
+          note: manual ? `manual — ${reason}` : reason,
         });
 
         // Approval verdicts ping the order's salesperson in-app.
@@ -1218,9 +1265,23 @@ app.post("/so-status/:rowid", async (req, res) => {
           await notifyUser(catalyst, sp && sp.app_user, `Order ${so.order_number} ${verdict}`, `#/orders/${soId}`);
         }
 
-        // On confirmation, auto-enqueue the order's items into the production
-        // waitlist (shared with SOs born Confirmed via the approver bypass).
+        // RETIRED no-op since CR-198 (production-first): confirming an SO no longer
+        // creates production jobs — see enqueueSoProduction. Call kept for rollback.
         if (to === "Confirmed") await enqueueSoProduction(catalyst, ds, soId);
+        // A cancelled order hands its allocated stock back (CR-199). Best-effort:
+        // boxes already palletised stay claimed until they are unpacked.
+        if (to === "Cancelled") {
+          const allocs = await zcqlAllRows(
+            catalyst,
+            `SELECT ROWID FROM ProductionLog WHERE sales_order = ${soId} AND entry_type = 'alloc' AND deleted_at is null`,
+          );
+          // Still best-effort (the cancel itself must not fail), but never silent:
+          // a claim that stays behind keeps stock reserved, so it is logged.
+          for (const a of allocs) {
+            try { await deallocateCore(catalyst, ds, String(a.ROWID)); }
+            catch (e) { console.error("cancel dealloc", soId, String(a.ROWID), e && e.message); }
+          }
+        }
         return { rowid: soId, data: { ROWID: soId, status: to } };
       },
     );
@@ -1233,7 +1294,7 @@ app.post("/so-status/:rowid", async (req, res) => {
 /* ----------------------------------------------------------------
    Business: SalesOrder header + line items
    body: { customer, po_number, order_date, shipment_date, payment_term,
-           port_of_discharge, status, currency, remarks, address, order_number,
+           port_of_discharge, status, currency, remarks, address, shipping_address, order_number,
            quote_rowid?, salesperson, customer_notes, terms, box_branding?,
            lines: [{ item, qty, rate, discount?, stage?, priority?, due_date? }] }
    ---------------------------------------------------------------- */
@@ -1270,9 +1331,10 @@ app.post("/so-with-items", async (req, res) => {
 });
 
 /* ----------------------------------------------------------------
-   Business: update an existing SalesOrder header + REPLACE its line
-   items — mirror of /update-quote-with-items. order_number is never
-   editable; status is never editable here (use /so-status).
+   Business: update an existing SalesOrder header + its line items IN
+   PLACE (CR-232: lines[].id = existing OrderItem, no id = new line, a
+   missing id = removed). order_number is never editable; status is never
+   editable here (use /so-status).
    ---------------------------------------------------------------- */
 app.post("/update-so-with-items/:rowid", async (req, res) => {
   try {
@@ -1296,19 +1358,19 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         )[0];
         if (!cur) throw badRequest(`Sales order not found: ${soId}`, 404);
 
-        // Once any work is recorded the lines are FK-referenced downstream
-        // (pallets, containers) — a wholesale line replace would orphan them.
+        // CR-232: lines are edited IN PLACE (matched by lines[].id) so an order
+        // with work recorded — pallets, loads, a partial dispatch — stays editable.
         const QTY_COLS = [
           "produced_qty_boxes", "purchased_qty_boxes", "palletized_qty_boxes",
           "loaded_qty_boxes", "dispatched_qty_boxes",
         ];
         const oldItems = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, ${QTY_COLS.join(", ")} FROM OrderItem WHERE sales_order = ${soId}`,
+            `SELECT ROWID, design, ${QTY_COLS.join(", ")} FROM OrderItem WHERE sales_order = ${soId}`,
           ),
         );
-        if (oldItems.some((it) => QTY_COLS.some((c) => (Number(it[c]) || 0) > 0)))
-          throw badRequest("Work already recorded on this order — items can no longer be edited", 409);
+        const hasWork = (it) => QTY_COLS.some((c) => (Number(it[c]) || 0) > 0);
+        const workRecorded = oldItems.some(hasWork);
 
         // Validate everything up front — never write a header then fail on a line.
         assertDateOrder(body.order_date, body.shipment_date, "order date", "shipment date");
@@ -1318,13 +1380,43 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
 
+        // Line rules, checked before any write: a line with work keeps its
+        // design, can't drop below what is already palletised/loaded/dispatched,
+        // and can't be removed (pallets and loads point at it).
+        const oldById = new Map(oldItems.map((r) => [String(r.ROWID), r]));
+        items.forEach((it, i) => {
+          const id = String(it.line.id || "");
+          if (!id) return;
+          const old = oldById.get(id);
+          if (!old) throw badRequest(`Line ${i + 1} no longer exists on this order — reload and retry`, 409);
+          if (!hasWork(old)) return;
+          if (String(old.design) !== String(designIds[i]))
+            throw badRequest(`Line ${i + 1}: the item can't change once work is recorded`, 409);
+          const floor = Math.max(
+            Number(old.palletized_qty_boxes) || 0, Number(old.loaded_qty_boxes) || 0, Number(old.dispatched_qty_boxes) || 0,
+          );
+          if ((Number(it.line.qty) || 0) < floor)
+            throw badRequest(`Line ${i + 1}: qty can't go below ${floor} boxes already palletised / loaded / dispatched`);
+        });
+        const keptIds = new Set(items.map((it) => String(it.line.id || "")).filter(Boolean));
+        const removed = oldItems.filter((r) => !keptIds.has(String(r.ROWID)));
+        if (removed.some(hasWork))
+          throw badRequest("A line with work recorded can't be removed — reduce its qty instead", 409);
+        if (removed.length) {
+          const planned = rowList(await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM PalletizationPlanLine WHERE order_item IN (${removed.map((r) => r.ROWID).join(",")}) AND deleted_at is null LIMIT 1`,
+          ));
+          if (planned.length) throw badRequest("A line that is on a palletization plan can't be removed", 409);
+        }
+
         const doc = docCompute(total, body);
         // Editing content invalidates a pending/granted approval → back to
         // Draft ("Confirmed" is the approved state in SO_TRANSITIONS) —
         // unless the editor can approve SOs (CR): stays/lands Confirmed.
         const curStatus = String(cur.status || "Draft");
+        // Never once work is recorded: a Draft order would drop off the floor.
         const nextStatus =
-          curStatus === "PendingApproval" || curStatus === "Confirmed"
+          !workRecorded && (curStatus === "PendingApproval" || curStatus === "Confirmed")
             ? canApprove(req, "SalesOrder") ? "Confirmed" : "Draft"
             : curStatus;
         await ds.table("SalesOrder").updateRow({
@@ -1339,9 +1431,10 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           currency: body.currency || "INR",
           exchange_rate: Number(body.exchange_rate) || 1,
           remarks: body.remarks || "",
-          // Address isn't on the SO form — omit it when unsent so editing an
-          // order can't blank the address carried over from its quote.
+          // Billing + shipping address (CR-221: on the SO form). Omitted when
+          // unsent so an older client can't blank what the order already carries.
           ...(typeof body.address === "string" ? { address: body.address } : {}),
+          ...(typeof body.shipping_address === "string" ? { shipping_address: body.shipping_address } : {}),
           // Box Brand master pick (Brand FK, CR-162). The legacy free-text
           // box_branding column is left untouched (read-only history).
           box_brand: body.box_brand || null,
@@ -1362,24 +1455,14 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
             note: nextStatus === "Confirmed" ? "edited by an approver — auto-approved" : "edited — approval reset",
           });
 
-        // Replace lines wholesale — safe because the guard above proved no
-        // work quantities exist, so nothing downstream references these rows.
-        for (const r of oldItems) await ds.table("OrderItem").deleteRow(r.ROWID);
+        for (const r of removed) await ds.table("OrderItem").deleteRow(r.ROWID);
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           const l = it.line;
-          await ds.table("OrderItem").insertRow({
-            sales_order: soId,
+          const fields = {
             design: designIds[i],
             pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
             ordered_qty_boxes: Number(l.qty) || 0,
-            produced_qty_boxes: 0,
-            purchased_qty_boxes: 0,
-            qc_passed_qty_boxes: 0,
-            palletized_qty_boxes: 0,
-            loaded_qty_boxes: 0,
-            dispatched_qty_boxes: 0,
-            stage: l.stage || "po",
             priority_level: l.priority || "normal",
             due_date: l.due_date || undefined,
             rate: Number(l.rate) || 0,
@@ -1387,8 +1470,25 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
             description: l.description || "",
             sub_total: it.sub,
             final_total: it.sub,
-          });
+          };
+          if (l.id) await ds.table("OrderItem").updateRow({ ROWID: String(l.id), ...fields });
+          else
+            await ds.table("OrderItem").insertRow({
+              sales_order: soId,
+              ...fields,
+              produced_qty_boxes: 0,
+              purchased_qty_boxes: 0,
+              qc_passed_qty_boxes: 0,
+              palletized_qty_boxes: 0,
+              loaded_qty_boxes: 0,
+              dispatched_qty_boxes: 0,
+              stage: l.stage || "po",
+            });
         }
+        // An edit is an explicit user act, so the status may step BACK too:
+        // 1000→400 on a 400-dispatched order ⇒ Completed; back to 1000 ⇒ Partially Completed.
+        if (workRecorded)
+          await recountOrderItems(catalyst, ds, oldItems.map((r) => r.ROWID), { allowDemote: true });
         // Approver-edit landed a pending SO on Confirmed → run the same
         // side-effect the approve click would have (after lines are replaced).
         if (curStatus === "PendingApproval" && nextStatus === "Confirmed")
@@ -1458,6 +1558,7 @@ async function createSalesOrder(ds, body, maps) {
     exchange_rate: Number(body.exchange_rate) || 1,
     remarks: body.remarks || "",
     address: body.address || "",
+    shipping_address: body.shipping_address || "",
     manual_so_number: body.manual_so_number || "",
     // Box Brand master pick (Brand FK, CR-162) — replaces the free-text box_branding.
     box_brand: body.box_brand || null,
@@ -1584,7 +1685,9 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             currency: q.currency,
             exchange_rate: q.exchange_rate,
             remarks: body.remarks || `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
-            address: q.address,
+            // CR-221: the convert form may edit the addresses; unsent = the quote's.
+            address: typeof body.address === "string" ? body.address : q.address,
+            shipping_address: typeof body.shipping_address === "string" ? body.shipping_address : q.shipping_address,
             // Carry the quote's Books-parity header fields onto the SO, allowing
             // the convert request to override per-field. Sales person carries by
             // FK (sales_person_rowid); a name override resolves in createSalesOrder.
@@ -1679,8 +1782,43 @@ async function loadOrderItems(catalyst, ids, cols) {
    the manual po/prod/qc chain and produced_qty_boxes are never touched.
    ---------------------------------------------------------------- */
 const STAGE_RANK = { po: 0, prod: 1, qc: 2, packing: 3, loading: 4, final: 5 };
+const { SO_RANK, nextSoStatus } = require("./lib/soStatus");
 
-async function recountOrderItems(catalyst, ds, oiIds) {
+/* CR-230/233: dispatch closes the SalesOrder — Partially Completed / Completed
+   (dispatched vs ordered over ALL the SO's lines). Palletization + loading
+   progress are grid columns, not SO statuses. Runs at the tail of every recount. Promote-only unless
+   allowDemote (an SO edit), so a manual status is never silently undone. */
+async function rollupSoStatus(catalyst, ds, oiIds, allowDemote) {
+  const zcql = catalyst.zcql();
+  const soIds = [...new Set(
+    rowList(await zcql.executeZCQLQuery(`SELECT sales_order FROM OrderItem WHERE ROWID IN (${oiIds.join(",")})`))
+      .map((r) => String(r.sales_order || "")),
+  )].filter(Boolean);
+  for (const soId of soIds) {
+    const so = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, status FROM SalesOrder WHERE ROWID = ${soId}`))[0];
+    const from = String((so && so.status) || "");
+    if (!(from in SO_RANK)) continue;
+    const items = await zcqlAllRows(
+      catalyst,
+      `SELECT ROWID, ordered_qty_boxes, dispatched_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+    );
+    if (!items.length) continue;
+    const t = { ordered: 0, dispatched: 0 };
+    for (const it of items) {
+      t.ordered += Number(it.ordered_qty_boxes) || 0;
+      t.dispatched += Number(it.dispatched_qty_boxes) || 0;
+    }
+    const to = nextSoStatus(from, t, allowDemote);
+    if (!to) continue;
+    await ds.table("SalesOrder").updateRow({ ROWID: soId, status: to });
+    await logTransition(catalyst, {
+      entity_type: "SalesOrder", entity_rowid: soId, from_status: from, to_status: to,
+      note: "auto — follows dispatch",
+    });
+  }
+}
+
+async function recountOrderItems(catalyst, ds, oiIds, opts) {
   const uniq = [...new Set((oiIds || []).map(String))].filter(Boolean);
   if (!uniq.length) return;
   const zcql = catalyst.zcql();
@@ -1781,6 +1919,7 @@ async function recountOrderItems(catalyst, ds, oiIds) {
         entity_type: "OrderItem", entity_rowid: oiId, from_status: curStage, to_status: derived,
       });
   }
+  await rollupSoStatus(catalyst, ds, uniq, !!(opts && opts.allowDemote));
 }
 
 /* 3b. Close a pallet — PalletisedBatch + lines + OrderItem.palletized + events. */
@@ -1990,7 +2129,7 @@ async function batchSeriesSettings(catalyst) {
     ),
   );
   const get = (k) => String((rows.find((r) => String(r.setting_key) === k) || {}).setting_value || "");
-  const clean = (s) => s.replace(/['%_]/g, "").slice(0, 10);
+  const clean = (s) => s.replace(/['%_*]/g, "").slice(0, 10);
   return {
     prefix: clean(get("batch_series_prefix")) || "B",
     sep: clean(get("batch_series_separator")) || "/",
@@ -2013,9 +2152,13 @@ async function nextBatchNumber(catalyst, designId) {
   const { prefix: p, sep, start } = await batchSeriesSettings(catalyst);
   const now = new Date();
   const prefix = `${p}${sep}${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}${sep}`;
+  // ROWIDs (~7e16) exceed Number.MAX_SAFE_INTEGER — Number() rounded the id, the
+  // scan matched nothing and every mint came out …/001. Keep it a digit string.
+  const id = String(designId);
+  if (!/^\d+$/.test(id)) throw badRequest("Batch numbering needs a valid item");
   const rows = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT batch_number FROM ProductionLog WHERE design = ${Number(designId)} AND batch_number LIKE '${prefix}%' AND deleted_at is null`,
+      `SELECT batch_number FROM ProductionLog WHERE design = ${id} AND batch_number LIKE '${prefix}*' AND deleted_at is null`,
     ),
   );
   let max = 0;
@@ -2131,12 +2274,41 @@ async function assertPlanWithinOrdered(catalyst, lines, excludePlanId) {
   }
 }
 
+/* CR-223: a hand-made plan line arrives batch-less (the form plans per design).
+   Split it FIFO over the item's produced/allocated batches not yet on any plan
+   line — the same `unqueuedBatches` the auto-enqueue uses — so the batch trail
+   survives manual plans. Boxes beyond what is produced stay one blank-batch
+   line (planning ahead is allowed). Lines that name a batch pass through. */
+async function attributeBatches(catalyst, lines) {
+  const ids = [...new Set(lines.filter((l) => !l.batch_number && /^\d+$/.test(l.order_item)).map((l) => l.order_item))];
+  if (!ids.length) return lines;
+  const live = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT order_item, batch_number, boxes FROM PalletizationPlanLine WHERE order_item IN (${ids.join(",")}) AND deleted_at is null`,
+    ),
+  );
+  const out = [];
+  for (const l of lines) {
+    if (l.batch_number || !ids.includes(l.order_item)) { out.push(l); continue; }
+    let left = l.boxes;
+    // `out` rides along so two blank lines for one item never claim the same boxes.
+    for (const b of await unqueuedBatches(catalyst, l.order_item, [...live, ...out])) {
+      if (left <= 0) break;
+      const take = Math.min(left, b.available);
+      out.push({ ...l, boxes: take, batch_number: b.batch, ...(b.brand ? { box_brand: b.brand } : {}) });
+      left -= take;
+    }
+    if (left > 0) out.push({ ...l, boxes: left });
+  }
+  return out.map((l, i) => ({ ...l, position: i }));
+}
+
 /** Insert a PalletizationPlan header + its lines. Compensates on mid-write failure. */
 async function createPalPlan(catalyst, ds, body, sMap) {
   // Blank pal_number → server assigns the next number (clients never mint it).
   const palNumber = String(body.pal_number || "").trim() || (await nextPalNumber(catalyst));
   await assertUnique(catalyst, "PalletizationPlan", "pal_number", palNumber);
-  const lines = normalizePlanLines(body);
+  const lines = await attributeBatches(catalyst, normalizePlanLines(body));
   await assertPlanWithinOrdered(catalyst, lines);
   const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
 
@@ -2208,16 +2380,21 @@ app.post("/pal-plan", async (req, res) => {
    are simply absent, and callers put the residue on a "" line. */
 async function unqueuedBatches(catalyst, orderItemId, liveLines) {
   const oiId = String(orderItemId);
-  const recs = rowList(
-    await catalyst.zcql().executeZCQLQuery(
-      `SELECT batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'record' AND deleted_at is null`,
-    ),
-  );
-  const producedByBatch = new Map(); // batch → { qty, first }
+  // Records AND stock allocations (CR-199) are the item's boxes per batch.
+  // box_brand rides along (CR-197); older Data Stores lack the column.
+  const where = `FROM ProductionLog WHERE order_item = ${oiId} AND (entry_type = 'record' OR entry_type = 'alloc') AND deleted_at is null`;
+  let recs;
+  try {
+    recs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT batch_number, qty_boxes, box_brand, CREATEDTIME ${where}`));
+  } catch (_) {
+    recs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT batch_number, qty_boxes, CREATEDTIME ${where}`));
+  }
+  const producedByBatch = new Map(); // batch → { qty, first, brand }
   for (const r of recs) {
     const b = String(r.batch_number || "");
-    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || "") };
+    const cur = producedByBatch.get(b) || { qty: 0, first: String(r.CREATEDTIME || ""), brand: "" };
     cur.qty += Number(r.qty_boxes) || 0;
+    if (!cur.brand && r.box_brand) cur.brand = String(r.box_brand);
     if (String(r.CREATEDTIME || "") < cur.first) cur.first = String(r.CREATEDTIME || "");
     producedByBatch.set(b, cur);
   }
@@ -2230,7 +2407,7 @@ async function unqueuedBatches(catalyst, orderItemId, liveLines) {
   return [...producedByBatch.entries()]
     .filter(([b]) => b !== "")
     .sort((a, c) => (a[1].first < c[1].first ? -1 : 1)) // FIFO by first record
-    .map(([batch, p]) => ({ batch, available: Math.max(0, p.qty - (enqueuedByBatch.get(batch) || 0)) }))
+    .map(([batch, p]) => ({ batch, brand: p.brand, available: Math.max(0, p.qty - (enqueuedByBatch.get(batch) || 0)) }))
     .filter((x) => x.available > 0);
 }
 
@@ -2334,7 +2511,7 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverrid
   const batches = await unqueuedBatches(catalyst, oiId, liveLines);
 
   // Every new card is born "Planning" — the Ready for Palletization column.
-  const upsert = async (batch, alloc) => {
+  const upsert = async (batch, alloc, brand) => {
     const mine = liveLines.find(
       (l) =>
         String(l.plan) === planId &&
@@ -2362,17 +2539,19 @@ async function autoEnqueuePalletization(catalyst, ds, orderItemId, palletOverrid
         position: liveLines.filter((l) => String(l.plan) === planId).length,
         status: "Planning",
         batch_number: batch,
+        // The carton the batch was produced in wins the line → SO → customer chain.
+        ...(brand ? { box_brand: brand } : {}),
       });
       liveLines.push({ ROWID: lr.ROWID, plan: planId, order_item: oiId, boxes: alloc, status: "Planning", batch_number: batch });
     }
   };
 
   let remaining = topUp;
-  for (const { batch, available } of batches) {
+  for (const { batch, available, brand } of batches) {
     if (remaining <= 0) break;
     const alloc = Math.min(available, remaining);
     if (alloc <= 0) continue;
-    await upsert(batch, alloc);
+    await upsert(batch, alloc, brand);
     remaining -= alloc;
   }
   if (remaining > 0) await upsert("", remaining);
@@ -2521,7 +2700,7 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, order_item, plan, sales_order, design, pallet, boxes, position, batch_number, pallet_group, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, order_item, plan, sales_order, design, pallet, boxes, position, batch_number, pallet_group, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         );
         if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -2547,6 +2726,7 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
             position: Number(line.position) || 0,
             status: to,
             batch_number: line.batch_number ? String(line.batch_number) : "",
+            ...(line.box_brand ? { box_brand: String(line.box_brand) } : {}),
             ...(line.pallet_group ? { pallet_group: String(line.pallet_group) } : {}),
             ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
           });
@@ -2839,7 +3019,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
         const pick = async (id) =>
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
+              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
             ),
           )[0];
         const target = await pick(targetId);
@@ -2876,6 +3056,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
             position: Number(donor.position) || 0,
             status: "Palletizing",
             batch_number: donor.batch_number ? String(donor.batch_number) : "",
+            ...(donor.box_brand ? { box_brand: String(donor.box_brand) } : {}),
             pallet_group: group,
             ...(String(donor.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
           });
@@ -2954,13 +3135,14 @@ async function nextBoxNumber(catalyst) {
 
 /* Loading series LOAD/FY/NNN — the loading's own identity (boxes predating
    this column stay numberless; the client label falls back). The LIKE scope
-   keeps the scan under ZCQL's 300-row cap. */
+   keeps the scan under ZCQL's 300-row cap. ZCQL's LIKE wildcard is `*`, not
+   `%` (CR-209: `%` matched nothing, so every loading minted 001). */
 async function nextLoadNumber(catalyst) {
   const now = new Date();
   const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
   const prefix = `LOAD/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
   const rows = rowList(
-    await catalyst.zcql().executeZCQLQuery(`SELECT load_number FROM LoadBox WHERE load_number LIKE '${prefix}%'`),
+    await catalyst.zcql().executeZCQLQuery(`SELECT load_number FROM LoadBox WHERE load_number LIKE '${prefix}*'`),
   );
   let max = 0;
   for (const r of rows) {
@@ -3290,6 +3472,9 @@ async function writeLineIntoBox(ds, line, boxRowid, n) {
       position: Number(line.position) || 0,
       status: "ReadyToLoad",
       batch_number: line.batch_number ? String(line.batch_number) : "",
+      // The production carton (CR-197) stays with both halves of a split;
+      // pallet_no is deliberately NOT copied — a typed range belongs to one line.
+      ...(line.box_brand ? { box_brand: String(line.box_brand) } : {}),
       ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
     });
     try {
@@ -3358,7 +3543,7 @@ app.post("/pal-lines-box", async (req, res) => {
         const byId = new Map(
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
+              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
             ),
           ).map((r) => [String(r.ROWID), r]),
         );
@@ -3417,7 +3602,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
       async () => {
         const line = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         )[0];
         if (!line) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -3527,7 +3712,7 @@ app.post("/send-to-loading", async (req, res) => {
           throw badRequest("Items can only be added to an open loading", 409);
         const items = rowList(
           await zcql.executeZCQLQuery(
-            `SELECT ROWID, design, pallet, ordered_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
+            `SELECT ROWID, design, pallet, ordered_qty_boxes, produced_qty_boxes, palletized_qty_boxes FROM OrderItem WHERE sales_order = ${soId} AND deleted_at is null`,
           ),
         );
         const byId = new Map(items.map((i) => [String(i.ROWID), i]));
@@ -3544,8 +3729,11 @@ app.post("/send-to-loading", async (req, res) => {
         }
         for (const [oiId, n] of wanted) {
           const oi = byId.get(oiId);
-          const cap = (Number(oi.ordered_qty_boxes) || 0) - (Number(oi.palletized_qty_boxes) || 0);
-          if (n > cap) throw badRequest(`Only ${Math.max(cap, 0)} boxes remain to send for an item`, 409);
+          // CR-199: only boxes the order OWNS (produced/allocated) may ship —
+          // unallocated stock would starve another order's reservation.
+          const owned = Math.min(Number(oi.ordered_qty_boxes) || 0, Number(oi.produced_qty_boxes) || 0);
+          const cap = owned - (Number(oi.palletized_qty_boxes) || 0);
+          if (n > cap) throw badRequest(`Only ${Math.max(cap, 0)} allocated boxes remain to send for an item — allocate stock first`, 409);
         }
 
         const planId = await ensureOpenPlan(catalyst, ds, soId, "Auto — direct loading");
@@ -3556,9 +3744,11 @@ app.post("/send-to-loading", async (req, res) => {
         ).length;
         // Batch trail: split each item's boxes across its unqueued production
         // batches (FIFO), one line per batch — same rule as the auto-enqueue, so
-        // skipping palletization doesn't lose the batch. The cap here is
-        // ordered−palletized, which can exceed what's produced, so whatever the
+        // skipping palletization doesn't lose the batch. The cap above is
+        // min(ordered, produced)−palletized (CR-199); whatever the unqueued
         // batches don't cover falls through to one unattributed "" line.
+        // KNOWN GAP (review 2026-09-19 #1): boxes already on a Planning/Palletizing
+        // line are not subtracted, so they can be sent again — fix pending a decision.
         // Soft-deleting a plan leaves its lines live, so restrict to live plans
         // (mirror of recountOrderItems / autoEnqueuePalletization).
         const allSoLines = rowList(
@@ -3588,11 +3778,11 @@ app.post("/send-to-loading", async (req, res) => {
           const oi = byId.get(oiId);
           const chunks = [];
           let left = n;
-          for (const { batch, available } of await unqueuedBatches(catalyst, oiId, soLines)) {
+          for (const { batch, brand, available } of await unqueuedBatches(catalyst, oiId, soLines)) {
             if (left <= 0) break;
             const alloc = Math.min(available, left);
             if (alloc <= 0) continue;
-            chunks.push({ batch, boxes: alloc });
+            chunks.push({ batch, brand, boxes: alloc });
             left -= alloc;
           }
           if (left > 0) chunks.push({ batch: "", boxes: left });
@@ -3607,6 +3797,8 @@ app.post("/send-to-loading", async (req, res) => {
               position: pos++,
               status: "ReadyToLoad",
               batch_number: c.batch,
+              // Same carton rule as the auto-enqueue (CR-197): the production brand wins.
+              ...(c.brand ? { box_brand: c.brand } : {}),
               ...(box ? { load_box: String(box.ROWID) } : {}),
             });
             soLines.push({ order_item: oiId, boxes: c.boxes, batch_number: c.batch });
@@ -3726,6 +3918,11 @@ app.post("/production-log", async (req, res) => {
               await ds.table("ProductionLog").updateRow({ ROWID: id, deleted_at: stamp });
           }
         }
+        // CR-234: "Start New Production" lands the job straight in In Production.
+        // Literal pair, not PRODUCTION_STAGES — a forged body must not create a
+        // job that is already Completed.
+        const stage = body.stage == null ? "New" : String(body.stage);
+        if (!["New", "InProduction"].includes(stage)) throw badRequest(`Unsupported stage: ${stage}`);
         const group = `PR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const created = [];
         for (const l of lines) {
@@ -3751,7 +3948,7 @@ app.post("/production-log", async (req, res) => {
             qty_boxes: 0,
             status: "Approved",
             entry_type: "plan",
-            stage: "New",
+            stage,
             request_group: group,
             production_date: String(body.production_date || ""),
             shift: String(body.shift || ""),
@@ -3759,7 +3956,7 @@ app.post("/production-log", async (req, res) => {
             note: String(body.note || ""),
           });
           await logTransition(catalyst, {
-            entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: "New",
+            entity_type: "ProductionLog", entity_rowid: row.ROWID, from_status: "", to_status: stage,
           });
           created.push(String(row.ROWID));
         }
@@ -3787,7 +3984,7 @@ app.post("/production-delete/:rowid", async (req, res) => {
       async () => {
         const pl = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, order_item, qty_boxes FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
+            `SELECT ROWID, order_item, design, qty_boxes FROM ProductionLog WHERE ROWID = ${rowid} AND deleted_at is null`,
           ),
         )[0];
         if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
@@ -3796,9 +3993,24 @@ app.post("/production-delete/:rowid", async (req, res) => {
         // on the plan line itself, from before the split-row model).
         const children = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, qty_boxes FROM ProductionLog WHERE parent_log = ${rowid} AND deleted_at is null`,
+            `SELECT ROWID, qty_boxes, batch_number FROM ProductionLog WHERE parent_log = ${rowid} AND deleted_at is null`,
           ),
         );
+        // Stock output already allocated to orders (CR-199) must be released first.
+        if (!pl.order_item && pl.design) {
+          const free = await serverFreeStock(catalyst, String(pl.design));
+          const going = new Map();
+          if (Number(pl.qty_boxes) > 0) going.set("", Number(pl.qty_boxes));
+          for (const c of children) {
+            const b = String(c.batch_number || "");
+            going.set(b, (going.get(b) || 0) + (Number(c.qty_boxes) || 0));
+          }
+          for (const [b, n] of going) {
+            const short = n - Math.max(0, free.get(b) || 0);
+            if (short > 0)
+              throw badRequest(`${short} boxes of ${b ? `batch ${b}` : "this output"} are allocated to orders or already shipped — de-allocate first`, 409);
+          }
+        }
         const reverseQty =
           (Number(pl.qty_boxes) || 0) + children.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
 
@@ -3834,6 +4046,237 @@ app.post("/production-delete/:rowid", async (req, res) => {
       },
     );
     res.json({ ok: true, rowid: result.rowid });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ================================================================
+   Stock allocation (CR-199, production-first). The factory produces to
+   STOCK; an SO line then CLAIMS boxes of a batch via an entry_type="alloc"
+   ProductionLog row. An alloc row is a claim only — never supply — so
+   on-hand is unchanged; it bumps OrderItem.produced_qty_boxes and feeds the
+   Ready-for-Palletization queue exactly like an order-linked record did.
+   ================================================================ */
+async function zcqlAllRows(catalyst, sqlNoLimit) {
+  const out = [];
+  for (let off = 0; ; off += 300) {
+    const page = rowList(await catalyst.zcql().executeZCQLQuery(`${sqlNoLimit} LIMIT ${off}, 300`));
+    out.push(...page);
+    if (page.length < 300) return out;
+  }
+}
+
+/* Free boxes per batch of one design = supply − loaded − Σ per order item
+   max(0, claim − its loaded). Mirrors the client's reservedByBatch/freeOf.
+   ponytail: race/double-submit backstop only — it skips the client reducer's
+   FIFO spill of blank-batch loads and the legacy PalletisedBatch consumption,
+   so it can read slightly HIGH (permissive), never low; the picker shows the
+   exact figure. Port the reducer here if that gap ever bites. */
+async function serverFreeStock(catalyst, designId) {
+  const logs = await zcqlAllRows(
+    catalyst,
+    `SELECT entry_type, batch_number, qty_boxes, order_item FROM ProductionLog WHERE design = ${designId} AND deleted_at is null`,
+  );
+  const lines = await zcqlAllRows(
+    catalyst,
+    `SELECT order_item, batch_number, boxes FROM PalletizationPlanLine WHERE design = ${designId} AND load_box is not null AND deleted_at is null`,
+  );
+  const d = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT is_batched, accounting_stock FROM Design WHERE ROWID = ${designId}`),
+  )[0] || {};
+  const free = new Map(); // batch → boxes
+  const add = (b, n) => free.set(b, (free.get(b) || 0) + n);
+  const claim = new Map(); // `${oi}|${batch}` → outstanding boxes
+  if (!(d.is_batched === true || String(d.is_batched) === "true")) add("", Number(d.accounting_stock) || 0);
+  for (const r of logs) {
+    const type = String(r.entry_type || "");
+    const qty = Number(r.qty_boxes) || 0;
+    if (qty <= 0) continue;
+    const batch = type === "plan" ? "" : String(r.batch_number || "");
+    if (type === "record" || type === "opening" || type === "plan") add(batch, qty);
+    const oi = String(r.order_item || "");
+    if (oi && (type === "record" || type === "alloc" || type === "plan"))
+      claim.set(`${oi}|${batch}`, (claim.get(`${oi}|${batch}`) || 0) + qty);
+  }
+  for (const l of lines) {
+    const n = Number(l.boxes) || 0;
+    const batch = String(l.batch_number || "");
+    add(batch, -n);
+    const k = `${String(l.order_item || "")}|${batch}`;
+    if (claim.has(k)) claim.set(k, claim.get(k) - n);
+  }
+  for (const [k, left] of claim) if (left > 0) add(k.slice(k.indexOf("|") + 1), -left);
+  return free;
+}
+
+app.post("/allocate-stock", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const oiId = String(body.order_item || "").replace(/[^0-9]/g, "");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "OrderItem", operation: "allocate-stock", payload: { order_item: oiId, rows: body.rows } },
+      async () => {
+        if (!oiId) throw badRequest("order_item is required");
+        const want = new Map(); // batch → boxes (duplicates merged)
+        for (const r of Array.isArray(body.rows) ? body.rows : []) {
+          const n = Number(r && r.qty_boxes);
+          if (!Number.isInteger(n) || n <= 0) throw badRequest("qty_boxes must be a positive whole number");
+          const b = String((r && r.batch_number) || "").trim();
+          want.set(b, (want.get(b) || 0) + n);
+        }
+        if (!want.size) throw badRequest("Pick at least one batch to allocate");
+        const total = [...want.values()].reduce((s, n) => s + n, 0);
+
+        const oi = (await loadOrderItems(
+          catalyst, [oiId], "ROWID, sales_order, design, ordered_qty_boxes, produced_qty_boxes, stage",
+        )).get(oiId);
+        if (!oi || !oi.sales_order || !oi.design) throw badRequest(`Order item not found: ${oiId}`, 404);
+        const soId = String(oi.sales_order);
+        const so = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT status FROM SalesOrder WHERE ROWID = ${soId}`))[0];
+        if (!so || ["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(String(so.status || "")))
+          throw badRequest("Stock can only be allocated to a confirmed sales order", 409);
+        const produced = Number(oi.produced_qty_boxes) || 0;
+        const room = (Number(oi.ordered_qty_boxes) || 0) - produced;
+        if (total > room) throw badRequest(`Only ${Math.max(room, 0)} boxes of this item are still unallocated`, 409);
+
+        const free = await serverFreeStock(catalyst, String(oi.design));
+        for (const [b, n] of want) {
+          const f = Math.max(0, free.get(b) || 0);
+          if (n > f) throw badRequest(`Only ${f} free boxes left in ${b ? `batch ${b}` : "unbatched stock"}`, 409);
+        }
+
+        const actor = await currentActor(catalyst);
+        const stage = String(oi.stage || "");
+        const patch = { ROWID: oiId, produced_qty_boxes: produced + total, ...(stage === "po" ? { stage: "prod" } : {}) };
+        await ds.table("OrderItem").updateRow(patch);
+        const inserted = [];
+        try {
+          for (const [b, n] of want) {
+            // The carton the batch was packed in travels with the claim (CR-197);
+            // tolerate a Data Store that predates ProductionLog.box_brand.
+            let brand = null;
+            if (b) {
+              try {
+                const hit = rowList(
+                  await catalyst.zcql().executeZCQLQuery(
+                    `SELECT box_brand FROM ProductionLog WHERE design = ${oi.design} AND batch_number = '${b.replace(/'/g, "''")}' AND box_brand is not null AND deleted_at is null LIMIT 1`,
+                  ),
+                )[0];
+                brand = hit && hit.box_brand ? String(hit.box_brand) : null;
+              } catch (_) { /* column not created yet */ }
+            }
+            const row = await ds.table("ProductionLog").insertRow({
+              entry_type: "alloc",
+              design: String(oi.design),
+              sales_order: soId,
+              order_item: oiId,
+              batch_number: b,
+              qty_boxes: n,
+              qty_requested: 0,
+              status: "Allocated",
+              stage: "Completed",
+              production_date: new Date().toISOString().slice(0, 10),
+              performed_by: String(actor || ""),
+              ...(brand ? { box_brand: brand } : {}),
+            });
+            inserted.push(String(row.ROWID));
+          }
+        } catch (e) {
+          for (const id of inserted) { try { await ds.table("ProductionLog").deleteRow(id); } catch (_) {} }
+          try { await ds.table("OrderItem").updateRow({ ROWID: oiId, produced_qty_boxes: produced, stage }); } catch (_) {}
+          throw e;
+        }
+        if (patch.stage)
+          await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: oiId, from_status: stage, to_status: "prod" });
+        // Allocated boxes flow straight to the palletization queue; a queue
+        // failure never fails the already-committed allocation.
+        try { await autoEnqueuePalletization(catalyst, ds, oiId, body.pallet); } catch (e) { console.error("alloc enqueue", e); }
+        await logRelated(catalyst, [{ table: "SalesOrder", rowid: soId }], "stock-allocated", { order_item: oiId, boxes: total });
+        return { rowid: oiId, data: { allocated: total, rows: inserted.length } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Undo ONE alloc row. Refused once its boxes have moved past the Planning
+   queue (palletising/ready/loaded) — unpack first, same rule as /production-delete.
+   Auto Planning cards of that batch shrink with it; a user-pinned (manual_edit)
+   card is the user's decision, so it blocks instead of being trimmed. */
+async function deallocateCore(catalyst, ds, rowid) {
+  const a = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, order_item, sales_order, batch_number, qty_boxes FROM ProductionLog WHERE ROWID = ${rowid} AND entry_type = 'alloc' AND deleted_at is null`,
+    ),
+  )[0];
+  if (!a) throw badRequest(`Allocation not found: ${rowid}`, 404);
+  const oiId = String(a.order_item);
+  const batch = String(a.batch_number || "");
+  const qty = Number(a.qty_boxes) || 0;
+  const oi = (await loadOrderItems(catalyst, [oiId], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage")).get(oiId);
+  if (!oi) throw badRequest(`Order item not found: ${oiId}`, 404);
+  const produced = Number(oi.produced_qty_boxes) || 0;
+  if (produced - qty < (Number(oi.palletized_qty_boxes) || 0))
+    throw badRequest("These boxes are already palletised — unpack them first", 409);
+
+  const safe = batch.replace(/'/g, "''");
+  const claims = await zcqlAllRows(
+    catalyst,
+    `SELECT qty_boxes FROM ProductionLog WHERE order_item = ${oiId} AND batch_number = '${safe}' AND (entry_type = 'record' OR entry_type = 'alloc') AND deleted_at is null`,
+  );
+  const claimAfter = claims.reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0) - qty;
+  const lines = (await zcqlAllRows(
+    catalyst,
+    `SELECT ROWID, boxes, status, manual_edit, batch_number FROM PalletizationPlanLine WHERE order_item = ${oiId} AND deleted_at is null`,
+  )).filter((l) => String(l.batch_number || "") === batch);
+  const boxesOf = (ls) => ls.reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+  const moved = boxesOf(lines.filter((l) => String(l.status) !== "Planning"));
+  if (claimAfter < moved) throw badRequest("These boxes are already in palletization — unpack them first", 409);
+  const auto = lines.filter((l) => String(l.status) === "Planning" && String(l.manual_edit || "") !== "true");
+  let excess = boxesOf(lines) - claimAfter;
+  if (excess > boxesOf(auto))
+    throw badRequest("A manually planned palletization line still holds these boxes — reduce it first", 409);
+
+  const deletedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
+  for (const l of auto) {
+    if (excess <= 0) break;
+    const cut = Math.min(excess, Number(l.boxes) || 0);
+    const left = (Number(l.boxes) || 0) - cut;
+    await ds.table("PalletizationPlanLine").updateRow(left > 0 ? { ROWID: l.ROWID, boxes: left } : { ROWID: l.ROWID, deleted_at: deletedAt });
+    excess -= cut;
+  }
+  const stage = String(oi.stage || "");
+  const newProduced = Math.max(0, produced - qty);
+  const toPo = newProduced <= 0 && stage === "prod";
+  await ds.table("OrderItem").updateRow({ ROWID: oiId, produced_qty_boxes: newProduced, ...(toPo ? { stage: "po" } : {}) });
+  if (toPo) await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: oiId, from_status: stage, to_status: "po" });
+  await ds.table("ProductionLog").updateRow({ ROWID: a.ROWID, deleted_at: deletedAt });
+  await recountOrderItems(catalyst, ds, [oiId]);
+  await logRelated(catalyst, [{ table: "SalesOrder", rowid: String(a.sales_order || "") }], "stock-deallocated", { order_item: oiId, boxes: qty });
+  return qty;
+}
+
+app.post("/deallocate-stock/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rowid = String(req.params.rowid || "").replace(/[^0-9]/g, "");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "deallocate-stock", payload: { ROWID: rowid } },
+      async () => {
+        if (!rowid) throw badRequest("Allocation id is required");
+        const qty = await deallocateCore(catalyst, ds, rowid);
+        return { rowid, data: { deallocated: qty } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
   } catch (err) {
     sendErr(res, err);
   }
@@ -3942,6 +4385,7 @@ app.post("/production-record/:rowid", async (req, res) => {
           ),
         )[0];
         if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+        const boxBrand = await brandOrNull(catalyst, body.box_brand);
 
         // Produced so far on THIS plan line = its (legacy) qty_boxes + every record child.
         const recs = rowList(
@@ -3997,6 +4441,7 @@ app.post("/production-record/:rowid", async (req, res) => {
           status: "Produced",
           stage: String(pl.stage || "New"),
           batch_number: batchNumber,
+          ...(boxBrand ? { box_brand: boxBrand } : {}),
           production_date: body.production_date != null ? String(body.production_date) : "",
           shift: body.shift != null ? String(body.shift) : "",
           performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -4058,6 +4503,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
           ),
         )[0];
         if (!pl) throw badRequest(`Production entry not found: ${rowid}`, 404);
+        const boxBrand = await brandOrNull(catalyst, body.box_brand);
         await assertBatchesAllowed(catalyst, lines.map((l) => l.batch_number), pl.design);
 
         const recs = rowList(
@@ -4113,6 +4559,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
               status: "Produced",
               stage: String(pl.stage || "New"),
               batch_number: batchNumber,
+              ...(boxBrand ? { box_brand: boxBrand } : {}),
               production_date: l.mfg_date,
               shift: body.shift != null ? String(body.shift) : "",
               performed_by: body.performed_by != null ? String(body.performed_by) : "",
@@ -4258,7 +4705,9 @@ app.post("/production-stage", async (req, res) => {
    unlike /production-record which caps at remaining), bumps OrderItem.produced by
    the delta over what's already recorded, inserts a dated `record` child so derived
    stock updates, and flips every line to stage=Completed.
-   body: { lines: [{ id, qty_boxes }], production_date?, performed_by?, note? }
+   body: { lines: [{ id, qty_boxes, batch_number?, production_date?, box_brand?, note? }],
+           production_date?, performed_by?, note? } — per-line date / note win over
+   the call-level ones (CR-244).
    ponytail: a down-correction below what's already been recorded (delta < 0) only
    completes the stage — it doesn't claw back stock. Prior records are rare now that
    In-Production no longer captures output; upgrade to a negative reconciling record
@@ -4318,14 +4767,23 @@ app.post("/production-complete", async (req, res) => {
             }
             // Batch per line (each completed line is one design's run);
             // blank batch → auto-mint.
-            const batchNumber = String((l && l.batch_number) || "").trim() || (await nextBatchNumber(catalyst, pl.design));
+            const typedBatch = String((l && l.batch_number) || "").trim();
+            // CR-237: the completion form now takes a typed batch — same duplicate
+            // guard as /production-record.
+            if (typedBatch) await assertBatchesAllowed(catalyst, [typedBatch], pl.design);
+            const batchNumber = typedBatch || (await nextBatchNumber(catalyst, pl.design));
+            const boxBrand = await brandOrNull(catalyst, l.box_brand);
             await ds.table("ProductionLog").insertRow({
               parent_log: id, entry_type: "record",
               design: pl.design || null, sales_order: pl.sales_order || null,
               order_item: pl.order_item || null, request_group: pl.request_group || null,
               qty_requested: 0, qty_boxes: delta, status: "Produced", stage: "Completed",
               batch_number: batchNumber,
-              production_date: productionDate, shift: "", performed_by: performedBy, note,
+              ...(boxBrand ? { box_brand: boxBrand } : {}),
+              // CR-244: the Record Production sheet dates / notes each row itself.
+              production_date: l.production_date ? String(l.production_date) : productionDate,
+              shift: "", performed_by: performedBy,
+              note: l.note != null ? String(l.note) : note,
             });
           }
 
@@ -4631,6 +5089,58 @@ app.post("/recount-order-items", async (req, res) => {
           if (rows.length < 100) break;
         }
         return { rowid: "", data: { scanned } };
+      },
+    );
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* One-off (CR-209): the `%` wildcard bug minted LOAD/FY/001 for every loading.
+   Renumber each LOAD/FY/ series that holds duplicates by CREATEDTIME (oldest =
+   001). Idempotent — a series with no duplicates is left alone. Soft-deleted
+   rows keep their place so a number is never reused. */
+app.post("/renumber-loads", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const ds = catalyst.datastore();
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "LoadBox", operation: "renumber-loads", payload: {} },
+      async () => {
+        const zcql = catalyst.zcql();
+        const boxes = [];
+        let offset = 0;
+        for (;;) {
+          const rows = rowList(
+            await zcql.executeZCQLQuery(`SELECT ROWID, load_number, CREATEDTIME FROM LoadBox LIMIT ${offset}, 100`),
+          );
+          boxes.push(...rows);
+          if (rows.length < 100) break;
+          offset += 100;
+        }
+        const series = new Map(); // "LOAD/2026-27/" → rows
+        for (const b of boxes) {
+          const m = String(b.load_number || "").match(/^(LOAD\/\d{4}-\d{2}\/)\d+$/);
+          if (m) (series.get(m[1]) ?? series.set(m[1], []).get(m[1])).push(b);
+        }
+        let updated = 0;
+        for (const [prefix, rows] of series) {
+          if (new Set(rows.map((r) => r.load_number)).size === rows.length) continue;
+          rows.sort(
+            (a, b) => String(a.CREATEDTIME).localeCompare(String(b.CREATEDTIME)) || Number(a.ROWID) - Number(b.ROWID),
+          );
+          for (let i = 0; i < rows.length; i++) {
+            const load_number = `${prefix}${String(i + 1).padStart(3, "0")}`;
+            if (rows[i].load_number === load_number) continue;
+            await ds.table("LoadBox").updateRow({ ROWID: rows[i].ROWID, load_number });
+            updated++;
+          }
+        }
+        return { rowid: "", data: { scanned: boxes.length, updated } };
       },
     );
     res.json({ ok: true, data: result.data });
@@ -5065,12 +5575,39 @@ app.post("/resync-size-snapshots", async (req, res) => {
   }
 });
 
+/* State columns owned by the status-machine routes: [table, column, message].
+   The generic CRUD may never write them — on update OR on insert (a forged
+   insert would mint a pre-approved record and skip canApprove). One list for
+   both verbs so they cannot drift apart. */
+const STATE_COLUMNS = [
+  ["Quote", "status", "Quote status cannot be set directly — use /quote-status"],
+  ["Quote", "conversion_flag", "Quote status cannot be set directly — use /quote-status"],
+  ["SalesOrder", "status", "Sales order status cannot be set directly — use /so-status"],
+  ["PalletizationPlan", "status", "Palletization plan status cannot be set directly — use /pal-status"],
+  ["PalletizationPlanLine", "status", "Palletization line status cannot be set directly — use /pal-line-status"],
+  ["PalletizationPlanLine", "load_box", "Line box allocation cannot be set directly — use /pal-line-box"],
+  ["PanelOrder", "status", "Panel order status cannot be set directly — use /panel-order-status"],
+];
+// The only state a generic insert may carry: the record's initial one.
+const INSERT_INITIAL = { PanelOrder: { status: "Received" } };
+function assertNoStateWrite(table, row, isInsert) {
+  for (const [t, col, msg] of STATE_COLUMNS) {
+    const v = (row || {})[col];
+    if (t !== table || v === undefined) continue;
+    if (isInsert && INSERT_INITIAL[t] && INSERT_INITIAL[t][col] === v) continue;
+    throw badRequest(msg);
+  }
+}
+
 app.post("/:table", async (req, res) => {
   try {
     const catalyst = init(req);
     const table = assertTable(req.params.table);
     if (table === "LoadBox") throw badRequest("Load boxes are managed via the /load-box routes");
     if (table === "PanelLine") throw badRequest("Panel lines are managed via /panel-save (they consume cut-piece stock)");
+    // Born status, numbering and totals are decided server-side by these routes.
+    if (table === "Quote") throw badRequest("Quotes are created via /quote-with-items");
+    if (table === "SalesOrder") throw badRequest("Sales orders are created via /so-with-items or /convert-quote");
     const ds = catalyst.datastore();
     const body = req.body || {};
     const rows = Array.isArray(body.rows) ? body.rows : [body];
@@ -5082,6 +5619,7 @@ app.post("/:table", async (req, res) => {
         // Reject inserts that collide with an existing row on the table's natural key.
         const nk = NATURAL_KEY[table];
         for (const r of rows) {
+          assertNoStateWrite(table, r, true);
           assertNoNegatives(r); // rule #5: no negative numeric values
           if (nk) await assertUnique(catalyst, table, nk, r[nk]);
         }
@@ -5163,19 +5701,8 @@ app.patch("/:table/:rowid", async (req, res) => {
       catalyst,
       { table_name: table, operation: "update", payload: req.body },
       async () => {
-        // Quote/SO status live behind their status-machine endpoints.
-        if (table === "Quote" && (patch.status !== undefined || patch.conversion_flag !== undefined))
-          throw badRequest("Quote status cannot be set directly — use /quote-status");
-        if (table === "SalesOrder" && patch.status !== undefined)
-          throw badRequest("Sales order status cannot be set directly — use /so-status");
-        if (table === "PalletizationPlan" && patch.status !== undefined)
-          throw badRequest("Palletization plan status cannot be set directly — use /pal-status");
-        if (table === "PalletizationPlanLine" && patch.status !== undefined)
-          throw badRequest("Palletization line status cannot be set directly — use /pal-line-status");
-        if (table === "PalletizationPlanLine" && patch.load_box !== undefined)
-          throw badRequest("Line box allocation cannot be set directly — use /pal-line-box");
-        if (table === "PanelOrder" && patch.status !== undefined)
-          throw badRequest("Panel order status cannot be set directly — use /panel-order-status");
+        // Quote/SO/plan/panel-order state lives behind the status-machine endpoints.
+        assertNoStateWrite(table, patch, false);
         if (table === "PanelLine")
           throw badRequest("Panel lines are managed via /panel-save (they consume cut-piece stock)");
         if (table === "LoadBox")

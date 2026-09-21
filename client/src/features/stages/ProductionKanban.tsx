@@ -4,13 +4,14 @@
    remaining portion stays in its In Production / New lane — so a partly-produced
    line appears in BOTH lanes. Stages: New Request → In Production → Completed
    (QC hidden 2026-07). Cards move by hand-rolled HTML5 drag-and-drop; the `+`
-   button on a remaining card logs output. Grouping is an ordered list of
+   menu on a remaining card starts / logs / completes (CR-235). Grouping is an ordered list of
    dimensions (Item / Customer / Order / Size) → nested swimlanes; empty = flat.
    ============================================================ */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar } from "@/ui/primitives";
+import { MoreMenu } from "@/features/common/DetailBits";
 import { fmt } from "@/lib/format";
 import {
   PRODUCTION_STAGE_ORDER,
@@ -50,6 +51,9 @@ function buildCards(groups: ProductionRequestGroup[]): Card[] {
   return cards;
 }
 
+/** Distinct batch numbers logged on a line, in recording order. */
+const batchesOf = (e: ProductionEntry): string => [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))].join(" · ");
+
 function laneKey(e: ProductionEntry, groupBy: ProductionGroupBy): string {
   switch (groupBy) {
     case "item": return e.design || "—";
@@ -65,13 +69,14 @@ export function ProductionKanban({
   groupBy,
   canEdit,
   onMove,
-  onRecord,
+  plusItems,
 }: {
   groups: ProductionRequestGroup[];
   groupBy: ProductionGroupBy[];
   canEdit: boolean;
   onMove: (group: ProductionRequestGroup, stage: ProductionStage) => void;
-  onRecord: (group: ProductionRequestGroup) => void;
+  /** The "+" menu items for a line — built by ProductionTable.plusMenuItems. */
+  plusItems: (e: ProductionEntry) => Parameters<typeof MoreMenu>[0]["items"];
 }) {
   const navigate = useNavigate();
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -139,16 +144,9 @@ export function ProductionKanban({
                       <span className="mono" style={{ fontWeight: 600 }}>{c.g.code}</span>
                       <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{fmt(c.qty)} box</span>
                       {c.kind === "remaining" && canEdit && (
-                        <button
-                          type="button"
-                          className="btn x"
-                          title="Log production"
-                          aria-label="Log production"
-                          style={{ padding: 2, height: 20, width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                          onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); onRecord(c.g); }}
-                        >
-                          <Icon name="plus" size={12} />
-                        </button>
+                        <span onClick={(ev) => ev.stopPropagation()}>
+                          <MoreMenu kebab icon="plus" title="Production actions" items={plusItems(e)} />
+                        </span>
                       )}
                       {/* Completed boxes → hand off to palletization (order-linked only). */}
                       {c.kind === "done" && canEdit && !e.independent && c.g.salesOrderId && (
@@ -158,7 +156,7 @@ export function ProductionKanban({
                           title="Send to Palletization"
                           aria-label="Send to Palletization"
                           style={{ padding: 2, height: 20, width: 20, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-                          onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); navigate(`/packing?fromOrder=${encodeURIComponent(c.g.salesOrderId)}`); }}
+                          onClick={(ev) => { ev.stopPropagation(); ev.preventDefault(); navigate(`/packing/new?fromOrder=${encodeURIComponent(c.g.salesOrderId)}`); }}
                         >
                           <Icon name="truck" size={12} />
                         </button>
@@ -170,6 +168,11 @@ export function ProductionKanban({
                     <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {[e.size, e.independent ? "Independent" : e.orderNumber || e.poNumber, e.customer].filter(Boolean).join(" · ") || "—"}
                     </div>
+                    {e.records.length > 0 && (
+                      <div className="mono dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={batchesOf(e)}>
+                        {batchesOf(e)}
+                      </div>
+                    )}
                     <div style={{ marginTop: 8 }}>
                       <ProgressBar value={e.producedSoFar} max={e.qtyRequested} color={meta.color} height={5} />
                       <div className="dim" style={{ display: "flex", gap: 8, fontSize: "var(--t-sm)", marginTop: 3 }}>
@@ -262,6 +265,10 @@ export function ProductionKanban({
                 <div className="form-field">
                   <span className="lbl">In this production</span>
                   <span className="mono">{fmt(info.producedSoFar)} / {fmt(info.qtyRequested)} boxes</span>
+                </div>
+                <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                  <span className="lbl">Batches</span>
+                  <span className="mono">{batchesOf(info) || "—"}</span>
                 </div>
               </div>
             </div>

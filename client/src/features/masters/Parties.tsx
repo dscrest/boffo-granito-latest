@@ -6,7 +6,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { toast } from "@/ui/Toast";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
@@ -15,15 +14,10 @@ import { ProgressBar } from "@/ui/primitives";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmtDateTime, pct } from "@/lib/format";
-import { nextCustomerCode } from "@/lib/seq";
 import { useOrders } from "@/features/orders/useOrders";
-import { PartyForm } from "./PartyForm";
 import {
-  createCustomer,
   listCustomers,
-  type CustomerInput,
   type CustomerRow,
-  type PaymentTermOption,
 } from "./customersApi";
 
 type Row = {
@@ -78,11 +72,8 @@ export function PartiesView() {
   const navigate = useNavigate();
   const { orders } = useOrders();
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
-  const [paymentTerms, setPaymentTerms] = useState<PaymentTermOption[]>([]);
-  const [salesPersons, setSalesPersons] = useState<PaymentTermOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = usePersistedState("parties.query", "");
   const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
   const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
@@ -99,25 +90,9 @@ export function PartiesView() {
       }
       setError(null);
       setCustomers(res.customers);
-      setPaymentTerms(res.paymentTerms);
-      setSalesPersons(res.salesPersons);
     });
   };
   useEffect(load, []);
-
-  const onSave = async (input: CustomerInput) => {
-    const res = await createCustomer(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowForm(false);
-    toast.success("Customer saved");
-    // Land on the new record (route is keyed by code) so the next action can't
-    // target the wrong one.
-    navigate(`/parties/${encodeURIComponent(input.code.trim().toUpperCase())}`);
-  };
 
   const base = useMemo<Row[]>(
     () =>
@@ -172,7 +147,8 @@ export function PartiesView() {
     rows,
     (r, k) =>
       (k === "openOrders" ? r.orders : k === "created" ? r.createdTime : k === "modified" ? r.modifiedTime : (r[k as keyof Row] as string | number)),
-    "name",
+    "created",
+    -1, // newest first
   );
   const pager = usePagination(rows.length, "partiesPageSize", `${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
 
@@ -185,16 +161,6 @@ export function PartiesView() {
     /* Column fills the scrollport exactly (same as Sizes) so the grid card
        grows and its footer sits on the window edge — no dead band below. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
-      {showForm && (
-        <PartyForm
-          paymentTerms={paymentTerms}
-          salesPersons={salesPersons}
-          initial={{ code: nextCustomerCode(customers.map((c) => c.code)) }}
-          onSave={onSave}
-          onClose={() => setShowForm(false)}
-        />
-      )}
-
       {error && <ErrorCard message={error} onRetry={load} />}
 
       <div className="fbar">
@@ -238,7 +204,7 @@ export function PartiesView() {
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} />
         {can("customers", "create") && (
           /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>
             <Icon name="plus" size={13} />
             New customer
           </button>

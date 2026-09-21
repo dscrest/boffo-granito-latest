@@ -18,11 +18,13 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { FilterSelect, IconBtn } from "./pcBits";
 import { PanelForm, panelToInput } from "./PanelForm";
+import { ImageThumb } from "@/features/common/ImageLightbox";
 import { bulkDeletePanels, createPanel, listPanels, updatePanel, type PanelInput, type PanelRow } from "./panelsApi";
 
 const dash = <span className="dim">—</span>;
 
 const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
+  { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.images} alt={r.panelCode} /> },
   {
     key: "code",
     label: "Panel Code",
@@ -107,7 +109,8 @@ export function Panels() {
       : k === "created" ? r.createdTime
       : k === "modified" ? r.modifiedTime
       : r.panelCode,
-    "code",
+    "created",
+    -1, // newest first
   );
   const pager = usePagination(sort.sorted.length, "panelsPageSize", `${query}|${designFilter}`);
   const pageRows = pager.slice(sort.sorted);

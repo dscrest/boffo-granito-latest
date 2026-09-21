@@ -19,12 +19,15 @@ import { invalidateBatchStock } from "@/features/stages/batchStockApi";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import type { DesignRow } from "@/features/masters/designsApi";
+import { useBoxBrands } from "@/features/masters/boxBrands";
 import { requestProduction, recordProduction, setProductionStage } from "./productionApi";
+import { designIndex, parseDate } from "./productionLogSheetEdit";
 
 const FIELDS = [
   { key: "sku", label: "SKU / Item", required: true, synonyms: ["sku", "item", "item code", "itemcode", "design", "design name", "product"] },
   { key: "qty", label: "Qty (boxes)", required: true, synonyms: ["qty", "quantity", "boxes", "box", "qty boxes", "qty (boxes)"] },
   { key: "batch", label: "Batch Number", required: false, synonyms: ["batch", "batch no", "batch no.", "batch number"] },
+  { key: "brand", label: "Box Brand", required: false, synonyms: ["box brand", "brand", "carton", "carton brand", "box"] },
   { key: "date", label: "Production Date", required: false, synonyms: ["date", "production date", "mfg date", "mfg. date", "prod date"] },
   { key: "shift", label: "Shift", required: false, synonyms: ["shift"] },
   { key: "note", label: "Note", required: false, synonyms: ["note", "notes", "remark", "remarks", "comment"] },
@@ -38,6 +41,8 @@ interface PreviewRow {
   raw: string; // the SKU cell as typed
   qty: number;
   batch: string;
+  brandId: string; // Brand ROWID matched by name ("" = none given)
+  brandName: string;
   date: string;
   shift: string;
   note: string;
@@ -50,62 +55,33 @@ interface RowResult {
   detail: string; // batch number or error message
 }
 
-function localISO(d: Date): string {
-  // Never toISOString — cellDates gives local dates; UTC shifts a day west.
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** "" → today; Date / Excel serial / yyyy-mm-dd / dd-mm-yyyy (day-first). null = unparseable. */
-function parseDate(v: unknown): string | null {
-  if (v instanceof Date) return isNaN(v.getTime()) ? null : localISO(v);
-  if (typeof v === "number" && isFinite(v)) return localISO(new Date(Math.round((v - 25569) * 86400000)));
-  const s = String(v ?? "").trim();
-  if (!s) return todayISO();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const dmy = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (dmy) {
-    const [, d, m, y] = dmy;
-    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
-  }
-  return null;
-}
-
 export function ProductionImport({ onDone, onClose }: { onDone: () => void; onClose: () => void }) {
   const { designRows, salesPersons } = useMasters();
   const importedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
   const panelRef = useModalA11y(onClose);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { brands } = useBoxBrands();
 
   const [step, setStep] = useState<"file" | "map" | "preview" | "results">("file");
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<unknown[][]>([]);
-  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, date: -1, shift: -1, note: -1 });
+  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, brand: -1, date: -1, shift: -1, note: -1 });
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<RowResult[]>([]);
 
   // SKU → design lookup: sku beats uniqueName beats designName (first writer wins).
-  const designByKey = useMemo(() => {
-    const m = new Map<string, DesignRow>();
-    for (const keyOf of [(d: DesignRow) => d.sku, (d: DesignRow) => d.uniqueName, (d: DesignRow) => d.designName]) {
-      for (const d of designRows) {
-        const k = keyOf(d).trim().toLowerCase();
-        if (k && !m.has(k)) m.set(k, d);
-      }
-    }
-    return m;
-  }, [designRows]);
+  const designByKey = useMemo(() => designIndex(designRows), [designRows]);
 
   const downloadTemplate = async () => {
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([
-      ["SKU", "Qty (boxes)", "Batch Number", "Production Date", "Shift", "Note"],
-      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", todayISO(), "Day", "blank batch = auto-numbered"],
-      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", todayISO(), "Night", ""],
+      ["SKU", "Qty (boxes)", "Batch Number", "Box Brand", "Production Date", "Shift", "Note"],
+      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", brands[0]?.name || "", todayISO(), "Day", "blank batch = auto-numbered"],
+      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", "", todayISO(), "Night", ""],
     ]);
-    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 15 }, { wch: 8 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 15 }, { wch: 8 }, { wch: 30 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Production");
     XLSX.writeFile(wb, "production-import-template.xlsx");
@@ -152,6 +128,8 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
       const design = designByKey.get(raw.toLowerCase()) ?? null;
       const qty = Math.floor(Number(cell(r, "qty")));
       const date = parseDate(cell(r, "date"));
+      const brandRaw = str(r, "brand");
+      const brand = brandRaw ? brands.find((b) => b.name.trim().toLowerCase() === brandRaw.toLowerCase()) : undefined;
       const error = !raw
         ? "Item is blank"
         : !design
@@ -160,20 +138,24 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
             ? `Qty must be a whole number above 0`
             : date === null
               ? `Unrecognised date: ${str(r, "date")}`
-              : "";
+              : brandRaw && !brand
+                ? `Box brand not found: ${brandRaw}`
+                : "";
       return {
         rowNum: i + 1,
         design,
         raw,
         qty,
         batch: str(r, "batch"),
+        brandId: brand?._id ?? "",
+        brandName: brand?.name ?? "",
         date: date ?? "",
         shift: str(r, "shift"),
         note: str(r, "note"),
         error,
       };
     });
-  }, [rows, mapping, designByKey]);
+  }, [rows, mapping, designByKey, brands]);
   const valid = useMemo(() => preview.filter((p) => !p.error), [preview]);
 
   const runImport = async () => {
@@ -208,6 +190,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
           performed_by: importedBy,
           note: r.note || undefined,
           batch_number: r.batch || undefined,
+          box_brand: r.brandId || undefined,
         });
         if (res.ok) {
           done.push(id);
@@ -293,6 +276,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <th>Item</th>
                     <th className="num" style={{ textAlign: "right" }}>Qty</th>
                     <th>Batch</th>
+                    <th>Box Brand</th>
                     <th>Date</th>
                     <th>Shift</th>
                     <th>Note</th>
@@ -303,12 +287,13 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <tr key={p.rowNum}>
                       <td className="mono dim">{p.rowNum}</td>
                       {p.error ? (
-                        <td colSpan={6} style={{ color: "var(--c-red)" }}>{p.error}</td>
+                        <td colSpan={7} style={{ color: "var(--c-red)" }}>{p.error}</td>
                       ) : (
                         <>
                           <td><span className="design-name">{p.design!.uniqueName || p.design!.designName}</span></td>
                           <td className="num mono">{fmt(p.qty)}</td>
                           <td className="mono">{p.batch || <span className="dim">auto</span>}</td>
+                          <td>{p.brandName || <span className="dim">—</span>}</td>
                           <td className="mono">{p.date}</td>
                           <td>{p.shift}</td>
                           <td>{p.note}</td>

@@ -8,22 +8,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
-import { useModalA11y } from "@/ui/useModalA11y";
+import { FormPage, useFormSave } from "@/ui/FormPage";
+import { AddressPair, defaultAddresses } from "@/features/common/AddressPair";
 import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
-import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
+import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { NumberInput } from "../../ui/NumberInput";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
-
-// Leading dimension of a size string ("300x600 - GVT…" → "300"). Mirrors PalPlanForm.
-const widthOf = (s: string) => String(s || "").match(/^\s*(\d+)/)?.[1] ?? "";
 
 export interface OrderLine {
   design: string;
@@ -32,6 +30,13 @@ export interface OrderLine {
   pallet: string; // Pallet ROWID — optional at SO creation, required at palletisation
   discount: string;
   description: string;
+  /** Edit mode: the existing OrderItem ROWID — the server edits it in place (CR-232). */
+  id?: string;
+  /** Boxes already palletised / loaded / dispatched on this line. > 0 = the line
+      has work: its item is frozen, qty can't go below this, and it can't be removed. */
+  floor?: number;
+  /** Any work at all (incl. allocated stock) — item frozen, line not removable. */
+  worked?: boolean;
 }
 
 export interface OrderDraft {
@@ -45,6 +50,8 @@ export interface OrderDraft {
   currency: string;
   exchange_rate?: number;
   remarks: string;
+  address: string; // billing (SalesOrder.address)
+  shipping_address: string;
   salesperson: string;
   box_brand: string; // Brand ROWID from the Box Brand master ("" = none)
   customer_notes: string;
@@ -116,7 +123,8 @@ export function OrderForm({
   initial,
   clone,
 }: {
-  onSave: (o: OrderDraft) => void;
+  /** Persists; the form stays on screen (with everything typed) until the caller navigates away. */
+  onSave: (o: OrderDraft) => void | Promise<void>;
   onClose: () => void;
   /** Convert-quote mode: prefill from the quote, lock customer/currency,
       cap quote-design quantities at the remaining unconverted boxes. */
@@ -141,6 +149,8 @@ export function OrderForm({
     currency: q?.currency ?? ed?.currency ?? "INR",
     exchange_rate: ed?.exchangeRate,
     remarks: ed?.remarks ?? "",
+    address: q?.address ?? ed?.address ?? "",
+    shipping_address: q?.shippingAddress ?? ed?.shippingAddress ?? "",
     salesperson: q?.salesperson ?? ed?.salesperson ?? "",
     box_brand: q?.boxBrandId ?? ed?.boxBrandId ?? "",
     customer_notes: q?.customerNotes ?? ed?.customerNotes ?? "",
@@ -161,6 +171,14 @@ export function OrderForm({
         pallet: o.palletId || "",
         discount: o.discount ? String(o.discount) : "",
         description: o.description || "",
+        // A clone is a NEW order: no row identity, no work carried over.
+        ...(clone
+          ? {}
+          : {
+              id: o.id,
+              floor: Math.max(o.palletizedQty, o.loadedQty, o.dispatchedQty),
+              worked: o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0 || o.dispatchedQty > 0,
+            }),
       }));
     if (!q) return [emptyLine()];
     const ls = q.lines
@@ -187,14 +205,12 @@ export function OrderForm({
   useEffect(() => {
     void listPallets().then((r) => setPallets(r.ok ? r.pallets : []));
   }, []);
-  // Pallets offered for a line = those whose size WIDTH matches the design's size.
-  const palletsForLine = (designName: string) => {
-    const w = widthOf(findDesign(designName)?.size || "");
-    return pallets.filter((p) => {
-      if (!p.sizeId) return true;
-      const pw = widthOf(p.sizeLabel);
-      return !w || !pw || pw === w;
-    });
+  // Pallets offered for a line = the shared size rule, plus the line's own
+  // pick so an already-saved pallet never vanishes from its Combobox.
+  const palletsForLine = (designName: string, picked: string) => {
+    const opts = palletsForSize(pallets, findDesign(designName)?.size || "");
+    const own = picked && !opts.some((p) => p.id === picked) ? pallets.find((p) => p.id === picked) : undefined;
+    return own ? [own, ...opts] : opts;
   };
 
   // Default the salesperson to the rep linked to the logged-in user.
@@ -208,7 +224,9 @@ export function OrderForm({
     }
   }, [salesPersons]);
 
+  const form = useFormSave(onClose);
   const setHead = (k: string, val: string) => {
+    form.touch();
     // Transactions inherit customer fields: picking a customer carries their
     // payment term, currency and handling sales person (mirrors QuoteForm).
     const cust = k === "customer" ? customers.find((x) => x.name === val) : undefined;
@@ -219,14 +237,22 @@ export function OrderForm({
         if (cust.currency) next.currency = cust.currency;
         if (cust.handlingPersonLabel) next.salesperson = cust.handlingPersonLabel;
         if (cust.boxBrandId) next.box_brand = cust.boxBrandId;
+        const { billing, shipping } = defaultAddresses(cust);
+        if (billing) next.address = billing;
+        if (shipping) next.shipping_address = shipping;
       }
       return next;
     });
   };
-  const setLine = (i: number, k: keyof OrderLine, val: string) =>
+  const setLine = (i: number, k: keyof OrderLine, val: string) => {
+    form.touch();
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
+  };
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  const removeLine = (i: number) => {
+    form.touch();
+    setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
+  };
 
   const totalBoxes = useMemo(
     () => lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0),
@@ -256,6 +282,8 @@ export function OrderForm({
   );
   // Rate is mandatory (user mandate 2026-07-20): a line only counts as valid
   // once it has a design, a qty AND a rate.
+  // CR-232: a line can't drop below the boxes already palletised / loaded / dispatched.
+  const belowFloor = (l: OrderLine) => !!l.floor && (parseInt(l.ordered_qty_boxes, 10) || 0) < l.floor;
   const validLines = lines.filter((l) => l.design && l.ordered_qty_boxes && String(l.rate).trim());
   // Lines with a design but no rate must block the save (rather than being
   // silently dropped from validLines) so the operator sees the error.
@@ -281,6 +309,7 @@ export function OrderForm({
     HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
     validLines.length === 0 ||
     rateMissing ||
+    lines.some(belowFloor) ||
     !!overCap;
 
   // Errors stay hidden until the first submit attempt, then update live.
@@ -293,28 +322,29 @@ export function OrderForm({
       setShowErrors(true);
       return;
     }
-    onSave({ ...h, _id: newId(), lines: validLines });
+    void form.run(() => onSave({ ...h, _id: newId(), lines: validLines }));
   };
 
-  const panelRef = useModalA11y(onClose);
-
   return (
-    <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="orders" size={18} />
-          </div>
-          <div>
-            <div className="ttl">{clone ? "Sales Order" : q ? "Sales Order" : ed ? "Edit Sales Order" : "New Order"}</div>
-            <div className="sub2">{ed && !q && !clone ? ed.orderNumber || ed.poNumber : ""}</div>
-          </div>
-          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>
-            ✕
-          </button>
-        </div>
-
-        <div className="df-body">
+    <FormPage
+      title={clone ? "Sales Order" : q ? "Sales Order" : ed ? "Edit Sales Order" : "New Order"}
+      sub={ed && !q && !clone ? ed.orderNumber || ed.poNumber : q ? `From ${q.quoteNo}` : ""}
+      busy={form.busy}
+      onCancel={() => void form.cancel()}
+      onSave={submit}
+      note={
+        showErrors && missing ? (
+          <span className="field-err">
+            {validLines.length === 0
+              ? "Add at least one line with a design + quantity"
+              : overCap || "Fill the required fields above"}
+          </span>
+        ) : (
+          "* Indicates a mandatory field"
+        )
+      }
+    >
+        <div>
           <div className="form-section">
             <div className="form-section-title">Order Details</div>
             <div className="form-grid">
@@ -386,6 +416,12 @@ export function OrderForm({
                   </label>
                 );
               })}
+              <AddressPair
+                customer={customers.find((x) => x.name === h.customer)}
+                billing={h.address}
+                shipping={h.shipping_address}
+                onChange={(kind, v) => setHead(kind === "billing" ? "address" : "shipping_address", v)}
+              />
             </div>
           </div>
 
@@ -397,7 +433,7 @@ export function OrderForm({
                 <span>Design</span>
                 <span>Pallet</span>
                 <span>Qty (boxes)</span>
-                <span>Rate<span className="req"> *</span></span>
+                <span>Rate / box<span className="req"> *</span></span>
                 <span>Disc %</span>
                 <span>Sub Total</span>
                 <span />
@@ -418,6 +454,7 @@ export function OrderForm({
                             value={l.design}
                             onChange={(v) => setLine(i, "design", v)}
                             placeholder="Search design…"
+                            disabled={!!l.worked}
                             options={designs.map((x) => ({
                               // Keyed by unique_name, same as quote lines and the
                               // quote picker; design_name only for legacy items.
@@ -442,7 +479,7 @@ export function OrderForm({
                     </div>
                     <div className="form-field" style={{ gap: 2 }}>
                       {(() => {
-                        const opts = palletsForLine(l.design);
+                        const opts = palletsForLine(l.design, l.pallet);
                         return (
                           <Combobox
                             value={l.pallet}
@@ -459,7 +496,13 @@ export function OrderForm({
                         value={l.ordered_qty_boxes}
                         onChange={(e) => setLine(i, "ordered_qty_boxes", e.target.value)}
                         placeholder="0"
+                        className={belowFloor(l) ? "error" : undefined}
                       />
+                      {!!l.floor && (
+                        <span className={belowFloor(l) ? "field-err" : "dim"} style={{ fontSize: "var(--t-sm)" }}>
+                          min {fmt(l.floor)} — already palletised / dispatched
+                        </span>
+                      )}
                     </div>
                     <NumberInput
                       value={l.rate}
@@ -477,7 +520,7 @@ export function OrderForm({
                     <span className="mono qt-sub">
                       {fmt(orderLineSub(l))}
                     </span>
-                    <button className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" disabled={lines.length === 1} tabIndex={-1}>
+                    <button className="btn ord-rm" onClick={() => removeLine(i)} title={l.worked ? "Work recorded on this line — reduce its qty instead" : "Remove line"} disabled={lines.length === 1 || !!l.worked} tabIndex={-1}>
                       ✕
                     </button>
                   </div>
@@ -527,15 +570,15 @@ export function OrderForm({
           <div className="form-section">
             <div className="form-section-title">Remarks &amp; Notes</div>
             <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Remarks</span>
                 <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Customer Notes</span>
                 <textarea rows={2} value={h.customer_notes} onChange={(e) => setHead("customer_notes", e.target.value)} placeholder="Notes shown to the customer" />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field">
                 <span className="lbl">Terms &amp; Conditions</span>
                 <textarea rows={3} value={h.terms} onChange={(e) => setHead("terms", e.target.value)} placeholder="Terms & conditions" />
               </label>
@@ -543,27 +586,6 @@ export function OrderForm({
           </div>
         </div>
 
-        <div className="df-foot">
-          <span className="df-req-note">
-            {showErrors && missing ? (
-              <span className="field-err">
-                {validLines.length === 0
-                  ? "Add at least one line with a design + quantity"
-                  : overCap || "Fill the required fields above"}
-              </span>
-            ) : (
-              "* Indicates a mandatory field"
-            )}
-          </span>
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="hbtn primary" onClick={submit}>
-            <Icon name="check" size={13} />
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
+    </FormPage>
   );
 }

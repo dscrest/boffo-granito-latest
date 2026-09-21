@@ -229,7 +229,7 @@ The **Sales Orders** menu item has a **List | Kanban** toggle at the top of the 
 - **Status buttons:** Submit for Approval → Approve → **Mark In Progress**; plus Cancel/Reopen.
 - **Items table** shows Ordered, Produced, Palletized, and **Available** boxes per line, with the stage.
 - **To palletize:** click **Send to Palletization** on the Items table, or the **More menu → Palletization** — both jump to the Palletization screen (`/packing`) with a new plan pre-scoped to this order, its items and available boxes already filled in (the same screen as *New Palletization* and Production's *Send to Palletization*).
-- **More menu:** Palletization, Record New Production, Cancel, Clone, Delete.
+- **More menu:** Palletization, Cancel, Clone, Delete.
 
 > Editing locks once any work (production, palletize, or load) is recorded — the button tells you why.
 
@@ -264,12 +264,13 @@ The production and logistics chain. Remember the golden rule: each stage can onl
 
 *The list of production jobs, each moving through New Request → In Production → Completed* (a job can also be Rejected). The default view hides completed jobs.
 
-**To request production:** click **Record New Production**. Two modes:
+**To record many items at once:** click **Record Production**. A sheet opens with one row per item — pick the **Design**, type the **Qty**, and optionally a **Batch No.** (leave blank to auto-number), a **Date** (leave blank to use the Production date at the top, which defaults to today), **Box Brand** and **Remark**. Press Enter to move down a column; you can also copy rows from Excel and paste them in. Save once — every row is recorded as completed production and goes straight to stock. If Save reports a problem (for example a batch number that already exists), fix that cell and Save again; rows already recorded are not repeated.
 
-- **Order** — pick a Sales Order and enter boxes per line (only lines still owing production appear, capped at what's left).
-- **Independent** — make-to-stock: pick a design and quantity.
+**To start production:** click **Start New Production**, add one line per item (**Item · Qty**) and Save. The job lands in **In Production** with nothing produced yet. Production is make-to-stock — stock is allocated to Sales Orders afterwards. "Recorded by" and the date stamp themselves.
 
-"Requested by" and the date stamp themselves.
+**The + menu** on every row and Kanban card: **Start Production** (New → In Production), **Log Production** (enter boxes, Batch No. and Box Brand for one batch), **Complete Production** (logs what is left and closes the job). Options that don't apply are greyed. Output can never exceed the planned quantity.
+
+**Batches:** the grid and sheet show **one row per batch** — the Production ID repeats, and the planned qty, remaining and status sit on the job's first row. Use **Group ▸ Item** to band all jobs and batches of one item together with its totals.
 
 **To record output** (the key step) — open a job's detail page:
 
