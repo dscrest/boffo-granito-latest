@@ -5,7 +5,7 @@
 
 ## 2026-10-06 (night, Panel Craft) — one image per panel (CR-291)
 
-**Deployed live (client); commit pending.**
+**Deployed live (client); committed `dd54401`.**
 
 - **Panel detail keeps one image.** The image box on `/panels/:id` is a single "Image" tile: click the
   dashed box to upload, ✕ to delete. Rear View, Other Images, Add Image and the N/5 counter are gone
