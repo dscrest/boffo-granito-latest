@@ -14,7 +14,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
-import type { PalPlanLine } from "./palPlansApi";
+import { readyPalletsLabel, type PalPlanLine } from "./palPlansApi";
 
 export interface PalletiseEntry {
   lineId: string;
@@ -29,6 +29,7 @@ export function PalletiseModal({
   busy,
   toLabel = "Ready for Loading",
   defaultPalletFor,
+  progress,
   onConfirm,
   onClose,
 }: {
@@ -36,6 +37,9 @@ export function PalletiseModal({
   busy: boolean;
   /** Destination stage shown in the footer. */
   toLabel?: string;
+  /** Per-order-item palletized progress (CR-280) — Complete Palletization shows
+      each item's ready pallets (boxes) and what is still to palletize. */
+  progress?: Map<string, { done: number; total: number }>;
   /** Fallback pallet per line (SO/quote container plan) — used only when the
       line has no saved pallet of its own; the user can still override. */
   defaultPalletFor?: (l: PalPlanLine) => string;
@@ -139,6 +143,14 @@ export function PalletiseModal({
                       <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
                         {[l.customerName, l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
                       </div>
+                      {(() => {
+                        const prog = progress?.get(l.orderItemId);
+                        return prog ? (
+                          <div className="mono" style={{ fontSize: "var(--t-sm)", marginTop: 2 }} title="Already palletized for this item: pallets (boxes) · boxes still to palletize">
+                            Ready {readyPalletsLabel(prog.done, l.boxesPerPallet, fmt)} · Remaining {fmt(Math.max(0, prog.total - prog.done))}
+                          </div>
+                        ) : null;
+                      })()}
                     </td>
                     <td>
                       {l.batchNumber ? (

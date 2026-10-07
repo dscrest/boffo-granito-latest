@@ -2,8 +2,10 @@
    Record Output / Add Batches — logs the ACTUAL boxes produced against one or
    MORE approved production lines in a single modal (one section per item, the
    item name as the section title). Each section: a TABLE of batch rows
-   (headers once, bare inputs, ✕ per row): batch no. · mfg date · qty ·
-   remark, with a "+ New Batch" link underneath. The palletization queue takes
+   (headers once, bare inputs, ✕ per row): batch no. · mfg date · qty · box
+   brand · remark, with a "+ New Batch" link underneath. Box Brand is per row
+   (CR-257); the CR-200 order-based prefill seeds each row until the user picks.
+   The palletization queue takes
    the SO line's own pallet (server fallback) — the pallet is picked/confirmed
    later, at palletise time. Batch-tracked items make the batch no. mandatory and save via
    /production-record-lines; singular items drop that column and save one
@@ -36,7 +38,7 @@ import { NumberInput } from "../../ui/NumberInput";
     items emit one single per line (parent loops /production-record). */
 export type RecordOutputPayload =
   | { singles: ProductionRecordInput[] }
-  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string; box_brand?: string } };
+  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string } };
 
 export type RecordOutputResult = { entry: ProductionEntry; payload: RecordOutputPayload; total: number };
 
@@ -68,21 +70,21 @@ export function RecordOutputForm({
   };
 
   const [saving, setSaving] = useState(false);
-  // Box Brand the boxes are packed in — one per item section (CR-197).
+  // Box Brand the boxes are packed in — per batch row (CR-257; was per item, CR-197).
   const { options: brandOpts } = useBoxBrands();
-  const [brandById, setBrandById] = useState<Record<string, string>>({});
-  // Box Brand follows the orders (CR-200): an order-linked line takes its SO's
-  // brand; stock production takes the brand most in demand among the open
-  // orders still waiting on that item. A prefill only — the user can change it.
+  // Default brand per item follows the orders (CR-200): an order-linked line
+  // takes its SO's brand; stock production takes the brand most in demand among
+  // the open orders still waiting on that item. Seeds rows the user hasn't picked on.
+  const [defaultBrandById, setDefaultBrandById] = useState<Record<string, string>>({});
   const { orders } = useOrders();
   const stockFor = useStockLookup();
   useEffect(() => {
     if (!orders.length) return;
     const demand = demandByDesign(orders, stockFor);
-    setBrandById((cur) => {
+    setDefaultBrandById((cur) => {
       const next = { ...cur };
       for (const e of entries) {
-        if (next[e.id] !== undefined) continue; // already prefilled or user-touched
+        if (next[e.id] !== undefined) continue;
         const own = e.orderItemId ? orders.find((o) => o.id === e.orderItemId)?.boxBrandId : "";
         next[e.id] = own || demand.find((d) => d.designName === e.design)?.brands.find((b) => b.boxBrandId)?.boxBrandId || "";
       }
@@ -92,9 +94,10 @@ export function RecordOutputForm({
   }, [orders, entries]);
   const panelRef = useModalA11y(onClose);
 
-  // One rows map for both modes (mfg date · qty · remark each, + New Batch,
+  // One rows map for both modes (mfg date · qty · brand · remark each, + New Batch,
   // like OrderForm); batch-tracked items add a mandatory batch no. per line.
-  type BatchRow = { batch: string; date: string; qty: string; note: string };
+  // `brand` undefined = follow the item default (so the async prefill still lands).
+  type BatchRow = { batch: string; date: string; qty: string; brand?: string; note: string };
   const emptyRow = (entry: ProductionEntry, rowQty = ""): BatchRow => ({
     batch: "",
     date: entry.productionDate || todayISO(),
@@ -104,7 +107,8 @@ export function RecordOutputForm({
   const [rowsById, setRowsById] = useState<Record<string, BatchRow[]>>(() =>
     Object.fromEntries(entries.map((e) => [e.id, [emptyRow(e, String(capFor(e)))]])),
   );
-  const setRow = (id: string, i: number, k: "batch" | "date" | "qty" | "note", val: string) =>
+  const brandOf = (entry: ProductionEntry, r: BatchRow) => r.brand ?? defaultBrandById[entry.id] ?? "";
+  const setRow = (id: string, i: number, k: "batch" | "date" | "qty" | "brand" | "note", val: string) =>
     setRowsById((m) => ({ ...m, [id]: m[id].map((r, j) => (j === i ? { ...r, [k]: val } : r)) }));
   const addLine = (entry: ProductionEntry) =>
     setRowsById((m) => ({ ...m, [entry.id]: [...m[entry.id], emptyRow(entry)] }));
@@ -168,19 +172,16 @@ export function RecordOutputForm({
             batch_number: r.batch.trim(),
             mfg_date: r.date || undefined,
             note: r.note.trim() || undefined,
+            box_brand: brandOf(entry, r) || undefined,
           }));
-          return {
-            entry,
-            total,
-            payload: { batches: { rows: lines, performed_by: loggedBy, box_brand: brandById[entry.id] || undefined } },
-          };
+          return { entry, total, payload: { batches: { rows: lines, performed_by: loggedBy } } };
         }
         const singles: ProductionRecordInput[] = rows.map((r) => ({
           qty_boxes: parseInt(r.qty, 10) || 0,
           production_date: r.date,
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
-          box_brand: brandById[entry.id] || undefined,
+          box_brand: brandOf(entry, r) || undefined,
         }));
         return { entry, total, payload: { singles } };
       });
@@ -192,7 +193,7 @@ export function RecordOutputForm({
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal wide" onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico"><Icon name="factory" size={18} /></div>
           <div>
@@ -226,16 +227,6 @@ export function RecordOutputForm({
                   }}
                 >
                   {!entry.orderItemId && <span className="chip">Make-to-stock</span>}
-                  <label className="form-field" style={{ minWidth: 220, margin: 0 }}>
-                    <span className="lbl">Box Brand</span>
-                    <Combobox
-                      value={brandById[entry.id] || ""}
-                      options={brandOpts}
-                      onChange={(v) => setBrandById((m) => ({ ...m, [entry.id]: v }))}
-                      placeholder="Pick a box brand…"
-                      ariaLabel={`${entry.design} box brand`}
-                    />
-                  </label>
                   <span style={{ display: "flex", gap: 14, marginLeft: "auto" }}>
                     <Count label="Requested" value={entry.qtyRequested} />
                     {/* Committed output only — the typed rows below show up in "Left to add". */}
@@ -269,6 +260,7 @@ export function RecordOutputForm({
                     {isBatched && <span>Batch No.</span>}
                     <span>Mfg date</span>
                     <span>Qty (boxes)<span className="req"> *</span></span>
+                    <span>Box Brand</span>
                     <span>Remark</span>
                     <span />
                   </div>
@@ -310,6 +302,13 @@ export function RecordOutputForm({
                           placeholder="0"
                           aria-label={`${entry.design} qty in boxes, row ${i + 1}`}
                           autoFocus={!isBatched && ei === 0 && i === 0}
+                        />
+                        <Combobox
+                          value={brandOf(entry, r)}
+                          options={brandOpts}
+                          onChange={(v) => setRow(entry.id, i, "brand", v)}
+                          placeholder="Pick a box brand…"
+                          ariaLabel={`${entry.design} box brand, row ${i + 1}`}
                         />
                         <input
                           value={r.note}

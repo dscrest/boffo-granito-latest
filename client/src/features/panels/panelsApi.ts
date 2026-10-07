@@ -167,8 +167,8 @@ export function updatePanel(rowid: string, input: PanelInput): Promise<OpResult>
 }
 
 /** Soft-delete via /panel-delete. No stock movement. */
-export function deletePanel(panel: PanelRow): Promise<OpResult> {
-  return bust(op(`panel-delete/${panel.id}`, {}));
+export function deletePanel(panel: PanelRow, reason?: string): Promise<OpResult> {
+  return bust(op(`panel-delete/${panel.id}`, { reason }));
 }
 
 export interface BulkResult {
@@ -178,8 +178,8 @@ export interface BulkResult {
   firstError?: string;
 }
 
-export async function bulkDeletePanels(panels: PanelRow[]): Promise<BulkResult> {
-  const results = await Promise.all(panels.map(deletePanel));
+export async function bulkDeletePanels(panels: PanelRow[], reason?: string): Promise<BulkResult> {
+  const results = await Promise.all(panels.map((p) => deletePanel(p, reason)));
   const failed = results.filter((r) => !r.ok);
   return {
     ok: failed.length === 0,

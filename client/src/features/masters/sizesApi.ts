@@ -175,8 +175,8 @@ export function updateSize(rowid: string, input: SizeInput) {
   return bust(update("Size", rowid, toPayload(input)));
 }
 
-export function deleteSize(rowid: string) {
-  return bust(remove("Size", rowid));
+export function deleteSize(rowid: string, reason?: string) {
+  return bust(remove("Size", rowid, reason));
 }
 
 /* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
@@ -199,6 +199,6 @@ async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): 
   };
 }
 
-export function bulkDeleteSizes(rowids: string[]): Promise<BulkResult> {
-  return bust(fanOut(rowids, (id) => remove("Size", id)));
+export function bulkDeleteSizes(rowids: string[], reason?: string): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Size", id, reason)));
 }

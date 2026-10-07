@@ -88,9 +88,10 @@ const MODULE_NAV = {
   quotes: ["quotes"],
   orders: ["byorder", "packing"],
   customers: ["parties"],
-  items: ["design", "stock", "sizes", "pallets", "prod"],
+  // "containers" = Container Master (CR-261), an Items master like Pallet Master.
+  items: ["design", "stock", "sizes", "pallets", "containers", "prod"],
   panel_craft: ["panels", "panel-orders", "cut-stock"],
-  stages: ["po", "qc", "containers", "fit", "loadplan", "loading", "final"],
+  stages: ["po", "qc", "container-shipments", "fit", "loadplan", "loading", "final"],
   invoices: ["invoices"],
   reports: ["reports", "ops"],
   settings: [], // settings pages live behind Admin-only routes, no nav ids
@@ -106,7 +107,7 @@ const TABLE_MODULE = {
   SalesOrder: "orders", OrderItem: "orders", OrderItemEvent: "orders",
   PalletisedBatch: "orders", PalletisedBatchLine: "orders",
   Customer: "customers",
-  Design: "items", DesignPallet: "items", Size: "items", Pallet: "items",
+  Design: "items", DesignPallet: "items", Size: "items", Pallet: "items", ContainerFormat: "items",
   Brand: "items", Grade: "items", Finish: "items", Glaze: "items", Category: "items",
   Panel: "panel_craft", PanelLine: "panel_craft", PanelOrder: "panel_craft",
   CutPieceSize: "panel_craft", CutPieceStock: "panel_craft",

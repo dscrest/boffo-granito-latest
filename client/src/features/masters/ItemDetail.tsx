@@ -17,7 +17,7 @@ import { can, isAdmin } from "@/lib/auth";
 import { update } from "@/lib/dataOps";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
@@ -264,9 +264,10 @@ export function ItemDetail() {
 
   const onDeleteItem = async () => {
     if (!design) return;
-    if (!(await confirmDialog({ message: `Are you sure you want to delete item "${design.uniqueName || design.designName}"? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete item "${design.uniqueName || design.designName}"? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteDesign(design.id);
+    const res = await deleteDesign(design.id, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");

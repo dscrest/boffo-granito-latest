@@ -4,8 +4,8 @@
    Edit / More (Clone, Delete) / ✕, Primary Details, the Product
    Showcase lines, orders for this panel, Activity log.
 
-   Like Pallet there is no dedicated edit *page*, so Edit opens the
-   shared PanelForm modal in place.
+   Edit / Clone open the Panel form page (CR-281):
+   /panels/:id/edit · /panels/:id/clone.
    ============================================================ */
 import { codeOf } from "@/ui/statusCode";
 import { useEffect, useState } from "react";
@@ -13,7 +13,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
@@ -24,8 +24,7 @@ import { ActivityLog, tabStyle } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ImageManager } from "@/features/common/ImageManager";
 import type { DesignImage } from "@/features/masters/designsApi";
-import { PanelForm, panelToInput } from "./PanelForm";
-import { cachedPanels, createPanel, deletePanel, listPanels, patchPanelCache, updatePanel, type PanelInput, type PanelRow } from "./panelsApi";
+import { cachedPanels, deletePanel, listPanels, patchPanelCache, type PanelRow } from "./panelsApi";
 import { cachedPanelOrders, listPanelOrders, PANEL_ORDER_STATUS_LABEL, type PanelOrderRow } from "./panelOrdersApi";
 
 /** [label, value, isUnset] — unset fields render dimmed as "Not set". */
@@ -40,8 +39,6 @@ export function PanelDetail() {
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [cloning, setCloning] = useState(false);
   // Overview (default) | Product Showcase | Activity — deep-linkable via ?tab=.
   const [sp, setSp] = useSearchParams();
   const spTab = sp.get("tab");
@@ -66,32 +63,6 @@ export function PanelDetail() {
     ? railRows.filter((p) => `${p.panelCode} ${p.lines.map((l) => l.designName).join(" ")}`.toLowerCase().includes(needle))
     : railRows;
 
-  const onSave = async (input: PanelInput) => {
-    if (!panel) return;
-    const res = await updatePanel(panel.id, input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setEditing(false);
-    toast.success("Panel updated");
-    await refresh();
-  };
-
-  // Clone: same lines into a fresh panel, user edits then saves.
-  const onClone = async (input: PanelInput) => {
-    const res = await createPanel(input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setCloning(false);
-    toast.success("Panel created");
-    if (res.rowid) navigate(`/panels/${encodeURIComponent(res.rowid)}`);
-    await refresh();
-  };
-
   /** Persist a new image list — same shape as Design.image_urls (ImageManager). */
   const saveImages = async (next: DesignImage[]) => {
     if (!panel) return false;
@@ -108,9 +79,10 @@ export function PanelDetail() {
 
   const onDelete = async () => {
     if (!panel) return;
-    if (!(await confirmDialog({ message: `Are you sure you want to delete panel "${panel.panelCode}"? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete panel "${panel.panelCode}"? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deletePanel(panel);
+    const res = await deletePanel(panel, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
@@ -121,18 +93,12 @@ export function PanelDetail() {
   };
 
   const moreItems = [
-    ...(can("panel_craft", "create") && panel ? [{ label: "Clone", onClick: () => setCloning(true) }] : []),
+    ...(can("panel_craft", "create") && panel ? [{ label: "Clone", onClick: () => navigate(`/panels/${encodeURIComponent(id)}/clone`) }] : []),
     ...(can("panel_craft", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-      {editing && panel && <PanelForm isEdit initial={panelToInput(panel)} onSave={(i) => void onSave(i)} onClose={() => setEditing(false)} />}
-      {/* Clone never copies the identity — panel_code is typed fresh. */}
-      {cloning && panel && (
-        <PanelForm initial={{ ...panelToInput(panel), panel_code: "" }} onSave={(i) => void onClone(i)} onClose={() => setCloning(false)} />
-      )}
-
       {/* Panel list — fixed viewport height with its OWN scroll, sticky while
           the detail scrolls. Drag the bottom-right corner to resize the width. */}
       <div
@@ -206,7 +172,7 @@ export function PanelDetail() {
                   {panel.panelCode}
                 </div>
                 {can("panel_craft", "edit") && (
-                  <button className="hbtn" onClick={() => setEditing(true)} disabled={busy} title="Edit panel">
+                  <button className="hbtn" onClick={() => navigate(`/panels/${encodeURIComponent(id)}/edit`)} disabled={busy} title="Edit panel">
                     <Icon name="edit" size={13} />
                     Edit
                   </button>
@@ -244,9 +210,9 @@ export function PanelDetail() {
                   ))}
                 </div>
 
-                {/* Image upload — same manager as the Item master (#12). */}
+                {/* Image upload — same manager as the Item master (#12), ONE slot for a panel. */}
                 <div style={{ flex: "0 1 340px", minWidth: 280, border: "1px solid var(--border)", borderRadius: 10, padding: 14, alignSelf: "flex-start" }}>
-                  <ImageManager images={panel.images} canEdit={can("panel_craft", "edit")} onSave={saveImages} />
+                  <ImageManager images={panel.images} canEdit={can("panel_craft", "edit")} onSave={saveImages} max={1} />
                 </div>
               </div>
               )}

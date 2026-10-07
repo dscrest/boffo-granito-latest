@@ -323,8 +323,8 @@ export function updateCustomer(rowid: string, input: CustomerInput) {
   return bust(update("Customer", rowid, patch));
 }
 
-export function deleteCustomer(rowid: string) {
-  return bust(remove("Customer", rowid));
+export function deleteCustomer(rowid: string, reason?: string) {
+  return bust(remove("Customer", rowid, reason));
 }
 
 /** Partial patch for the More-menu Active/Inactive toggle. */

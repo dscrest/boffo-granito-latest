@@ -99,8 +99,8 @@ export function updateCurrency(rowid: string, input: CurrencyInput) {
   return bust(update("Currency", rowid, toPayload(input)));
 }
 
-export function deleteCurrency(rowid: string) {
-  return bust(remove("Currency", rowid));
+export function deleteCurrency(rowid: string, reason?: string) {
+  return bust(remove("Currency", rowid, reason));
 }
 
 /** Re-fetch live rates now (admin button). Cron does the same daily. */

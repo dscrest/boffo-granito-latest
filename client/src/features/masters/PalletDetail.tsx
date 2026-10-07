@@ -14,7 +14,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
@@ -86,15 +86,10 @@ export function PalletDetail() {
 
   const onDelete = async () => {
     if (!pallet) return;
-    if (
-      !(await confirmDialog({
-        message: `Are you sure you want to delete pallet "${pallet.name}"? This cannot be undone.`,
-        danger: true,
-      }))
-    )
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete pallet "${pallet.name}"? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deletePallet(pallet.id);
+    const res = await deletePallet(pallet.id, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
@@ -168,7 +163,7 @@ export function PalletDetail() {
                   {[
                     p.sizeLabel && `Size: ${p.sizeLabel}`,
                     p.palletType && `Type: ${p.palletType}`,
-                    p.totalBoxesPerContainer > 0 && `${nfmt(p.totalBoxesPerContainer)} boxes/cont.`,
+                    p.boxesPerPallet > 0 && `${nfmt(p.boxesPerPallet)} boxes/pallet`,
                   ]
                     .filter(Boolean)
                     .join("  ·  ") || "No details yet"}
@@ -236,35 +231,14 @@ export function PalletDetail() {
                     ]}
                   />
 
+                  {/* Boxes only (CR-261): what a container holds is on the Container Master. */}
                   <Section
-                    title="Arrangement A"
+                    title="Arrangement"
                     rows={[
                       num("Boxes / Pallet", pallet.boxesPerPallet),
-                      num("Pallets / Container", pallet.palletsPerContainer),
                       num("Empty Pallet Weight (kg)", pallet.emptyWeightKg),
-                    ]}
-                  />
-
-                  {/* Arrangement B only exists on mixed loads — hide the section entirely otherwise. */}
-                  {(pallet.bBoxesPerPallet > 0 || pallet.bPalletsPerContainer > 0) && (
-                    <Section
-                      title="Arrangement B"
-                      rows={[
-                        num("Boxes / Pallet", pallet.bBoxesPerPallet),
-                        num("Pallets / Container", pallet.bPalletsPerContainer),
-                        num("Pallet Weight (kg)", pallet.bPalletWeightKg),
-                      ]}
-                    />
-                  )}
-
-                  <Section
-                    title="Per Container (A + B)"
-                    rows={[
-                      num("Total Boxes", pallet.totalBoxesPerContainer),
-                      num("Total Pallets", pallet.totalPalletsPerContainer),
-                      num("Total Coverage (ft²)", pallet.totalSqftPerContainer),
-                      num("Total Coverage (m²)", pallet.totalSqmPerContainer),
-                      num("Total Box Weight (kg)", pallet.totalBoxWeightPerContainer),
+                      num("Loaded Pallet Weight (kg)", pallet.boxWeightKg * pallet.boxesPerPallet + pallet.emptyWeightKg),
+                      num("Coverage / Pallet (m²)", pallet.coverageSqm * pallet.boxesPerPallet),
                     ]}
                   />
 

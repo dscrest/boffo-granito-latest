@@ -58,7 +58,7 @@ export function useLoadFlow({ plans, boxes, onChanged }: { plans: PalPlan[]; box
     for (let i = 0; i < cp.plan.containers.length; i++) {
       if (prog[i].status === "Sent") continue;
       const ln = cp.plan.containers[i].lines.find((x) => designIdOf(x.design) === designId);
-      if (ln) return { docNo: cp.docNo, containerNo: cp.plan.containers[i].no, boxes: ln.boxes, palletName: ln.palletName };
+      if (ln) return { docNo: cp.docNo, containerNo: cp.plan.containers[i].no, boxes: ln.boxes, palletName: ln.palletName, containerFormat: cp.plan.containers[i].containerFormat };
     }
     return undefined;
   };

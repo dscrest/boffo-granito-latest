@@ -11,7 +11,7 @@ import { useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { designImageUrl } from "@/lib/api";
@@ -320,9 +320,10 @@ function MasterTable({ def }: { def: MasterDef }) {
 
   const removeSelected = async () => {
     const ids = [...selected];
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected row${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const results = await Promise.all(ids.map((id) => deleteMaster(def.table, id)));
+    const results = await Promise.all(ids.map((id) => deleteMaster(def.table, id, reason)));
     setBusy(false);
     const failed = results.filter((r) => !r.ok).length;
     if (failed) {

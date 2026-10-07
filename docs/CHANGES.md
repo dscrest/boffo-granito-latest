@@ -3,6 +3,165 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-06 (night, Panel Craft) — one image per panel (CR-291)
+
+**Deployed live (client); commit pending.**
+
+- **Panel detail keeps one image.** The image box on `/panels/:id` is a single "Image" tile: click the
+  dashed box to upload, ✕ to delete. Rear View, Other Images, Add Image and the N/5 counter are gone
+  from panels. The Item master's five-image manager is unchanged (same component, new `max` prop).
+
+## 2026-10-06 (evening, Panel Craft) — Request Panels from Quote / SO, Panel Order page, requirements checklist, full-size cut piece (CR-286…290)
+
+**Built; deploy (client + functions) + commit pending. `PanelOrder` gained `sales_order`, `quote`, `checklist`
+(created on the live Data Store 2026-10-06). One line still to add by hand: `ORDER_STATUS_TONE.NewRequest`
+in `pcBits.tsx` (that file was being edited in another session), and the Panel form's `completeLines` /
+placeholder change for CR-289.**
+
+- **New Request stage.** Panel Orders now runs New Request → Received → In Cutting → Ready → Dispatched.
+  A Quote or Sales Order page has More ▸ **Request Panels**: it opens the New Panel Order page with the
+  customer locked and every panel carrying that sale's designs preselected; the rows saved are born New
+  Request and show on a new **Panel Orders** tab of the Quote / SO, and every stage flip is mirrored onto
+  the source record's Activity. Panel Craft accepts a request with **Accept** (→ Received). Direct New
+  Order is still born Received.
+- **Panel Order page** (`/panel-orders/:id`). Click a row or card to open it. The header carries the
+  status and the forward-step buttons (Accept / Start Cutting / Ready / Dispatch — Dispatch greyed with
+  the shortage in its tooltip while stock is short), Edit (greyed: delete and raise again), More ▸ Delete
+  (New Request / Received only, reason asked), ✕. Overview | Activity tabs (status timeline + log). The
+  grid rows and kanban cards lost their stage buttons; the sheet is now a column-picker grid with Stock,
+  Source, Created and Modified columns.
+- **Requirements checklist.** On the order page: one row per design × cut piece size with Need, In Stock
+  and a manual **Available** tick the godown saves on the order (`PanelOrder.checklist`). An amber
+  "Short: Design · size — have 2 of 6" line sits above it, in the sheet's Stock column (`Short · n`) and
+  on the kanban card. This replaces the godown print slip.
+- **Blank cut piece size = full size** (server). A panel line saved without a cut piece size resolves to
+  the design's own Size (a CutPieceSize named after the Size code, created on first use).
+- **New Panel Order is a page** at `/panel-orders/new` in the label-left layout with the Customer 🔍
+  search modal; the modal is gone.
+
+## 2026-10-06 (late, Panel Craft) — Add Stock, row-click grid + photo view, PANEL numbers, Panel form page (CR-282…285)
+
+**Built; deploy (client + functions) + commit pending.**
+
+- **"Add Stock."** The cut-piece stock button on Panel Orders and Cut Stock, and its dialog title, now say
+  Add Stock. Wording only; the dialog still sets the on-hand for a design + cut size.
+- **Panels grid opens the record.** No pencil or bin on the rows and no Edit / Clone icons in the toolbar:
+  click a row (or a tile) to open the panel, where Edit and More ▸ Clone / Delete live. Bulk Delete on the
+  selection stays. This is now a house rule for every grid; Cut Stock rows open the prefilled Add Stock
+  dialog, and the Panels tables on Item and Customer detail click through.
+- **Photo | Grid view on Panels.** Panels opens as photo tiles (image, code, sizes, designs) — the same tile
+  as the New Panel Order picker; a toggle switches to the column grid. Filter, search, sort and paging are
+  shared.
+- **Panel numbers.** A new panel is numbered `PANEL-001`, `PANEL-002`… by the server; there is no Panel
+  Code box any more. Editing keeps the number; Clone gets a fresh one. Needs the functions deploy.
+- **New / Edit Panel is a page** like every other form (label-left layout), reached from New panel, Edit
+  and More ▸ Clone; the modal is gone.
+
+## 2026-10-06 (late) — Palletization pages read in pallets; partial remainder re-queues (CR-278…281)
+
+**Built; deploy (client + functions) + commit pending.**
+
+- **Each page shows its own rows.** Ready for Palletization opens on the queue, In Palletization opens on
+  its own rows plus the recorded (not yet loaded) ones; "All" is still in the dropdown as the overview.
+  The two pages had been opening on All and so looked identical (CR-278).
+- **Ready Pallets + Pallet columns.** Ordered and Completed are gone from the palletization sheet.
+  Ready Pallets shows palletized boxes as pallets with the boxes in brackets, e.g. `8 (480)`; Pallet shows
+  the pallet type (Jungli …) instead of the full size-packing-type name. Footer follows (CR-279).
+- **Complete Palletization dialog** shows each item's ready pallets (boxes) and remaining boxes (CR-280).
+- **Partial Complete re-queues the rest.** Completing 480 of 520 boxes now leaves the 40 under Ready for
+  Palletization (Start available again) instead of stuck in In Palletization (CR-281, server).
+
+## 2026-10-06 (night) — Form rows tightened: label gap, one-control-wide full rows, Notes boxes (CR-277)
+
+**Built; deploy + commit pending.**
+
+- **Label hugs its control.** The label column on every form page is now only as wide as the longest
+  label in that section (capped where it was), so *Name* no longer sits a hand's width from its box.
+- **Full-row fields stay one control wide.** Customer, the formula Name, Remarks and Note still have their
+  own row, but the box is the same width as every other control instead of running to the page edge.
+- **Notes are real text boxes.** Remarks / Note on Pallet, Container Master, Quote, Sales Order,
+  Palletization and Production are multi-line (about three lines, drag to grow); Customer Notes and
+  Terms get the same height. No database change.
+
+## 2026-10-06 (evening) — Zoho-style form layout + Customer search modal (CR-275, CR-276)
+
+**Built; deploy + commit pending.**
+
+- **Every form page** (Quote, Sales Order, Item, Pallet, Container Master, Customer, Production,
+  Palletization, New Loading) now lays its header fields out label-left / control-right, two pairs per
+  row, like Zoho Books. The Customer sits on its own full row with Billing | Shipping under it and a
+  divider before the dates / terms. One CSS class (`.form-rows`) — modals keep the old label-above grid.
+  Narrow screens stack the label above the control again.
+- **Customer search modal**: a magnifier beside the Customer picker on Quote, Sales Order and New
+  Palletization opens a searchable customer table (name, code, country, currency, sales person, payment
+  term); click or Enter picks, and the form fills in exactly as the inline picker does.
+- Swept while there: SO dates use the house calendar; Payment Term / Currency on Quote + SO are
+  Comboboxes; checkboxes on form pages no longer look like text inputs. No database change.
+
+## 2026-10-06 (later) — Planner picks the container per Size; the loading starts on it (CR-274)
+
+**Built; deploy + browser drive + commit pending.**
+
+- **Plan Containerisation ▸ Box Fitting**: a Containers strip beside the Box / Weight toggle shows one
+  picker per tile size on the plan, listing that size's containers from the Container Master
+  (`N pallets = M boxes`). Default is the size's largest, so existing plans open unchanged. Changing
+  the pick repacks every container of that size at once; Save keeps it with the plan.
+- **Container Planning tab** (SO and Quote): each planned container names the container it was packed for.
+- **Loading from the plan**: New Loading opened from the SO, Fill from plan, and the Load dialog's new
+  container all start on the plan's container — only when the Container field is still blank. The
+  loading's own pick remains what the fill % is measured against.
+- Weight Fitting is untouched. No database change.
+
+## 2026-10-06 — Several containers per Size; the loading picks one (CR-273)
+
+**LIVE 2026-10-06 (functions + client); browser drive + commit pending.**
+
+- **Container Master**: a Size may now have any number of containers (different pallet mixes). The
+  Size picker offers every size; Clone keeps the size. Server one-per-size key removed.
+- **Loading picks its container**: a Container field on New Loading (Loading Details) and on the
+  Load dialog's new-container form, stored on the loading (`LoadBox.container_format`). The fill %
+  of that loading — while typing and everywhere it is shown afterwards — uses that container's
+  boxes. Shown on the loading page header and as a Loadings grid column.
+- **No pick**: the size's largest container is the denominator (also what the planner's Box
+  Fitting uses). Quote Suitable Containers lists every container of the size.
+
+## 2026-10-03 (evening) — SO Delete obeys "work recorded"; DATA-FLOW.md (CR-271, CR-272)
+
+**Built; deploy + commit pending.**
+
+- **Sales Order ▸ Delete**: refused once any line has work (allocated / palletised / loaded /
+  dispatched / on a plan) — "Work is recorded on this order — it can't be deleted. Cancel it
+  instead." The SO page greys the Delete item with that reason. Root cause: the form saved through
+  the business route carrying the CR-232 rule, the page deleted through the generic table route
+  that never had it. The rule now sits on the generic route too.
+- **`docs/DATA-FLOW.md`** (new): every mutation path per entity (server route + client surface),
+  the owner helper of each rule, the invariant chain, and a 22-row register of paths that enforce
+  different rules for the same thing today. Fifth place in the "closing a change" contract.
+- **Not fixed yet** (user decision): the divergence register is documentation only; the Orders grid
+  bulk delete (DF-06) and the three-way OrderItem delete (DF-01) are the agreed next fix.
+
+## 2026-10-03 — Phase 2 batch 1: Container Master, quote containers, SO remaining, date-first grids (CR-261…266)
+
+**LIVE 2026-10-03 (functions + client); browser drive and commit pending. First Phase 2 batch — see `PHASE-2-FEATURES.md`.**
+
+- **Container Master** (Inventory ▸ Container Master, `/containers`): one record per Size — the pallet
+  formats of that size with a count each; total pallets and boxes follow. New table `ContainerFormat`.
+- **Pallet Master is boxes only**: no "Pallets / Container", no per-container totals. Fill % on loading and
+  palletization and the planner's box fitting now read the size's container format.
+- **Quote**: a "Suitable Containers" table on New / Edit Quote and the Quote page (per size: container,
+  boxes, containers needed, last fill). Screen only for now.
+- **Sales Order Details**: Remaining = Ordered − Allocated, a totals row, and a per-line ✕ → Deallocate
+  Stock (by batch; refused once palletized). Also in More for the whole order.
+- **Bulk Record Production**: Size · Design · Batch · Box Brand · Qty · Remark; Size narrows the items;
+  per-row Date hidden (toolbar date rules); "+ 10 rows".
+- **Production**: grid opens grouped by Date, Production ID hidden by default, detail titled by the date
+  with the PRD number small. Grid and detail both say `PRD-`.
+- **Palletization + Loading grids**: a Date column; PAL / LOAD codes hidden by default (column picker
+  re-shows them).
+- **/prod buttons** (CR-267): Bulk Record Production is the primary button, Start New Production secondary.
+- **Discard prompt** (CR-268): leaving unsaved changes asks "Discard changes?" with Yes / No wording everywhere, never "Delete".
+- Legacy per-shipment container page moved to `/container-shipments` (still hidden).
+
 ## 2026-09-19 — New Loading is two steps; vehicle sits with the sheet (CR-225)
 
 - The "Vehicle & loading" step is gone. After **Select items** comes one step, **Seals, sheet & vehicle**:

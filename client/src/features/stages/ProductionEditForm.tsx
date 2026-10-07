@@ -89,14 +89,16 @@ export function ProductionEditForm({
             </table>
           </div>
           <div className="form-section">
+            <div className="form-rows one">
             <label className="form-field">
               <span className="lbl">Note</span>
-              <input value={note} onChange={(e) => {
+              <textarea value={note} onChange={(e) => {
                   form.touch();
                   setNote(e.target.value);
                 }}
                 placeholder="Optional — priority, target date, remarks…" />
             </label>
+            </div>
           </div>
     </FormPage>
   );

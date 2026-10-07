@@ -359,6 +359,8 @@ export interface ProductionRecordLine {
   /** Batch mfg date. */
   mfg_date?: string;
   note?: string;
+  /** Box Brand (Brand ROWID) this batch is packed in — per row (CR-257). */
+  box_brand?: string;
 }
 export interface ProductionRecordLinesInput {
   rows: ProductionRecordLine[];
@@ -366,7 +368,7 @@ export interface ProductionRecordLinesInput {
   performed_by?: string;
   /** Pallet spec for the queue lines these records create; blank → the SO line's own. */
   pallet?: string;
-  /** Box Brand (Brand ROWID) for every row of this recording (CR-197). */
+  /** Fallback Box Brand for rows without their own (CR-197; rows carry it since CR-257). */
   box_brand?: string;
 }
 /** One batch row of opening stock (batch-tracked items). */
@@ -472,8 +474,8 @@ export function updateProductionLine(rowid: string, input: { qty_requested?: num
 /** Delete a production line, reversing its effect: a Produced order-linked line
     gives back the OrderItem.produced bump (and steps stage prod→po if it hits
     zero). Blocked server-side when those boxes are already palletised. */
-export function deleteProductionLog(rowid: string) {
-  return bust(op(`production-delete/${encodeURIComponent(rowid)}`, {}));
+export function deleteProductionLog(rowid: string, reason?: string) {
+  return bust(op(`production-delete/${encodeURIComponent(rowid)}`, { reason }));
 }
 
 /* ---- status presentation (shared across the production surfaces) ---- */
@@ -604,13 +606,14 @@ export function productionDetailKey(entry: ProductionEntry): string {
 }
 
 /** One row per production LINE ITEM (ProductionLog entry), each its own card on
-    the item-wise board/grid. Sequential PROD id ordered by creation. */
+    the item-wise board/grid. Sequential PRD id ordered by creation (CR-265: one
+    display prefix everywhere — the grid used to say PROD- while the detail said PRD-). */
 export function groupProductionByItem(entries: ProductionEntry[]): ProductionRequestGroup[] {
   const groups = entries.map((e) => buildGroup(e.id, [e]));
   [...groups]
     .sort((a, b) => (a.createdTime < b.createdTime ? -1 : a.createdTime > b.createdTime ? 1 : a.group < b.group ? -1 : 1))
     .forEach((g, i) => {
-      g.code = `PROD-${String(i + 1).padStart(3, "0")}`;
+      g.code = `PRD-${String(i + 1).padStart(3, "0")}`;
     });
   return groups;
 }

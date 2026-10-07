@@ -115,14 +115,29 @@ async function masters() {
   const missing = wanted.filter((u) => !found[u]);
   if (missing.length) throw new Error(`Missing designs in the item master: ${missing.join(", ")}`);
 
-  const pallet = rows(await get("Pallet?columns=ROWID,name,boxes_per_pallet&limit=300"))
+  const pallet = rows(await get("Pallet?columns=ROWID,name,boxes_per_pallet,size&limit=300"))
     .find((p) => p.name === PALLET_NAME);
   if (!pallet) throw new Error(`Missing pallet master: ${PALLET_NAME}`);
+
+  // Container Master (CR-261): one format per size — reuse the size's format, else seed one
+  // (28 × the pallet above) and remember it for teardown.
+  let format = pallet.size ? one(await get(`ContainerFormat?where=size=${pallet.size}&limit=1`)) : null;
+  if (!format && pallet.size) {
+    const r = await post("ContainerFormat", {
+      name: `ZZT 600x1200 · ${PALLETS_PER_CONTAINER} pallets = ${BOXES_PER_PALLET * PALLETS_PER_CONTAINER} boxes`,
+      size: pallet.size,
+      pallets_json: JSON.stringify([{ pallet: pallet.ROWID, count: PALLETS_PER_CONTAINER }]),
+      total_pallets: PALLETS_PER_CONTAINER,
+      total_boxes: BOXES_PER_PALLET * PALLETS_PER_CONTAINER,
+    });
+    S.containerFormat = r.rowid; save();
+    format = { ROWID: r.rowid };
+  }
 
   const vehicle = one(await get("Vehicle?columns=ROWID,vehicle_number&limit=50"));
   if (!vehicle) throw new Error("No vehicle in the master — add one before seeding");
 
-  log(`· masters: ${wanted.length} design(s), pallet ${pallet.ROWID}, vehicle ${vehicle.vehicle_number}`);
+  log(`· masters: ${wanted.length} design(s), pallet ${pallet.ROWID}, container ${format?.ROWID || "—"}, vehicle ${vehicle.vehicle_number}`);
   return { designs: found, pallet, vehicle };
 }
 
@@ -435,6 +450,8 @@ async function teardown() {
     for (const it of items) await hard("OrderItem", it.ROWID);
     await hard("SalesOrder", soId);
   }
+  // Only a container format THIS seed created (a pre-existing one for the size is kept).
+  if (S.containerFormat) await hard("ContainerFormat", S.containerFormat);
   if (S.quote) await hard("Quote", S.quote);
   if (S.customer) await hard("Customer", S.customer);
 

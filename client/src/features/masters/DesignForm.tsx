@@ -357,7 +357,7 @@ export function DesignFields({
         return (
         <div key={sec.title} className="form-section">
           <div className="form-section-title">{sec.title}</div>
-          <div className="form-grid">
+          <div className="form-rows">
             {fields.map((f) => {
               const opts = f.lookup ? lookups[f.lookup] : null;
               // Formula fields have no stored value; every other key is a DesignValues key.

@@ -18,6 +18,7 @@ file and the code win — those three are pre-implementation history.
 | [`BOFFO_Architecture.md`](../BOFFO_Architecture.md) | The locked architecture *decisions* and why they were made. |
 | [`CHANGES.md`](CHANGES.md) | Dated narrative of what shipped, newest first. |
 | [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md) | The numbered change-request register + the process for filing one. |
+| [`DATA-FLOW.md`](DATA-FLOW.md) | **Who may change what, and where the rule lives.** Every mutation path (server route + client surface) per entity, the owner helper of each rule, and the register of paths that diverge. Read its row before touching how an entity is created / edited / deleted / re-statused. |
 | [`USER-MANUAL.md`](USER-MANUAL.md) | End-user guide. **Stale from 2026-07-23** for Palletization/Loading/Panel Craft; its §9 formula reference is still correct. |
 
 ---
@@ -135,7 +136,8 @@ plus `PalletisedBatch` / `PalletisedBatchLine` / `ContainerLoading` (legacy — 
 |---|---|
 | **Design / Item** | The sellable tile SKU. UI always says *Item*; the table is `Design`. |
 | **Size** | Owns per-box packing data — dims, pcs/box, coverage, box weight. Items and pallets **snapshot** it so the operator is never asked twice. Editing a Size fans the new packing out to those snapshots ([`/resync-size-snapshots`](../functions/data-ops/index.js#L5051) backfills — full overwrite, clobbers manual weights). **Box weight is the one override:** the Size value is only the default on the Item form and the Pallet form (CR-133, CR-190); a typed value is kept by the fan-out. Consumers read the **Item's** weight first (Plan Containerisation Weight Fitting, server loading-capacity check), the Pallet format's only as fallback. |
-| **Pallet Master** | The master of pallet *formats* (an Inventory master). |
+| **Pallet Master** | The master of pallet *formats* — boxes per pallet + weights, nothing per container since CR-261 (an Inventory master). |
+| **Container Master** | `ContainerFormat`: what ONE container of a Size holds — pallet formats × count, Σ pallets, Σ boxes. A Size may have several (CR-273); the loading picks the one it uses (`LoadBox.container_format`), readers with no pick take the size's largest. The planner's Box Fitting picks one per SIZE (toolbar strip, saved in the plan as `formats` + per-container `containerFormat`; CR-274) and a loading made from the plan starts on that pick. The only source of per-container capacity (fill %, planner box fitting, quote Suitable Containers). CR-261. |
 | **Palletization** | The *process* under Sales that consumes pallet formats. **Never** merge the two — they are different things with similar names. |
 | **Batch** | A production run of one item, numbered `B/YYYY-MM/NNN` (series per item per calendar month; format changed 2026-09-04, older batches keep `B/FY/NNN`). Unique per item always; cross-item reuse is allowed by default, controlled by `AppSetting.allow_duplicate_batches`. |
 | **PalPlan** | A `PalletizationPlan`, numbered `PAL/FY/NNN`. Can span multiple sales orders. |
@@ -156,7 +158,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | Group | Leaves |
 |---|---|
 | **Dashboard** | Dashboard |
-| **Inventory** | Items · Stock Details · Size Master · Pallet Master · Production |
+| **Inventory** | Items · Stock Details · Size Master · Pallet Master · Container Master · Production |
 | **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading and Dispatch · **Panel Craft** (Cut Stock · Panels · Panel Orders) |
 | **Reports** | Reports · Audit Log |
 | *header gear* | Settings (admin only) |
@@ -174,30 +176,32 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/sizes` · `/sizes/:id` | `masters/Sizes` · `SizeDetail` | |
 | `/pallets` · `/pallets/:id` | `masters/Pallets` · `PalletDetail` | Pallet formats |
 | `/pallets/new[?size=<id>]` · `/pallets/:id/edit` · `/pallets/:id/clone` | `masters/PalletFormPage.tsx` | CR-220; `?size=` locks the Size and returns to `/sizes/:id` |
+| `/containers` · `/containers/:id` | `masters/ContainerFormats` · `ContainerFormatDetail` | CR-261 Container Master (several per Size since CR-273) |
+| `/containers/new` · `/containers/:id/edit` · `/containers/:id/clone` | `masters/ContainerFormatFormPage.tsx` | CR-261; a clone keeps the size (CR-273 — same size, new mix). CR-269: pallets are added as lines (Pallet picker · count · Add line · ✕), like Quote Line Items |
 | `/prod` · `/prod/:id` | `stages/Production` · `ProductionDetail` | Kanban + Sheet |
 | `/prod/new` · `/prod/:id/clone` · `/prod/:id/edit` | `stages/ProductionFormPage.tsx` | CR-220: Start New Production (CR-234) / Edit Production pages |
-| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production sheet — many items, one Save, straight to stock |
+| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production sheet — many items, one Save, straight to stock. CR-264: Size · Design · Batch · Box Brand · Qty · Remark, Size narrows Design, toolbar date rules (per-row Date optional) |
 | `/parties` · `/parties/:id` | `masters/Parties` · `CustomerDetail` | Customers |
 | `/parties/new` · `/parties/:id/edit` · `/parties/:id/clone` | `masters/PartyFormPage.tsx` | CR-220: Customer form page (`:id` = customer code) |
 | `/quotes` · `/quotes/:id` | `quotes/QuotesTable` · `QuoteDetail` | |
 | `/quotes/new[?customer=]` · `/quotes/:id/edit` · `/quotes/:id/clone` | `quotes/QuoteFormPage.tsx` | CR-219: the Quote form is a page (create / edit / clone), never a modal |
-| `/quotes/:id/containerise` | `quotes/PlanContainerisation.tsx` | Quote-level container plan |
+| `/quotes/:id/containerise` | `quotes/PlanContainerisation.tsx` | Quote-level container plan; Box Fitting picks the container per Size (CR-274) |
 | `/approvals` | `quotes/Approvals.tsx` | Role-gated at nav **and** route |
 | `/orders` · `/byorder` · `/kanban` | `orders/OrdersTable` · `ByOrderView` · `pipeline/Kanban` | One nav leaf, `ViewToggle` switches |
 | `/orders/new[?quote=<id>]` · `/orders/:id/edit` · `/orders/:id/clone` | `orders/OrderFormPage.tsx` | CR-219: the Sales Order form is a page; `?quote=` = Convert-to-SO |
 | `/orders/:id` | `orders/OrderDetail.tsx` | |
-| `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy |
-| `/packing` · `/palletizing` · `/packing/:id` | `stages/PalPlans` (×2, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization (+ Ready for Loading) — CR-160 |
+| `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy; same per-Size container pick (CR-274) |
+| `/packing` · `/palletizing` · `/packing/:id` | `stages/PalPlans` (×2, `stages` + `pageLabel` props) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization (+ recorded Ready for Loading rows, CR-278) — CR-160 |
 | `/packing/new[?fromOrder=<soId>]` · `/packing/:id/edit` · `/packing/:id/clone` | `stages/PalPlanFormPage.tsx` | CR-222: Palletization form page (New + Send to Palletization share it) |
 | `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading and Dispatch board |
-| `/cut-stock` · `/panels` · `/panels/:id` · `/panel-orders` | `panels/*` | Panel Craft |
+| `/cut-stock` · `/panels` · `/panels/new` · `/panels/:id/edit` · `/panels/:id/clone` · `/panels/:id` · `/panel-orders` | `panels/*` (`PanelFormPage.tsx` for the form routes, CR-285) | Panel Craft |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
 | `/ops` | `ops/OperationsLog.tsx` | Audit log |
 | `/settings` · `/masters` · `/users` · `/roles` · `/currencies` · `/data-operations` | `settings/*`, `admin/*`, `masters/Masters` | **Admin only** — non-admins redirect to `/dashboard` |
 
 **Registered but hidden.** The "Stages" nav block is commented out
 ([`App.tsx:160-174`](../client/src/App.tsx#L160-L174)); the routes still resolve if typed:
-`/po`, `/po/:id`, `/qc`, `/containers`, `/fit`, `/loadplan`, `/invoices`.
+`/po`, `/po/:id`, `/qc`, `/container-shipments` (the legacy per-shipment Container page; `/containers` is the Container Master since CR-261), `/fit`, `/loadplan`, `/invoices`.
 `/final` (Final Loading) was **removed** on 2026-08-29 along with the legacy pallet flow (§6.6).
 
 ### Public, unauthenticated
@@ -252,7 +256,7 @@ Line-status labels differ from their stored values and the labels are what users
 
 ### 5.1 Quote
 
-Screen `/quotes` → `/quotes/:id`; the form is a page — `/quotes/new`, `/quotes/:id/edit`, `/quotes/:id/clone` (CR-219). Routes `POST /quote-with-items`,
+Screen `/quotes` → `/quotes/:id`; the form is a page — `/quotes/new`, `/quotes/:id/edit`, `/quotes/:id/clone` (CR-219; Zoho-style label-left rows + Customer search modal, CR-275 / CR-276). Routes `POST /quote-with-items`,
 `POST /update-quote-with-items/:rowid`, `POST /quote-status/:rowid`.
 
 - Header inherits **all** customer fields on pick — currency, payment terms, addresses,
@@ -282,7 +286,7 @@ Screen `/quotes` → `/quotes/:id`; the form is a page — `/quotes/new`, `/quot
 
 ### 5.2 Convert → Sales Order
 
-Screen `/orders/new?quote=<id>` (the Sales Order form page in convert mode, CR-219). Route `POST /convert-quote/:rowid`. **Enabled only for `Accepted` or `PartiallyConverted`
+Screen `/orders/new?quote=<id>` (the Sales Order form page in convert mode, CR-219; same Zoho-style rows as the Quote, CR-275 / CR-276). Route `POST /convert-quote/:rowid`. **Enabled only for `Accepted` or `PartiallyConverted`
 quotes.** Full or partial; a partial conversion leaves the quote `PartiallyConverted`.
 
 On conversion the quote's container plan is **snapshotted onto the SO**, which then owns its
@@ -317,7 +321,8 @@ Screen `/prod` — a Kanban board and a Sheet (grid) view of the same rows.
   ([`ProductionForm.tsx`](../client/src/features/stages/ProductionForm.tsx), `presetLines` prefill).
   Output is logged batch by batch from the row's **+ menu** (CR-235: Start Production · Log
   Production · Complete Production — `plusMenuItems` in `ProductionTable.tsx`, shared `MoreMenu`);
-  Batch No. + Box Brand are captured there (`RecordOutputForm`), a blank batch is minted server-side
+  Batch No. + Box Brand are captured there **per batch row** (`RecordOutputForm`, CR-257; the
+  CR-200 order-based brand prefill seeds each row), a blank batch is minted server-side
   (`nextBatchNumber`, CR-211). Over-production stays blocked (`capFor` + server 409).
 - **/prod Grid + Sheet are flat, one row per logged batch** (CR-236, `batchRows` in
   `productionSheetEdit.ts`): Production ID/Design/Order/Customer repeat, line-level cells (qty,
@@ -336,6 +341,7 @@ Screen `/prod` — a Kanban board and a Sheet (grid) view of the same rows.
   production*, lines of one item sharing its free stock first-come by SO. `/prod` ▸ **To Produce**
   ([`ToProduce.tsx`](../client/src/features/stages/ToProduce.tsx)) lists per item the open demand,
   free stock, in production, need-production and the Box Brand wanted; ticked rows prefill a job.
+- **Deallocate Stock** (CR-263): the Items table shows Remaining = Ordered − Allocated with a totals footer; a ✕ per allocated line (and SO ▸ More ▸ Deallocate Stock for the whole order) opens `DeallocateStockModal` — that line's `alloc` rows, ✕ each → `POST /deallocate-stock/:rowid` (`deallocateCore`: refused once palletised; trims auto Planning lines, lowers `produced_qty_boxes`, soft-deletes the alloc row, recounts) → free stock rises.
 - **Allocate Stock** (SO ▸ More) hands free boxes of chosen batches to an order line — see §6.2a. The modal is one flat table (item row → batch rows: Batch ·
   Available · Allocate) with an item search (CR-219); the Items-card button shows while ANY line
   is Stock ready / Partial stock — per line, never the header label (CR-220).
@@ -399,16 +405,24 @@ deliberately **not** stock-adjusted.
 
 **Two sidebar pages over one board since 2026-09-14 (CR-160)**: `/packing` **Ready for
 Palletization** (the Planning queue only) and `/palletizing` **In Palletization** (the Palletizing
-stage only since CR-170 — a `ReadyToLoad` line whose whole batch is palletised leaves for the
-**Ready for Loading** section of `/loading`; a gated slice stays here wearing a **Recorded** chip,
-CR-176, while the unrecorded rows of a partially palletised item read **Partial**). Same
-`PalPlans` component scoped by a `stages` prop; both nav leaves share feature id `packing`.
+stage **plus the recorded, not-yet-loaded `ReadyToLoad` rows since CR-278** — they wear the
+**Recorded** chip, CR-176, carry Load in their "+" menu, and also appear in the **Ready for Loading**
+section of `/loading`; the unrecorded rows of a partially palletised item read **Partial**). Same
+`PalPlans` component scoped by `stages` + `pageLabel` props; both nav leaves share feature id
+`packing`. The status dropdown opens on the **page's own rows** (CR-278 reversed CR-246's All default
+here, pref key `.show.v3`); **All** is the opt-in overview of every stage.
 Kanban/Sheet toggle, Group, Today's Report and New Palletization Plan sit on both. The Sheet is
-ColumnDef-driven (CR-161: Customer, Item, Order, Batch, Boxes, Ordered, Completed, Remaining, Age,
+ColumnDef-driven (CR-161/279: Customer, Item, Order, Batch, Boxes, **Ready Pallets** `N (boxes)` =
+the item's palletized boxes ÷ `Pallet.boxes_per_pallet` rounded up, **Pallet** = the master's
+`pallet_type` (line `palletKind`, composite name on hover), Remaining, Date, Status, Age,
 **PAL** last and hideable; checkbox / edit inputs / "+" cell fixed) and has **no stage band**.
 The Sheet ends in a **`TotalsRow` tfoot** (CR-187, same shape as /loading): "Total · N pallets"
-in the first visible column, Boxes / Ordered / Completed / Remaining sums under their own headers
-(Ordered/Completed deduped per order item). Under the grid (both views) sits the **totals /
+in the first visible column, Boxes / Ready Pallets / Remaining sums under their own headers
+(Ready/Remaining deduped per order item; `readyPalletsLabel()` is the one formatter, shared with the
+Complete Palletization dialog which shows each item's `Ready N (boxes) · Remaining N`, CR-280).
+A **partial Complete** (Palletizing → ReadyToLoad with fewer boxes than the line) splits off the
+recorded slice and sends the **remainder back to Planning** (CR-281, server) so it re-queues on
+`/packing` with Start available. Under the grid (both views) sits the **totals /
 selection bar** (CR-178): idle it reads **Total · N pallets · N boxes** in Kanban only (`palletsOf`;
 blank on the Sheet, whose tfoot carries the totals), with rows ticked it reads *N selected · N boxes*
 + actions. Every row
@@ -688,8 +702,10 @@ part="details"`: Size, Destination, Transporter, Supervisor) → **Item Table** 
 palletized stock only: Item `Combobox` = design · SO → Batch `Combobox` → Boxes; a partly palletized
 batch is listed with its n/m badge but `pickable` refuses it; a batch held by one row leaves the
 other rows' lists; **Add New Row** + **Add Items in Bulk**
-([`BulkLoadItemsModal.tsx`](../client/src/features/stages/BulkLoadItemsModal.tsx) — list | selected
-with a boxes stepper); in Edit the already-loaded lines are the table's first rows, replacing the
+([`BulkLoadItemsModal.tsx`](../client/src/features/stages/BulkLoadItemsModal.tsx) — list | selected;
+since CR-259 a selected row is two lines: name + batch on top, typed pallets count (no − / + buttons
+since CR-260, hover = "of N full pallets") / loose tick / = boxes right-aligned under it, modal 1100px
+wide); in Edit the already-loaded lines are the table's first rows, replacing the
 Loaded-items card) → **Vehicle & Container Seal Details** (`part="vehicle"`; all optional — a
 loading saves without them and takes them later from Edit, the Loading Sheet's Truck No. cell or
 Assign Vehicle; only Dispatch needs a vehicle, CR-251). **⚠ CR-250 (2026-09-21): the CR-241 "Add
@@ -701,7 +717,17 @@ itself and the SO detail's Send to Loading stay.
 (`off` = batches the picker left out). The Batches cell opens the batch picker = `BulkLoadItemsModal`
 scoped to that one item (`initial` = `pick.qty`; Apply → `applyPicks` rewrites every line in scope,
 so boxes are chosen PER BATCH; Add Items in Bulk is the same modal over all bands); Boxes typed on the row → `pick.setDesign(row, v, skip)` → `spreadQty(lines, want, skip)`
-→ `allocateFifo`, so `qty` stays per line id and the `/pal-lines-box` payload is unchanged. Loaded
+→ `allocateFifo`, so `qty` stays per line id and the `/pal-lines-box` payload is unchanged. **CR-258
+(2026-09-28): the picker reads and takes PALLETS** — `pickerEntries(bands)` → one entry per line, or ONE
+entry per shared `palletGroup` (Mix Batch = one physical pallet, moves whole); each entry shows
+`palletBoxesLabel` ("12 pallets + 6 boxes" = `palletSplit(boxes, boxesPerPallet)`) with the box
+conversion, and the selection has a pallets stepper + a tick for the loose remainder (all-or-none).
+State is still boxes per line id; pallets/loose are derived (`floor(v/bpp)`, `v%bpp>0`). bpp 0 = the old boxes stepper.
+Round 2 (2026-09-30): **the Item Table types PALLETS** (Pallets column typed → `pick.setDesignPallets` →
+`spreadPallets(lines, n, skip)` = whole pallets oldest batch first, `min(line.boxes, k×bpp)`; Boxes is the read-only
+conversion; loaded rows the same via `setGroupPallets`); a Mix Batch pallet is a parent + `└` children tree with
+an `MXBATCH` chip (`MxChip`, also on `/loading/:id`); `/loading/:id` Loaded Items and the `/loading` grid carry a
+Pallets column + totals (`palletsOf` / `palletsOfLine`). Loaded
 lines (Edit) group by `salesOrderId|designId`; a typed total is spread FIFO into the per-line
 `loadedDraft` (newest batch gives way first). `batchOptions` / `pickable` below are gone;
 `itemOptions(bands, takenRows)` keeps an item to one row. Double-loading is still stopped by the
@@ -801,6 +827,18 @@ shared `ImageThumb` / `ImageLightbox` in
 Panel Order form multi-picks panels and writes one row per panel (shared customer, date, sales
 person) — deliberately not a header + lines model, so the forward-only stock machine and the
 board stay per-panel. A shared sale reference is the next step if the sale must be grouped.
+
+**Panel master UX (CR-282…285, 2026-10-06).** `/panels` opens as a **Photo** view (one
+`PanelTile` per panel — the picker's tile, shared via `pcBits.tsx`) with a Grid toggle; both views
+share filter, search, sort and pager, and **no row carries an edit / delete icon** — the row (or
+tile) opens `/panels/:id`, where Edit and More ▸ Clone / Delete live (house rule since CR-283;
+`/cut-stock` rows open the prefilled Add Stock dialog instead, having no detail page). New / Edit /
+Clone are `FormPage` routes `/panels/new` · `/panels/:id/edit` · `/panels/:id/clone`
+([`PanelFormPage.tsx`](../client/src/features/panels/PanelFormPage.tsx)). **`panel_code` is
+server-assigned** — `/panel-save` mints `PANEL-NNN` (max numeric suffix + 1 over all Panel rows,
+deleted included) when a create arrives with a blank code; edits keep theirs, clones get a new one.
+The cut-piece stock dialog is titled "Add Cut Piece Stock" behind an "Add Stock" button (it still
+sets the absolute on-hand).
 
 ---
 
@@ -955,7 +993,11 @@ Dispatch); a report may appear in more than one. Registry: `REPORTS` in
 
 **Audit.** Every mutation writes to `Activity` (actor + human-readable detail); `OperationLog`
 carries data-operation records including admin overrides and their reasons; `StatusTransition`
-records every state-machine move. `/ops` renders the audit log with local-time timestamps.
+records every state-machine move. **Deletes carry a reason (CR-270):** `confirmDelete()` in
+`ui/ConfirmDialog.tsx` is the one delete confirm — Admin gets the plain Yes/No, every other role must
+type a reason; `remove(table, rowid, reason)` sends it as `?reason=` (the `/panel-delete`,
+`/load-box-delete`, `/production-delete` ops take `body.reason`) and the server's `deleteReason()`
+rejects a non-admin delete without one and stores it in the `OperationLog` payload. `/ops` renders the audit log with local-time timestamps.
 Detail pages' Activity/Status tabs filter server-side (`?where=` on `entity_rowid`, else
 `table_name` — CR-128); the old global newest-N fetch dropped older records' history.
 
@@ -982,7 +1024,8 @@ default in a page — go through `useViewState` so the setting keeps reaching ev
 **ColumnPicker Apply is locked.** Checkbox changes and reorder both *stage*; nothing applies
 until **Apply**. Never make it immediate. Detail-page Fields pickers use the same component.
 The button lights up (`.btn.active`, same as an applied Search) when the view is non-default:
-`useColumns().customised` → `active` for column/field pickers, `groupBy.length > 0` for Group (CR-245). Status filters open on **All** on every grid and their
+`useColumns().customised` → `active` for column/field pickers, `groupBy.length > 0` for Group (CR-245). Status filters open on **All** on every grid (except the two
+palletization pages, which open on their own stage since CR-278) and their
 `<select>` takes `.fbar select.on` (same indigo) when narrowed (CR-246).
 
 **Forms** — no negative values anywhere; pick lists are `Combobox` only and **always sourced
@@ -991,7 +1034,16 @@ grey = auto-derived, white = typable, `ƒx` marks a calculated field; inputs com
 values; Save-only buttons (no Save-and-new variants); `seq_code` is auto-generated — no Short
 Code inputs; registration fields auto-format (`formatVehicleNumber`); **every date field
 defaults to today** (`todayISO`), never blank; Sales Person defaults to the logged-in user
-(`currentSalespersonName` / `storedAuth`).
+(`currentSalespersonName` / `storedAuth`). **Layout (CR-275, tightened by CR-277):** every form on `FormPage` lays its header
+fields out in `.form-rows` — label left, control right, two pairs per row. The label column is
+`fit-content(160px)` shared across the section through CSS subgrid (as wide as the longest label, never a
+fixed hole); `.span2` for a field that owns its row (the Customer row, a formula Name, Remarks / Note) —
+its control stays ONE control wide, never the page width; `.form-rows.one` for a single column (notes
+sections, address columns), `.form-divider` between groups, `.ctl-row` for a control with a button or
+preview beside it. Every Remarks / Note field is a `<textarea>` (`.form-rows textarea` min-height 84px),
+never a single-line input. Modals keep `.form-grid`. Every Customer picker on a transaction form carries a magnifier
+that opens [`CustomerSearchModal`](../client/src/features/masters/CustomerSearchModal.tsx) (CR-276) —
+the shared search surface; never a per-form picker.
 
 **Detail pages** — one shared design, copied from Quotes / Item master. Header actions are
 **always right-aligned** and are always **`Edit` + `More` (+ ✕)** — Edit is never hidden, only
@@ -1128,7 +1180,7 @@ prefix for test records so they are easy to find and remove.
 | **QC stage** | Exists in `ProductionStage`, dropped from the board and flow. |
 | **Production approval** | Retired; server transitions kept for rollback only. |
 | **Zoho Books integration** | Phase 6 in the original plan. **Never built.** No Books sync exists. |
-| **Hidden routes** | `/po`, `/qc`, `/containers`, `/fit`, `/loadplan`, `/invoices` — registered, no nav entry. |
+| **Hidden routes** | `/po`, `/qc`, `/container-shipments`, `/fit`, `/loadplan`, `/invoices` — registered, no nav entry. |
 | **Clear / None on pick lists** | Every `Combobox` still needs a Clear affordance (reverses the None-removal in `b9a47f2`). |
 | **Excel import dedupe** | Re-uploading the same production file double-counts. |
 | **SO picker migration** | Quote lines carry `unique_name`; the SO picker migration to match is deferred. |
@@ -1147,5 +1199,7 @@ prefix for test records so they are easy to find and remove.
 2. Add the dated entry to [`CHANGES.md`](CHANGES.md).
 3. Close the row in [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md) with its commit.
 4. Update [`DATASTORE-SCHEMA.md`](../DATASTORE-SCHEMA.md) if any column moved.
+5. Update the entity's row in [`DATA-FLOW.md`](DATA-FLOW.md) if the change added a write path
+   (route, button, bulk action, sheet) or a rule — and apply the rule to every path in that row.
 
-A change is not done until all four are true.
+A change is not done until all five are true.

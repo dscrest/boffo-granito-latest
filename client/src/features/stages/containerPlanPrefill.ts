@@ -95,10 +95,10 @@ export function nextPlanContainer(
   plans: PalPlan[],
   boxes: LoadBox[],
   designIdOf: (name: string) => string,
-): { ci: number; lines: ContainerPlanLine[] } | null {
+): { ci: number; lines: ContainerPlanLine[]; containerFormat?: string } | null {
   const cp = soId ? planBySo.get(soId) : undefined;
   if (!cp) return null;
   const prog = planProgress(cp.plan, dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] })), designIdOf);
   const ci = cp.plan.containers.findIndex((_, i) => prog[i]?.status !== "Sent");
-  return ci >= 0 ? { ci, lines: cp.plan.containers[ci].lines } : null;
+  return ci >= 0 ? { ci, lines: cp.plan.containers[ci].lines, containerFormat: cp.plan.containers[ci].containerFormat } : null;
 }

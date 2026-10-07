@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, confirmDialog } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { parseLoadPlan, type Order } from "@/data";
@@ -28,6 +28,8 @@ import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill"
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
+import { MxChip } from "./BulkLoadItemsModal";
+import { palletsOfLine } from "./newLoadingRows";
 import {
   boxFill,
   boxLabel,
@@ -42,12 +44,14 @@ import {
   listPalPlans,
   missingLoadDetails,
   mixedBatchOrderItems,
+  palletsOf,
   sealed,
   type LoadBox,
   type PalPlan,
   type PalPlanLine,
   soHeadOf,
 } from "./palPlansApi";
+import { useContainerFormats } from "@/features/masters/containerFormatsApi";
 
 type Entry = { p: PalPlan; l: PalPlanLine };
 
@@ -67,6 +71,7 @@ export function LoadingDetail() {
   const [busy, setBusy] = useState(false);
   const [entryOverlay, setEntryOverlay] = useState<{ box: LoadBox; entries: Entry[] } | null>(null);
   const [planSo, setPlanSo] = useState(""); // Container Planning tab: selected SO
+  const formats = useContainerFormats(); // CR-273: name of the loading's Container Master format
   useMasters(); // warm the designs cache for the embedded planner
 
   const load = async () => {
@@ -95,6 +100,7 @@ export function LoadingDetail() {
     [plans, boxes],
   );
   const totalBoxes = lines.reduce((s, l) => s + l.boxes, 0);
+  const totalPallets = palletsOf(lines);
   const pct = Math.round(boxFill(lines) * 100);
   // Stable colour per design (first-seen) — same rule as the board's box cards.
   const colorByDesign = new Map<string, string>();
@@ -203,17 +209,16 @@ export function LoadingDetail() {
 
   const onDelete = async () => {
     if (busy) return;
-    const ok = await confirmDialog({
+    const reason = await confirmDelete({
       title: "Delete loading",
       message:
         entries.length > 0
           ? `Delete ${boxLabel(box)}? ${entries.length} item${entries.length === 1 ? "" : "s"} return to Ready for Loading.`
           : `Delete ${boxLabel(box)}?`,
-      danger: true,
     });
-    if (!ok) return;
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteLoadBox(box.id);
+    const res = await deleteLoadBox(box.id, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not delete the loading");
@@ -237,6 +242,7 @@ export function LoadingDetail() {
     { key: "driver", label: "Driver", value: box.driverName || "—" },
     { key: "mobile", label: "Mobile", value: box.mobileNumber || "—" },
     { key: "containerNo", label: "Container No.", value: box.containerNumber || "—" },
+    { key: "containerFormat", label: "Container", value: formats.find((f) => f.id === box.containerFormatId)?.name || "—" },
     { key: "containerSize", label: "Size", value: box.containerSize || "—" },
     { key: "lineSeal", label: "Line Seal", value: box.lineSeal || "—" },
     { key: "electronicSeal", label: "Electronic Seal", value: box.electronicSeal || "—" },
@@ -377,14 +383,14 @@ export function LoadingDetail() {
             {/* Fill bar — design-coloured segments, fractional vs each line's pallet capacity. */}
             <div
               style={{ flex: 1, maxWidth: 320, display: "flex", height: 12, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border)", background: "var(--panel-2)" }}
-              title={`${fmt(totalBoxes)} boxes · ${pct}% of a full container`}
+              title={`${fmt(totalPallets)} pallets · ${fmt(totalBoxes)} boxes · ${pct}% of a full container`}
             >
               {lines.map((l) => (
                 <div key={l.id} style={{ width: `${lineFrac(l) * 100}%`, background: colorByDesign.get(l.designId) }} title={`${l.designLabel}: ${fmt(l.boxes)} boxes`} />
               ))}
             </div>
             <span className="mono dim" style={{ fontSize: "var(--t-sm)", marginLeft: "auto" }}>
-              {planLines.length > 0 ? `${fmt(plannedBoxes)} box planned` : `${fmt(totalBoxes)} box · ${pct}%`}
+              {planLines.length > 0 ? `${fmt(plannedBoxes)} box planned` : `${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"} · ${fmt(totalBoxes)} box · ${pct}%`}
             </span>
           </div>
           <div style={{ overflow: "auto" }}>
@@ -395,6 +401,7 @@ export function LoadingDetail() {
                   <th>Design</th>
                   <th>Batch</th>
                   <th>Pallet</th>
+                  <th className="num" style={{ textAlign: "right" }}>Pallets</th>
                   <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                   <th>Order</th>
                   <th>Customer</th>
@@ -410,8 +417,9 @@ export function LoadingDetail() {
                       </span>
                     </td>
                     <td><span className="design-name">{l.designLabel}</span></td>
-                    <td className="mono">{l.batchNumber || "—"}</td>
+                    <td className="mono">{l.batchNumber || "—"}{l.palletGroup && <MxChip />}</td>
                     <td>{l.palletName}</td>
+                    <td className="num mono">{fmt(palletsOfLine(l.boxes, l.boxesPerPallet))}</td>
                     <td className="num mono">{fmt(l.boxes)}</td>
                     <td className="mono">
                       {l.salesOrderId ? (
@@ -433,6 +441,7 @@ export function LoadingDetail() {
                         <td><span className="design-name">{l.design}</span></td>
                         <td className="mono">{l.batch || "—"}</td>
                         <td className="muted">—</td>
+                        <td className="muted" style={{ textAlign: "right" }}>—</td>
                         <td className="num mono">{fmt(l.boxes)}</td>
                         <td className="mono">
                           {o ? (
@@ -447,12 +456,22 @@ export function LoadingDetail() {
                   })}
                 {entries.length === 0 && planLines.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 18 }}>
+                    <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>
                       Nothing loaded yet{canEdit && open ? " — use Add Items, or load Ready items from the board." : "."}
                     </td>
                   </tr>
                 )}
               </tbody>
+              {entries.length > 0 && (
+                <tfoot>
+                  <tr style={{ fontWeight: 600 }}>
+                    <td colSpan={4}>Total <span className="dim" style={{ fontWeight: 400 }}>· {fmt(entries.length)} lines</span></td>
+                    <td className="num mono">{fmt(totalPallets)}</td>
+                    <td className="num mono">{fmt(totalBoxes)}</td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
           {mixedBatchOrderItems(lines) && (

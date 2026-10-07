@@ -22,7 +22,7 @@ import {
   type ProductionStage,
 } from "./productionApi";
 
-export type ProductionGroupBy = "item" | "customer" | "order" | "size";
+export type ProductionGroupBy = "date" | "item" | "customer" | "order" | "size";
 
 interface Card {
   key: string;
@@ -56,6 +56,7 @@ const batchesOf = (e: ProductionEntry): string => [...new Set(e.records.map((r) 
 
 function laneKey(e: ProductionEntry, groupBy: ProductionGroupBy): string {
   switch (groupBy) {
+    case "date": return (e.productionDate || e.createdTime || "").slice(0, 10) || "—";
     case "item": return e.design || "—";
     case "customer": return e.customer || "—";
     case "order": return e.independent ? "Independent" : e.orderNumber || e.poNumber || "—";

@@ -2,7 +2,7 @@
    (DispatchBoard), backed by the Catalyst Data Store via palPlansApi. Since
    CR-160 it is TWO pages over the same component, scoped by `stages`:
      /packing      → Ready for Palletization (the Planning stage only)
-     /palletizing  → In Palletization + Ready for Loading (Load handoff)
+     /palletizing  → In Palletization + recorded Ready for Loading rows (CR-278)
    The page header holds the status tab, the ONE Kanban/Sheet view toggle,
    Group (+ Sections when the page has >1 stage) and "New Palletization Plan"
    (opens PalPlanForm and lands on the created record). The old plans-list
@@ -37,11 +37,14 @@ type StageKey = (typeof COLUMNS)[number]["key"];
 export function PalPlans({
   stages = ["Planning"],
   sectionsKey = "palplans.stages",
+  pageLabel,
 }: {
   /** Stage sections this page shows (in order). One stage = no Sections picker. */
   stages?: StageKey[];
   /** localStorage key for the Sections show/hide prefs (per page). */
   sectionsKey?: string;
+  /** Status-dropdown label for this page's own rows (CR-278); defaults to the stage labels joined. */
+  pageLabel?: string;
 }) {
   const navigate = useNavigate();
   // Sections picker defs — this page's stage columns.
@@ -49,13 +52,14 @@ export function PalPlans({
     () => COLUMNS.filter((c) => stages.includes(c.key)).map((c) => ({ key: c.key, label: c.label })),
     [stages],
   );
-  // Status filter: "All" by default (CR-246, key bumped to .v2) — lists every line
-  // of every stage (boxed + dispatched included) as a read-only overview.
+  // Status filter: the page's own stage(s) by default (CR-278, key bumped to .v3 —
+  // CR-246's "All" default made both pages show one identical grid). "All" stays
+  // the opt-in overview of every stage (boxed + dispatched included), read-only.
   const TABS = [
-    { id: "page", label: STAGE_DEFS.map((c) => c.label).join(" + ") },
+    { id: "page", label: pageLabel || STAGE_DEFS.map((c) => c.label).join(" + ") },
     { id: "all", label: "All" },
   ];
-  const [tab, setTab] = usePersistedState(`${sectionsKey}.show.v2`, "all");
+  const [tab, setTab] = usePersistedState(`${sectionsKey}.show.v3`, "page");
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
   // whatever Settings → Default view says; key kept from the old inner toggle
   // so existing users keep their preference.

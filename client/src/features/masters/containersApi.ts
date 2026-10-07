@@ -146,8 +146,8 @@ export function updateContainer(rowid: string, input: ContainerInput) {
   return bust(update("Container", rowid, patch));
 }
 
-export function deleteContainer(rowid: string) {
-  return bust(remove("Container", rowid));
+export function deleteContainer(rowid: string, reason?: string) {
+  return bust(remove("Container", rowid, reason));
 }
 
 /* ---- Current fill (loaded boxes per container, from ContainerLoading) ----
@@ -197,8 +197,8 @@ async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): 
   };
 }
 
-export function bulkDeleteContainers(rowids: string[]): Promise<BulkResult> {
-  return bust(fanOut(rowids, (id) => remove("Container", id)));
+export function bulkDeleteContainers(rowids: string[], reason?: string): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Container", id, reason)));
 }
 
 /* ---- Container-fit suggester (read-only, multi-constraint, POST /fit-suggest) ----

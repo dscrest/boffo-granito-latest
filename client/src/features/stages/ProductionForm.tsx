@@ -155,19 +155,19 @@ export function ProductionForm({
 
           <div className="form-section">
             <div className="form-section-title">Details</div>
-            <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
-                <span className="lbl">Note</span>
-                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional — shift, remarks…" />
+            <div className="form-rows">
+              <label className="form-field">
+                <span className="lbl">Production date</span>
+                <DateInput value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
               </label>
               <label className="form-field">
                 <span className="lbl">Recorded by</span>
                 {/* Auto-stamped from the signed-in user — grey = system-filled. */}
                 <input value={recordedBy || "—"} readOnly tabIndex={-1} style={{ background: "var(--bg-2)", color: "var(--muted)" }} title="Auto: the signed-in user" />
               </label>
-              <label className="form-field">
-                <span className="lbl">Production date</span>
-                <DateInput value={prodDate} onChange={(e) => setProdDate(e.target.value)} />
+              <label className="form-field span2">
+                <span className="lbl">Note</span>
+                <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional — shift, remarks…" />
               </label>
             </div>
           </div>

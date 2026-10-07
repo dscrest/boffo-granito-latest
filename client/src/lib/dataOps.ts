@@ -132,9 +132,11 @@ export async function update(
   }
 }
 
-export async function remove(table: string, rowid: string): Promise<OpResult> {
+/** `reason` (CR-270) is what the user typed in the delete confirm — required
+    server-side for every role but Admin, logged on the OperationLog row. */
+export async function remove(table: string, rowid: string, reason?: string): Promise<OpResult> {
   try {
-    const res = await apiDelete<{ ok: boolean; rowid: string }>(`${FN}/${table}/${rowid}`);
+    const res = await apiDelete<{ ok: boolean; rowid: string }>(`${FN}/${table}/${rowid}${reason ? `?reason=${encodeURIComponent(reason)}` : ""}`);
     return { ok: true, rowid: res.rowid };
   } catch (e) {
     return fail(e);

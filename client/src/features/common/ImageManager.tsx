@@ -107,13 +107,18 @@ export function ImageManager({
   images,
   canEdit,
   onSave,
+  max = MAX_IMAGES,
 }: {
   images: DesignImage[];
   canEdit: boolean;
   /** Persist the new list (positional: [front, rear, ...other]).
       Return false when the save failed — the old list stays on screen. */
   onSave: (next: DesignImage[]) => Promise<boolean>;
+  /** Slot cap. 1 = a single "Image" slot (Panel master); default = Front/Rear + others. */
+  max?: number;
 }) {
+  const single = max === 1; // ponytail: only 1 and 5 exist today; generalise the slot labels if a third cap appears
+  const fixedSlots = single ? 1 : 2; // slots rendered as tiles; the rest are list rows
   const [busy, setBusy] = useState(false); // upload/save only
   const [viewer, setViewer] = useState<number | null>(null); // lightbox: index into images
   const [uploads, setUploads] = useState<{ name: string; status: "pending" | "done" | "error" }[]>([]); // per-file upload progress
@@ -128,13 +133,13 @@ export function ImageManager({
       remaining slots in order, cap at MAX_IMAGES, skip non-images. */
   const uploadMany = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const room = MAX_IMAGES - images.length;
+    const room = max - images.length;
     if (room <= 0) {
-      toast.info(`Only ${MAX_IMAGES} images allowed`);
+      toast.info(single ? "Only 1 image allowed" : `Only ${max} images allowed`);
       return;
     }
     const picked = Array.from(files).slice(0, room);
-    if (files.length > room) toast.info(`Only ${MAX_IMAGES} images allowed — extra files skipped.`);
+    if (files.length > room) toast.info(single ? "Only 1 image allowed — extra files skipped." : `Only ${max} images allowed — extra files skipped.`);
     setBusy(true);
     // Separate per-file progress (2026-07 request): each picked file shows
     // pending → done/error while the batch uploads.
@@ -181,9 +186,9 @@ export function ImageManager({
   return (
     <>
       {/* One "Add Image" button (2026-07 request) — fills slots in order. */}
-      <div style={{ display: "flex", gap: 18, marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 18, marginBottom: single ? 0 : 14 }}>
         <ImageSlot
-          label="Front View"
+          label={single ? "Image" : "Front View"}
           imageId={images[0]?.id}
           name={images[0]?.name}
           busy={busy}
@@ -191,20 +196,25 @@ export function ImageManager({
           onOpen={images[0] ? () => setViewer(0) : undefined}
           onUpload={canEdit ? (files) => uploadSlot(0, files) : undefined}
         />
-        <ImageSlot
-          label="Rear View"
-          imageId={images[1]?.id}
-          name={images[1]?.name}
-          busy={busy}
-          onDelete={() => void deleteAt(1)}
-          onOpen={images[1] ? () => setViewer(1) : undefined}
-          onUpload={canEdit ? (files) => uploadSlot(1, files) : undefined}
-        />
+        {!single && (
+          <ImageSlot
+            label="Rear View"
+            imageId={images[1]?.id}
+            name={images[1]?.name}
+            busy={busy}
+            onDelete={() => void deleteAt(1)}
+            onOpen={images[1] ? () => setViewer(1) : undefined}
+            onUpload={canEdit ? (files) => uploadSlot(1, files) : undefined}
+          />
+        )}
       </div>
+      {/* Single-slot mode hides the "Other" section unless legacy extras exist (still deletable). */}
+      {(!single || images.length > fixedSlots) && (
       <div className="muted" style={{ fontSize: "var(--t-sm)", marginBottom: 6 }}>Other Images</div>
+      )}
       {/* List rows (2026-07 request) — tiny inline preview + open/delete, not thumbnail tiles. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {images.slice(2).map((img, i) => (
+        {images.slice(fixedSlots).map((img, i) => (
           <div
             key={img.id + i}
             className="row"
@@ -212,35 +222,35 @@ export function ImageManager({
           >
             <img
               src={designImageUrl(img.id)}
-              alt={img.name || `Image ${i + 3}`}
-              onClick={() => setViewer(i + 2)}
+              alt={img.name || `Image ${i + fixedSlots + 1}`}
+              onClick={() => setViewer(i + fixedSlots)}
               title="Click to view"
               style={{ width: 26, height: 26, objectFit: "cover", borderRadius: 4, border: "1px solid var(--border)", flexShrink: 0, cursor: "zoom-in" }}
             />
             <button
               type="button"
-              onClick={() => setViewer(i + 2)}
-              title={img.name || `Image ${i + 3}`}
+              onClick={() => setViewer(i + fixedSlots)}
+              title={img.name || `Image ${i + fixedSlots + 1}`}
               style={{ fontSize: "var(--t-sm)", color: "var(--accent)", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}
             >
-              {img.name || `Image ${i + 3}`}
+              {img.name || `Image ${i + fixedSlots + 1}`}
             </button>
             <div style={{ flex: 1 }} />
             <button
               type="button"
               className="btn x"
               disabled={busy}
-              onClick={() => void deleteAt(i + 2)}
+              onClick={() => void deleteAt(i + fixedSlots)}
               title="Delete image"
             >
               ✕
             </button>
           </div>
         ))}
-        {images.slice(2).length === 0 && (
+        {!single && images.slice(fixedSlots).length === 0 && (
           <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "2px 0" }}>No other images</div>
         )}
-        {images.length < MAX_IMAGES && canEdit && (
+        {!single && images.length < max && canEdit && (
           <label
             className="btn"
             style={{ alignSelf: "flex-start", marginTop: 4, cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -274,9 +284,11 @@ export function ImageManager({
           </div>
         )}
       </div>
-      <div className="dim" style={{ marginTop: 10, fontSize: "var(--t-sm)" }}>
-        {images.length}/{MAX_IMAGES}
-      </div>
+      {!single && (
+        <div className="dim" style={{ marginTop: 10, fontSize: "var(--t-sm)" }}>
+          {images.length}/{max}
+        </div>
+      )}
 
       {/* Image lightbox (2026-07 request): view + prev/next across all images — shared since CR-192. */}
       {viewer !== null && <ImageLightbox images={images} index={viewer} onIndex={setViewer} onClose={() => setViewer(null)} />}

@@ -13,7 +13,7 @@ import { codeOf } from "@/ui/statusCode";
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -159,11 +159,11 @@ export function Containers() {
   const ids = useMemo(() => [...selected], [selected]);
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected container${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected container${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
     setNotice(`Deleting ${ids.length} container${ids.length > 1 ? "s" : ""}…`);
-    const res = await bulkDeleteContainers(ids);
+    const res = await bulkDeleteContainers(ids, reason);
     setBusy(false);
     if (!res.ok) {
       setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);

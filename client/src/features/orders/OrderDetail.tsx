@@ -7,17 +7,19 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
 import { type Order, type Quote } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
 import { QuotePrint } from "@/features/quotes/QuotePrint";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { deleteSalesOrder, listOrders, loadStatus, palStatus, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
+import { deleteSalesOrder, listOrders, loadStatus, palStatus, remainingOf, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
+import { DeallocateStockModal } from "./DeallocateStockModal";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
 import { listPalPlans, palLineStatusLabel } from "@/features/stages/palPlansApi";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
+import { SourcePanelOrders } from "@/features/panels/SourcePanelOrders";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
 import { deallocateStock, listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
@@ -316,6 +318,8 @@ export function OrderDetail() {
   // CR-175/203: New Loading from palletised stock = the Loading Session page, this SO only.
   const newLoading = () => navigate(`/loading/new?so=${encodeURIComponent(head?.salesOrderId || "")}`);
   const [allocating, setAllocating] = useState(false); // CR-199: Allocate Stock
+  // CR-263: Deallocate Stock — "" = closed, "*" = whole order, else one OrderItem ROWID.
+  const [deallocating, setDeallocating] = useState("");
   const [changingStatus, setChangingStatus] = useState(false); // CR-231: manual status + reason
   // CR-200 supply status per line — every open order shares each item's free
   // stock first-come, so it needs ALL orders, not just this one's lines.
@@ -418,14 +422,17 @@ export function OrderDetail() {
   const editable = can("orders", "edit") && !["Cancelled", "Rejected"].includes(status);
   // Edit stays visible on every order (consistency); when locked, explain why.
   const editLockReason = `Can't edit — order is ${soStatusLabel(status)}`;
+  // Mirrors OrderForm's per-line `worked` flag, rolled up to the order.
+  const workRecorded = items.some((o) => o.producedQty > 0 || o.palletizedQty > 0 || o.loadedQty > 0 || o.dispatchedQty > 0);
 
   // Edit / Clone open the Sales Order form page (CR-219).
   const formUrl = (mode: "edit" | "clone") => `/orders/${encodeURIComponent(orderId)}/${mode}`;
 
   const onDelete = async () => {
     if (!head.salesOrderId) return;
-    if (!(await confirmDialog({ message: `Delete order ${head.orderNumber || head.poNumber}? This cannot be undone.`, danger: true }))) return;
-    const res = await deleteSalesOrder(head.salesOrderId);
+    const reason = await confirmDelete({ message: `Delete order ${head.orderNumber || head.poNumber}? This cannot be undone.` });
+    if (reason == null) return;
+    const res = await deleteSalesOrder(head.salesOrderId, reason);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
       return;
@@ -589,9 +596,17 @@ export function OrderDetail() {
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
                 ? [{ label: "New Loading", onClick: newLoading }]
                 : []),
+              // Request Panels (CR-286): showcase panels for this sale → Panel Orders queue as New Request.
+              ...(head.salesOrderId && can("panel_craft", "create")
+                ? [{ label: "Request Panels", onClick: () => navigate(`/panel-orders/new?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
+                : []),
               // Allocate Stock (CR-199): hand free stock to this order's lines.
               ...(canAllocate
                 ? [{ label: "Allocate Stock", onClick: () => setAllocating(true) }]
+                : []),
+              // Deallocate Stock (CR-263): return allocated boxes to free stock.
+              ...(head.salesOrderId && can("stages", "edit") && items.some((o) => o.producedQty > 0)
+                ? [{ label: "Deallocate Stock", onClick: () => setDeallocating("*") }]
                 : []),
               // ponytail: "Record New Production" retired here (CR-198) — production is
               // recorded to stock on /prod, then allocated to this order (Allocate Stock).
@@ -608,8 +623,9 @@ export function OrderDetail() {
               ...(head.salesOrderId && can("orders", "create")
                 ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }]
                 : []),
+              // Same rule as the form's line removal (CR-232): work recorded → no delete, cancel instead.
               ...(can("orders", "delete")
-                ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }]
+                ? [{ label: "Delete", danger: true, disabled: workRecorded, title: workRecorded ? "Work is recorded on this order — cancel it instead" : undefined, onClick: () => void onDelete() }]
                 : []),
             ]}
           />
@@ -629,6 +645,7 @@ export function OrderDetail() {
           ? [
               { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onChanged={() => void load()} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
+              { id: "panels", label: "Panel Orders", content: <SourcePanelOrders salesOrderId={head.salesOrderId} /> },
               {
                 id: "containers",
                 label: "Container Planning",
@@ -717,8 +734,10 @@ export function OrderDetail() {
                 <th>Finish</th>
                 <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                 <th className="num" style={{ textAlign: "right" }}>Allocated</th>
+                <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                 <th>Supply</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -729,6 +748,8 @@ export function OrderDetail() {
                   <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
                   <td className="num mono">{fmt(o.orderQty)}</td>
                   <td className="num mono">{fmt(o.producedQty)}</td>
+                  {/* CR-263: Remaining = Ordered − Allocated (what Allocate Stock still has to find). */}
+                  <td className="num mono" style={{ color: remainingOf(o) > 0 ? "var(--c-amber)" : undefined }}>{fmt(remainingOf(o))}</td>
                   <td className="nw">
                     {(() => {
                       const sp = supplyById.get(o.id);
@@ -736,9 +757,27 @@ export function OrderDetail() {
                     })()}
                   </td>
                   <td className="num mono">{fmt(o.palletizedQty)}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {/* CR-263: per-line Deallocate — returns this line's allocated boxes to free stock. */}
+                    {can("stages", "edit") && o.producedQty > 0 && (
+                      <button type="button" className="btn ord-rm" title="Deallocate stock from this item" onClick={() => setDeallocating(o.id)}>✕</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
+            {/* CR-263: totals row — sums of the order's lines. */}
+            <tfoot>
+              <tr>
+                <td colSpan={3} style={{ fontWeight: 600 }}>Total · {items.length} item{items.length === 1 ? "" : "s"}</td>
+                <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + o.orderQty, 0))}</td>
+                <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + o.producedQty, 0))}</td>
+                <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + remainingOf(o), 0))}</td>
+                <td />
+                <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + o.palletizedQty, 0))}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -802,6 +841,15 @@ export function OrderDetail() {
           items={items}
           onDone={() => void load()}
           onClose={() => setAllocating(false)}
+        />
+      )}
+      {deallocating && head.salesOrderId && (
+        <DeallocateStockModal
+          title={[head.orderNumber || head.poNumber, head.party, deallocating !== "*" ? items.find((o) => o.id === deallocating)?.design : ""].filter(Boolean).join("  ·  ")}
+          salesOrderId={head.salesOrderId}
+          orderItemId={deallocating === "*" ? undefined : deallocating}
+          onDone={() => void load()}
+          onClose={() => setDeallocating("")}
         />
       )}
     </RecordDetail>

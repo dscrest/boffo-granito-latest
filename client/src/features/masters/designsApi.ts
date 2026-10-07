@@ -411,8 +411,8 @@ export function updateDesign(rowid: string, input: DesignInput) {
   return bust(update("Design", rowid, patch));
 }
 
-export function deleteDesign(rowid: string) {
-  return bust(remove("Design", rowid));
+export function deleteDesign(rowid: string, reason?: string) {
+  return bust(remove("Design", rowid, reason));
 }
 
 /* ---- Associate Pallets (DesignPallet many-to-many join) ---- */
@@ -465,6 +465,6 @@ export function bulkUpdateDesigns(rowids: string[], patch: Record<string, unknow
   return bust(fanOut(rowids, (id) => update("Design", id, patch)));
 }
 
-export function bulkDeleteDesigns(rowids: string[]): Promise<BulkResult> {
-  return bust(fanOut(rowids, (id) => remove("Design", id)));
+export function bulkDeleteDesigns(rowids: string[], reason?: string): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Design", id, reason)));
 }

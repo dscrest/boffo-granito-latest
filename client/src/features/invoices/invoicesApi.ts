@@ -113,6 +113,6 @@ export function generateInvoice(containerId: string, invoiceDate?: string) {
   );
 }
 
-export function deleteInvoice(rowid: string) {
-  return bust(remove("Invoice", rowid));
+export function deleteInvoice(rowid: string, reason?: string) {
+  return bust(remove("Invoice", rowid, reason));
 }

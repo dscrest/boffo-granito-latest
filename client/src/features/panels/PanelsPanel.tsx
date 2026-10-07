@@ -8,8 +8,8 @@
    "sent panel" record once dispatched.
    ============================================================ */
 import { codeOf } from "@/ui/statusCode";
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { fmt } from "@/lib/format";
 import { EmptyState } from "@/ui/States";
 import { ImageThumb } from "@/features/common/ImageLightbox";
@@ -20,7 +20,21 @@ export type PanelsScope =
   | { kind: "design"; designId: string }
   | { kind: "customer"; customerId: string };
 
+/** CR-279: whole row opens the panel (no row icons anywhere). */
+function rowProps(navigate: ReturnType<typeof useNavigate>, panelId: string) {
+  const to = `/panels/${encodeURIComponent(panelId)}`;
+  return {
+    tabIndex: 0,
+    style: { cursor: "pointer" as const },
+    onClick: () => navigate(to),
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" && e.target === e.currentTarget) navigate(to);
+    },
+  };
+}
+
 export function PanelsPanel({ scope }: { scope: PanelsScope }) {
+  const navigate = useNavigate();
   // Seed from the module caches so switching records never flashes a skeleton.
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
@@ -79,10 +93,10 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
               {myPanels.map((p) => {
                 const line = p.lines.find((l) => l.designId === scope.designId)!;
                 return (
-                  <tr key={p.id}>
+                  <tr key={p.id} {...rowProps(navigate, p.id)}>
                     <td><ImageThumb images={p.images} alt={p.panelCode} /></td>
                     <td className="mono">
-                      <Link className="linkish" to={`/panels/${encodeURIComponent(p.id)}`} title="Open panel">{p.panelCode}</Link>
+                      <Link className="linkish" to={`/panels/${encodeURIComponent(p.id)}`} title="Open panel" onClick={(e) => e.stopPropagation()}>{p.panelCode}</Link>
                     </td>
                     <td className="mono muted">{p.panelSize || "—"}</td>
                     <td className="mono">{line.cutSizeName || "—"}</td>
@@ -120,10 +134,10 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
           </thead>
           <tbody>
             {myOrders.map((o) => (
-              <tr key={o.id}>
+              <tr key={o.id} {...rowProps(navigate, o.panelId)}>
                 <td><ImageThumb images={panels.find((p) => p.id === o.panelId)?.images ?? []} alt={o.panelCode} /></td>
                 <td className="mono">
-                  <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel">{o.panelCode}</Link>
+                  <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel" onClick={(e) => e.stopPropagation()}>{o.panelCode}</Link>
                 </td>
                 <td className="num mono">{fmt(o.qty)}</td>
                 <td className="mono muted">{o.orderDate || "—"}</td>

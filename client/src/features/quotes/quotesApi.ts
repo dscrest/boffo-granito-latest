@@ -216,8 +216,8 @@ export function updateQuoteWithItems(rowid: string, input: NewQuoteInput) {
   return bust(op<{ ROWID: string; total_amount: number }>(`update-quote-with-items/${rowid}`, input));
 }
 
-export function deleteQuote(rowid: string) {
-  return bust(remove("Quote", rowid));
+export function deleteQuote(rowid: string, reason?: string) {
+  return bust(remove("Quote", rowid, reason));
 }
 
 /** Return the quote's share token, minting + persisting one on first use. */

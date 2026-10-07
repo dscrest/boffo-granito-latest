@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { designImageUrl } from "@/lib/api";
+import { PanelTile } from "./pcBits";
 import type { PanelRow } from "./panelsApi";
 
 export function PanelPickerModal({
@@ -65,7 +65,7 @@ export function PanelPickerModal({
                 aria-label="Search panels"
               />
             </div>
-            {/* CR-192: e-commerce tiles — the showcase image IS the panel's identity for a rep. */}
+            {/* CR-192: e-commerce tiles (PanelTile, shared with the /panels Photo view). */}
             <div
               style={{
                 maxHeight: "calc(100vh - 260px)",
@@ -80,40 +80,7 @@ export function PanelPickerModal({
             >
               {listed.map((p) => {
                 const sel = selected.has(p.id);
-                const designs = p.lines.map((l) => l.designName).join(", ");
-                const meta =
-                  [
-                    p.panelSize && `Panel: ${p.panelSize}`,
-                    p.vinylSize && `Vinyl: ${p.vinylSize}`,
-                    p.lines.length && `${p.lines.length} design${p.lines.length > 1 ? "s" : ""}`,
-                  ]
-                    .filter(Boolean)
-                    .join("  ·  ") || "No details yet";
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className={`panel-card${sel ? " sel" : ""}`}
-                    aria-pressed={sel}
-                    onClick={() => onToggle(p.id)}
-                    title={sel ? `${p.panelCode} — click to remove` : p.panelCode}
-                  >
-                    {p.images[0] ? (
-                      <img className="img" src={designImageUrl(p.images[0].id)} alt={p.panelCode} loading="lazy" />
-                    ) : (
-                      <div className="img none">No image</div>
-                    )}
-                    <div className="code">
-                      {sel && <Icon name="check" size={12} />} {p.panelCode}
-                    </div>
-                    <div className="meta" title={meta}>{meta}</div>
-                    {designs && (
-                      <div className="meta" title={designs}>
-                        {designs}
-                      </div>
-                    )}
-                  </button>
-                );
+                return <PanelTile key={p.id} panel={p} selected={sel} onClick={() => onToggle(p.id)} title={sel ? `${p.panelCode} — click to remove` : p.panelCode} />;
               })}
               {listed.length === 0 && (
                 <div className="dim" style={{ padding: 12, gridColumn: "1 / -1" }}>

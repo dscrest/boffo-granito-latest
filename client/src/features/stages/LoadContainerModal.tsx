@@ -25,6 +25,7 @@ import { todayISO } from "@/lib/dates";
 import { type Order } from "@/data";
 import { cachedOrders, listOrders } from "@/features/orders/ordersApi";
 import { CONTAINER_TYPES } from "@/features/masters/containersApi";
+import { useContainerFormats } from "@/features/masters/containerFormatsApi";
 import { formatVehicleNumber, resolveVehicle } from "@/features/masters/vehiclesApi";
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import {
@@ -50,6 +51,7 @@ export const NO_CONTAINER = "__none__";
 export interface ContainerDraft {
   container_number: string;
   container_size: string;
+  container_format: string; // ContainerFormat ROWID (CR-273; "" = size default)
   vehicle_number: string;
   electronic_seal: string;
   driver_name: string;
@@ -63,6 +65,7 @@ export interface ContainerDraft {
 export const newContainerDraft = (): ContainerDraft => ({
   container_number: "",
   container_size: CONTAINER_TYPES[0], // 28ft — the standard vehicle
+  container_format: "",
   vehicle_number: "",
   electronic_seal: "",
   driver_name: "",
@@ -94,6 +97,7 @@ export async function draftToCreateInput(
     dispatch_date: d.dispatch_date,
     container_number: d.container_number.trim(),
     container_size: d.container_size,
+    container_format: d.container_format,
     electronic_seal: d.electronic_seal.trim(),
     transporter: d.transporter.trim(),
     lr_number: d.lr_number.trim(),
@@ -133,6 +137,7 @@ export function ContainerPicker({
   onlyNew?: boolean;
 }) {
   const set = (k: keyof ContainerDraft, v: string) => onDraft({ ...draft, [k]: v });
+  const formats = useContainerFormats();
   const box = lockedTo ?? boxes.find((b) => b.id === selected);
 
   const options = [
@@ -191,6 +196,17 @@ export function ContainerPicker({
                 placeholder="e.g. TCLU 4829137"
                 className={showErrors && !draft.container_number.trim() ? "error" : undefined}
                 onChange={(e) => set("container_number", e.target.value)}
+              />
+            </label>
+            <label className="form-field">
+              <span className="lbl">Container</span>
+              <Combobox
+                value={draft.container_format}
+                options={formats.map((f) => ({ value: f.id, label: f.name }))}
+                onChange={(v) => set("container_format", v)}
+                placeholder="Search container…"
+                ariaLabel="Container format"
+                clearable
               />
             </label>
             <label className="form-field">
@@ -332,7 +348,7 @@ export function LoadContainerModal({
   linesOfBox: (boxId: string) => Array<{ p: PalPlan; l: PalPlanLine }>;
   busy: boolean;
   /** The SO/quote container plan's next target for this design (guide + warn only). */
-  planHint?: { docNo: string; containerNo: number; boxes: number; palletName: string };
+  planHint?: { docNo: string; containerNo: number; boxes: number; palletName: string; containerFormat?: string };
   /** boxId = load into that container; details = mint a new one first. Entries
       carry `boxes` only for a partial load (below the line's total).
       `prodEntries` are order items loaded straight from production — the
@@ -346,7 +362,8 @@ export function LoadContainerModal({
 }) {
   const panelRef = useModalA11y(onClose);
   const [sel, setSel] = useState<string>(boxes[0]?.id ?? NEW_CONTAINER);
-  const [draft, setDraft] = useState<ContainerDraft>(newContainerDraft);
+  // CR-274: a new container starts on the plan's container format (user can change it).
+  const [draft, setDraft] = useState<ContainerDraft>(() => ({ ...newContainerDraft(), container_format: planHint?.containerFormat || "" }));
   const [showErrors, setShowErrors] = useState(false);
   const [partial, setPartial] = useState(false);
   // The load list is editable: ✕ drops a supplied line, the Add-item picker
@@ -370,11 +387,15 @@ export function LoadContainerModal({
   // Greedy 100% cap, line by line in selection order: each line loads what
   // still fits (in ITS pallet's boxes-per-container), the rest stays Ready.
   // Every clamp is shown in the table below — nothing is dropped silently.
+  // CR-273: the container's own format (picked on the new-container form, or saved on the box) wins over the size default.
+  const formats = useContainerFormats();
+  const draftCap = formats.find((f) => f.id === (sel === NEW_CONTAINER ? draft.container_format : selBox?.containerFormatId))?.totalBoxes || 0;
+  const capOf = (l: PalPlanLine) => draftCap || l.palletCapacity;
   let runningFill = selBox ? boxFill(linesOfBox(selBox.id).map(({ l }) => l)) : 0;
   const fits = effLines.map((l) => {
-    const fit = !override && l.palletCapacity > 0 ? Math.floor(Math.max(0, 1 - runningFill) * l.palletCapacity) : l.boxes;
+    const fit = !override && capOf(l) > 0 ? Math.floor(Math.max(0, 1 - runningFill) * capOf(l)) : l.boxes;
     const n = Math.max(0, Math.min(l.boxes, fit));
-    if (l.palletCapacity > 0) runningFill += n / l.palletCapacity;
+    if (capOf(l) > 0) runningFill += n / capOf(l);
     return { l, n };
   });
   const maxLoad = single ? fits[0].n : 0;

@@ -248,6 +248,9 @@ export const SO_STATUSES = [
 ];
 export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
 
+/** Boxes an order line still needs = Ordered − Allocated (CR-263; Allocate Stock's "to allocate"). */
+export const remainingOf = (o: Pick<Order, "orderQty" | "producedQty">) => Math.max(0, o.orderQty - o.producedQty);
+
 export interface SoChip { key: string; label: string; cls: string; title?: string; ratio: number }
 const sumOf = (items: Order[], f: (o: Order) => number) => items.reduce((s, o) => s + f(o), 0);
 
@@ -313,8 +316,8 @@ export function updateSalesOrderWithItems(salesOrderId: string, input: NewSalesO
   return bust(op<{ ROWID: string }>(`update-so-with-items/${salesOrderId}`, input));
 }
 
-export function deleteSalesOrder(rowid: string) {
-  return bust(remove("SalesOrder", rowid));
+export function deleteSalesOrder(rowid: string, reason?: string) {
+  return bust(remove("SalesOrder", rowid, reason));
 }
 
 /** Delete a single order line. Any production still linked to the line is

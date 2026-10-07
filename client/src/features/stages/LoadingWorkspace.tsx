@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState } from "@/ui/States";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
@@ -248,9 +248,10 @@ export function LoadingWorkspace({
 
   const removeBox = async (b: LoadBox) => {
     if (busy) return;
-    if (!(await confirmDialog({ title: "Delete loading", message: `Delete ${boxLabel(b)}?`, danger: true }))) return;
+    const reason = await confirmDelete({ title: "Delete loading", message: `Delete ${boxLabel(b)}?` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteLoadBox(b.id);
+    const res = await deleteLoadBox(b.id, reason);
     setBusy(false);
     after(res.ok, res.error || "Could not delete the loading", `${boxLabel(b)} deleted`);
   };

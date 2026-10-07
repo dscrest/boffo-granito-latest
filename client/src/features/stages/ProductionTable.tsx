@@ -20,9 +20,9 @@ import { ProgressBar } from "@/ui/primitives";
 import { NumberInput } from "@/ui/NumberInput";
 import { can } from "@/lib/auth";
 import { usePersistedState, useViewState } from "@/lib/usePersistedState";
-import { fmt, fmtDateTime, pct } from "@/lib/format";
+import { fmt, fmtDateTime, fmtLocalDate, pct } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, confirmDiscard } from "@/ui/ConfirmDialog";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
 import { batchRows, effectiveRequested, hasOps, resolveSheetEdit, type SheetDraft, type SheetOps } from "./productionSheetEdit";
 import { MoreMenu } from "@/features/common/DetailBits";
@@ -61,6 +61,7 @@ const TABS: Array<{ id: string; label: string; match?: ProductionStage; pending?
 
 // Board swimlane dimensions, in the menu order. Selecting several nests them.
 const GROUP_DIMS: Array<{ id: ProductionGroupBy; label: string }> = [
+  { id: "date", label: "Date" }, // CR-265: the default — production is read day by day
   { id: "item", label: "Item" },
   { id: "customer", label: "Customer" },
   { id: "order", label: "Order" },
@@ -174,16 +175,18 @@ export function ProductionTable() {
   // Status filter opens on All in every view (CR-246).
   const [tab, setTab] = useState("all");
   // Board grouping: an ordered list of dimensions → nested swimlanes (empty = flat).
+  // Default = grouped by Date (CR-265). Key bumped to .v2 so a stored "[]" from
+  // the ungrouped-default era doesn't defeat the new default (same as loading.groups.v2).
   const [groupBy, setGroupBy] = useState<ProductionGroupBy[]>(() => {
     try {
-      const v = JSON.parse(localStorage.getItem("productionGroups") || "[]");
-      return Array.isArray(v) ? v.filter((d) => GROUP_DIMS.some((o) => o.id === d)) : [];
+      const v = JSON.parse(localStorage.getItem("productionGroups.v2") ?? '["date"]');
+      return Array.isArray(v) ? v.filter((d) => GROUP_DIMS.some((o) => o.id === d)) : ["date"];
     } catch {
-      return [];
+      return ["date"];
     }
   });
   useEffect(() => {
-    localStorage.setItem("productionGroups", JSON.stringify(groupBy));
+    localStorage.setItem("productionGroups.v2", JSON.stringify(groupBy));
   }, [groupBy]);
   // Grouping picker (reuses the grid's ColumnPicker: checked = included, row
   // order = nesting order). Checked dims first (in nesting order), rest after.
@@ -221,7 +224,7 @@ export function ProductionTable() {
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
   // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
   // .v3 (CR-236): Batch + Mfg Date columns.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v3", COLS, ["items", "created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v4", COLS, ["items", "created", "modified", "code"]); // .v4 (CR-265): Production ID hidden by default
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -287,7 +290,8 @@ export function ProductionTable() {
   const groupKeyOf = (g: ProductionRequestGroup): string =>
     groupBy
       .map((d) =>
-        d === "item" ? g.designSummary || "—"
+        d === "date" ? (g.date || "").slice(0, 10) || "—"
+        : d === "item" ? g.designSummary || "—"
         : d === "customer" ? g.customer || "—"
         : d === "order" ? g.orderNumber || g.poNumber || (g.independent ? "Independent" : "—")
         : g.entries[0]?.size || "—",
@@ -295,8 +299,9 @@ export function ProductionTable() {
       .join("  ›  ");
 
   // Sheet groups rows into sections by the selected dims (adjacent within page).
+  // Date sections run newest day first; every other dimension alphabetical.
   const sheetSorted = useMemo(
-    () => (groupBy.length ? [...sort.sorted].sort((a, b) => groupKeyOf(a).localeCompare(groupKeyOf(b))) : sort.sorted),
+    () => (groupBy.length ? [...sort.sorted].sort((a, b) => groupKeyOf(a).localeCompare(groupKeyOf(b)) * (groupBy[0] === "date" ? -1 : 1)) : sort.sorted),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [sort.sorted, groupBy],
   );
@@ -422,7 +427,8 @@ export function ProductionTable() {
     return (
       <tr key={`h-${key}`} style={{ background: "var(--accent-soft)", fontWeight: 700, color: "var(--accent-ink)" }}>
         <td colSpan={lead}>
-          {key}
+          {/* A Date section key is ISO (sorts right); show it the way the app writes dates. */}
+          {key.replace(/\d{4}-\d{2}-\d{2}/g, (d) => fmtLocalDate(d))}
           {!nums && <span className="mono" style={{ marginLeft: 10, fontWeight: 400 }}>{fmt(tot.produced)} / {fmt(tot.requested)} bx</span>}
         </td>
         {nums && (
@@ -462,7 +468,7 @@ export function ProductionTable() {
   const editDirty = editOps.rows.length > 0 || editOps.bad;
 
   const leaveEdit = async () => {
-    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return false;
+    if (editDirty && !(await confirmDiscard())) return false;
     setDraft({});
     setEditMode(false);
     return true;
@@ -540,14 +546,15 @@ export function ProductionTable() {
       toast.error("Selected productions have recorded output and can't be deleted");
       return;
     }
-    if (!(await confirmDialog({ message: `Delete ${deletable.length} production${deletable.length > 1 ? "s" : ""}${blocked ? ` (${blocked} skipped — output recorded)` : ""}? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Delete ${deletable.length} production${deletable.length > 1 ? "s" : ""}${blocked ? ` (${blocked} skipped — output recorded)` : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBulkBusy(true);
     let done = 0;
     let failed = 0;
     for (const g of deletable) {
       let ok = true;
       for (const e of g.entries) {
-        const res = await deleteProductionLog(e.id);
+        const res = await deleteProductionLog(e.id, reason);
         if (!res.ok) ok = false;
       }
       ok ? (done += 1) : (failed += 1);
@@ -667,16 +674,17 @@ export function ProductionTable() {
             Import
           </button>
         )}
+        {/* CR-267: Bulk Record Production is the default (primary) action; Start New Production is secondary. */}
         {canEdit && (
-          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/record")}>
-            <Icon name="columns" size={13} />
-            Bulk Record Production
+          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/new")}>
+            <Icon name="plus" size={13} />
+            Start New Production
           </button>
         )}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/new")}>
-            <Icon name="plus" size={13} />
-            Start New Production
+          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/record")}>
+            <Icon name="columns" size={13} />
+            Bulk Record Production
           </button>
         )}
       </div>
@@ -886,12 +894,17 @@ export function ProductionTable() {
                         <EmptyState
                           icon="factory"
                           title="No production requested yet"
-                          hint="Send items for production from a Sales Order, or start a request here"
+                          hint="Record what the factory made, or start a production request"
                           action={
                             canEdit ? (
-                              <button className="hbtn primary" onClick={() => navigate("/prod/new")}>
-                                Start New Production
-                              </button>
+                              <span style={{ display: "inline-flex", gap: 8 }}>
+                                <button className="hbtn primary" onClick={() => navigate("/prod/record")}>
+                                  Bulk Record Production
+                                </button>
+                                <button className="hbtn" onClick={() => navigate("/prod/new")}>
+                                  Start New Production
+                                </button>
+                              </span>
                             ) : undefined
                           }
                         />

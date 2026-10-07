@@ -11,7 +11,7 @@
    as the loading detail's "Loading Sheet" tab. */
 import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDiscard } from "@/ui/ConfirmDialog";
 import { EmptyState } from "@/ui/States";
 import { Combobox } from "@/ui/Combobox";
 import { update } from "@/lib/dataOps";
@@ -152,7 +152,7 @@ export function LoadingCustomerSheet({
     setSoDraft({});
   };
   const cancelEdit = async () => {
-    if (resolved.dirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+    if (resolved.dirty && !(await confirmDiscard())) return;
     clearDrafts();
   };
 

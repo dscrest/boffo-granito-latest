@@ -7,7 +7,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { codeOf } from "@/ui/statusCode";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
@@ -253,13 +253,13 @@ export function QuotesTable() {
   };
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected quote${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected quote${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBulkBusy(true);
     let done = 0;
     let failed = 0;
     for (const rowid of ids) {
-      const res = await deleteQuote(rowid);
+      const res = await deleteQuote(rowid, reason);
       if (res.ok) done += 1;
       else failed += 1;
     }

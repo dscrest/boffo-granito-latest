@@ -191,17 +191,12 @@ export function AssociatedPallets({
               </span>
             </div>
             <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
+              {/* Boxes only (CR-261): per-pallet facts; a container's capacity is the Container Master's. */}
               {facts([
                 p.boxesPerPallet > 0 && `${p.boxesPerPallet} box/pallet`,
-                p.palletsPerContainer > 0 && `${p.palletsPerContainer} pallet/container`,
+                p.boxesPerPallet > 0 && p.coverageSqm > 0 && `${nfmt(p.boxesPerPallet * p.coverageSqm)} m²/pallet`,
+                p.boxesPerPallet > 0 && p.boxWeightKg > 0 && `${nfmt(p.boxesPerPallet * p.boxWeightKg + p.emptyWeightKg)} kg/pallet`,
               ]) || "No arrangement set"}
-            </div>
-            <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-              {facts([
-                p.totalBoxesPerContainer > 0 && `${nfmt(p.totalBoxesPerContainer)} boxes/container`,
-                p.totalSqmPerContainer > 0 && `${nfmt(p.totalSqmPerContainer)} m²`,
-                p.totalBoxWeightPerContainer > 0 && `${nfmt(p.totalBoxWeightPerContainer)} kg`,
-              ])}
             </div>
           </button>
         ))

@@ -17,6 +17,15 @@ export function groupProgressOf(
   return m;
 }
 
+/** "N (boxes)" readout of palletized boxes as physical pallets (CR-279) —
+    the Ready Pallets column, its footer and the Complete dialog share it.
+    Unknown pallet capacity → just "(boxes)"; nothing done → "—". */
+export function readyPalletsLabel(doneBoxes: number, boxesPerPallet: number, fmtNum: (n: number) => string = String): string {
+  if (doneBoxes <= 0) return "—";
+  const boxes = `(${fmtNum(doneBoxes)})`;
+  return boxesPerPallet > 0 ? `${fmtNum(Math.ceil(doneBoxes / boxesPerPallet))} ${boxes}` : boxes;
+}
+
 // Blank batchNumber = legacy aggregate: those lines group per order item, so
 // the gate degrades to "whole order item palletised" for legacy data.
 export const batchKey = (l: PalPlanLine) => `${l.orderItemId}|${l.batchNumber}`;

@@ -61,8 +61,9 @@ export interface PalPlanLine {
   designLabel: string;
   designName: string; // Design.design_name alone — prints show this, not the composite (CR-183)
   palletId: string;
-  palletName: string;
-  palletCapacity: number; // container capacity: A + B arrangements, as in palletsApi.totalBoxesPerContainer (0 = unknown)
+  palletName: string; // Pallet.name — the composite "SIZE - Packing - Type"
+  palletKind: string; // Pallet.pallet_type ("Jungli") — the master's type (CR-279), NOT the Loading-Sheet override `palletType`
+  palletCapacity: number; // boxes one container holds: the loading's chosen Container Master format (CR-273), else the design's SIZE largest format (0 = none yet)
   boxesPerPallet: number; // Pallet.boxes_per_pallet (A arrangement) — pallet count = boxes ÷ this (0 = unknown)
   boxes: number;
   position: number;
@@ -116,7 +117,8 @@ export interface LoadBox {
   lineSeal: string;
   electronicSeal: string;
   loadingSupervisor: string;
-  containerSize: string; // 20 / 40 / 40HQ
+  containerSize: string; // 28ft / 30ft
+  containerFormatId: string; // ContainerFormat ROWID the loading uses (CR-273; "" = none picked → size default)
   transporter: string;
   lrNumber: string; // LR / docket no.
   destination: string; // port / city
@@ -232,6 +234,8 @@ export function boxFill(lines: PalPlanLine[]): number {
 export function palletsOf(lines: PalPlanLine[]): number {
   return lines.reduce((s, l) => s + (l.boxesPerPallet > 0 && l.boxes > 0 ? Math.ceil(l.boxes / l.boxesPerPallet) : 0), 0);
 }
+// readyPalletsLabel (CR-279) lives in palLoadGate.ts with the other pure helpers.
+export { readyPalletsLabel } from "./palLoadGate";
 /** The one pallet capacity shared by all lines, or 0 when mixed/unknown —
     lets the UI show absolute "X boxes short" only when that number is meaningful. */
 export function sharedCapacity(lines: PalPlanLine[]): number {
@@ -262,22 +266,24 @@ export function listPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
 
 async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: LoadBox[]; error?: string }> {
   // FKs are bigint ROWID strings; no JOINs — resolve names client-side (house convention).
-  const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes] = await Promise.all([
+  const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats] = await Promise.all([
     listAll("PalletizationPlan", { order: "ROWID desc" }),
     listAll("PalletizationPlanLine"),
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer", "box_brand"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "finish"] }),
-    listAll("Pallet", { columns: ["name", "boxes_per_pallet", "pallets_per_container", "b_boxes_per_pallet", "b_pallets_per_container"] }),
+    listAll("Pallet", { columns: ["name", "boxes_per_pallet", "pallet_type"] }),
     listAll("SalesPerson", { columns: ["name", "phone", "email"] }),
     listAll("Vehicle", { columns: ["vehicle_number", "driver_name", "mobile_number"] }),
     listAll("Customer", { columns: ["name", "country_code", "box_brand"] }),
     listAll("Size", { columns: ["code"] }),
     listAll("LoadBox", { order: "ROWID asc" }),
     listAll("Finish", { columns: ["name"] }),
+    // Container Master (CR-261): box capacity of one container, per size.
+    listAll("ContainerFormat", { columns: ["size", "total_boxes"] }),
   ]);
   // ANY failed read fails the load — a swallowed lines/lookup failure rendered
   // an empty board with no error (and got cached).
-  const failed = [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes].find((r) => !r.ok);
+  const failed = [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats].find((r) => !r.ok);
   if (failed) return { ok: false, plans: [], boxes: [], error: failed.error };
 
   const vehicleById = new Map<string, { number: string; driver: string; mobile: string }>();
@@ -314,17 +320,26 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
   const finishNameById = new Map<string, string>();
   (finishes.rows || []).forEach((f) => finishNameById.set(String(f.ROWID), str(f.name)));
   const palletName = new Map<string, string>();
-  const palletCap = new Map<string, number>(); // Pallet ROWID → boxes per full container
+  const palletKind = new Map<string, string>(); // Pallet ROWID → pallet_type (CR-279)
   const palletBpp = new Map<string, number>(); // Pallet ROWID → boxes per pallet
   (pallets.rows || []).forEach((p) => {
     palletName.set(String(p.ROWID), str(p.name));
+    palletKind.set(String(p.ROWID), str(p.pallet_type));
     palletBpp.set(String(p.ROWID), num(p.boxes_per_pallet));
-    // Mixed-config pallets ("[64*12] + [32*4] = 896") stack a second B arrangement.
-    palletCap.set(
-      String(p.ROWID),
-      num(p.boxes_per_pallet) * num(p.pallets_per_container) + num(p.b_boxes_per_pallet) * num(p.b_pallets_per_container),
-    );
   });
+  // CR-273: a loading's own Container Master format sets its lines' capacity; a line not in a
+  // loading (or in one with no pick) falls back to its size's LARGEST format.
+  const capByFormat = new Map<string, number>(); // ContainerFormat ROWID → total_boxes
+  const containerCapBySize = new Map<string, number>(); // Size ROWID → max total_boxes
+  (formats.rows || []).forEach((f) => {
+    if (str(f.deleted_at)) return;
+    const cap = num(f.total_boxes);
+    capByFormat.set(String(f.ROWID), cap);
+    const sizeId = str(f.size);
+    if (sizeId && cap > (containerCapBySize.get(sizeId) || 0)) containerCapBySize.set(sizeId, cap);
+  });
+  const boxFormat = new Map<string, string>(); // LoadBox ROWID → ContainerFormat ROWID
+  (loadBoxes.rows || []).forEach((b) => str(b.container_format) && boxFormat.set(String(b.ROWID), str(b.container_format)));
   const repById = new Map<string, { name: string; phone: string; email: string }>();
   (reps.rows || []).forEach((r) =>
     repById.set(String(r.ROWID), { name: str(r.name), phone: str(r.phone), email: str(r.email) }),
@@ -350,6 +365,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         electronicSeal: str(b.electronic_seal),
         loadingSupervisor: str(b.loading_supervisor),
         containerSize: str(b.container_size),
+        containerFormatId: str(b.container_format),
         transporter: str(b.transporter),
         lrNumber: str(b.lr_number),
         destination: str(b.destination),
@@ -379,7 +395,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       designName: designNameById.get(designId) || designLabel.get(designId) || "—",
       palletId,
       palletName: palletName.get(palletId) || "—",
-      palletCapacity: palletCap.get(palletId) || 0,
+      palletKind: palletKind.get(palletId) || "",
+      palletCapacity: capByFormat.get(boxFormat.get(str(l.load_box)) || "") || containerCapBySize.get(designSize.get(designId) || "") || 0,
       boxesPerPallet: palletBpp.get(palletId) || 0,
       boxes: num(l.boxes),
       position: num(l.position),
@@ -544,6 +561,7 @@ export interface LoadingCapture {
   electronic_seal?: string;
   loading_supervisor?: string;
   container_size?: string;
+  container_format?: string; // ContainerFormat ROWID (CR-273)
   transporter?: string;
   lr_number?: string;
   destination?: string;
@@ -556,8 +574,8 @@ export function updateLoadBox(rowid: string, patch: { vehicle?: string; capacity
 }
 
 /** Remove an Open box; its lines fall back to Ready for Loading. */
-export function deleteLoadBox(rowid: string) {
-  return bust(op<{ ROWID: string }>(`load-box-delete/${rowid}`, {}));
+export function deleteLoadBox(rowid: string, reason?: string) {
+  return bust(op<{ ROWID: string }>(`load-box-delete/${rowid}`, { reason }));
 }
 
 /** Dispatch a box (needs a vehicle + ≥1 line). Auto-completes fully-dispatched plans. */
@@ -593,8 +611,8 @@ export function sendToLoading(input: {
   return bust(op<{ ROWID: string; lines: number }>("send-to-loading", input));
 }
 
-export function deletePalPlan(rowid: string) {
-  return bust(remove("PalletizationPlan", rowid));
+export function deletePalPlan(rowid: string, reason?: string) {
+  return bust(remove("PalletizationPlan", rowid, reason));
 }
 
 /** Seed a create form from an existing plan (clone) — drops the auto-gen PAL number. */

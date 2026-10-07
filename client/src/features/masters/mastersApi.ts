@@ -61,6 +61,6 @@ export function updateMaster(
   return update(table, rowid, toPayload(vals));
 }
 
-export function deleteMaster(table: string, rowid: string): Promise<OpResult> {
-  return remove(table, rowid);
+export function deleteMaster(table: string, rowid: string, reason?: string): Promise<OpResult> {
+  return remove(table, rowid, reason);
 }

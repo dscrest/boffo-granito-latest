@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
@@ -273,13 +273,13 @@ export function OrdersTable() {
   };
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected order${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected order${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBulkBusy(true);
     let done = 0;
     let failed = 0;
     for (const rowid of ids) {
-      const res = await deleteSalesOrder(rowid);
+      const res = await deleteSalesOrder(rowid, reason);
       if (res.ok) done += 1;
       else failed += 1;
     }

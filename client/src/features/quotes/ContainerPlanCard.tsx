@@ -73,6 +73,9 @@ export function ContainerPlanCard({ containerPlan, docNo, plannerPath, dispatche
               <span className="mono" style={{ fontWeight: 600 }}>{docNo} · C{c.no}</span>
               <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{c.pallets} pallets · {fmt(c.boxes)} boxes · <span style={c.fillPct > 100 ? { color: "var(--c-red)", fontWeight: 600 } : undefined}>{c.fillPct}%{c.fillPct > 100 ? " · Override" : ""}</span></span>
             </div>
+            {c.containerFormatName && (
+              <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: -4, marginBottom: 6 }}>{c.containerFormatName}</div>
+            )}
             {chip && (
               <div style={{ marginBottom: 6 }}>
                 <span className={`chip ${chip.cls}`} style={{ whiteSpace: "nowrap" }}>{chip.label}</span>

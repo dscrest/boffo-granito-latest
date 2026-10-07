@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -157,10 +157,11 @@ export function CurrenciesAdmin() {
 
   const onDelete = async () => {
     if (!draft?.rowid) return;
-    if (!(await confirmDialog({ message: `Are you sure you want to delete currency "${draft.code}"? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete currency "${draft.code}"? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
     try {
-      await deleteCurrency(draft.rowid);
+      await deleteCurrency(draft.rowid, reason);
       toast.success("Currency removed");
       setDraft(null);
       await load();

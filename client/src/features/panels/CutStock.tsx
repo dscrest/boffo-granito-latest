@@ -1,7 +1,7 @@
 /* ============================================================
    Cut Piece Stock (Panel Craft) — on-hand cut pieces per design +
    cut size. Read-mostly grid over CutPieceStock; the only mutation
-   is the Update Stock modal (sets the absolute on-hand — the stock
+   is the Add Stock modal (sets the absolute on-hand — the stock
    otherwise moves via panel saves and the panel-order lifecycle).
    No detail page — a row click opens the modal prefilled.
    ============================================================ */
@@ -139,7 +139,7 @@ export function CutStock() {
         {canAdjust && (
           <button className="hbtn primary" onClick={() => setAdjust({})}>
             <Icon name="plus" size={13} />
-            Update Stock
+            Add Stock
           </button>
         )}
       </div>
@@ -155,40 +155,44 @@ export function CutStock() {
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
-                  {canAdjust && <th style={{ width: 40 }} />}
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((r) => (
-                  <tr key={r.id}>
-                    {visible.map((c) => (
-                      <td key={c.key} className={c.className} style={c.style}>
-                        {c.render!(r)}
-                      </td>
-                    ))}
-                    {canAdjust && (
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <span className="row-actions">
-                          <IconBtn icon="edit" title="Update this stock" onClick={() => setAdjust({ design: r.designId, cutSize: r.cutSizeId })} />
-                        </span>
-                      </td>
-                    )}
-                  </tr>
-                ))}
+                {pageRows.map((r) => {
+                  // CR-279: no row icons — the whole row opens the prefilled Add Stock
+                  // form (no detail page for cut stock, same as Containers / lookups).
+                  const open = canAdjust ? () => setAdjust({ design: r.designId, cutSize: r.cutSizeId }) : undefined;
+                  return (
+                    <tr
+                      key={r.id}
+                      tabIndex={open ? 0 : undefined}
+                      style={open ? { cursor: "pointer" } : undefined}
+                      onClick={open}
+                      onKeyDown={open ? (e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); } : undefined}
+                      title={open ? "Add stock for this design / cut size" : undefined}
+                    >
+                      {visible.map((c) => (
+                        <td key={c.key} className={c.className} style={c.style}>
+                          {c.render!(r)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + (canAdjust ? 1 : 0)}>
+                    <td colSpan={visible.length}>
                       {rows.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (
                         <EmptyState
                           icon="tile"
                           title="No cut-piece stock yet"
-                          hint="Record an opening entry with Update Stock — cutting jobs add stock when they turn Ready"
+                          hint="Record an opening entry with Add Stock — cutting jobs add stock when they turn Ready"
                           action={
                             canAdjust ? (
                               <button className="hbtn primary" onClick={() => setAdjust({})}>
-                                Update Stock
+                                Add Stock
                               </button>
                             ) : undefined
                           }

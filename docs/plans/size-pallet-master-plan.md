@@ -2,6 +2,10 @@
 
 Date: 2026-07-09 · Branch: `feature/master-order-forms`
 
+> **Superseded in part by CR-261 (2026-10-03):** the Pallet master is "boxes only" — `pallets_per_container`,
+> the `b_*` arrangement and every per-container formula in §4.2/§4.3 are no longer used. What a container
+> holds lives on the **Container Master** (`ContainerFormat`, one per Size). See `docs/SYSTEM.md`.
+
 > **Status 2026-07-09:** Phases A–D implemented, typecheck clean. Not yet smoke-tested, committed, or deployed.
 > Backfill of the 15 existing sizes is **deferred** (see §7).
 >

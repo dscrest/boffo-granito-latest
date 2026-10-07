@@ -18,7 +18,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDiscard } from "@/ui/ConfirmDialog";
 import { NumberInput } from "@/ui/NumberInput";
 import { Combobox } from "@/ui/Combobox";
 import { fmt } from "@/lib/format";
@@ -33,6 +33,7 @@ import {
   palLineStatusLabel,
   palletsOf,
   palTopUp,
+  readyPalletsLabel,
   setPalLineStatus,
   type LoadBox,
   type PalPlan,
@@ -216,22 +217,25 @@ export function DispatchBoard({
         },
       },
       { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
+      // CR-279: Ordered + Completed gave way to the pallet view — palletized
+      // boxes of this ITEM as physical pallets "N (boxes)", and the pallet type.
       {
-        key: "ordered",
-        label: "Ordered",
-        className: "num mono",
-        style: { textAlign: "right" },
-        render: ({ l }) => fmt(oiProgress.get(l.orderItemId)?.total ?? 0),
-      },
-      {
-        key: "completed",
-        label: "Completed",
-        className: "num mono",
+        key: "readyPallets",
+        label: "Ready Pallets",
+        className: "num mono nw",
         style: { textAlign: "right" },
         render: ({ l }) => {
           const done = oiProgress.get(l.orderItemId)?.done ?? 0;
-          return done ? <span style={{ color: "var(--c-green)" }}>{fmt(done)}</span> : <span className="dim">—</span>;
+          return done
+            ? <span style={{ color: "var(--c-green)" }} title="Palletized pallets (boxes) for this item">{readyPalletsLabel(done, l.boxesPerPallet, fmt)}</span>
+            : <span className="dim">—</span>;
         },
+      },
+      {
+        key: "pallet",
+        label: "Pallet",
+        className: "nw",
+        render: ({ l }) => <span title={l.palletName}>{l.palletKind || l.palletName}</span>,
       },
       {
         key: "remaining",
@@ -243,6 +247,8 @@ export function DispatchBoard({
           return fmt(Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0)));
         },
       },
+      // CR-266: the line's date (when it entered palletization) reads instead of the PAL code.
+      { key: "date", label: "Date", className: "mono muted nw", render: ({ p, l }) => (l.createdTime || p.createdTime || "").slice(0, 10) || "—" },
       {
         key: "status",
         label: "Status",
@@ -259,7 +265,8 @@ export function DispatchBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [plans],
   );
-  const sheetCols = useColumns("packingSheetColumns", SHEET_COLS);
+  // .v2 (CR-266): Date column added, PAL code hidden by default (ColumnPicker re-shows it).
+  const sheetCols = useColumns("packingSheetColumns.v2", SHEET_COLS, ["pal"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -299,7 +306,8 @@ export function DispatchBoard({
   // one call (`to` = Palletizing from the Palletise button, ReadyToLoad from
   // Record Palletised / "+" / pallet-less drop on Ready — a line never
   // reaches Ready for Loading without a pallet on record). A partial qty
-  // splits the line server-side; the remainder stays in its stage.
+  // splits the line server-side; the remainder stays in its stage — except a
+  // partial Complete, whose remainder re-queues to Ready for Palletization (CR-281).
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
     if (busy || entries.length === 0 || !palletise) return;
     const to = palletise.to;
@@ -353,7 +361,7 @@ export function DispatchBoard({
   const editDirty = editRows.length > 0 || editBad;
 
   const leaveEdit = async () => {
-    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+    if (editDirty && !(await confirmDiscard())) return;
     setDraft({});
     setEditMode(false);
   };
@@ -488,12 +496,17 @@ export function DispatchBoard({
   const sheetLines = sheetRows.map(({ l }) => l);
   const totalBoxes = sheetLines.reduce((s, l) => s + l.boxes, 0);
   const totalPallets = palletsOf(sheetLines);
-  // Ordered/Completed are per order item and several rows can share one —
-  // dedupe before summing (CR-187 footer).
+  // Ready/Remaining are per order item and several rows can share one —
+  // dedupe before summing (CR-187 footer; CR-279 pallets = Σ per item, on the
+  // item's first row's boxes-per-pallet).
   const oiIds = [...new Set(sheetLines.map((l) => l.orderItemId))];
-  const totalOrdered = oiIds.reduce((s, id) => s + (oiProgress.get(id)?.total ?? 0), 0);
-  const totalCompleted = oiIds.reduce((s, id) => s + (oiProgress.get(id)?.done ?? 0), 0);
-  const totalRemaining = Math.max(0, totalOrdered - totalCompleted);
+  const bppOf = (id: string) => sheetLines.find((l) => l.orderItemId === id)?.boxesPerPallet ?? 0;
+  const totalReadyBoxes = oiIds.reduce((s, id) => s + (oiProgress.get(id)?.done ?? 0), 0);
+  const totalReadyPallets = oiIds.reduce((s, id) => {
+    const done = oiProgress.get(id)?.done ?? 0;
+    return s + (done > 0 && bppOf(id) > 0 ? Math.ceil(done / bppOf(id)) : 0);
+  }, 0);
+  const totalRemaining = oiIds.reduce((s, id) => s + Math.max(0, (oiProgress.get(id)?.total ?? 0) - (oiProgress.get(id)?.done ?? 0)), 0);
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -650,7 +663,7 @@ export function DispatchBoard({
           </div>
         )}
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {[l.soNumber, l.palletName].filter((s) => s && s !== "—").join("  ·  ") || "—"}
+          {[l.soNumber, l.palletKind || l.palletName].filter((s) => s && s !== "—").join("  ·  ") || "—"}
         </div>
         {(() => {
           const cp = planBySo.get(l.salesOrderId);
@@ -1027,8 +1040,7 @@ export function DispatchBoard({
                         {ci === 0
                           ? `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"}`
                           : c.key === "boxes" ? fmt(totalBoxes)
-                          : c.key === "ordered" ? fmt(totalOrdered)
-                          : c.key === "completed" ? fmt(totalCompleted)
+                          : c.key === "readyPallets" ? (totalReadyBoxes > 0 ? `${fmt(totalReadyPallets)} (${fmt(totalReadyBoxes)})` : "—")
                           : c.key === "remaining" ? fmt(totalRemaining)
                           : ""}
                       </td>
@@ -1132,6 +1144,7 @@ export function DispatchBoard({
           busy={busy}
           defaultPalletFor={(l) => defaultPalletFor(l.salesOrderId, l.designId)}
           toLabel={PAL_LINE_STATUS_LABEL[palletise.to]}
+          progress={palletise.to === "ReadyToLoad" ? oiProgress : undefined}
           onConfirm={(entries) => void confirmPalletise(entries)}
           onClose={() => setPalletise(null)}
         />

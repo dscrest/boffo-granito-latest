@@ -22,6 +22,7 @@
    native confirm()/prompt() only if the host isn't mounted (should never happen).
    ============================================================ */
 import { useEffect, useState } from "react";
+import { isAdmin } from "@/lib/auth";
 
 export interface ConfirmOpts {
   title?: string;
@@ -53,6 +54,29 @@ export function confirmDialog(opts: ConfirmOpts): Promise<boolean> {
     const r: Req = { id: ++_id, kind: "confirm", resolve: (v) => resolve(v === true), ...opts };
     listeners.forEach((l) => l(r));
   });
+}
+
+/** The ONE "unsaved changes" prompt (CR-268): a Yes / No question, never a "Delete" dialog.
+    Every form Cancel / edit-mode exit routes through here. */
+export function confirmDiscard(): Promise<boolean> {
+  return confirmDialog({
+    title: "Discard changes?",
+    message: "You have unsaved changes. Leave without saving them?",
+    confirmLabel: "Yes, discard",
+    cancelLabel: "No, keep editing",
+    danger: true,
+  });
+}
+
+/** The ONE delete confirm (CR-270). Everyone but Admin must type a reason —
+    the server refuses a non-admin delete without one and stores it on the
+    OperationLog row. Resolves the reason ("" for Admin) or null when cancelled:
+      const reason = await confirmDelete({ message: "Are you sure you want to delete X? This cannot be undone." });
+      if (reason == null) return;
+      await deleteX(id, reason); */
+export function confirmDelete(opts: ConfirmOpts): Promise<string | null> {
+  if (isAdmin()) return confirmDialog({ danger: true, ...opts }).then((ok) => (ok ? "" : null));
+  return promptDialog({ danger: true, required: true, placeholder: "Reason for deleting (required)", ...opts });
 }
 
 export function promptDialog(opts: PromptOpts): Promise<string | null> {

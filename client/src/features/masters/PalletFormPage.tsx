@@ -50,11 +50,7 @@ export function PalletFormPage() {
         coverage_sqft: pallet.coverageSqft,
         box_weight_kg: pallet.boxWeightKg,
         boxes_per_pallet: pallet.boxesPerPallet,
-        pallets_per_container: pallet.palletsPerContainer,
         empty_pallet_weight_kg: pallet.emptyWeightKg,
-        b_boxes_per_pallet: pallet.bBoxesPerPallet,
-        b_pallets_per_container: pallet.bPalletsPerContainer,
-        b_pallet_weight: pallet.bPalletWeightKg,
         remarks: pallet.remarks,
       }
     : size

@@ -1686,7 +1686,9 @@ a { color: inherit; text-decoration: none; }
 .form-field input[type="checkbox"],
 .form-field input[type="radio"],
 .modal-panel input[type="checkbox"],
-.modal-panel input[type="radio"] {
+.modal-panel input[type="radio"],
+.form-page input[type="checkbox"],
+.form-page input[type="radio"] {
   appearance: auto;
   width: 15px;
   height: 15px;
@@ -1951,6 +1953,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   overflow: hidden;
   border-radius: 16px;
 }
+/* Log Production carries a 5-column batch table (CR-257) — wider, scoped. */
+.df-modal.wide { max-width: 1120px; }
 .df-head {
   display: flex;
   align-items: center;
@@ -2034,6 +2038,10 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.qt-line {
   grid-template-columns: 2fr 0.8fr 0.9fr 0.7fr 1fr 26px;
 }
+/* Container Master pallet lines (CR-269) — pallet, boxes/pallet, pallets/container, boxes, remove. */
+.ord-line.cf-line {
+  grid-template-columns: 2.2fr 1fr 1fr 1fr 26px;
+}
 /* Sales-order lines add a required Pallet column after Design (chosen at
    creation; pre-seeds palletization). Scoped so Quotes keep their 6-col grid. */
 .ord-line.qt-line.so-line {
@@ -2041,8 +2049,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 /* Batch capture rows (Record Output / Add Batches) — headers once, bare inputs.
    Non-batched items drop the Batch No. column. */
-.ord-line.batch-line { grid-template-columns: 1.4fr 1fr 0.8fr 1.4fr 26px; }
-.ord-line.batch-line.no-batch { grid-template-columns: 1fr 0.8fr 1.6fr 26px; }
+.ord-line.batch-line { grid-template-columns: 1.3fr 1fr 0.8fr 1.3fr 1.2fr 26px; }
+.ord-line.batch-line.no-batch { grid-template-columns: 1fr 0.8fr 1.4fr 1.4fr 26px; }
 .batch-line .ord-rm {
   width: 26px; height: 26px; font-size: 13px; padding: 0;
   align-self: start; margin-top: 4px; border-radius: 50%;
@@ -2051,7 +2059,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Compact remove ✕ on quote lines (order lines keep the 35px button).
    Circular, pinned to the first input line (35px tall) rather than
    centered in the whole row — the description textarea makes rows tall. */
-.qt-line .ord-rm {
+.qt-line .ord-rm,
+.cf-line .ord-rm {
   width: 26px;
   height: 26px;
   font-size: 13px;
@@ -2061,7 +2070,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   border-radius: 50%;
 }
 /* Subtotal cell: sit on the 35px input line, not centered in the tall row. */
-.qt-line .qt-sub {
+.qt-line .qt-sub,
+.cf-line .qt-sub {
   line-height: 35px;
   padding-left: 2px;
   color: var(--fg);
@@ -2130,8 +2140,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
    modal, full width: the Design column gets the room so item names read in full. */
 .form-page .ord-line.qt-line { grid-template-columns: 3fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
 .form-page .ord-line.qt-line.so-line { grid-template-columns: 3fr 1.4fr 0.8fr 0.9fr 0.7fr 1fr 26px; }
-/* Loading Item Table (CR-247) — item, batch, boxes, pallets, pallet, box brand, remove. */
-.ord-line.qt-line.load-line { grid-template-columns: 3fr 1.1fr 0.8fr 0.6fr 1.2fr 1fr 26px; }
+/* Loading Item Table (CR-247, pallets first CR-258) — item, batch, pallets, boxes, pallet, box brand, remove. */
+.ord-line.qt-line.load-line { grid-template-columns: 3fr 1.1fr 0.6fr 0.8fr 1.2fr 1fr 26px; }
 @media (max-width: 900px) { .ord-lines:has(> .load-line) { overflow-x: auto; } .ord-line.qt-line.load-line { min-width: 820px; } }
 /* Add Items in Bulk — list | selection. */
 .bulk-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; min-height: 380px; }
@@ -2144,8 +2154,16 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   padding: 9px 10px; border-bottom: 1px solid var(--border); text-align: left;
 }
 .bulk-item { background: none; border-width: 0 0 1px; cursor: pointer; color: inherit; font: inherit; border-radius: 0; }
+/* CR-259: a selected row is two lines — name + batch on top (own line), the stepper / loose tick / = boxes right-aligned under it. */
+.bulk-row { flex-wrap: wrap; justify-content: flex-end; }
+.bulk-row > .bulk-name { flex: 1 1 100%; min-width: 0; }
 .bulk-item:hover, .bulk-item.on { background: var(--accent-soft); }
 .bulk-item:disabled { opacity: 0.5; cursor: not-allowed; background: none; }
+/* Mix Batch tree (CR-258): the physical pallet is the parent row, each batch/item on it a child. */
+.bulk-item.sub, .bulk-row .sub { padding: 4px 10px 4px 34px; font-size: var(--t-sm); color: var(--muted); }
+.bulk-item.sub { border-bottom: 0; }
+.bulk-item.sub + .bulk-item:not(.sub), .bulk-item.sub:last-child { border-top: 1px solid var(--border); }
+.chip.mx { color: var(--c-amber); border-color: var(--c-amber); font-size: 11px; letter-spacing: 0.02em; }
 .bulk-tick {
   width: 20px; height: 20px; border-radius: 50%; flex: none;
   display: grid; place-items: center; border: 1px solid var(--border-2); color: #fff;
@@ -2154,6 +2172,37 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Billing | Shipping side by side (CR-221) — a full-width row inside a .form-grid. */
 .addr-pair { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 13px 14px; }
 @media (max-width: 900px) { .addr-pair { grid-template-columns: 1fr; } }
+/* Zoho-style form rows (CR-275, tightened by CR-277): label left, control right,
+   two label+control pairs per row. The label column is as wide as the widest
+   label in the section (max 160px) — subgrid keeps every pair in the section
+   aligned, so short labels no longer leave a hole before their control. Every
+   FormPage form opts in by swapping .form-grid for this; the .form-field markup
+   (lbl + control) is unchanged so the input skin, .req, .field-err and
+   readonly/calc rules keep working. Modals keep .form-grid. */
+.form-rows { display: grid; grid-template-columns: fit-content(160px) minmax(0, 1fr) fit-content(160px) minmax(0, 1fr); gap: 12px 28px; align-items: start; }
+.form-rows.one { grid-template-columns: fit-content(160px) minmax(0, 1fr); }  /* single column: notes sections, address columns */
+.form-rows > .form-field,
+.form-rows .addr-pair > .form-field { grid-column: span 2; display: grid; grid-template-columns: subgrid; column-gap: 12px; row-gap: 4px; align-items: start; }
+.form-rows > .form-field > .lbl,
+.form-rows .addr-pair > .form-field > .lbl { padding-top: 9px; }   /* sits on the 35px input line; textareas keep it top-aligned */
+.form-rows > .form-field > :nth-child(n + 3),
+.form-rows .addr-pair > .form-field > :nth-child(n + 3) { grid-column: 2; }  /* field-err / hint under the control, not the label */
+/* CR-277: a .span2 field (Customer, Name ƒx, Remarks) owns its row but its control
+   stays ONE control wide — never stretched to the page edge. */
+.form-rows > .span2 { grid-column: 1 / 3; }
+.form-rows > .span2 + .form-field { grid-column: 1 / span 2; }    /* the next field starts a fresh row */
+.form-rows > .form-divider { grid-column: 1 / -1; height: 0; border-top: 1px solid var(--border); margin: 2px 0; }
+.form-rows .addr-pair { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; }
+.form-rows .ctl-row { display: flex; align-items: center; gap: 8px; }  /* control + button/preview (Customer search, Box Brand logo) */
+.form-rows .ctl-row > .btn { height: 35px; flex: none; }
+.form-rows textarea { min-height: 84px; }                           /* CR-277: notes are ~3 lines tall, still resizable */
+@media (max-width: 900px) {
+  .form-rows, .form-rows.one, .form-rows .addr-pair { grid-template-columns: 1fr; }
+  .form-rows > .form-field, .form-rows .addr-pair > .form-field,
+  .form-rows > .span2, .form-rows > .span2 + .form-field { grid-column: 1; grid-template-columns: 1fr; }  /* label stacks above again */
+  .form-rows > .form-field > .lbl, .form-rows .addr-pair > .form-field > .lbl { padding-top: 0; }
+  .form-rows > .form-field > :nth-child(n + 3), .form-rows .addr-pair > .form-field > :nth-child(n + 3) { grid-column: 1; }
+}
 /* Small forms (a few fields) keep a readable width instead of stretching. */
 .form-page.narrow { max-width: 760px; }
 /* Step 1 rail + pane fill the viewport; each side scrolls on its own (CR-204).

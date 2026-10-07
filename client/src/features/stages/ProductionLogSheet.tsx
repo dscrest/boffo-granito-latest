@@ -34,11 +34,12 @@ const START_ROWS = 20;
 const GROW_BY = 10;
 const blanks = (n: number) => Array.from({ length: n }, blankRow);
 
-// Only the optional columns are pickable — Design / Batch / Date / Qty always show.
+// Only the optional columns are pickable — Size / Design / Batch / Qty always show (CR-264).
+// Date is hidden by default: the toolbar Production date is THE date; show it for a mixed-day sheet.
 const OPTIONAL: ColumnDef<LogRow>[] = [
-  { key: "size", label: "Size" },
   { key: "brand", label: "Box Brand" },
   { key: "note", label: "Remark" },
+  { key: "date", label: "Date" },
 ];
 
 /** Enter / ↓ / ↑ walk the same column. Comboboxes keep their own keys (option list). */
@@ -67,20 +68,31 @@ export function ProductionLogSheet() {
   const [showErrors, setShowErrors] = useState(false);
   // Save errors show in the foot, not as a toast — a sticky error toast sits on top of Save.
   const [saveError, setSaveError] = useState("");
-  const cols = useColumns("productionLogSheetColumns", OPTIONAL);
+  // Key bumped to .v2 (CR-264): Size became a fixed column, Date an optional hidden one.
+  const cols = useColumns("productionLogSheetColumns.v2", OPTIONAL, ["date"]);
   const shows = (key: string) => cols.visible.some((c) => c.key === key);
 
   const designById = useMemo(() => new Map(designRows.map((d) => [d.id, d])), [designRows]);
+  const activeDesigns = useMemo(() => designRows.filter((d) => d.status !== "Inactive" && d.status !== "Discontinued"), [designRows]);
+  // Size pick list = the distinct sizes of the active items (no extra fetch).
+  const sizeOptions = useMemo<ComboOption[]>(() => {
+    const m = new Map<string, string>();
+    activeDesigns.forEach((d) => d.sizeId && !m.has(d.sizeId) && m.set(d.sizeId, d.sizeLabel));
+    return [...m].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [activeDesigns]);
   const designOptions = useMemo<ComboOption[]>(
-    () =>
-      designRows
-        .filter((d) => d.status !== "Inactive" && d.status !== "Discontinued")
-        .map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || undefined })),
-    [designRows],
+    () => activeDesigns.map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || undefined })),
+    [activeDesigns],
   );
+  // A picked Size narrows the row's Design list; no Size = every item.
+  const designOptionsFor = (sizeId: string) => (sizeId ? designOptions.filter((o) => designById.get(o.value)?.sizeId === sizeId) : designOptions);
   const lookups = useMemo(
-    () => ({ designByKey: designIndex(designRows), brandByName: new Map(brands.map((b) => [b.name.trim().toLowerCase(), b._id])) }),
-    [designRows, brands],
+    () => ({
+      designByKey: designIndex(designRows),
+      brandByName: new Map(brands.map((b) => [b.name.trim().toLowerCase(), b._id])),
+      sizeByLabel: new Map(sizeOptions.map((s) => [s.label.trim().toLowerCase(), s.value])),
+    }),
+    [designRows, brands, sizeOptions],
   );
 
   /** Patch rows from index `at` on; the sheet grows so there is always a blank tail. */
@@ -190,13 +202,13 @@ export function ProductionLogSheet() {
             <thead>
               <tr>
                 <th className="rn" />
+                <th>Size</th>
                 <th className="cust">Design <span className="req">*</span></th>
-                {shows("size") && <th>Size</th>}
                 <th>Batch No.</th>
-                <th>Date</th>
-                <th className="num qtyh">Qty (boxes) <span className="req">*</span></th>
                 {shows("brand") && <th>Box Brand</th>}
+                <th className="num qtyh">Qty (boxes) <span className="req">*</span></th>
                 {shows("note") && <th>Remark</th>}
+                {shows("date") && <th>Date</th>}
                 <th className="rm" />
               </tr>
             </thead>
@@ -208,35 +220,47 @@ export function ProductionLogSheet() {
                 return (
                   <tr key={r.key} data-i={i} className={filled ? "on" : undefined}>
                     <td className={`rn mono ${rowBad ? "err" : ""}`}>{i + 1}</td>
+                    {/* Size first (CR-264): narrows the item list; picking an item fills it back. */}
+                    <td className="cellin" data-col="size" style={{ minWidth: 170 }}>
+                      <Combobox
+                        value={r.size}
+                        options={sizeOptions}
+                        placeholder="Size…"
+                        disabled={!!r.jobId}
+                        ariaLabel={`Size, row ${i + 1}`}
+                        onChange={(v) => setCell(i, { size: v, ...(r.design && d?.sizeId !== v ? { design: "", unmatched: "" } : {}) })}
+                      />
+                    </td>
                     <td className={`cust cellin ${bad(r, "design") ? "bad" : ""}`} data-col="design" style={{ minWidth: 300 }}>
                       <Combobox
                         value={r.design}
-                        options={designOptions}
+                        options={designOptionsFor(r.size)}
                         placeholder={r.unmatched || "Item…"}
                         invalid={bad(r, "design")}
                         disabled={!!r.jobId}
                         ariaLabel={`Design, row ${i + 1}`}
-                        onChange={(v) => setCell(i, { design: v, unmatched: "" })}
+                        onChange={(v) => setCell(i, { design: v, unmatched: "", size: designById.get(v)?.sizeId || r.size })}
                       />
                     </td>
-                    {shows("size") && <td className="auto nw">{d?.sizeLabel || ""}</td>}
                     <td className={`cellin ${bad(r, "batch") ? "bad" : ""}`} data-col="batch" style={{ width: 150 }}>
                       <input className="mono" value={r.batch} placeholder="auto" aria-label={`Batch number, row ${i + 1}`} onChange={(e) => setCell(i, { batch: e.target.value })} />
-                    </td>
-                    <td className="cellin" data-col="date" style={{ width: 140 }}>
-                      <DateInput value={r.date} max={todayISO()} style={{ width: "100%" }} aria-label={`Production date, row ${i + 1}`} onChange={(e) => setCell(i, { date: e.target.value })} />
-                    </td>
-                    <td className={`qty ${bad(r, "qty") ? "bad" : ""}`} data-col="qty">
-                      <NumberInput maxDecimals={0} value={r.qty} placeholder="0" aria-label={`Boxes produced, row ${i + 1}`} onChange={(e) => setCell(i, { qty: e.target.value })} />
                     </td>
                     {shows("brand") && (
                       <td className="cellin" data-col="brand" style={{ minWidth: 170 }}>
                         <Combobox value={r.brand} options={brandOptions} placeholder="" ariaLabel={`Box brand, row ${i + 1}`} onChange={(v) => setCell(i, { brand: v })} />
                       </td>
                     )}
+                    <td className={`qty ${bad(r, "qty") ? "bad" : ""}`} data-col="qty">
+                      <NumberInput maxDecimals={0} value={r.qty} placeholder="0" aria-label={`Boxes produced, row ${i + 1}`} onChange={(e) => setCell(i, { qty: e.target.value })} />
+                    </td>
                     {shows("note") && (
                       <td className="cellin" data-col="note" style={{ minWidth: 200 }}>
                         <input value={r.note} aria-label={`Remark, row ${i + 1}`} onChange={(e) => setCell(i, { note: e.target.value })} />
+                      </td>
+                    )}
+                    {shows("date") && (
+                      <td className="cellin" data-col="date" style={{ width: 140 }}>
+                        <DateInput value={r.date} max={todayISO()} style={{ width: "100%" }} aria-label={`Production date, row ${i + 1}`} onChange={(e) => setCell(i, { date: e.target.value })} />
                       </td>
                     )}
                     <td className="rm">
@@ -254,10 +278,11 @@ export function ProductionLogSheet() {
             <tfoot>
               <tr>
                 <td className="rn" />
+                <td />
                 <td className="cust">Total <span className="dim" style={{ fontWeight: 400 }}>· {lines.length} item{lines.length === 1 ? "" : "s"}</span></td>
-                <td colSpan={shows("size") ? 3 : 2} />
+                <td colSpan={shows("brand") ? 2 : 1} />
                 <td className="num mono">{fmt(totalBoxes)}</td>
-                <td colSpan={cols.visible.filter((c) => c.key !== "size").length + 1} />
+                <td colSpan={(shows("note") ? 1 : 0) + (shows("date") ? 1 : 0) + 1} />
               </tr>
             </tfoot>
           </table>
@@ -269,6 +294,10 @@ export function ProductionLogSheet() {
           <span><i>Items</i><b className="mono">{lines.length}</b></span>
           <span><i>Boxes</i><b className="mono">{fmt(totalBoxes)}</b></span>
         </div>
+        {/* The sheet already grows as you type into the last row; this makes it visible (CR-264). */}
+        <button className="btn" onClick={() => setRows((prev) => [...prev, ...blanks(GROW_BY)])} disabled={form.busy} title="Add 10 more rows">
+          <Icon name="plus" size={12} /> {GROW_BY} rows
+        </button>
         <span role="alert" style={{ color: "var(--c-red)" }}>
           {showErrors && errors.size > 0 ? `${errors.size} row${errors.size === 1 ? "" : "s"} to fix` : saveError}
         </span>

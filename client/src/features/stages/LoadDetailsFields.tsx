@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Combobox } from "@/ui/Combobox";
 import { formatVehicleNumber } from "@/features/masters/vehiclesApi";
 import { CONTAINER_TYPES } from "@/features/masters/containersApi";
+import { useContainerFormats } from "@/features/masters/containerFormatsApi";
 import type { LoadBox, LoadingCapture } from "./palPlansApi";
 
 export type VehicleDraft = { vehicle_number: string; driver_name: string; mobile_number: string };
@@ -27,6 +28,7 @@ export function useLoadDetails(
     electronic_seal: initialCapture?.electronic_seal || "",
     loading_supervisor: initialCapture?.loading_supervisor || "",
     container_size: initialCapture?.container_size || "",
+    container_format: initialCapture?.container_format || "",
     transporter: initialCapture?.transporter || "",
     lr_number: initialCapture?.lr_number || "",
     destination: initialCapture?.destination || "",
@@ -46,6 +48,7 @@ export const captureOf = (b: LoadBox): LoadingCapture => ({
   electronic_seal: b.electronicSeal,
   loading_supervisor: b.loadingSupervisor,
   container_size: b.containerSize,
+  container_format: b.containerFormatId,
   transporter: b.transporter,
   lr_number: b.lrNumber,
   destination: b.destination,
@@ -84,6 +87,21 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
       </label>
     </>
   );
+  // CR-273: which Container Master format this loading uses — sets its fill % denominator.
+  const formats = useContainerFormats();
+  const container = (
+    <label className="form-field">
+      <span className="lbl">Container</span>
+      <Combobox
+        value={capture.container_format || ""}
+        options={formats.map((f) => ({ value: f.id, label: f.name }))}
+        onChange={(v) => setCap("container_format", v)}
+        placeholder="Search container…"
+        ariaLabel="Container format"
+        clearable
+      />
+    </label>
+  );
   const size = (
     <label className="form-field">
       <span className="lbl">Size</span>
@@ -99,6 +117,7 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
   if (part === "details")
     return (
       <>
+        {container}
         {size}
         {text("Destination / Port", "destination", "Port / city")}
         {text("Transporter", "transporter", "Carrier company")}
@@ -126,6 +145,7 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
       <div className="form-section-title" style={{ marginTop: 14 }}>Loading details</div>
       <div className="form-grid">
         {!sheetOwned && text("Container No.", "container_number", "e.g. MSCU1234567")}
+        {container}
         {size}
         {!sheetOwned && text("Line Seal", "line_seal", "Line seal no.")}
         {!sheetOwned && text("Electronic Seal", "electronic_seal", "E-seal no.")}

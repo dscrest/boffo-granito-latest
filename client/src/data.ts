@@ -248,13 +248,16 @@ export interface ContainerPlanContainer {
   boxes: number;
   tonnes?: number; // gross container weight (boxes * box weight); optional (older plans omit)
   tonCapacity?: number; // weight mode: this container's weight cap (per-container override; falls back to plan default)
-  palletCapacity?: number; // box mode: pallets per container from the Pallet format
+  palletCapacity?: number; // box mode: pallets per container from the Container Master (size's format; CR-261)
+  containerFormat?: string; // box mode: ContainerFormat ROWID the owner line's size packs into (CR-274)
+  containerFormatName?: string; // its name, denormalised so readers need no lookup (CR-274)
   lines: ContainerPlanLine[];
 }
 export interface ContainerPlan {
   v: 1;
   mode?: "boxes" | "weight"; // fitting basis; absent on older plans (= weight)
   tonCapacity?: number; // weight mode: per-container weight cap the plan was packed at (default 28)
+  formats?: Record<string, string>; // box mode: Size ROWID → ContainerFormat ROWID picked in the planner (CR-274); absent = size's largest
   containers: ContainerPlanContainer[];
 }
 /** Parse a Quote.containerPlan JSON string; null when absent/invalid. */

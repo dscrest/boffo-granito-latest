@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
@@ -86,8 +86,9 @@ export function PalPlanDetail() {
 
   const onDelete = async () => {
     if (!plan) return;
-    if (!(await confirmDialog({ message: `Delete palletization plan ${plan.palNumber}? This cannot be undone.`, danger: true }))) return;
-    const res = await deletePalPlan(plan.id);
+    const reason = await confirmDelete({ message: `Delete palletization plan ${plan.palNumber}? This cannot be undone.` });
+    if (reason == null) return;
+    const res = await deletePalPlan(plan.id, reason);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
       return;

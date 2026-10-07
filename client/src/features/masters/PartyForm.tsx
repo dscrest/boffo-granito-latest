@@ -326,7 +326,7 @@ export function PartyForm({
   if (snapshot !== pristine.current) form.touch();
 
   const addressColumn = (prefix: "billing" | "shipping", disabled: boolean) => (
-    <div style={{ display: "grid", gap: 8 }}>
+    <div className="form-rows one" style={{ gap: 8 }}>
       {ADDRESS_KEYS.map((k) => {
         const key = `${prefix}_${k}` as keyof CustomerExtras;
         if (k === "country") {
@@ -415,7 +415,7 @@ export function PartyForm({
     >
           <div className="form-section">
             <div className="form-section-title">Customer</div>
-            <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="form-rows">
               <label className="form-field">
                 <span className="lbl">Customer Type</span>
                 <div style={{ display: "flex", gap: 18, alignItems: "center", minHeight: 34 }}>
@@ -485,7 +485,7 @@ export function PartyForm({
                   <span className="dim">Overseas customer</span>
                 </div>
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field span2">
                 <span className="lbl">Primary Contact</span>
                 <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 1fr", gap: 6 }}>
                   <select value={x.contact_salutation} onChange={(e) => setExtra("contact_salutation", e.target.value)} title="Salutation">
@@ -508,9 +508,7 @@ export function PartyForm({
                   />
                 </div>
               </label>
-              {/* Email trimmed so both phone numbers get real typing room;
-                  the dial picker is compact (+91) and expands on open. */}
-              <div style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 14 }}>
+              {/* The dial picker is compact (+91) and expands on open. */}
                 <label className="form-field">
                   <span className="lbl">Email Address</span>
                   <input
@@ -526,7 +524,6 @@ export function PartyForm({
                 </label>
                 {phoneField("Work Phone", workPhone, setWorkPhone)}
                 {phoneField("Mobile", mobile, setMobile)}
-              </div>
             </div>
           </div>
 
@@ -554,7 +551,7 @@ export function PartyForm({
           {tab === "other" && (
           <div className="form-section">
             <div className="form-section-title">Other Details</div>
-            <div className="form-grid">
+            <div className="form-rows">
               <label className="form-field">
                 <span className="lbl">Currency</span>
                 {/* The saved value stays selectable even if its master row is gone. */}
@@ -576,7 +573,7 @@ export function PartyForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Default Box Brand</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="ctl-row">
                   <Combobox
                     className="grow"
                     value={v.box_brand}

@@ -67,13 +67,20 @@ const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ d
 // Panel Craft — showcase panels (master + detail) and their cutting-job orders.
 const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
 const PanelDetail = lazy(() => import("@/features/panels/PanelDetail").then((m) => ({ default: m.PanelDetail })));
+const PanelFormPage = lazy(() => import("@/features/panels/PanelFormPage").then((m) => ({ default: m.PanelFormPage })));
 const PanelOrders = lazy(() => import("@/features/panels/PanelOrders").then((m) => ({ default: m.PanelOrders })));
+const PanelOrderDetail = lazy(() => import("@/features/panels/PanelOrderDetail").then((m) => ({ default: m.PanelOrderDetail })));
+const PanelOrderFormPage = lazy(() => import("@/features/panels/PanelOrderFormPage").then((m) => ({ default: m.PanelOrderFormPage })));
 const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
 const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
 const SizeDetail = lazy(() => import("@/features/masters/SizeDetail").then((m) => ({ default: m.SizeDetail })));
+// Legacy per-shipment container page (no nav entry) — lives at /container-shipments since CR-261.
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
+const ContainerFormats = lazy(() => import("@/features/masters/ContainerFormats").then((m) => ({ default: m.ContainerFormats })));
+const ContainerFormatFormPage = lazy(() => import("@/features/masters/ContainerFormatFormPage").then((m) => ({ default: m.ContainerFormatFormPage })));
+const ContainerFormatDetail = lazy(() => import("@/features/masters/ContainerFormatDetail").then((m) => ({ default: m.ContainerFormatDetail })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
 const RolesAdmin = lazy(() => import("@/features/admin/Roles").then((m) => ({ default: m.RolesAdmin })));
@@ -112,6 +119,8 @@ function navTree(): NavNode[] {
         // Pallet Master = the master of pallet formats (an Items master).
         // Palletization (Sales, id "packing") is the process that consumes it.
         { id: "pallets", label: "Pallet Master", icon: "palette" },
+        // Container Master (CR-261) = what one container of a size holds (pallet formats × count).
+        { id: "containers", label: "Container Master", icon: "truck" },
         { id: "prod", label: "Production", icon: "factory" },
       ],
     },
@@ -406,13 +415,18 @@ export default function App() {
             <Route path="/prod/:id/clone" element={<ProductionFormPage />} />
             <Route path="/prod/:id" element={<ProductionDetail />} />
             <Route path="/qc" element={<QC />} />
-            <Route path="/containers" element={<Containers />} />
+            <Route path="/container-shipments" element={<Containers />} />
+            <Route path="/containers" element={<ContainerFormats />} />
+            <Route path="/containers/new" element={<ContainerFormatFormPage />} />
+            <Route path="/containers/:id/edit" element={<ContainerFormatFormPage />} />
+            <Route path="/containers/:id/clone" element={<ContainerFormatFormPage />} />
+            <Route path="/containers/:id" element={<ContainerFormatDetail />} />
             <Route path="/fit" element={<FitSuggest />} />
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
-            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
-            {/* CR-170: Ready for Loading renders on /loading, not here. */}
-            <Route path="/palletizing" element={<PalPlans stages={["Palletizing"]} />} />
+            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" pageLabel="Ready for Palletization" />} />
+            {/* CR-278: recorded (Ready for Loading) rows list here again beside In Palletization; /loading keeps them too. */}
+            <Route path="/palletizing" element={<PalPlans stages={["Palletizing", "Ready"]} pageLabel="In Palletization" />} />
             <Route path="/packing/new" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/edit" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/clone" element={<PalPlanFormPage />} />
@@ -435,8 +449,13 @@ export default function App() {
             <Route path="/pallets/:id/clone" element={<PalletFormPage />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
             <Route path="/panels" element={<Panels />} />
+            <Route path="/panels/new" element={<PanelFormPage />} />
+            <Route path="/panels/:id/edit" element={<PanelFormPage />} />
+            <Route path="/panels/:id/clone" element={<PanelFormPage />} />
             <Route path="/panels/:id" element={<PanelDetail />} />
             <Route path="/panel-orders" element={<PanelOrders />} />
+            <Route path="/panel-orders/new" element={<PanelOrderFormPage />} />
+            <Route path="/panel-orders/:id" element={<PanelOrderDetail />} />
             <Route path="/cut-stock" element={<CutStock />} />
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />

@@ -15,7 +15,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -293,11 +293,11 @@ export function DesignMaster() {
   };
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected design${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
     setNotice(`Deleting ${ids.length} item${ids.length > 1 ? "s" : ""}…`);
-    const res = await bulkDeleteDesigns(ids);
+    const res = await bulkDeleteDesigns(ids, reason);
     setBusy(false);
     if (!res.ok) {
       setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);

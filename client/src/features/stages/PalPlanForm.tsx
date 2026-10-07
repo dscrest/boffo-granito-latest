@@ -12,6 +12,7 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Combobox } from "@/ui/Combobox";
+import { Icon } from "@/ui/Icon";
 import { DateInput } from "@/ui/DateInput";
 import { NumberInput } from "@/ui/NumberInput";
 import { todayISO } from "@/lib/dates";
@@ -20,6 +21,7 @@ import { FormPage, useFormSave } from "@/ui/FormPage";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
+import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
@@ -64,6 +66,7 @@ export function PalPlanForm({
   const [boxesByItem, setBoxesByItem] = useState<Record<string, number>>({});
   const [palletByItem, setPalletByItem] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
+  const [custSearch, setCustSearch] = useState(false);
   const form = useFormSave(onClose);
   const stockFor = useStockLookup(); // per-design stock signal dot (same as the SO form)
   // Pallet prefill from the SO/quote container plan (quotes/orders can arrive
@@ -336,18 +339,25 @@ export function PalPlanForm({
   const planFields = (
               <div className="form-section">
                 <div className="form-section-title">Plan</div>
-                <div className="form-grid">
+                {/* CR-275: Zoho-style rows — Customer on its own row with the search modal (CR-276). */}
+                <div className="form-rows">
                   {pickSo && (
-                    <label className="form-field">
+                    <div className="form-field span2">
                       <span className="lbl">Customer <span className="req">*</span></span>
-                      <Combobox
-                        value={selectedCustomer}
-                        options={customers.map((c) => ({ value: c.id, label: c.name }))}
-                        onChange={pickCustomer}
-                        placeholder="Search customers…"
-                        invalid={showErrors && !selectedCustomer}
-                      />
-                    </label>
+                      <div className="ctl-row">
+                        <Combobox
+                          className="grow"
+                          value={selectedCustomer}
+                          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+                          onChange={pickCustomer}
+                          placeholder="Search customers…"
+                          invalid={showErrors && !selectedCustomer}
+                        />
+                        <button type="button" className="btn" aria-label="Search customers" title="Search customers" onClick={() => setCustSearch(true)}>
+                          <Icon name="search" size={13} />
+                        </button>
+                      </div>
+                    </div>
                   )}
                   <label className="form-field">
                     <span className="lbl">Palletization Date</span>
@@ -365,9 +375,9 @@ export function PalPlanForm({
                       placeholder="Search sales persons…"
                     />
                   </label>
-                  <label className="form-field">
+                  <label className="form-field span2">
                     <span className="lbl">Remarks</span>
-                    <input value={remarks} onChange={(e) => {
+                    <textarea value={remarks} onChange={(e) => {
                         form.touch();
                         setRemarks(e.target.value);
                       }} placeholder="Optional" />
@@ -375,6 +385,8 @@ export function PalPlanForm({
                 </div>
               </div>
   );
+  // Only customers with palletizable stock are offered — same list as the Combobox.
+  const customerIds = new Set(customers.map((c) => c.id));
   const sections = (
     <>
               {shownOrders.map((o) => (
@@ -532,6 +544,7 @@ export function PalPlanForm({
               {sections}
             </>
           )}
+      {custSearch && <CustomerSearchModal filter={(c) => customerIds.has(c.id)} onPick={(c) => pickCustomer(c.id)} onClose={() => setCustSearch(false)} />}
     </FormPage>
   );
 }

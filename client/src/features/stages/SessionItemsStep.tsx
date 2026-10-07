@@ -20,7 +20,7 @@ import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
 import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill";
-import { groupReady, openLines, partialNote, spreadQty, type DesignRow, type SoBand } from "./newLoadingRows";
+import { groupReady, openLines, palletsOfLine, partialNote, spreadPallets, spreadQty, type DesignRow, type PickLine, type SoBand } from "./newLoadingRows";
 import { SessionSheetView } from "./SessionSheetView";
 import {
   boxFill,
@@ -43,11 +43,13 @@ export interface SessionPickProps {
   presetSalesOrderId?: string;
   /** CR-252 (LoadingSession): Customer is only a filter — blank = every customer, a container may mix customers. */
   anyCustomer?: boolean;
+  /** CR-273: boxes the chosen Container Master format holds — overrides every line's size default in the fill %. */
+  capacityOverride?: number;
   onSaved: (boxId: string) => void | Promise<void>;
 }
 
 /** Selection state + Save of step 1 — shared by this step and the CR-227 PlanSheetStep. */
-export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer, onSaved }: SessionPickProps) {
+export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer, capacityOverride, onSaved }: SessionPickProps) {
   const [brands, setBrands] = useState<MasterRow[]>([]);
   const [pickedCustomer, setPickedCustomer] = useState("");
   // The ONE selection state: boxes to load per PalPlanLine id.
@@ -74,13 +76,14 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
   // Rail: every customer with Ready-for-Loading stock (blocked batches included,
   // so the pane can say why nothing loads), badge = boxes loadable now.
   const customers = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; ready: number }>();
+    const m = new Map<string, { id: string; name: string; ready: number; lines: PickLine[] }>();
     for (const band of groupReady(allLines, () => true))
       for (const row of band.designs) {
         const l = row.lines[0].line;
         if (!l.customerId) continue;
-        const c = m.get(l.customerId) ?? m.set(l.customerId, { id: l.customerId, name: l.customerName || l.customerId, ready: 0 }).get(l.customerId)!;
+        const c = m.get(l.customerId) ?? m.set(l.customerId, { id: l.customerId, name: l.customerName || l.customerId, ready: 0, lines: [] }).get(l.customerId)!;
         c.ready += row.ready;
+        c.lines.push(...row.lines);
       }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [allLines]);
@@ -106,6 +109,8 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
   const merge = (m: Map<string, number>) => setQty((prev) => new Map([...prev, ...m]));
   const setLine = (l: PalPlanLine, v: number) => merge(new Map([[l.id, Math.max(0, Math.min(l.boxes, Math.floor(v) || 0))]]));
   const setDesign = (row: DesignRow, v: number, skip?: Set<string>) => merge(spreadQty(openLines(row), v, skip));
+  /** Pallets typed on the Item Table (CR-258): whole pallets, oldest batch first. */
+  const setDesignPallets = (row: DesignRow, p: number, skip?: Set<string>) => merge(spreadPallets(openLines(row), p, skip));
 
   // Plan as a helper: prefill the SO's next unsent container, FIFO per design.
   /** The SO's next unsent planned container (null = no plan / all sent) + how many the plan has. */
@@ -134,10 +139,11 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
   // anyCustomer: picks outlive the Customer filter, so count them over every band.
   const picked = (anyCustomer ? allBands : bands).flatMap((b) => b.designs.flatMap(openLines)).filter((l) => (qty.get(l.id) || 0) > 0);
   const totalBoxes = picked.reduce((s, l) => s + qty.get(l.id)!, 0);
-  const totalPallets = picked.reduce((s, l) => s + (l.boxesPerPallet > 0 ? Math.ceil(qty.get(l.id)! / l.boxesPerPallet) : 0), 0);
+  const totalPallets = picked.reduce((s, l) => s + palletsOfLine(qty.get(l.id)!, l.boxesPerPallet), 0);
   // Share of a container (boxFill idiom): already loaded + picked — advisory, never blocks (CR-195).
-  const loadedFill = boxFill(boxLines);
-  const fill = loadedFill + picked.reduce((s, l) => (l.palletCapacity > 0 ? s + qty.get(l.id)! / l.palletCapacity : s), 0);
+  const capOf = (l: PalPlanLine) => capacityOverride || l.palletCapacity;
+  const loadedFill = capacityOverride ? boxLines.reduce((s, l) => s + l.boxes / capacityOverride, 0) : boxFill(boxLines);
+  const fill = loadedFill + picked.reduce((s, l) => (capOf(l) > 0 ? s + qty.get(l.id)! / capOf(l) : s), 0);
   const over = fill > 1.001;
 
   const entriesOf = () => picked.map((l) => ({ lineId: l.id, ...(qty.get(l.id)! < l.boxes ? { boxes: qty.get(l.id)! } : {}) }));
@@ -210,7 +216,7 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
   };
 
   return {
-    brandName, customers, customerId, showRail, pickCustomer, bands, allBands, qty, setLine, setDesign, fillFromPlan, planNext,
+    brandName, customers, customerId, showRail, pickCustomer, bands, allBands, qty, setLine, setDesign, setDesignPallets, fillFromPlan, planNext,
     planBySo, boxLines, picked, totalBoxes, totalPallets, fill, over, busy, onSave, saveAdds, loadPlan,
   };
 }

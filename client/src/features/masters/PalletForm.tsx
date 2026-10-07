@@ -36,11 +36,7 @@ const blank: PalletInput = {
   coverage_sqft: 0,
   box_weight_kg: 0,
   boxes_per_pallet: 0,
-  pallets_per_container: 0,
   empty_pallet_weight_kg: 0,
-  b_boxes_per_pallet: 0,
-  b_pallets_per_container: 0,
-  b_pallet_weight: 0,
   remarks: "",
 };
 
@@ -89,16 +85,12 @@ export function PalletForm({
   // (CR 2026-09-10); picking a size re-fills it (see the Combobox onChange).
   const boxWeightKg = v.box_weight_kg || (picked ? picked.boxWeightKg : 0);
 
-  // Packing detail is formula-owned → "[30 * 18] = 540" from the arrangement.
-  const packing = useMemo(() => {
-    const product = v.boxes_per_pallet * v.pallets_per_container;
-    return v.boxes_per_pallet && v.pallets_per_container
-      ? `[${v.boxes_per_pallet} * ${v.pallets_per_container}] = ${product}`
-      : "";
-  }, [v.boxes_per_pallet, v.pallets_per_container]);
+  // Packing detail is formula-owned → "32 boxes" (boxes per pallet). A pallet
+  // is boxes only since CR-261; what a container holds is the Container Master's.
+  const packing = useMemo(() => (v.boxes_per_pallet ? `${v.boxes_per_pallet} boxes` : ""), [v.boxes_per_pallet]);
 
   // 5.4: auto-name → "SIZE - Packing Detail - Type", e.g.
-  // "800x1600 - [30 * 18] = 540 - Junglee".
+  // "800x1600 - 32 boxes - Junglee".
   const autoName = useMemo(
     () => [sizeLabel, packing, v.pallet_type.trim()].filter(Boolean).join(" - "),
     [sizeLabel, packing, v.pallet_type],
@@ -118,13 +110,8 @@ export function PalletForm({
 
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const r4 = (n: number) => Math.round(n * 10000) / 10000;
-  const totalBoxes = v.boxes_per_pallet * v.pallets_per_container;
-  const totalPallets = v.pallets_per_container;
   // Per spec: one loaded pallet = (box wt × boxes/pallet) + empty pallet wt.
   const totalPalletWeight = boxWeightKg * v.boxes_per_pallet + v.empty_pallet_weight_kg;
-  const totalSqm = totalBoxes * coverageSqm;
-  const totalSqft = totalBoxes * coverageSqft;
-  const totalBoxWeight = totalBoxes * boxWeightKg;
 
   // Size is the one hard requirement — every pallet spec is a spec *for a
   // size*; without the FK the name, coverage and weight are all blank.
@@ -162,7 +149,7 @@ export function PalletForm({
     >
           <div className="form-section">
             <div className="form-section-title">Identity</div>
-            <div className="form-grid">
+            <div className="form-rows">
               {/* Inputs first, derived Name last — you pick Size & Type,
                   the name falls out. */}
               <label className="form-field">
@@ -215,11 +202,11 @@ export function PalletForm({
                   readOnly
                   tabIndex={-1}
                   className="calc"
-                  title="Formula field: Boxes/Pallet × Pallets/Container"
-                  placeholder="e.g. [32 * 30] = 960"
+                  title="Formula field: Boxes / Pallet"
+                  placeholder="e.g. 32 boxes"
                 />
               </label>
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+              <label className="form-field span2">
                 <span className="lbl">Name</span>
                 <input
                   value={v.name}
@@ -236,7 +223,7 @@ export function PalletForm({
           {/* Owned by the Size master — pick a Size above to fill these. */}
           <div className="form-section">
             <div className="form-section-title">Coverage / Weight (per box) · from Size Master</div>
-            <div className="form-grid">
+            <div className="form-rows">
               <label className="form-field">
                 <span className="lbl">Coverage (Sq.Ft.)</span>
                 <input
@@ -276,21 +263,13 @@ export function PalletForm({
 
           <div className="form-section">
             <div className="form-section-title">Arrangement</div>
-            <div className="form-grid">
+            <div className="form-rows">
               <label className="form-field">
                 <span className="lbl">Boxes / Pallet</span>
                 <NumberInput
                   value={v.boxes_per_pallet || ""}
                   onChange={(e) => setNum("boxes_per_pallet", e.target.value)}
                   placeholder="e.g. 32"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Pallets / Container</span>
-                <NumberInput
-                  value={v.pallets_per_container || ""}
-                  onChange={(e) => setNum("pallets_per_container", e.target.value)}
-                  placeholder="e.g. 30"
                 />
               </label>
               <label className="form-field">
@@ -302,34 +281,8 @@ export function PalletForm({
                   placeholder="e.g. 18.5"
                 />
               </label>
-            </div>
-          </div>
-
-          <div className="form-section">
-            <div className="form-section-title">Per Container (computed)</div>
-            <div className="form-grid">
               <label className="form-field">
-                <span className="lbl">Total Boxes</span>
-                <input
-                  value={totalBoxes > 0 ? String(totalBoxes) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: A boxes×pallets + B boxes×pallets"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Total Pallets</span>
-                <input
-                  value={totalPallets > 0 ? String(totalPallets) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: A pallets + B pallets"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Total Pallet Weight (kg)</span>
+                <span className="lbl">Loaded Pallet Weight (kg)</span>
                 <input
                   value={totalPalletWeight > 0 ? String(r2(totalPalletWeight)) : "—"}
                   readOnly
@@ -338,45 +291,16 @@ export function PalletForm({
                   title="Formula field: (Box weight × Boxes/Pallet) + Empty pallet weight"
                 />
               </label>
-              <label className="form-field">
-                <span className="lbl">Total Sq.Ft / Container</span>
-                <input
-                  value={totalSqft > 0 ? String(r2(totalSqft)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Total Boxes × Coverage Sq.Ft"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Total Sq.M / Container</span>
-                <input
-                  value={totalSqm > 0 ? String(r2(totalSqm)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Total Boxes × Coverage Sq.M"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Total Box Weight / Container (kg)</span>
-                <input
-                  value={totalBoxWeight > 0 ? String(r2(totalBoxWeight)) : "—"}
-                  readOnly
-                  tabIndex={-1}
-                  className="calc"
-                  title="Formula field: Total Boxes × Box weight"
-                />
-              </label>
             </div>
+            {/* Pallets per container moved to the Container Master (CR-261). */}
           </div>
 
           <div className="form-section">
             <div className="form-section-title">Notes</div>
-            <div className="form-grid">
-              <label className="form-field" style={{ gridColumn: "1 / -1" }}>
+            <div className="form-rows one">
+              <label className="form-field">
                 <span className="lbl">Remarks</span>
-                <input value={v.remarks} onChange={(e) => setStr("remarks", e.target.value)} placeholder="Optional notes" />
+                <textarea value={v.remarks} onChange={(e) => setStr("remarks", e.target.value)} placeholder="Optional notes" />
               </label>
             </div>
           </div>

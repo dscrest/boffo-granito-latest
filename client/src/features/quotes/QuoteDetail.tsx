@@ -20,7 +20,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog, StatusTimeline } from "@/features/common/RecordDetail";
@@ -30,7 +30,9 @@ import { docTotals, lineTotals, type Quote, type QuoteStatus } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { QuotePrint } from "./QuotePrint";
 import { ContainerPlanCard } from "./ContainerPlanCard";
+import { ContainerOptionsPanel } from "./ContainerOptionsPanel";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
+import { SourcePanelOrders } from "@/features/panels/SourcePanelOrders";
 import { listPalPlans } from "@/features/stages/palPlansApi";
 import { soStatusLabel } from "@/features/orders/ordersApi";
 import {
@@ -83,7 +85,7 @@ export function QuoteDetail() {
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"details" | "orders" | "containers" | "dispatch" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "orders" | "containers" | "dispatch" | "panels" | "activity">("details");
   // Details | PDF segmented toggle (Books-style inline document preview).
   const [view, setView] = useState<"details" | "pdf">("details");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -241,9 +243,10 @@ export function QuoteDetail() {
 
   const onDelete = async () => {
     if (!quote) return;
-    if (!(await confirmDialog({ message: `Are you sure you want to delete quote ${quote.quoteNo}? This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete quote ${quote.quoteNo}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(`Deleting ${quote.quoteNo}…`);
-    const res = await deleteQuote(quote.id);
+    const res = await deleteQuote(quote.id, reason);
     if (!res.ok) {
       setBusy(null);
       setError(res.error || "Delete failed");
@@ -294,6 +297,8 @@ export function QuoteDetail() {
     ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => navigate(`/orders/new?quote=${encodeURIComponent(quote?.id || "")}`) }] : []),
     ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }] : []),
     { label: "Plan Containerisation", onClick: () => navigate(`/quotes/${quote.id}/containerise`) },
+    // Request Panels (CR-286): showcase panels for this quote → Panel Orders queue as New Request.
+    ...(can("panel_craft", "create") ? [{ label: "Request Panels", onClick: () => navigate(`/panel-orders/new?fromQuote=${encodeURIComponent(quote.id)}`) }] : []),
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
     { label: "Copy Share Link", onClick: () => void onShare() },
@@ -498,6 +503,13 @@ export function QuoteDetail() {
           Dispatch
         </button>
         <button
+          className={`tabish ${tab === "panels" ? "active" : ""}`}
+          onClick={() => setTab("panels")}
+          style={tabStyle(tab === "panels")}
+        >
+          Panel Orders
+        </button>
+        <button
           className={`tabish ${tab === "activity" ? "active" : ""}`}
           onClick={() => setTab("activity")}
           style={tabStyle(tab === "activity")}
@@ -658,6 +670,12 @@ export function QuoteDetail() {
             </div>
           </div>
 
+          {/* CR-262: containers the quoted sizes need, from the Container Master. */}
+          <div className="card" style={{ padding: 18, marginTop: 12 }}>
+            <div className="form-section-title" style={{ marginBottom: 8 }}>Suitable Containers</div>
+            <ContainerOptionsPanel lines={quote.lines} />
+          </div>
+
           {/* #19: Remarks / Customer Notes / Terms below the item table. */}
           {FIELDS.some((f) => NOTE_KEYS.has(f.key) && !fields.hidden.has(f.key)) && (
             <div className="card" style={{ padding: 18, marginTop: 12 }}>
@@ -733,6 +751,9 @@ export function QuoteDetail() {
       {tab === "dispatch" && (
         <DispatchTab scope={{ kind: "so", salesOrderIds: quoteSoIds }} orderedBoxes={undefined} />
       )}
+
+      {/* Panel Orders tab (CR-286) — panel requests raised from this quote. */}
+      {tab === "panels" && <SourcePanelOrders quoteId={id} />}
 
       {/* Activity tab — status timeline (with time-in-state) + OperationLog. */}
       {tab === "activity" && (

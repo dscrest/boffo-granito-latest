@@ -13,7 +13,7 @@ import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, confirmDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { can } from "@/lib/auth";
@@ -257,15 +257,10 @@ export function CustomerDetail() {
 
   const onDelete = async () => {
     if (!party) return;
-    if (
-      !(await confirmDialog({
-        message: `Are you sure you want to delete customer "${party.name}"? This cannot be undone.`,
-        danger: true,
-      }))
-    )
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete customer "${party.name}"? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteCustomer(party.id);
+    const res = await deleteCustomer(party.id, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");

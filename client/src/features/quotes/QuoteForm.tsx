@@ -20,11 +20,13 @@ import {
 import { useMasters } from "@/features/masters/useMasters";
 import { AddressPair, defaultAddresses } from "@/features/common/AddressPair";
 import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
+import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
 import { NumberInput } from "../../ui/NumberInput";
+import { ContainerOptionsPanel } from "./ContainerOptionsPanel";
 
 // #16 status set on QuoteDetail bar; #18 TDS/TCS removed — STATUSES/TAX_TYPES no longer used here.
 
@@ -138,6 +140,7 @@ export function QuoteForm({
   const [fx, setFx] = useState(() => (initial?.exchangeRate ? String(initial.exchangeRate) : "1"));
 
   const form = useFormSave(onClose);
+  const [custSearch, setCustSearch] = useState(false);
   const setHead = (k: keyof Head, val: string) => {
     form.touch();
     // Auto-fill from the Customer master when a known customer is picked:
@@ -256,19 +259,36 @@ export function QuoteForm({
         <div>
           <div className="form-section">
             <div className="form-section-title">Quote Details</div>
-            <div className="form-grid">
-              <label className="form-field">
+            {/* CR-275: Zoho-style rows — label left, two pairs per row; Customer on its own row. */}
+            <div className="form-rows">
+              <div className="form-field span2">
                 <span className="lbl">
                   Customer<span className="req"> *</span>
                 </span>
-                <Combobox
-                  value={h.customer}
-                  onChange={(v) => setHead("customer", v)}
-                  placeholder="Search customer…"
-                  options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
-                />
+                <div className="ctl-row">
+                  <Combobox
+                    className="grow"
+                    value={h.customer}
+                    onChange={(v) => setHead("customer", v)}
+                    placeholder="Search customer…"
+                    options={parties.map((p) => ({ value: p.name, label: p.name, hint: [p.code, p.country].filter(Boolean).join(" · ") }))}
+                  />
+                  {/* CR-276: the bigger search surface — a modal with a customer table. */}
+                  <button type="button" className="btn" aria-label="Search customers" title="Search customers" onClick={() => setCustSearch(true)}>
+                    <Icon name="search" size={13} />
+                  </button>
+                </div>
                 {customerErr && <span className="field-err">{customerErr}</span>}
-              </label>
+              </div>
+              {/* #16: Status removed from the form — set via the status bar on
+                  QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
+              <AddressPair
+                customer={customers.find((x) => x.name === h.customer)}
+                billing={h.address}
+                shipping={h.shippingAddress}
+                onChange={(kind, v) => setHead(kind === "billing" ? "address" : "shippingAddress", v)}
+              />
+              <div className="form-divider" />
               <label className="form-field">
                 <span className="lbl">Quote Date</span>
                 <DateInput value={h.quoteDate} onChange={(e) => setHead("quoteDate", e.target.value)} />
@@ -289,7 +309,7 @@ export function QuoteForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Box Brand</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="ctl-row">
                   <Combobox
                     className="grow"
                     value={h.boxBrandId}
@@ -303,27 +323,25 @@ export function QuoteForm({
               </label>
               <label className="form-field">
                 <span className="lbl">Payment Term</span>
-                <select value={h.paymentTerm} onChange={(e) => setHead("paymentTerm", e.target.value)}>
-                  <option value=""></option>
-                  {paymentTerms.map((t) => (
-                    <option key={t.id} value={t.label}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+                <Combobox
+                  value={h.paymentTerm}
+                  onChange={(v) => setHead("paymentTerm", v)}
+                  placeholder="Search payment term…"
+                  options={paymentTerms.map((t) => ({ value: t.label, label: t.label }))}
+                />
               </label>
               {/* Port of Discharge removed from quotes 2026-07-13 — the stored
                   value passes through unchanged when editing legacy quotes. */}
               <label className="form-field">
                 <span className="lbl">Currency</span>
-                <select value={h.currency} onChange={(e) => setHead("currency", e.target.value)}>
-                  {/* Saved value stays selectable even if its master row is gone. */}
-                  {[...new Set([...currencyCodes(currencies), ...(h.currency ? [h.currency] : [])])].map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
+                {/* Saved value stays selectable even if its master row is gone. */}
+                <Combobox
+                  value={h.currency}
+                  onChange={(v) => setHead("currency", v)}
+                  placeholder="Search currency…"
+                  clearable={false}
+                  options={[...new Set([...currencyCodes(currencies), ...(h.currency ? [h.currency] : [])])].map((o) => ({ value: o, label: o }))}
+                />
               </label>
               {h.currency !== "INR" && (
                 <label className="form-field">
@@ -337,14 +355,6 @@ export function QuoteForm({
                   />
                 </label>
               )}
-              {/* #16: Status removed from the form — set via the status bar on
-                  QuoteDetail (Zoho-Books style). New quotes default to "Draft". */}
-              <AddressPair
-                customer={customers.find((x) => x.name === h.customer)}
-                billing={h.address}
-                shipping={h.shippingAddress}
-                onChange={(kind, v) => setHead(kind === "billing" ? "address" : "shippingAddress", v)}
-              />
             </div>
           </div>
 
@@ -437,12 +447,18 @@ export function QuoteForm({
             </div>
           </div>
 
+          {/* CR-262: containers the quoted sizes need, from the Container Master. */}
+          <div className="form-section">
+            <div className="form-section-title">Suitable Containers</div>
+            <ContainerOptionsPanel lines={lines.map((l) => ({ item: l.item, qty: Number(l.qty) || 0 }))} />
+          </div>
+
           <div className="form-section">
             <div className="form-section-title">Remarks &amp; Notes</div>
-            <div className="form-grid">
+            <div className="form-rows one">
               <label className="form-field">
                 <span className="lbl">Remarks</span>
-                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
+                <textarea value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Notes for this quote" />
               </label>
               <label className="form-field">
                 <span className="lbl">Customer Notes</span>
@@ -456,6 +472,7 @@ export function QuoteForm({
           </div>
         </div>
 
+      {custSearch && <CustomerSearchModal onPick={(c) => setHead("customer", c.name)} onClose={() => setCustSearch(false)} />}
     </FormPage>
   );
 }

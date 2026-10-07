@@ -11,7 +11,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmtLocalDateTime } from "@/lib/format";
@@ -123,15 +123,12 @@ export function SizeDetail() {
 
   const onDelete = async () => {
     if (!size) return;
-    if (
-      !(await confirmDialog({
-        message: `Are you sure you want to delete size "${size.code}"? Items and pallets that reference it will lose the link. This cannot be undone.`,
-        danger: true,
-      }))
-    )
-      return;
+    const reason = await confirmDelete({
+      message: `Are you sure you want to delete size "${size.code}"? Items and pallets that reference it will lose the link. This cannot be undone.`,
+    });
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteSize(size.id);
+    const res = await deleteSize(size.id, reason);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");

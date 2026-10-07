@@ -8,8 +8,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
+import { DateInput } from "@/ui/DateInput";
 import { FormPage, useFormSave } from "@/ui/FormPage";
 import { AddressPair, defaultAddresses } from "@/features/common/AddressPair";
+import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
@@ -70,31 +72,9 @@ function orderLineSub(l: OrderLine): number {
   return gross - disc;
 }
 
-type FieldKind = "text" | "date" | "select";
-interface FieldSpec {
-  key: keyof OrderDraft;
-  label: string;
-  kind?: FieldKind;
-  options?: string[];
-  required?: boolean;
-}
-
-const HEADER: FieldSpec[] = [
-  // customer renders as a Combobox over the live Customer master (options unused)
-  { key: "customer", label: "Customer", kind: "select", options: [], required: true },
-  { key: "po_number", label: "PO Number", required: true },
-  { key: "order_date", label: "Order Date", kind: "date" },
-  { key: "shipment_date", label: "Shipment Date", kind: "date" },
-  // options injected at render from the live PaymentTerm / Currency masters (useMasters)
-  { key: "payment_term", label: "Payment Term", kind: "select", options: [] },
-  { key: "currency", label: "Currency", kind: "select", options: [] },
-  // Status removed from the form — managed via the status bar on OrderDetail.
-  // Port of Discharge removed 2026-07-13 (hidden app-wide; carries silently).
-  { key: "salesperson", label: "Salesperson" },
-  // Box Brand master pick list (CR-162) — prefilled from the customer's
-  // default, carried from the quote on convert, feeds the Customer Sheet.
-  { key: "box_brand", label: "Box Brand", kind: "select", options: [] },
-];
+// Header fields render explicitly in Zoho-style rows (CR-275). Status is managed
+// via the status bar on OrderDetail; Port of Discharge is hidden app-wide
+// (2026-07-13) and carries silently.
 
 // Qty defaults to 1 (user mandate 2026-07-20) so a new line is immediately valid
 // once a design is picked.
@@ -306,7 +286,8 @@ export function OrderForm({
     return null;
   }, [q, lines, maxByDesign]);
   const missing =
-    HEADER.some((f) => f.required && !String(h[f.key as keyof typeof h]).trim()) ||
+    !h.customer.trim() ||
+    !h.po_number.trim() ||
     validLines.length === 0 ||
     rateMissing ||
     lines.some(belowFloor) ||
@@ -314,8 +295,13 @@ export function OrderForm({
 
   // Errors stay hidden until the first submit attempt, then update live.
   const [showErrors, setShowErrors] = useState(false);
-  const fieldError = (f: FieldSpec): string | null =>
-    showErrors && f.required && !String(h[f.key as keyof typeof h]).trim() ? `${f.label} is required` : null;
+  const customerErr = showErrors && !h.customer.trim() ? "Customer is required" : null;
+  const poErr = showErrors && !h.po_number.trim() ? "PO Number is required" : null;
+  const [custSearch, setCustSearch] = useState(false);
+  // Convert mode: customer + currency are fixed by the source quote.
+  const locked = !!q;
+  // Saved value stays selectable even if its master row is gone.
+  const currencyOptions = [...new Set([...currencyCodes(currencies), ...(h.currency ? [h.currency] : [])])].map((o) => ({ value: o, label: o }));
 
   const submit = () => {
     if (missing) {
@@ -347,81 +333,102 @@ export function OrderForm({
         <div>
           <div className="form-section">
             <div className="form-section-title">Order Details</div>
-            <div className="form-grid">
-              {HEADER.map((f) => {
-                const err = fieldError(f);
-                const locked = !!q && (f.key === "customer" || f.key === "currency");
-                return (
-                  <label key={f.key} className="form-field">
-                    <span className="lbl">
-                      {f.label}
-                      {f.required && <span className="req"> *</span>}
-                    </span>
-                    {locked ? (
-                      <input value={h[f.key as keyof typeof h]} disabled title="Fixed by the source quote" />
-                    ) : f.key === "customer" ? (
-                      <Combobox
-                        value={h.customer}
-                        onChange={(v) => setHead("customer", v)}
-                        placeholder="Search customer…"
-                        options={parties.map((p) => ({ value: p.name, label: p.name, hint: p.code }))}
-                      />
-                    ) : f.key === "salesperson" ? (
-                      <Combobox
-                        value={h.salesperson}
-                        onChange={(v) => setHead("salesperson", v)}
-                        placeholder="Search sales person…"
-                        options={salesPersonOptions(salesPersons)}
-                      />
-                    ) : f.key === "box_brand" ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Combobox
-                          className="grow"
-                          value={h.box_brand}
-                          onChange={(v) => setHead("box_brand", v)}
-                          placeholder="Search box brand…"
-                          options={boxBrands.options}
-                          clearable
-                        />
-                        <BoxBrandPreview src={boxBrands.logoUrlOf(h.box_brand)} />
-                      </div>
-                    ) : f.kind === "select" ? (
-                      <select
-                        className={err ? "error" : ""}
-                        value={h[f.key as keyof typeof h]}
-                        onChange={(e) => setHead(f.key, e.target.value)}
-                      >
-                        <option value=""></option>
-                        {(f.key === "payment_term"
-                          ? paymentTerms.map((t) => t.label)
-                          : f.key === "currency"
-                            ? currencyCodes(currencies)
-                            : f.options!
-                        ).map((o) => (
-                          <option key={o} value={o}>
-                            {o}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        className={err ? "error" : ""}
-                        type={f.kind === "date" ? "date" : "text"}
-                        value={h[f.key as keyof typeof h]}
-                        onChange={(e) => setHead(f.key, e.target.value)}
-                        placeholder={f.label}
-                      />
-                    )}
-                    {err && <span className="field-err">{err}</span>}
-                  </label>
-                );
-              })}
+            {/* CR-275: Zoho-style rows — label left, two pairs per row; Customer on its own row. */}
+            <div className="form-rows">
+              <div className="form-field span2">
+                <span className="lbl">
+                  Customer<span className="req"> *</span>
+                </span>
+                {locked ? (
+                  <input value={h.customer} disabled title="Fixed by the source quote" />
+                ) : (
+                  <div className="ctl-row">
+                    <Combobox
+                      className="grow"
+                      value={h.customer}
+                      onChange={(v) => setHead("customer", v)}
+                      placeholder="Search customer…"
+                      invalid={!!customerErr}
+                      options={parties.map((p) => ({ value: p.name, label: p.name, hint: [p.code, p.country].filter(Boolean).join(" · ") }))}
+                    />
+                    {/* CR-276: the bigger search surface — a modal with a customer table. */}
+                    <button type="button" className="btn" aria-label="Search customers" title="Search customers" onClick={() => setCustSearch(true)}>
+                      <Icon name="search" size={13} />
+                    </button>
+                  </div>
+                )}
+                {customerErr && <span className="field-err">{customerErr}</span>}
+              </div>
               <AddressPair
                 customer={customers.find((x) => x.name === h.customer)}
                 billing={h.address}
                 shipping={h.shipping_address}
                 onChange={(kind, v) => setHead(kind === "billing" ? "address" : "shipping_address", v)}
               />
+              <div className="form-divider" />
+              <label className="form-field">
+                <span className="lbl">
+                  PO Number<span className="req"> *</span>
+                </span>
+                <input className={poErr ? "error" : ""} value={h.po_number} onChange={(e) => setHead("po_number", e.target.value)} placeholder="PO Number" />
+                {poErr && <span className="field-err">{poErr}</span>}
+              </label>
+              <label className="form-field">
+                <span className="lbl">Order Date</span>
+                <DateInput value={h.order_date} onChange={(e) => setHead("order_date", e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Shipment Date</span>
+                <DateInput value={h.shipment_date} onChange={(e) => setHead("shipment_date", e.target.value)} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Salesperson</span>
+                <Combobox
+                  value={h.salesperson}
+                  onChange={(v) => setHead("salesperson", v)}
+                  placeholder="Search sales person…"
+                  options={salesPersonOptions(salesPersons)}
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Payment Term</span>
+                <Combobox
+                  value={h.payment_term}
+                  onChange={(v) => setHead("payment_term", v)}
+                  placeholder="Search payment term…"
+                  options={paymentTerms.map((t) => ({ value: t.label, label: t.label }))}
+                />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Currency</span>
+                {locked ? (
+                  <input value={h.currency} disabled title="Fixed by the source quote" />
+                ) : (
+                  <Combobox
+                    value={h.currency}
+                    onChange={(v) => setHead("currency", v)}
+                    placeholder="Search currency…"
+                    clearable={false}
+                    options={currencyOptions}
+                  />
+                )}
+              </label>
+              {/* Box Brand master pick list (CR-162) — prefilled from the customer's
+                  default, carried from the quote on convert, feeds the Customer Sheet. */}
+              <label className="form-field">
+                <span className="lbl">Box Brand</span>
+                <div className="ctl-row">
+                  <Combobox
+                    className="grow"
+                    value={h.box_brand}
+                    onChange={(v) => setHead("box_brand", v)}
+                    placeholder="Search box brand…"
+                    options={boxBrands.options}
+                    clearable
+                  />
+                  <BoxBrandPreview src={boxBrands.logoUrlOf(h.box_brand)} />
+                </div>
+              </label>
             </div>
           </div>
 
@@ -569,10 +576,10 @@ export function OrderForm({
 
           <div className="form-section">
             <div className="form-section-title">Remarks &amp; Notes</div>
-            <div className="form-grid">
+            <div className="form-rows one">
               <label className="form-field">
                 <span className="lbl">Remarks</span>
-                <input value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
+                <textarea value={h.remarks} onChange={(e) => setHead("remarks", e.target.value)} placeholder="Internal notes for this order" />
               </label>
               <label className="form-field">
                 <span className="lbl">Customer Notes</span>
@@ -586,6 +593,7 @@ export function OrderForm({
           </div>
         </div>
 
+      {custSearch && <CustomerSearchModal onPick={(c) => setHead("customer", c.name)} onClose={() => setCustSearch(false)} />}
     </FormPage>
   );
 }

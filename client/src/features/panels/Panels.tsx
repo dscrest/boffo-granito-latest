@@ -1,27 +1,32 @@
 /* ============================================================
-   Panels (Panel Craft) — showcase-panel master grid, backed by the
+   Panels (Panel Craft) — showcase-panel master, backed by the
    Catalyst Data Store via panelsApi. Follows the master-page UI
    convention (see DesignMaster):
-   • NO inline row actions — row-click opens the panel detail page.
-   • Bulk select (checkboxes) → bulk delete on selection.
+   • NO row actions — the whole row (or tile) opens the panel detail
+     page, where Edit / More ▸ Clone / Delete live (CR-279).
+   • Photo | Grid toggle (CR-279): Photo = .panel-card tiles (the
+     picker's PanelTile), Grid = the ColumnDef table; both share the
+     filter, sort and pager. Photo is the default.
+   • Bulk select (checkboxes, Grid view) → bulk delete on selection.
+   • New / Edit / Clone are form pages: /panels/new|:id/edit|:id/clone.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { FilterSelect, IconBtn } from "./pcBits";
-import { PanelForm, panelToInput } from "./PanelForm";
+import { FilterSelect, IconBtn, PanelTile } from "./pcBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { bulkDeletePanels, createPanel, listPanels, updatePanel, type PanelInput, type PanelRow } from "./panelsApi";
+import { bulkDeletePanels, listPanels, type PanelRow } from "./panelsApi";
 
 const dash = <span className="dim">—</span>;
+const detailPath = (r: PanelRow) => `/panels/${encodeURIComponent(r.id)}`;
 
 const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
   { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.images} alt={r.panelCode} /> },
@@ -29,7 +34,7 @@ const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
     key: "code",
     label: "Panel Code",
     render: (r) => (
-      <Link className="linkish mono" to={`/panels/${r.id}`} title="View panel">
+      <Link className="linkish mono" to={detailPath(r)} title="View panel" onClick={(e) => e.stopPropagation()}>
         {r.panelCode}
       </Link>
     ),
@@ -58,13 +63,11 @@ export function Panels() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("panels.query", "");
+  const [view, setView] = usePersistedState<"photo" | "grid">("panels.view", "photo");
   const [designFilter, setDesignFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns", PANEL_COLUMNS, ["created", "modified"]);
-  const [showNew, setShowNew] = useState(false);
-  const [editRow, setEditRow] = useState<PanelRow | null>(null);
-  const [cloneRow, setCloneRow] = useState<PanelRow | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -115,21 +118,6 @@ export function Panels() {
   const pager = usePagination(sort.sorted.length, "panelsPageSize", `${query}|${designFilter}`);
   const pageRows = pager.slice(sort.sorted);
 
-  const onCreate = async (input: PanelInput) => {
-    const res = await createPanel(input);
-    if (!res.ok) {
-      // Keep the form open — closing here would discard everything typed.
-      setError(res.error || "Save failed");
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setShowNew(false);
-    setCloneRow(null);
-    toast.success("Panel saved");
-    // Land on the new record so the next action can't target the wrong one.
-    if (res.rowid) navigate(`/panels/${encodeURIComponent(res.rowid)}`);
-  };
-
   const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
 
   const toggleOne = (id: string) =>
@@ -148,14 +136,12 @@ export function Panels() {
     });
 
   const ids = useMemo(() => [...selected], [selected]);
-  // Toolbar enable rules: Edit/Clone at exactly 1 selected, Delete at ≥1.
-  const singleRow = ids.length === 1 ? (rows.find((r) => r.id === ids[0]) ?? null) : null;
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected panel${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected panel${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await bulkDeletePanels(rows.filter((r) => selected.has(r.id)));
+    const res = await bulkDeletePanels(rows.filter((r) => selected.has(r.id)), reason);
     setBusy(false);
     if (!res.ok) {
       setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);
@@ -166,47 +152,89 @@ export function Panels() {
     await load();
   };
 
-  const onDeleteOne = async (r: PanelRow) => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete panel "${r.panelCode}"? This cannot be undone.`, danger: true }))) return;
-    setBusy(true);
-    const res = await bulkDeletePanels([r]);
-    setBusy(false);
-    if (!res.ok) toast.error(res.firstError || "Delete failed");
-    else toast.success("Panel deleted");
-    await load();
-  };
+  const newPanel = () => navigate("/panels/new");
+  const open = (r: PanelRow) => navigate(detailPath(r));
 
-  const onEdit = async (input: PanelInput) => {
-    if (!editRow) return;
-    const res = await updatePanel(editRow.id, input);
-    if (!res.ok) {
-      toast.error(res.error || "Save failed");
-      return;
-    }
-    setEditRow(null);
-    toast.success("Panel updated");
-    await load();
-  };
+  const empty =
+    rows.length > 0 ? (
+      <EmptyState title="No matching results" hint="Try a different filter" />
+    ) : (
+      <EmptyState
+        icon="tile"
+        title="No panels yet"
+        hint="Add your first showcase panel with New panel"
+        action={
+          can("panel_craft", "create") ? (
+            <button className="hbtn primary" onClick={newPanel}>
+              New panel
+            </button>
+          ) : undefined
+        }
+      />
+    );
+  const showEmpty = !loading && !error && filtered.length === 0;
+
+  const photo = (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10, padding: 10, alignContent: "start" }}>
+      {pageRows.map((r) => (
+        <PanelTile key={r.id} panel={r} onClick={() => open(r)} />
+      ))}
+      {showEmpty && <div style={{ gridColumn: "1 / -1" }}>{empty}</div>}
+    </div>
+  );
+
+  const grid = (
+    <table className="tbl">
+      <thead>
+        <tr>
+          <th style={{ width: 34, textAlign: "center" }}>
+            <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title={allShownSelected ? "Deselect all" : "Select all"} />
+          </th>
+          {visible.map((c) => (
+            <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {pageRows.map((r) => {
+          const sel = selected.has(r.id);
+          return (
+            <tr
+              key={r.id}
+              className={sel ? "sel" : undefined}
+              tabIndex={0}
+              style={{ cursor: "pointer" }}
+              onClick={() => open(r)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.target === e.currentTarget) open(r);
+              }}
+            >
+              <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
+              </td>
+              {visible.map((c) => (
+                <td key={c.key} className={c.className} style={c.style}>
+                  {c.render!(r)}
+                </td>
+              ))}
+            </tr>
+          );
+        })}
+        {showEmpty && (
+          <tr>
+            <td colSpan={visible.length + 1}>{empty}</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
-      {showNew && <PanelForm onSave={(i) => void onCreate(i)} onClose={() => setShowNew(false)} />}
-      {editRow && <PanelForm isEdit initial={panelToInput(editRow)} onSave={(i) => void onEdit(i)} onClose={() => setEditRow(null)} />}
-      {/* Clone never copies the identity — panel_code is typed fresh. */}
-      {cloneRow && (
-        <PanelForm initial={{ ...panelToInput(cloneRow), panel_code: "" }} onSave={(i) => void onCreate(i)} onClose={() => setCloneRow(null)} />
-      )}
-
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
-      {/* One toolbar; Edit/Clone/Delete enable off the selection (dim, never hide). */}
+      {/* One toolbar; bulk Delete enables off the selection (dim, never hide). */}
       <div className="fbar">
-        {can("panel_craft", "edit") && (
-          <IconBtn icon="edit" title="Edit selected panel" disabled={!singleRow || busy} onClick={() => singleRow && setEditRow(singleRow)} />
-        )}
-        {can("panel_craft", "create") && (
-          <IconBtn icon="copy" title="Clone selected panel" disabled={!singleRow || busy} onClick={() => singleRow && setCloneRow(singleRow)} />
-        )}
         {can("panel_craft", "delete") && (
           <IconBtn icon="trash" title="Delete selected" danger disabled={ids.length === 0 || busy} onClick={() => void onBulkDelete()} />
         )}
@@ -214,14 +242,19 @@ export function Panels() {
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
         <span className="muted">{loading ? "Loading…" : ids.length > 0 ? `${ids.length} selected` : null}</span>
         <div style={{ flex: 1 }} />
+        <span role="group" aria-label="Panels view" title="Switch view" style={{ display: "inline-flex", gap: 4 }}>
+          <IconBtn icon="tile" title="Photo view" active={view === "photo"} onClick={() => setView("photo")} />
+          <IconBtn icon="orders" title="Grid view" active={view === "grid"} onClick={() => setView("grid")} />
+        </span>
+        <span className="pc-divider" />
         <FilterSelect label="Design" value={designFilter} onChange={setDesignFilter} options={designOptions} />
         <span className="gsearch">
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search panel…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
+        {view === "grid" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
         {can("panel_craft", "create") && (
-          <button className="hbtn primary" onClick={() => setShowNew(true)}>
+          <button className="hbtn primary" onClick={newPanel}>
             <Icon name="plus" size={13} />
             New panel
           </button>
@@ -230,66 +263,7 @@ export function Panels() {
 
       <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
-          {loading && rows.length === 0 ? (
-            <SkeletonRows rows={6} />
-          ) : (
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th style={{ width: 34, textAlign: "center" }}>
-                    <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title={allShownSelected ? "Deselect all" : "Select all"} />
-                  </th>
-                  {visible.map((c) => (
-                    <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
-                  ))}
-                  <th style={{ width: 68 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((r) => {
-                  const sel = selected.has(r.id);
-                  return (
-                    <tr key={r.id} className={sel ? "sel" : undefined}>
-                      <td style={{ textAlign: "center" }}>
-                        <input type="checkbox" checked={sel} onChange={() => toggleOne(r.id)} />
-                      </td>
-                      {visible.map((c) => (
-                        <td key={c.key} className={c.className} style={c.style}>
-                          {c.render!(r)}
-                        </td>
-                      ))}
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <span className="row-actions">
-                          {can("panel_craft", "edit") && <IconBtn icon="edit" title="Edit panel" onClick={() => setEditRow(r)} />}
-                          {can("panel_craft", "delete") && <IconBtn icon="trash" title="Delete panel" danger onClick={() => void onDeleteOne(r)} />}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!loading && !error && filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={visible.length + 2}>
-                      {rows.length > 0 ? (
-                        <EmptyState title="No matching results" hint="Try a different filter" />
-                      ) : (
-                        <EmptyState
-                          icon="tile"
-                          title="No panels yet"
-                          hint="Add your first showcase panel with New panel"
-                          action={
-                            <button className="hbtn primary" onClick={() => setShowNew(true)}>
-                              New panel
-                            </button>
-                          }
-                        />
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
+          {loading && rows.length === 0 ? <SkeletonRows rows={6} /> : view === "photo" ? photo : grid}
         </div>
         {!(loading && rows.length === 0) && <GridFooter {...pager} />}
       </div>

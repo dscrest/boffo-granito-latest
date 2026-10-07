@@ -16,8 +16,7 @@ import { fmt } from "@/lib/format";
 import type { Order } from "@/data";
 import { cachedBatchStock, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import { allocateStock } from "@/features/stages/productionApi";
-
-const needOf = (o: Order) => Math.max(0, o.orderQty - o.producedQty);
+import { remainingOf as needOf } from "./ordersApi";
 // Oldest first; the unbatched bucket ("" mfg date) leads, as in the stock FIFO.
 const byAge = (a: BatchStockRow, b: BatchStockRow) => a.mfgDate.localeCompare(b.mfgDate) || a.batchNumber.localeCompare(b.batchNumber);
 

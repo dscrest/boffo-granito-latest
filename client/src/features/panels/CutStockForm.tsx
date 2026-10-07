@@ -83,7 +83,7 @@ export function CutStockForm({
             <Icon name="tile" size={18} />
           </div>
           <div>
-            <div className="ttl">Update Cut Piece Stock</div>
+            <div className="ttl">Add Cut Piece Stock</div>
             <div className="sub2">Panel Craft</div>
           </div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>

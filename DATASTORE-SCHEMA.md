@@ -33,7 +33,8 @@
 | DesignPallet | 76673000000048747 | Design↔Pallet join |
 | PaymentTerm | 76673000000049001 | Lookup |
 | NumberMaster | 76673000000049360 | SKU sequence per entity |
-| Pallet | 76673000000049723 | Pallet packing master |
+| Pallet | 76673000000049723 | Pallet packing master (boxes only since CR-261) |
+| ContainerFormat | 69851000000313445 (LIVE id) | Container Master — what one container of a Size holds; several per Size since CR-273 (CR-261) |
 | Size | 76673000000050001 | Lookup (keys on `code`) |
 | QuoteItem | 76673000000050364 | Quote line items |
 | Finish | 76673000000051001 | Lookup |
@@ -360,7 +361,7 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | pallet_type | varchar(100) | |
 | pallet_size_label | varchar(100) | |
 | boxes_per_pallet | int | |
-| pallets_per_container | int | |
+| pallets_per_container | int | **unused since CR-261** (not written; capacity = ContainerFormat) |
 | empty_pallet_weight_kg | double | |
 | remarks | text(10000) | |
 | size | FK → Size | SET-NULL |
@@ -368,9 +369,23 @@ lists (customer / quote / order forms) are DB-sourced from this table.
 | coverage_sqm | double | |
 | coverage_sqft | double | |
 | box_weight_kg | double | |
-| b_boxes_per_pallet | int | B-variant packing |
-| b_pallets_per_container | int | B-variant packing |
-| b_pallet_weight | double | B-variant packing |
+| b_boxes_per_pallet | int | B-variant packing — unused since CR-261 |
+| b_pallets_per_container | int | B-variant packing — unused since CR-261 |
+| b_pallet_weight | double | B-variant packing — unused since CR-261 |
+
+### ContainerFormat (69851000000313445, LIVE) — Container Master, CR-261
+What one container of a size holds. A Size may have several rows (CR-273 dropped `NATURAL_KEY = size`);
+a loading points at the one it uses via `LoadBox.container_format`, readers with no pick take the size's
+largest `total_boxes`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | auto: `<size> · N pallets = M boxes` |
+| size | FK → Size | SET-NULL |
+| pallets_json | text(10000) | `[{ "pallet": "<Pallet ROWID>", "count": n }]` — ponytail: no child table |
+| total_pallets | int | Σ count (denormalised on save) |
+| total_boxes | int | Σ count × Pallet.boxes_per_pallet — the per-container box capacity every reader projects |
+| remarks | text(10000) | |
+| deleted_at | datetime | soft delete |
 
 ### DesignPallet (76673000000048747) — join table
 | Column | Type | Notes |
@@ -613,7 +628,7 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | pallet | FK → Pallet | SET-NULL (drives vehicle-fill capacity). Never born null since 2026-09-11: `/pal-plan` + `/update-pal-plan` reject pallet-less lines, and `autoEnqueuePalletization` / `/send-to-loading` fall back to `defaultPalletForDesign()` (the Pallet whose `size` matches the design's size, lowest ROWID) when the OrderItem has no pallet. Legacy nulls: `POST /backfill-line-pallets` (admin) — OrderItem.pallet else size default; returns `{scanned, updated, unresolved}` |
 | boxes | int | no-negative |
 | position | int | vehicle ordering |
-| status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call; optional `boxes` < the line's boxes = PARTIAL move — the line splits and only the slice transitions, added 2026-09-10); `Palletizing` added 2026-08-17 |
+| status | varchar(30) | per-line kanban stage `Planning / Palletizing / ReadyToLoad` via `/pal-line-status` (optional `pallet` in the body sets the pallet in the same call; optional `boxes` < the line's boxes = PARTIAL move — the line splits and only the slice transitions, added 2026-09-10; since CR-281 (2026-10-06) a partial `Palletizing → ReadyToLoad` also sets the remainder back to `Planning`); `Palletizing` added 2026-08-17 |
 | batch_number | varchar(40) | production batch these boxes come from (`""` = unattributed legacy aggregate). Set by `autoEnqueuePalletization`, `/pal-plan`, `/pal-topup` and `/send-to-loading` via the shared `unqueuedBatches()` FIFO split; preserved when `/pal-line-box` splits a line for a partial load. **The batch trail from ProductionLog to dispatch runs through this column** — batch-wise stock and the batch reports read it |
 | pallet_group | varchar(60) | shared physical pallet group (`""` = none) — legacy mixed pallets |
 | manual_edit | varchar(10) | `"true"` = user-authored line (`/pal-plan` + `/update-pal-plan` stamp it; splits carry it) — `autoEnqueuePalletization` skips top-up for an item whose open plan has a manual Planning line (CR 2026-09-10) |
@@ -646,6 +661,7 @@ Un-boxed (legacy) plans keep the manual `/pal-status` + `/pal-vehicle` flow.
 | electronic_seal | varchar(50) | loading capture — added 2026-08-07 |
 | loading_supervisor | varchar(120) | loading capture — added 2026-08-07 |
 | container_size | varchar(10) | 28ft / 30ft (default 28ft) since 2026-09-10; legacy rows may hold 20ft/40ft/40HQ — captured on the load form — added 2026-08-25 |
+| container_format | FK → ContainerFormat | SET-NULL; the Container Master format this loading uses — its `total_boxes` is the fill % denominator for every line in the loading (blank = size's largest); written via `applyLoadBoxFields` on `/load-box`, `/load-box-update`, `/load-box-dispatch` — added 2026-10-06 (CR-273), column 69851000000319372 |
 | transporter | varchar(120) | carrier company — added 2026-08-25 |
 | lr_number | varchar(60) | LR / docket number — added 2026-08-25 |
 | destination | varchar(120) | destination port / city — added 2026-08-25 |
@@ -701,7 +717,7 @@ for admin/e2e cleanup).
 Natural key = `panel_code`.
 | Column | Type | Notes |
 |---|---|---|
-| panel_code | varchar(60) | unique, e.g. "C01-F11-S03-118" |
+| panel_code | varchar(60) | unique; **server-assigned `PANEL-NNN` on create** when sent blank (CR-284, `/panel-save` → `nextPanelCode`); legacy typed codes like "C01-F11-S03-118" stay |
 | panel_size | varchar(30) | e.g. "1200x2100" |
 | vinyl_size | varchar(30) | |
 | image_urls | text | JSON `[{id,name}]` File Store ids (max 5, same shape as Design.image_urls; shared ImageManager) — added 2026-08-26 |
@@ -721,10 +737,14 @@ movement.
 
 ### PanelOrder (live id 69851000000193408)
 Status machine (server `/panel-order-status/:rowid`, forward-only; generic PATCH
-rejects `status`): Received → InCutting → Ready → Dispatched, plus direct
+rejects `status`): NewRequest → Received → InCutting → Ready → Dispatched, plus direct
 Received → Dispatched when stock covers. **Ready adds** each line's
 `cut_piece_qty × qty` to CutPieceStock; **Dispatched deducts** it (409 when short).
-Flips log StatusTransition (`entity_type: PanelOrder`).
+Flips log StatusTransition (`entity_type: PanelOrder`) and, when `sales_order` /
+`quote` is set, an OperationLog row on that source record (`logRelated`, CR-286).
+Insert may carry `status` Received (direct) or NewRequest (raised from a Quote / SO
+via "Request Panels", CR-286) — `INSERT_INITIAL`. Status changes only from
+`/panel-orders/:id` (CR-287).
 | Column | Type | Notes |
 |---|---|---|
 | panel | bigint | logical FK → Panel |
@@ -732,7 +752,10 @@ Flips log StatusTransition (`entity_type: PanelOrder`).
 | qty | int | panels ordered |
 | salesperson | varchar(160) | defaulted from the signed-in user |
 | order_date | date | omit when blank |
-| status | varchar(20) | Received / InCutting / Ready / Dispatched |
+| status | varchar(20) | NewRequest / Received / InCutting / Ready / Dispatched |
+| sales_order | bigint | logical FK → SalesOrder; source of a "Request Panels" order (CR-286, col 69851000000316427, added 2026-10-06) |
+| quote | bigint | logical FK → Quote; source of a "Request Panels" order (CR-286, col 69851000000316429, added 2026-10-06) |
+| checklist | text | JSON `{"<design>|<cut_piece_size>": true}` — manual Available ticks on the requirements checklist, plain column via generic PATCH (CR-288, col 69851000000322244, added 2026-10-06) |
 | deleted_at | datetime | soft delete |
 
 ### CutPieceSize (live id 69851000000182460)

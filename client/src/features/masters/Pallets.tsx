@@ -13,7 +13,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -49,20 +49,13 @@ const PALLET_COLUMNS: ColumnDef<PalletRow>[] = [
     style: { textAlign: "right" },
     render: (r) => (r.coverageSqft > 0 ? `${r.coverageSqft} / ${r.coverageSqm}` : dash),
   },
+  // Boxes only (CR-261) — per-container capacity is on the Container Master.
   {
-    key: "boxesPerCont",
-    label: "Boxes / Cont.",
+    key: "boxesPerPallet",
+    label: "Boxes / Pallet",
     className: "num mono",
     style: { textAlign: "right" },
-    render: (r) =>
-      r.totalBoxesPerContainer > 0 ? <span style={{ color: "var(--fg)" }}>{fmt(r.totalBoxesPerContainer)}</span> : dash,
-  },
-  {
-    key: "palletsPerCont",
-    label: "Pallets / Cont.",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => (r.totalPalletsPerContainer > 0 ? fmt(r.totalPalletsPerContainer) : dash),
+    render: (r) => (r.boxesPerPallet > 0 ? <span style={{ color: "var(--fg)" }}>{fmt(r.boxesPerPallet)}</span> : dash),
   },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
@@ -76,7 +69,7 @@ export function Pallets() {
   const [query, setQuery] = usePersistedState("pallets.query", "");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletsTableColumns", PALLET_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletsTableColumns.v2", PALLET_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -131,10 +124,10 @@ export function Pallets() {
   const ids = useMemo(() => [...selected], [selected]);
 
   const onBulkDelete = async () => {
-    if (!(await confirmDialog({ message: `Are you sure you want to delete ${ids.length} selected pallet${ids.length > 1 ? "s" : ""}? This cannot be undone.`, danger: true })))
-      return;
+    const reason = await confirmDelete({ message: `Are you sure you want to delete ${ids.length} selected pallet${ids.length > 1 ? "s" : ""}? This cannot be undone.` });
+    if (reason == null) return;
     setBusy(true);
-    const res = await bulkDeletePallets(ids);
+    const res = await bulkDeletePallets(ids, reason);
     setBusy(false);
     if (!res.ok) {
       setError(`${res.failed} delete(s) failed: ${res.firstError || "unknown error"}`);

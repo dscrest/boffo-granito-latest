@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, confirmDialog, confirmDiscard } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
@@ -66,6 +66,7 @@ import {
   type PalPlanLine,
   soHeadOf,
 } from "./palPlansApi";
+import { useContainerFormats } from "@/features/masters/containerFormatsApi";
 
 type Entry = { p: PalPlan; l: PalPlanLine };
 
@@ -189,6 +190,8 @@ function loadColumns(): ColumnDef<Row>[] {
         <span className="clip" style={{ maxWidth: 150 }} title={r.box?.loadingSupervisor}>{r.box?.loadingSupervisor || "—"}</span>
       ),
     },
+    // CR-266: the loading's date reads instead of the LOAD code (hidden by default).
+    { key: "date", label: "Date", className: "mono muted nw", render: (r) => (r.box?.createdTime || r.l.createdTime || "").slice(0, 10) || "—" },
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box?.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted nw", render: (r) => `${ageDays(r.p, r.l)}d` },
     { key: "code", label: "Loading", className: "mono nw", style: { fontWeight: 600 }, render: (r) => (r.box ? boxLabel(r.box) : "—") },
@@ -214,6 +217,7 @@ function loadSortVal(r: Row, k: string): string | number {
     case "destination": return r.box?.destination || "";
     case "supervisor": return r.box?.loadingSupervisor || "";
     case "dispatchDate": return r.box?.dispatchDate || "";
+    case "date": return r.box?.createdTime || r.l.createdTime || "";
     case "age": return ageDays(r.p, r.l);
     default: return "";
   }
@@ -235,7 +239,7 @@ type BoxRow = {
   status: BoxStatus;
 };
 
-function boxColumns(): ColumnDef<BoxRow>[] {
+function boxColumns(formatName: Map<string, string>): ColumnDef<BoxRow>[] {
   return [
     {
       key: "customers",
@@ -250,6 +254,7 @@ function boxColumns(): ColumnDef<BoxRow>[] {
       render: (r) => <span className="clip" style={{ maxWidth: 180 }} title={r.sos}>{r.sos || "—"}</span>,
     },
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.lines.length) },
+    { key: "pallets", label: "Pallets", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(palletsOf(r.lines)) },
     { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.totalBoxes) },
     { key: "fill", label: "Fill", className: "num mono", style: { textAlign: "right" }, render: (r) => `${r.fillPct}%` },
     {
@@ -267,6 +272,7 @@ function boxColumns(): ColumnDef<BoxRow>[] {
         return <span className="clip" style={{ maxWidth: 150 }} title={s}>{s || "—"}</span>;
       },
     },
+    { key: "containerFormat", label: "Container", className: "nw", render: (r) => formatName.get(r.box.containerFormatId) || "—" },
     { key: "containerSize", label: "Size", className: "nw", render: (r) => r.box.containerSize || "—" },
     {
       key: "transporter",
@@ -287,6 +293,8 @@ function boxColumns(): ColumnDef<BoxRow>[] {
       className: "nw",
       render: (r) => <span className="clip" style={{ maxWidth: 150 }} title={r.box.loadingSupervisor}>{r.box.loadingSupervisor || "—"}</span>,
     },
+    // CR-266: the loading's date reads instead of the LOAD code (hidden by default).
+    { key: "date", label: "Date", className: "mono muted nw", render: (r) => (r.box.createdTime || "").slice(0, 10) || "—" },
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted nw", render: (r) => `${daysSince(r.box.createdTime)}d` },
     { key: "created", label: "Created", className: "mono muted nw", render: (r) => fmtDateTime(r.box.createdTime) },
@@ -316,6 +324,7 @@ function boxSortVal(r: BoxRow, k: string): string | number {
     case "customers": return r.customers;
     case "sos": return r.sos;
     case "items": return r.lines.length;
+    case "pallets": return palletsOf(r.lines);
     case "boxes": return r.totalBoxes;
     case "fill": return r.fillPct;
     case "status": return BOX_STATUS_IDX[r.status];
@@ -326,6 +335,7 @@ function boxSortVal(r: BoxRow, k: string): string | number {
     case "lrNumber": return r.box.lrNumber || "";
     case "destination": return r.box.destination || "";
     case "supervisor": return r.box.loadingSupervisor || "";
+    case "date": return r.box.createdTime || "";
     case "dispatchDate": return r.box.dispatchDate || "";
     case "age": return daysSince(r.box.createdTime);
     case "created": return r.box.createdTime || "";
@@ -406,7 +416,7 @@ export function LoadingBay() {
   const COLS = useMemo(() => loadColumns(), []);
   // Key bumped to .v2 (CR-161) so the Customer→Design default order and the
   // now-hideable Loading column apply everywhere; the old prefs are dead.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v2", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v3", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "code"]); // .v3 (CR-266): Date in, LOAD code hidden
 
   // ---- derived ------------------------------------------------
   const { allLines, openBoxes, linesOfBox } = flow;
@@ -528,8 +538,9 @@ export function LoadingBay() {
   })();
 
   // ---- loadings view: box-level grid state --------------------
-  const BOX_COLS = useMemo(() => boxColumns(), []);
-  const boxCols = useColumns("loadingBoxColumns.v2", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created"]);
+  const formats = useContainerFormats();
+  const BOX_COLS = useMemo(() => boxColumns(new Map(formats.map((f) => [f.id, f.name]))), [formats]);
+  const boxCols = useColumns("loadingBoxColumns.v3", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created", "label"]); // .v3 (CR-266): Date in, LOAD code hidden
   // Plain search only — the advanced-filter criteria and group dims are
   // line-shaped and would silently half-apply to box rows.
   const boxSearched = boxRows.filter(
@@ -590,17 +601,16 @@ export function LoadingBay() {
   const deleteBox = async (box: LoadBox) => {
     if (busy) return;
     const inBox = linesOfBox(box.id);
-    const ok = await confirmDialog({
+    const reason = await confirmDelete({
       title: "Delete loading",
       message:
         inBox.length > 0
           ? `Delete ${boxLabel(box)}? ${inBox.length} item${inBox.length === 1 ? "" : "s"} return to Ready for Loading.`
           : `Delete ${boxLabel(box)}?`,
-      danger: true,
     });
-    if (!ok) return;
+    if (reason == null) return;
     setBusy(true);
-    const res = await deleteLoadBox(box.id);
+    const res = await deleteLoadBox(box.id, reason);
     setBusy(false);
     after(res.ok, res.error || "Could not delete the loading", `${boxLabel(box)} deleted`);
   };
@@ -642,7 +652,7 @@ export function LoadingBay() {
   }
   const editDirty = editRows.length > 0 || editBad;
   const leaveEdit = async () => {
-    if (editDirty && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+    if (editDirty && !(await confirmDiscard())) return;
     setDraft({});
     setEditMode(false);
   };
@@ -1055,7 +1065,7 @@ export function LoadingBay() {
                   <TotalsRow>
                     {boxCols.visible.map((c, ci) => (
                       <td key={c.key} className={c.className?.includes("num") ? "num mono" : undefined} style={c.style}>
-                        {ci === 0 ? `Total · ${fmt(pallets)} pallet${pallets === 1 ? "" : "s"}` : c.key === "items" ? fmt(items) : c.key === "boxes" ? fmt(bx) : ""}
+                        {ci === 0 ? `Total · ${fmt(pallets)} pallet${pallets === 1 ? "" : "s"}` : c.key === "items" ? fmt(items) : c.key === "pallets" ? fmt(pallets) : c.key === "boxes" ? fmt(bx) : ""}
                       </td>
                     ))}
                     <td />

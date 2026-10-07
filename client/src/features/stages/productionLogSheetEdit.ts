@@ -8,6 +8,7 @@ import { todayISO } from "../../lib/dates";
 /** One sheet row. Everything is the typed string; "" = blank. */
 export type LogRow = {
   key: string;
+  size: string; // Size ROWID — narrows the Design pick list (CR-264); not saved, the design carries it
   design: string; // Design ROWID
   unmatched: string; // pasted item text that matched no item — shown as the invalid placeholder
   batch: string; // blank = auto-numbered
@@ -19,16 +20,17 @@ export type LogRow = {
   jobId?: string;
 };
 
-/** Typed columns in sheet order — a paste fills them left to right from the focused one. */
-export const LOG_COLS = ["design", "batch", "date", "qty", "brand", "note"] as const;
+/** Typed columns in sheet order — a paste fills them left to right from the focused one.
+    CR-264: Size · Design · Batch · Box Brand · Qty · Remark; Date is an optional (default hidden) last column. */
+export const LOG_COLS = ["size", "design", "batch", "brand", "qty", "note", "date"] as const;
 export type LogCol = (typeof LOG_COLS)[number];
 
 export type LogLine = { key: string; jobId?: string; design: string; qty: number; batch: string; date: string; brand: string; note: string };
 
 let seq = 0;
-export const blankRow = (): LogRow => ({ key: `r${++seq}`, design: "", unmatched: "", batch: "", date: "", qty: "", brand: "", note: "" });
+export const blankRow = (): LogRow => ({ key: `r${++seq}`, size: "", design: "", unmatched: "", batch: "", date: "", qty: "", brand: "", note: "" });
 
-const isActive = (r: LogRow) => !!(r.design || r.unmatched || r.batch.trim() || r.date || r.qty || r.brand || r.note.trim());
+const isActive = (r: LogRow) => !!(r.size || r.design || r.unmatched || r.batch.trim() || r.date || r.qty || r.brand || r.note.trim());
 
 /** Blank rows are skipped. errors: row key → the columns at fault. */
 export function resolveLogSheet(rows: LogRow[], defaultDate: string): { lines: LogLine[]; errors: Map<string, Set<LogCol>>; totalBoxes: number } {
@@ -94,7 +96,7 @@ export function parseDate(v: unknown): string | null {
 export function parsePaste(
   text: string,
   startCol: LogCol,
-  lookups: { designByKey: Map<string, { id: string }>; brandByName: Map<string, string> },
+  lookups: { designByKey: Map<string, { id: string; sizeId?: string }>; brandByName: Map<string, string>; sizeByLabel?: Map<string, string> },
 ): Partial<LogRow>[] {
   const start = LOG_COLS.indexOf(startCol);
   return text
@@ -111,6 +113,10 @@ export function parsePaste(
           const hit = lookups.designByKey.get(v.toLowerCase());
           patch.design = hit?.id ?? "";
           patch.unmatched = hit ? "" : v;
+          // The matched item's size wins over whatever size text was pasted beside it.
+          if (hit?.sizeId) patch.size = hit.sizeId;
+        } else if (col === "size") {
+          if (patch.size === undefined) patch.size = lookups.sizeByLabel?.get(v.toLowerCase()) ?? "";
         } else if (col === "date") patch.date = v ? parseDate(v) ?? "" : "";
         else if (col === "qty") patch.qty = v.replace(/[^\d]/g, "");
         else if (col === "brand") patch.brand = lookups.brandByName.get(v.toLowerCase()) ?? "";

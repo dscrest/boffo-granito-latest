@@ -4,9 +4,12 @@
    app-wide. */
 import { Icon } from "@/ui/Icon";
 import type { ChipTone } from "@/ui/Chip";
+import { designImageUrl } from "@/lib/api";
 import type { PanelOrderStatus } from "./panelOrdersApi";
+import type { PanelRow } from "./panelsApi";
 
 export const ORDER_STATUS_TONE: Record<PanelOrderStatus, ChipTone> = {
+  NewRequest: "slate",
   Received: "amber",
   InCutting: "blue",
   Ready: "teal",
@@ -69,5 +72,54 @@ export function FilterSelect({
         </option>
       ))}
     </select>
+  );
+}
+
+/** E-commerce tile (CR-192) — the showcase image IS the panel's identity for a
+    rep. Shared by the New Panel Order picker (multi-select) and the /panels
+    Photo view (CR-279). Styles: `.panel-card` in styles.css. */
+export function PanelTile({
+  panel: p,
+  selected,
+  onClick,
+  title,
+}: {
+  panel: PanelRow;
+  selected?: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  const designs = p.lines.map((l) => l.designName).join(", ");
+  const meta =
+    [
+      p.panelSize && `Panel: ${p.panelSize}`,
+      p.vinylSize && `Vinyl: ${p.vinylSize}`,
+      p.lines.length && `${p.lines.length} design${p.lines.length > 1 ? "s" : ""}`,
+    ]
+      .filter(Boolean)
+      .join("  ·  ") || "No details yet";
+  return (
+    <button
+      type="button"
+      className={`panel-card${selected ? " sel" : ""}`}
+      aria-pressed={selected === undefined ? undefined : selected}
+      onClick={onClick}
+      title={title ?? p.panelCode}
+    >
+      {p.images[0] ? (
+        <img className="img" src={designImageUrl(p.images[0].id)} alt={p.panelCode} loading="lazy" />
+      ) : (
+        <div className="img none">No image</div>
+      )}
+      <div className="code">
+        {selected && <Icon name="check" size={12} />} {p.panelCode}
+      </div>
+      <div className="meta" title={meta}>{meta}</div>
+      {designs && (
+        <div className="meta" title={designs}>
+          {designs}
+        </div>
+      )}
+    </button>
   );
 }

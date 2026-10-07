@@ -8,8 +8,9 @@
 
    Item-wise container planning for a quote, in one of two modes
    (same view, same details):
-   · Box Fitting (default) — capacity from the chosen Pallet format:
-     pallets/container × boxes/pallet = boxes per container.
+   · Box Fitting (default) — capacity from the Container Master: one
+     container format picked PER SIZE in the toolbar strip (CR-274; default =
+     the size's largest), saved in the plan and prefilled on the loading.
    · Weight Fitting — each container has a Ton capacity (default 28 t,
      editable) and boxes-per-container = floor(tonCapacity·1000 /
      boxWeightKg) from the Item's per-box weight (Size default, per-item
@@ -47,11 +48,13 @@ import { parseContainerPlan, type ContainerPlan, type Order, type Quote } from "
 import { update } from "@/lib/dataOps";
 import { useMasters } from "@/features/masters/useMasters";
 import { listPallets, cachedPallets, palletsForSize, widthOf, type PalletRow } from "@/features/masters/palletsApi";
+import { cachedContainerFormats, listContainerFormats, type ContainerFormatRow } from "@/features/masters/containerFormatsApi";
 import { listBatchStock, cachedBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import type { DesignRow } from "@/features/masters/designsApi";
 import { cachedOrders, invalidateOrders, listOrders, soStatusLabel, SO_STATUS_CHIP } from "@/features/orders/ordersApi";
 import { STATUS_CHIP, STATUS_LABEL, quoteToInput } from "./QuotesTable";
 import { cellsOfSegs, emptyCells, packItemWise } from "./containerPack";
+import { resolveFormatBySize } from "./containerOptions";
 import {
   cachedQuotes,
   invalidateQuotes,
@@ -127,6 +130,8 @@ interface ResolvedLine {
   item: string;
   sku: string;
   designId: string;
+  sizeId: string; // the item's Size ROWID — keys the per-size container pick (CR-274)
+  sizeLabel: string;
   qty: number;
   rate: number;
   ordered?: number;
@@ -176,6 +181,8 @@ interface PlannerProps {
   /** The persisted container-plan JSON ("" when none) — drives mode restore + dirty. */
   savedPlan: string;
   pallets: PalletRow[];
+  /** Container Master rows — box capacity per size (CR-261). */
+  formats: ContainerFormatRow[];
   canSave: boolean;
   saving: boolean;
   saveTitle: string;
@@ -186,8 +193,11 @@ interface PlannerProps {
 
 function ContainerisePlanner({
   docNo, statusChip, customer, partyCode, subtitleExtras, closeTo, embedded,
-  seedLines, seedKey, savedPlan, pallets, canSave, saving, saveTitle, linesDirty, onSave,
+  seedLines, seedKey, savedPlan, pallets, formats, canSave, saving, saveTitle, linesDirty, onSave,
 }: PlannerProps) {
+  // CR-274: the plan's container pick per Size (Size ROWID → ContainerFormat ROWID); unpicked = largest.
+  const [formatPick, setFormatPick] = useState<Record<string, string>>({});
+  const formatOfSize = useMemo(() => resolveFormatBySize(formats, formatPick), [formats, formatPick]);
   const navigate = useNavigate();
   const { designRows, designs } = useMasters();
 
@@ -237,6 +247,7 @@ function ContainerisePlanner({
       if (c.tonCapacity && c.tonCapacity > 0 && c.tonCapacity !== g) caps[i] = c.tonCapacity;
     });
     setCapByIdx(caps);
+    setFormatPick(saved?.formats ?? {});
   }, [seedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- resolve each draft line: design → size-matched pallet → weight capacity ---- */
@@ -249,6 +260,8 @@ function ContainerisePlanner({
         ...base,
         sku: "",
         designId: extra.designId ?? "",
+        sizeId: extra.sizeId ?? "",
+        sizeLabel: extra.sizeLabel ?? "",
         boxWeightKg: extra.boxWeightKg ?? 0,
         tonnes: extra.tonnes ?? 0,
         palletId: extra.palletId ?? "",
@@ -284,17 +297,21 @@ function ContainerisePlanner({
       // same order as the server loading-capacity check.
       const boxWeightKg = d.boxWeightKg || chosen.boxWeightKg;
       const tonnes = base.qty * boxWeightKg / 1000;
+      // CR-261: what a container holds comes from the Container Master, per SIZE.
+      const format = formatOfSize.get(d.sizeId);
       const capacityBoxes =
         mode === "boxes"
-          ? chosen.totalBoxesPerContainer
+          ? format?.totalBoxes ?? 0
           : boxWeightKg > 0 ? Math.floor(tonKg / boxWeightKg) : 0;
       if (capacityBoxes < 1) {
         const reason =
           mode === "boxes"
-            ? `no pallets/container on Pallet format “${chosen.name}”`
+            ? `no Container format for size “${d.sizeLabel}” — add it in Container Master`
             : boxWeightKg > 0 ? "box heavier than container capacity" : "no box weight — set it on the Item (or Size) master";
         return fail(reason, {
           designId: d.id,
+          sizeId: d.sizeId,
+          sizeLabel: d.sizeLabel,
           boxWeightKg,
           tonnes,
           palletId: chosen.id,
@@ -305,23 +322,38 @@ function ContainerisePlanner({
         ...base,
         sku: d.sku,
         designId: d.id,
+        sizeId: d.sizeId,
+        sizeLabel: d.sizeLabel,
         boxWeightKg,
         tonnes,
         palletId: chosen.id,
         palletName: chosen.name,
         palletOptions,
         boxesPerPallet: chosen.boxesPerPallet,
-        boxesPerContainer: chosen.totalBoxesPerContainer,
-        palletsPerContainer: chosen.totalPalletsPerContainer,
+        boxesPerContainer: format?.totalBoxes ?? 0,
+        palletsPerContainer: format?.totalPallets ?? 0,
         capacityBoxes,
         pallets: Math.ceil(base.qty / chosen.boxesPerPallet),
         packable: base.qty > 0,
         reason: base.qty > 0 ? undefined : "quantity is 0",
       };
     });
-  }, [draftLines, mode, tonCapacity, designRows, pallets]);
+  }, [draftLines, mode, tonCapacity, designRows, pallets, formatOfSize]);
 
   const lines = useMemo(() => rows.filter((r) => r.packable), [rows]);
+
+  // Sizes on the plan that have at least one Container Master format — one picker each (CR-274).
+  const planSizes = useMemo(() => {
+    const seen = new Map<string, string>();
+    rows.forEach((r) => { if (r.sizeId && !seen.has(r.sizeId)) seen.set(r.sizeId, r.sizeLabel); });
+    return [...seen]
+      .map(([sizeId, sizeLabel]) => ({
+        sizeId,
+        sizeLabel,
+        options: formats.filter((f) => f.sizeId === sizeId).map((f) => ({ value: f.id, label: `${f.totalPallets} pallets = ${f.totalBoxes} boxes` })),
+      }))
+      .filter((s) => s.options.length > 0);
+  }, [rows, formats]);
 
   /* ---- pack item-wise: each container starts with a single item, in line
      order. Boxes mode: capacity from the item's Pallet-format boxes-per-
@@ -475,7 +507,9 @@ function ContainerisePlanner({
     const plan: ContainerPlan = {
       v: 1,
       mode,
-      ...(mode === "weight" ? { tonCapacity: Math.max(1, tonCapacity) } : {}),
+      ...(mode === "weight"
+        ? { tonCapacity: Math.max(1, tonCapacity) }
+        : { formats: Object.fromEntries(planSizes.flatMap((s) => { const f = formatOfSize.get(s.sizeId); return f ? [[s.sizeId, f.id]] : []; })) }),
       containers: containers.map((c, i) => {
         const segLines = c.segs.flatMap((s) => {
           const l = lineOf(s.idx);
@@ -492,14 +526,18 @@ function ContainerisePlanner({
           tonnes: round1(tonnesIn(c)),
           ...(mode === "weight"
             ? { tonCapacity: c.capTons }
-            : { palletCapacity: lineOf(c.segs[0]?.idx)?.palletsPerContainer ?? 0 }),
+            : (() => {
+                const owner = lineOf(c.segs[0]?.idx);
+                const f = owner ? formatOfSize.get(owner.sizeId) : undefined;
+                return { palletCapacity: owner?.palletsPerContainer ?? 0, ...(f ? { containerFormat: f.id, containerFormatName: f.name } : {}) };
+              })()),
           lines: segLines,
         };
       }),
     };
     return JSON.stringify(plan);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [containers, lines, mode, tonCapacity]);
+  }, [containers, lines, mode, tonCapacity, formatOfSize, planSizes]);
 
   /** Colored pallet cells of a container (single item): ceil(boxes / box-per-pallet). */
   const cellsOf = (c: PackedContainer) =>
@@ -792,7 +830,7 @@ function ContainerisePlanner({
               : "No packable quantities yet"}
           </span>
           <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Fitting basis" title="Switch fitting basis">
-            <button onClick={() => switchMode("boxes")} title="Capacity from the Pallet format: pallets/container × boxes/pallet"
+            <button onClick={() => switchMode("boxes")} title="Capacity from the Container Master: the container picked for each size"
               style={{ background: mode === "boxes" ? "var(--accent-soft)" : "transparent", color: mode === "boxes" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
               Box Fitting
             </button>
@@ -801,6 +839,20 @@ function ContainerisePlanner({
               Weight Fitting
             </button>
           </span>
+          {mode === "boxes" && planSizes.map((s) => (
+            <label key={s.sizeId} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title={`Container every ${s.sizeLabel} container packs into (Container Master)`}>
+              <span className="dim">{s.sizeLabel}</span>
+              <span style={{ width: 230 }}>
+                <Combobox
+                  value={formatOfSize.get(s.sizeId)?.id ?? ""}
+                  options={s.options}
+                  onChange={(v) => setFormatPick((p) => ({ ...p, [s.sizeId]: v }))}
+                  disabled={!canSave}
+                  ariaLabel={`Container for ${s.sizeLabel}`}
+                />
+              </span>
+            </label>
+          ))}
           {mode === "weight" && (
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title="Default container weight capacity — override any container below">
               <span className="dim">Default</span>
@@ -1117,16 +1169,18 @@ export function PlanContainerisation() {
   const navigate = useNavigate();
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
+  const [formats, setFormats] = useState<ContainerFormatRow[]>(() => cachedContainerFormats() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
   const [saving, setSaving] = useState(false);
 
   const quote = useMemo(() => quotes.find((q) => q.id === id) ?? null, [quotes, id]);
 
   const load = async () => {
-    const [q, p] = await Promise.all([listQuotes(), listPallets()]);
+    const [q, p, f] = await Promise.all([listQuotes(), listPallets(), listContainerFormats()]);
     setLoading(false);
     if (q.ok) setQuotes(q.quotes);
     if (p.ok) setPallets(p.pallets);
+    if (f.ok) setFormats(f.formats);
   };
   useEffect(() => {
     void load();
@@ -1176,6 +1230,7 @@ export function PlanContainerisation() {
       seedKey={`${quote.id}:${quote.modifiedTime}`}
       savedPlan={quote.containerPlan || ""}
       pallets={pallets}
+      formats={formats}
       canSave={can("quotes", "edit")}
       saving={saving}
       saveTitle="Save the items and plan to the quote"
@@ -1222,6 +1277,7 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [pallets, setPallets] = useState<PalletRow[]>(() => cachedPallets() ?? []);
+  const [formats, setFormats] = useState<ContainerFormatRow[]>(() => cachedContainerFormats() ?? []);
   const [loading, setLoading] = useState(() => cachedOrders() == null);
   const [saving, setSaving] = useState(false);
 
@@ -1229,10 +1285,11 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
   const head = items[0] ?? null;
 
   const load = async () => {
-    const [o, p] = await Promise.all([listOrders(), listPallets()]);
+    const [o, p, f] = await Promise.all([listOrders(), listPallets(), listContainerFormats()]);
     setLoading(false);
     if (o.ok) setOrders(o.orders);
     if (p.ok) setPallets(p.pallets);
+    if (f.ok) setFormats(f.formats);
   };
   useEffect(() => {
     void load();
@@ -1298,6 +1355,7 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
       seedKey={`${id}:${head.modifiedTime}`}
       savedPlan={head.containerPlan || ""}
       pallets={pallets}
+      formats={formats}
       canSave={can("orders", "edit")}
       saving={saving}
       saveTitle="Save the container plan to the sales order"

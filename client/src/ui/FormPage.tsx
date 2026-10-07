@@ -10,7 +10,7 @@
    ============================================================ */
 import { useRef, useState, type ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDiscard } from "@/ui/ConfirmDialog";
 
 // ponytail: sidebar/back navigation away from a dirty form is unguarded (HashRouter has no useBlocker) — add a nav guard if drafts get lost.
 export function useFormSave(onClose: () => void) {
@@ -32,7 +32,7 @@ export function useFormSave(onClose: () => void) {
       }
     },
     cancel: async () => {
-      if (touched.current && !(await confirmDialog({ message: "Discard unsaved changes?", danger: true }))) return;
+      if (touched.current && !(await confirmDiscard())) return;
       onClose();
     },
   };

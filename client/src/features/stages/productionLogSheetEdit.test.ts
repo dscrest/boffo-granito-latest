@@ -36,13 +36,17 @@ const row = (over: Partial<LogRow>): LogRow => ({ ...blankRow(), ...over });
   assert.deepEqual([...errors.keys()].sort(), [a.key, b.key].sort());
 }
 
-// Excel paste: fills left to right from the focused column; day-first dates; unknown item kept as text.
+// Excel paste (CR-264 order: Size · Design · Batch · Box Brand · Qty · Remark · Date): fills left to
+// right from the focused column; day-first dates; unknown item kept as text; a matched item sets its size.
 {
-  const designByKey = designIndex([{ id: "11", sku: "SKU-1", uniqueName: "Alpha 600x1200", designName: "Alpha" }]);
-  const lookups = { designByKey, brandByName: new Map([["boffo", "91"]]) };
-  const out = parsePaste("sku-1\tB-1\t20/09/2026\t1,200\tBoffo\thello\r\nGhost\t\t\t5\n", "design", lookups);
-  assert.deepEqual(out[0], { design: "11", unmatched: "", batch: "B-1", date: "2026-09-20", qty: "1200", brand: "91", note: "hello" });
-  assert.deepEqual(out[1], { design: "", unmatched: "Ghost", batch: "", date: "", qty: "5" });
+  const designByKey = designIndex([{ id: "11", sku: "SKU-1", uniqueName: "Alpha 600x1200", designName: "Alpha", sizeId: "s1" }]);
+  const lookups = { designByKey, brandByName: new Map([["boffo", "91"]]), sizeByLabel: new Map([["600x1200", "s1"]]) };
+  const out = parsePaste("sku-1\tB-1\tBoffo\t1,200\thello\t20/09/2026\r\nGhost\t\t\t5\n", "design", lookups);
+  assert.deepEqual(out[0], { design: "11", unmatched: "", size: "s1", batch: "B-1", brand: "91", qty: "1200", note: "hello", date: "2026-09-20" });
+  assert.deepEqual(out[1], { design: "", unmatched: "Ghost", batch: "", brand: "", qty: "5" });
+  // Size column: label → Size ROWID; a following matched item overrides it.
+  assert.deepEqual(parsePaste("600X1200\tsku-1", "size", lookups), [{ size: "s1", design: "11", unmatched: "" }]);
+  assert.deepEqual(parsePaste("no such size", "size", lookups), [{ size: "" }]);
   // Pasting a qty column only.
   assert.deepEqual(parsePaste("10\n20", "qty", lookups), [{ qty: "10" }, { qty: "20" }]);
 }

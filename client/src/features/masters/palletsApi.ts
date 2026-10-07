@@ -34,22 +34,11 @@ export interface PalletRow {
   coverageSqm: number; // per box
   coverageSqft: number; // per box
   boxWeightKg: number; // per box
-  // Arrangement A
+  // Boxes only since CR-261 — per-container capacity lives on the Container
+  // Master (containerFormatsApi.defaultFormatBySize / the loading's pick), never on a pallet.
   boxesPerPallet: number;
-  palletsPerContainer: number;
-  emptyWeightKg: number; // A pallet weight
-  // Arrangement B (mixed loads; 0 when single-arrangement)
-  bBoxesPerPallet: number;
-  bPalletsPerContainer: number;
-  bPalletWeightKg: number;
+  emptyWeightKg: number;
   remarks: string;
-  boxesPerContainer: number; // computed: boxesPerPallet * palletsPerContainer (arrangement A)
-  // Computed per-container totals (A + B), not stored
-  totalBoxesPerContainer: number;
-  totalPalletsPerContainer: number;
-  totalSqmPerContainer: number;
-  totalSqftPerContainer: number;
-  totalBoxWeightPerContainer: number;
   createdTime: string; // Catalyst CREATEDTIME
   modifiedTime: string; // Catalyst MODIFIEDTIME
 }
@@ -119,17 +108,10 @@ async function fetchPallets(): Promise<{
 
   const rows: PalletRow[] = (pallets.rows || []).map((p) => {
     const boxesPerPallet = num(p.boxes_per_pallet);
-    const palletsPerContainer = num(p.pallets_per_container);
-    const bBoxesPerPallet = num(p.b_boxes_per_pallet);
-    const bPalletsPerContainer = num(p.b_pallets_per_container);
     const coverageSqm = num(p.coverage_sqm);
     const coverageSqft = num(p.coverage_sqft);
     const boxWeightKg = num(p.box_weight_kg);
     const sizeId = str(p.size);
-    // Per-container totals sum both arrangements (A + B); coverage/weight are per box.
-    const totalBoxesPerContainer =
-      boxesPerPallet * palletsPerContainer + bBoxesPerPallet * bPalletsPerContainer;
-    const totalPalletsPerContainer = palletsPerContainer + bPalletsPerContainer;
     return {
       id: String(p.ROWID),
       name: str(p.name),
@@ -142,18 +124,8 @@ async function fetchPallets(): Promise<{
       coverageSqft,
       boxWeightKg,
       boxesPerPallet,
-      palletsPerContainer,
       emptyWeightKg: num(p.empty_pallet_weight_kg),
-      bBoxesPerPallet,
-      bPalletsPerContainer,
-      bPalletWeightKg: num(p.b_pallet_weight),
       remarks: str(p.remarks),
-      boxesPerContainer: boxesPerPallet * palletsPerContainer,
-      totalBoxesPerContainer,
-      totalPalletsPerContainer,
-      totalSqmPerContainer: totalBoxesPerContainer * coverageSqm,
-      totalSqftPerContainer: totalBoxesPerContainer * coverageSqft,
-      totalBoxWeightPerContainer: totalBoxesPerContainer * boxWeightKg,
       createdTime: str(p.CREATEDTIME),
       modifiedTime: str(p.MODIFIEDTIME),
     };
@@ -245,12 +217,10 @@ export interface PalletInput {
   coverage_sqm: number;
   coverage_sqft: number;
   box_weight_kg: number;
-  boxes_per_pallet: number; // arrangement A
-  pallets_per_container: number; // arrangement A
-  empty_pallet_weight_kg: number; // arrangement A pallet weight
-  b_boxes_per_pallet: number; // arrangement B
-  b_pallets_per_container: number; // arrangement B
-  b_pallet_weight: number; // arrangement B pallet weight
+  boxes_per_pallet: number;
+  empty_pallet_weight_kg: number;
+  // pallets_per_container + the b_* arrangement columns stay in the table but
+  // are no longer written (CR-261): capacity is the Container Master's.
   remarks: string;
 }
 
@@ -265,11 +235,7 @@ function toPayload(input: PalletInput): Record<string, unknown> {
     coverage_sqft: input.coverage_sqft,
     box_weight_kg: input.box_weight_kg,
     boxes_per_pallet: input.boxes_per_pallet,
-    pallets_per_container: input.pallets_per_container,
     empty_pallet_weight_kg: input.empty_pallet_weight_kg,
-    b_boxes_per_pallet: input.b_boxes_per_pallet,
-    b_pallets_per_container: input.b_pallets_per_container,
-    b_pallet_weight: input.b_pallet_weight,
     remarks: input.remarks.trim(),
   };
   if (input.size) p.size = input.size; // FK only when chosen
@@ -295,8 +261,8 @@ export function updatePallet(rowid: string, input: PalletInput) {
   return bust(update("Pallet", rowid, patch));
 }
 
-export function deletePallet(rowid: string) {
-  return bust(remove("Pallet", rowid));
+export function deletePallet(rowid: string, reason?: string) {
+  return bust(remove("Pallet", rowid, reason));
 }
 
 /* ---- Bulk ops (client-side fan-out; each row logged in OperationLog) ---- */
@@ -319,6 +285,6 @@ async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): 
   };
 }
 
-export function bulkDeletePallets(rowids: string[]): Promise<BulkResult> {
-  return bust(fanOut(rowids, (id) => remove("Pallet", id)));
+export function bulkDeletePallets(rowids: string[], reason?: string): Promise<BulkResult> {
+  return bust(fanOut(rowids, (id) => remove("Pallet", id, reason)));
 }

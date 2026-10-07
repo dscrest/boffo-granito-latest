@@ -31,8 +31,9 @@ import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { resolveVehicle } from "@/features/masters/vehiclesApi";
 import { LoadDetailsFields, captureOf, useLoadDetails } from "./LoadDetailsFields";
+import { useContainerFormats } from "@/features/masters/containerFormatsApi";
 import { BulkLoadItemsModal } from "./BulkLoadItemsModal";
-import { bandLabel, batchLabel, batchSummary, itemOptions, openLines, spreadQty, type DesignRow } from "./newLoadingRows";
+import { bandLabel, batchLabel, batchSummary, itemOptions, openLines, palletSplit, palletsOfLine, readyLabel, spreadPallets, type DesignRow, type SoBand } from "./newLoadingRows";
 import { useSessionPick } from "./SessionItemsStep";
 import { UNLOAD, resolveLoadSheetEdit, type LoadSheetDraft } from "./loadSheetEdit";
 import { duplicateSeals } from "./sealChecks";
@@ -55,8 +56,19 @@ const NEW = "__new";
 /** One row per item (CR-256): its batches combined; `off` = its batches the batch picker left out. */
 interface ItemRow { key: number; /** DesignRow.key */ rowKey: string; off: string[] }
 const BLANK = { rowKey: "", off: [] as string[] };
-const sumPallets = (parts: { l: PalPlanLine; n: number }[]) => parts.reduce((s, x) => s + (x.l.boxesPerPallet > 0 && x.n > 0 ? Math.ceil(x.n / x.l.boxesPerPallet) : 0), 0);
+const sumPallets = (parts: { l: PalPlanLine; n: number }[]) => parts.reduce((s, x) => s + palletsOfLine(x.n, x.l.boxesPerPallet), 0);
 const palletNames = (ls: PalPlanLine[]) => [...new Set(ls.map((l) => l.palletName).filter(Boolean))].join(" / ");
+/** Hover on a derived Boxes cell: "12 full + 1 partial (6 boxes)" per batch (CR-258). */
+const boxesHint = (parts: { l: PalPlanLine; n: number }[]) =>
+  parts
+    .filter((x) => x.n > 0)
+    .map((x) => {
+      const { pallets, loose } = palletSplit(x.n, x.l.boxesPerPallet);
+      return `${batchLabel(x.l)}: ${fmt(x.n)} boxes = ${pallets} full${loose > 0 ? ` + 1 partial (${loose} boxes)` : ""}`;
+    })
+    .join("\n");
+/** Any of the row's lines shares a physical pallet with another batch/item. */
+const mixBatchOf = (ls: PalPlanLine[]) => ls.some((l) => l.palletGroup);
 
 export function LoadingSession() {
   const { id = "" } = useParams();
@@ -93,8 +105,11 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
 }) {
   const navigate = useNavigate();
   const open = !box || box.status === "Open";
-  const pick = useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer: true, onSaved: () => undefined });
   const details = useLoadDetails(box, box ? captureOf(box) : undefined);
+  // CR-273: the picked Container's capacity drives the % while typing (saved on the LoadBox).
+  const formats = useContainerFormats();
+  const capacityOverride = formats.find((f) => f.id === details.capture.container_format)?.totalBoxes || 0;
+  const pick = useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCustomer: true, capacityOverride, onSaved: () => undefined });
   // Loaded lines: typed qty per line id ("0" = remove).
   const [loadedDraft, setLoadedDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -165,8 +180,9 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
     const k = `${l.salesOrderId}|${l.designId}`;
     return m.set(k, [...(m.get(k) ?? []), l]);
   }, new Map<string, PalPlanLine[]>()).values()].map((ls) => [...ls].sort((a, b) => a.createdTime.localeCompare(b.createdTime)));
-  const setGroupQty = (ls: PalPlanLine[], v: number) =>
-    setLoadedDraft((p) => ({ ...p, ...Object.fromEntries([...spreadQty(ls, v)].map(([id, n]) => [id, String(n)])) }));
+  /** Pallets typed on a loaded row: whole pallets, oldest batch first (CR-258); the rest goes back to Ready for Loading. */
+  const setGroupPallets = (ls: PalPlanLine[], p: number) =>
+    setLoadedDraft((d) => ({ ...d, ...Object.fromEntries([...spreadPallets(ls, p)].map(([id, n]) => [id, String(n)])) }));
 
   const dups = duplicateSeals(
     [
@@ -240,7 +256,7 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
 
   const customerLocked = !pick.showRail || !open;
   const customerOptions = [
-    ...pick.customers.map((c) => ({ value: c.id, label: c.name, hint: `${fmt(c.ready)} boxes ready` })),
+    ...pick.customers.map((c) => ({ value: c.id, label: c.name, hint: `${readyLabel(c)} ready` })),
     // A locked customer with nothing left to load is not in the ready list — still name them.
     ...(pick.customerId && !pick.customers.some((c) => c.id === pick.customerId)
       ? [{ value: pick.customerId, label: loaded[0]?.customerName || pick.customerId }]
@@ -258,6 +274,17 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
     return next ? [{ band, next, boxes: next.lines.reduce((s, ln) => s + ln.boxes, 0) }] : [];
   });
 
+  // CR-274: a loading opened from the SO starts on the plan's container; Fill from plan does the same.
+  // Prefill only while nothing is picked — the loading's own pick is the truth (CR-273).
+  const planFormat = presetSalesOrderId && !box ? planHints[0]?.next.containerFormat : undefined;
+  useEffect(() => {
+    if (planFormat && !details.capture.container_format) details.setCap("container_format", planFormat);
+  }, [planFormat]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fillFromPlan = (band: SoBand, format?: string) => {
+    addRows(pick.fillFromPlan(band).map((f) => f.rowKey));
+    if (format && !details.capture.container_format) details.setCap("container_format", format);
+  };
+
   const nothingNew = !box && pick.totalBoxes === 0;
   return (
     <div>
@@ -271,8 +298,8 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
       </nav>
 
       <div className="form-section">
-        <div className="form-grid">
-          <label className="form-field">
+        <div className="form-rows">
+          <label className="form-field span2">
             <span className="lbl">Customer</span>
             <Combobox
               value={pick.customerId}
@@ -293,37 +320,38 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
             <div className="ord-line ord-line-head qt-line load-line">
               <span>Item Details</span>
               <span>Batches</span>
-              <span style={{ textAlign: "right" }}>Boxes</span>
               <span style={{ textAlign: "right" }}>Pallets</span>
+              <span style={{ textAlign: "right" }}>Boxes</span>
               <span>Pallet</span>
               <span>Box Brand</span>
               <span />
             </div>
 
-            {/* Already loaded (edit), one row per item: fewer boxes sends the rest (newest batch first) back to Ready for Loading; ✕ / 0 unloads. */}
+            {/* Already loaded (edit), one row per item: fewer PALLETS sends the rest (newest batch first) back to Ready for Loading; ✕ / 0 unloads. */}
             {loadedGroups.map((ls) => {
               const l0 = ls[0];
-              const total = ls.reduce((n, l) => n + l.boxes, 0);
-              const keptN = ls.reduce((n, l) => n + keptOf(l), 0);
+              const keptParts = ls.map((l) => ({ l, n: keptOf(l) }));
+              const keptN = keptParts.reduce((n, x) => n + x.n, 0);
               const touched = ls.some((l) => (loadedDraft[l.id] ?? "").trim() !== "");
               const removed = touched && keptN === 0;
               const error = loadedOps.find((o) => o.error && ls.includes(o.l))?.error;
               const batches = ls.map((l) => `${batchLabel(l)} · ${fmt(l.boxes)}`);
+              const mix = mixBatchOf(ls);
               return (
                 <div key={l0.id} className="ord-line qt-line load-line" style={removed ? { opacity: 0.5 } : undefined}>
                   <div className="form-field"><input readOnly tabIndex={-1} value={`${l0.designLabel} · ${l0.soNumber || "—"}`} /></div>
-                  <div className="form-field"><input readOnly tabIndex={-1} title={batches.join("\n")} value={ls.length === 1 ? l0.batchNumber || "—" : `${ls.length} batches`} /></div>
+                  <div className="form-field"><input readOnly tabIndex={-1} title={batches.join("\n")} value={`${ls.length === 1 ? l0.batchNumber || "—" : `${ls.length} batches`}${mix ? " · MXBATCH" : ""}`} /></div>
                   <div className="form-field" title={error || undefined}>
                     <NumberInput
                       maxDecimals={0}
-                      value={touched ? String(keptN) : String(total)}
-                      aria-label={`Boxes loaded, ${l0.designLabel}`}
+                      value={String(sumPallets(keptParts))}
+                      aria-label={`Pallets loaded, ${l0.designLabel}`}
                       aria-invalid={!!error}
-                      onChange={(e) => setGroupQty(ls, Math.min(total, Number(e.target.value) || 0))}
+                      onChange={(e) => setGroupPallets(ls, Number(e.target.value) || 0)}
                       style={{ textAlign: "right", ...(error ? { borderColor: "var(--c-red)" } : {}) }}
                     />
                   </div>
-                  <div className="form-field"><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={fmt(sumPallets(ls.map((l) => ({ l, n: keptOf(l) })))) || ""} /></div>
+                  <div className="form-field" title={boxesHint(keptParts) || undefined}><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={fmt(keptN)} /></div>
                   <div className="form-field"><input readOnly tabIndex={-1} value={palletNames(ls) || "—"} /></div>
                   <div className="form-field"><input readOnly tabIndex={-1} value={pick.brandName(l0.boxBrandId || l0.soBoxBrandId || l0.customerBoxBrandId) || "—"} /></div>
                   <button
@@ -343,6 +371,9 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
               const v = dr ? rowQty(dr) : 0;
               const max = dr ? openLines(dr).reduce((n, l) => n + (skip.has(l.id) ? 0 : l.boxes), 0) : 0;
               const used = dr ? openLines(dr).filter((l) => (pick.qty.get(l.id) || 0) > 0) : [];
+              const usedParts = used.map((l) => ({ l, n: pick.qty.get(l.id)! }));
+              const maxPallets = dr ? openLines(dr).reduce((n, l) => n + (skip.has(l.id) ? 0 : palletsOfLine(l.boxes, l.boxesPerPallet)), 0) : 0;
+              const mix = mixBatchOf(used.length ? used : dr ? openLines(dr) : []);
               return (
                 <div key={r.key} className="ord-line qt-line load-line">
                   <Combobox
@@ -359,26 +390,26 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
                       disabled={!dr}
                       aria-label="Batches"
                       aria-haspopup="dialog"
-                      title={dr ? "Choose batches and boxes" : undefined}
-                      value={dr ? batchSummary(openLines(dr), v ? new Set(openLines(dr).filter((l) => !pick.qty.get(l.id)).map((l) => l.id)) : skip) : ""}
+                      title={dr ? `Choose batches and pallets${mix ? "\nMXBATCH: a pallet here is shared with another batch/item" : ""}` : undefined}
+                      value={dr ? `${batchSummary(openLines(dr), v ? new Set(openLines(dr).filter((l) => !pick.qty.get(l.id)).map((l) => l.id)) : skip)}${mix ? " · MXBATCH" : ""}` : ""}
                       placeholder="—"
                       style={{ cursor: dr ? "pointer" : undefined }}
                       onClick={() => setPicker(r.rowKey)}
                       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setPicker(r.rowKey)}
                     />
                   </div>
-                  <div className="form-field" title={dr ? `${fmt(max)} boxes ready` : undefined}>
+                  <div className="form-field" title={dr ? `${fmt(maxPallets)} pallets · ${fmt(max)} boxes ready` : undefined}>
                     <NumberInput
                       maxDecimals={0}
-                      value={dr ? v || "" : ""}
+                      value={dr && v ? String(sumPallets(usedParts)) : ""}
                       placeholder="0"
                       disabled={!dr}
-                      aria-label="Boxes"
-                      onChange={(e) => dr && pick.setDesign(dr, Number(e.target.value) || 0, skip)}
+                      aria-label="Pallets"
+                      onChange={(e) => dr && pick.setDesignPallets(dr, Number(e.target.value) || 0, skip)}
                       style={{ textAlign: "right" }}
                     />
                   </div>
-                  <div className="form-field"><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={dr && v ? fmt(sumPallets(used.map((l) => ({ l, n: pick.qty.get(l.id)! })))) : ""} /></div>
+                  <div className="form-field" title={dr && v ? boxesHint(usedParts) : undefined}><input readOnly tabIndex={-1} style={{ textAlign: "right" }} value={dr && v ? fmt(v) : ""} /></div>
                   <div className="form-field"><input readOnly tabIndex={-1} value={dr ? palletNames(used.length ? used : openLines(dr)) : ""} /></div>
                   <div className="form-field"><input readOnly tabIndex={-1} value={dr ? pick.brandName(dr.brandId) : ""} /></div>
                   <button className="btn ord-rm" title="Remove row" onClick={() => removeRow(r)}><Icon name="x" size={13} /></button>
@@ -390,8 +421,8 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
             <div className="ord-line qt-line load-line" style={{ fontWeight: 700, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
               <span>Total <span className="dim" style={{ fontWeight: 400 }}>· {fmt(totalLines)} lines</span></span>
               <span />
-              <span className="mono" style={{ textAlign: "right", paddingRight: 10 }}>{fmt(totalBoxes)}</span>
               <span className="mono" style={{ textAlign: "right", paddingRight: 10 }}>{fmt(totalPallets)}</span>
+              <span className="mono" style={{ textAlign: "right", paddingRight: 10 }}>{fmt(totalBoxes)}</span>
               <span className="mono nw" style={{ fontWeight: 400, color: pick.over ? "var(--c-amber)" : "var(--muted)" }} title="Share of one container">
                 {pick.fill > 0 ? `${Math.round(pick.fill * 100)}% of a container` : ""}
               </span>
@@ -415,7 +446,7 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
                 <span>
                   <span className="mono">{bandLabel(band)}</span> · container plan: Container {next.ci + 1} of {next.of} · <span className="mono">{fmt(planned)}</span> boxes
                 </span>
-                <button className="btn" onClick={() => addRows(pick.fillFromPlan(band).map((f) => f.rowKey))}>Fill from plan</button>
+                <button className="btn" onClick={() => fillFromPlan(band, next.containerFormat)}>Fill from plan</button>
               </div>
             ))}
           </div>
@@ -428,14 +459,14 @@ function SessionPage({ box, plans, boxes, presetSalesOrderId, reload }: {
           <button role="tab" aria-selected={tab === "vehicle"} onClick={() => setTab("vehicle")} style={tabStyle(tab === "vehicle")}>Vehicle Details</button>
         </div>
         {/* Both stay mounted — one Save reads the same `details` state either way. */}
-        <div className="form-grid" style={tab === "details" ? undefined : { display: "none" }}>
+        <div className="form-rows" style={tab === "details" ? undefined : { display: "none" }}>
           <label className="form-field">
             <span className="lbl">Loading No.</span>
             <input readOnly tabIndex={-1} value={box ? boxLabel(box) : "Auto"} />
           </label>
           <LoadDetailsFields {...details} part="details" />
         </div>
-        <div className="form-grid" style={tab === "vehicle" ? undefined : { display: "none" }}>
+        <div className="form-rows" style={tab === "vehicle" ? undefined : { display: "none" }}>
           <LoadDetailsFields {...details} part="vehicle" />
         </div>
       </div>

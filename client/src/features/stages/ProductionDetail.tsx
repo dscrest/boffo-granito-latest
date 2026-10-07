@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete } from "@/ui/ConfirmDialog";
 import { can } from "@/lib/auth";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ActivityLog } from "@/features/common/RecordDetail";
@@ -172,10 +172,11 @@ export function ProductionDetail() {
   const onDelete = async () => {
     if (!group) return;
     const reversal = producedBoxes > 0 ? ` ${fmt(producedBoxes)} produced boxes will be subtracted from the order.` : "";
-    if (!(await confirmDialog({ message: `Delete this production (${group.code} · ${fmt(group.totalRequested)} boxes requested · ${group.lineCount} item${group.lineCount > 1 ? "s" : ""})?${reversal} This cannot be undone.`, danger: true }))) return;
+    const reason = await confirmDelete({ message: `Delete this production (${group.code} · ${fmt(group.totalRequested)} boxes requested · ${group.lineCount} item${group.lineCount > 1 ? "s" : ""})?${reversal} This cannot be undone.` });
+    if (reason == null) return;
     setBusy("Deleting…");
     for (const e of group.entries) {
-      const res = await deleteProductionLog(e.id);
+      const res = await deleteProductionLog(e.id, reason);
       if (!res.ok) {
         setBusy(null);
         toast.error(res.error || "Delete failed");
@@ -287,11 +288,12 @@ export function ProductionDetail() {
                 }}
                 title={x.code}
               >
+                {/* CR-265: date leads, the PRD number reads small on the second line. */}
                 <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {x.code} · {x.designSummary}
+                  {fmtLocalDate(x.date) || x.code} · {x.designSummary}
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[x.independent ? "Independent" : x.orderNumber || x.poNumber, stageChip(x.stage).label].filter(Boolean).join("  ·  ")}
+                  {[x.code, x.independent ? "Independent" : x.orderNumber || x.poNumber, stageChip(x.stage).label].filter(Boolean).join("  ·  ")}
                 </div>
               </Link>
             );
@@ -304,8 +306,9 @@ export function ProductionDetail() {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="card" style={{ padding: 16, marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {/* CR-265: the DATE is the title; the PRD number sits small beneath. */}
             <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
-              <span className="mono" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{group.code}</span>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtLocalDate(group.date) || group.code}</span>
               <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
               {/* This batch's completeness — produced vs what THIS production
                   requested (ignores the wider SO target, which may be part-
@@ -344,8 +347,10 @@ export function ProductionDetail() {
             </button>
           </div>
           <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+            <span className="mono" title="Production ID">{group.code}</span>
             {group.independent ? null : (
               <>
+                {" · "}
                 <Link className="linkish" to={`/orders/${group.salesOrderId}`} title="Open Sales Order">
                   {group.orderNumber || group.poNumber || "Order"}
                 </Link>
