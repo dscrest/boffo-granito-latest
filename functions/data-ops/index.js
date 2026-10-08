@@ -112,8 +112,14 @@ const ALLOWED = new Set([
   "Panel",
   "PanelLine",
   "PanelOrder",
+  "PanelOrderLine", // CR-302: one row per panel on a panel order
   "CutPieceSize",
   "CutPieceStock",
+  "CutStockEntry", // CR-307: cut-piece stock ledger (route-only writes)
+  "Mdf", // CR-309: MDF master (Settings ▸ Masters)
+  "AdjustmentReason", // CR-308: inventory adjustment reasons (Settings ▸ Masters)
+  "SampleOrder", // CR-315: customer sample requests (route-only writes)
+  "SampleOrderLine",
 ]);
 
 function assertTable(table) {
@@ -544,6 +550,7 @@ const NATURAL_KEY = {
   AppSetting: "setting_key",
   Panel: "panel_code",
   CutPieceSize: "name",
+  AdjustmentReason: "name",
 };
 
 /**
@@ -1519,11 +1526,12 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
    ponytail: MAX-scan over SalesOrder, not TransactionSeries — assertUnique
    below is the backstop if two inserts race; wire TransactionSeries when
    multi-user contention becomes real. */
-async function nextOrderNumber(catalyst) {
+// CR-302: also mints PNL/FY/NNN for PanelOrder — same FY prefix + max-scan, one function.
+async function nextOrderNumber(catalyst, table = "SalesOrder", tag = "SO") {
   const now = new Date();
   const y = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; // Indian FY (Apr–Mar)
-  const prefix = `SO/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
-  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT order_number FROM SalesOrder"));
+  const prefix = `${tag}/${y}-${String((y + 1) % 100).padStart(2, "0")}/`;
+  const rows = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT order_number FROM ${table}`));
   let max = 0;
   for (const r of rows) {
     const n = String(r.order_number || "");
@@ -2843,10 +2851,12 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
 
 /* ----------------------------------------------------------------
    Panel Craft — showcase-panel orders + cut-piece stock (2026-08-26).
-   Stock is an on-hand row per (design, cut_piece_size); the cutting-job
-   lifecycle mutates it: Ready adds the job's output, Dispatched deducts
-   it (including direct Received→Dispatched when stock already covers).
-   Forward-only transitions — going back would double-add stock.
+   CR-302: a PanelOrder is a HEADER (customer, PNL/FY/NNN number, status)
+   with PanelOrderLine rows (panel × qty) — SO-style. Stock is an on-hand
+   row per (design, cut_piece_size); the cutting-job lifecycle mutates it:
+   Ready adds Σ over every line's PanelLine pieces × line qty, Dispatched
+   deducts the same (including direct Received→Dispatched when stock
+   already covers). Forward-only transitions — going back would double-add.
    ---------------------------------------------------------------- */
 const PANEL_ORDER_TRANSITIONS = {
   NewRequest: ["Received"], // CR-286: a request raised from a Quote / SO, accepted by Panel Craft
@@ -2859,7 +2869,7 @@ const PANEL_ORDER_TRANSITIONS = {
 /* Upsert the on-hand row for (design, cut size) by delta. Composite key —
    NATURAL_KEY can't cover it, so uniqueness lives here. Throws 409 when a
    deduction would go negative. */
-async function adjustCutStock(catalyst, ds, designId, cutSizeId, delta) {
+async function adjustCutStock(catalyst, ds, designId, cutSizeId, delta, entry) {
   const d = rowidParam(designId);
   const c = rowidParam(cutSizeId);
   if (!d || !c) throw badRequest("design and cut_piece_size are required");
@@ -2872,12 +2882,95 @@ async function adjustCutStock(catalyst, ds, designId, cutSizeId, delta) {
   if (next < 0) throw badRequest("Insufficient cut-piece stock", 409);
   if (row) await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, qty: next });
   else await ds.table("CutPieceStock").insertRow({ design: d, cut_piece_size: c, qty: next });
+  // CR-307: every movement leaves a dated ledger row (receipt / adjustment / order_ready / order_dispatch / sample — CR-316).
+  if (entry)
+    await ds.table("CutStockEntry").insertRow({
+      design: d, cut_piece_size: c, qty: delta,
+      entry_date: entry.entry_date || new Date().toISOString().slice(0, 10),
+      kind: String(entry.kind || ""), reason: String(entry.reason || ""), note: String(entry.note || ""),
+      ref_table: String(entry.ref_table || ""), ...(entry.ref_rowid ? { ref_rowid: String(entry.ref_rowid) } : {}),
+      performed_by: String(entry.performed_by || ""),
+    });
   return next;
 }
 
-/* Panel-order stage flip. On Ready: + line.cut_piece_qty × order.qty per
-   PanelLine (the cutting job's output). On Dispatched: − the same (409 if
-   short — also guards direct Received→Dispatched against missing stock). */
+/* Live PanelOrderLine rows of one order. */
+async function panelOrderLines(catalyst, orderId) {
+  return rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, panel, qty, mdf FROM PanelOrderLine WHERE panel_order = ${orderId} AND deleted_at is null`,
+    ),
+  );
+}
+
+/* CR-312: need per design|cutSize for one order — or for `lines` ({panel, qty})
+   about to be saved, so /panel-order-save can clamp a booking before the rows
+   exist. Lifted verbatim from /panel-order-status. */
+async function panelOrderNeeds(catalyst, orderId, lines) {
+  const needs = new Map();
+  for (const ol of lines || (await panelOrderLines(catalyst, orderId))) {
+    const lineQty = Number(ol.qty) || 0;
+    const pieces = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT design, cut_piece_size, cut_piece_qty FROM PanelLine WHERE panel = ${rowidParam(ol.panel)} AND deleted_at is null`,
+      ),
+    );
+    for (const p of pieces) {
+      const need = (Number(p.cut_piece_qty) || 0) * lineQty;
+      if (need <= 0) continue;
+      const key = `${p.design}|${p.cut_piece_size}`;
+      const cur = needs.get(key) || { design: p.design, cut_piece_size: p.cut_piece_size, need: 0 };
+      cur.need += need;
+      needs.set(key, cur);
+    }
+  }
+  return needs;
+}
+
+const parseJsonCol = (raw) => {
+  try {
+    const v = JSON.parse(raw || "{}");
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+};
+
+/* CR-312: a booking (PanelOrder.allocation JSON) is a CLAIM on on-hand, never a
+   movement. Open = Received | InCutting | Ready — Dispatched rows keep their
+   JSON for audit but drop out of every sum. Σ bookings ≤ on-hand is the
+   invariant: guarded at allocate, negative adjustment and save-clamp; Ready
+   adds its output and books it, so it cannot break it. */
+const PANEL_ORDER_OPEN = new Set(["Received", "InCutting", "Ready"]);
+async function otherAllocations(catalyst, excludeOrderId) {
+  const rows = await zcqlAllRows(
+    catalyst,
+    `SELECT ROWID, allocation FROM PanelOrder WHERE (status = 'Received' OR status = 'InCutting' OR status = 'Ready') AND deleted_at is null`,
+  );
+  const sum = new Map();
+  for (const r of rows) {
+    if (excludeOrderId && String(r.ROWID) === String(excludeOrderId)) continue;
+    for (const [k, q] of Object.entries(parseJsonCol(r.allocation))) sum.set(k, (sum.get(k) || 0) + (Number(q) || 0));
+  }
+  return sum;
+}
+async function cutOnHand(catalyst, designId, cutSizeId) {
+  const row = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT qty FROM CutPieceStock WHERE design = ${rowidParam(designId)} AND cut_piece_size = ${rowidParam(cutSizeId)} AND deleted_at is null`,
+    ),
+  )[0];
+  return row ? Number(row.qty) || 0 : 0;
+}
+async function cutPieceLabel(catalyst, designId, cutSizeId) {
+  const c = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT name FROM CutPieceSize WHERE ROWID = ${rowidParam(cutSizeId)}`))[0];
+  return `${await designLabel(catalyst, designId)} · ${c && c.name ? String(c.name) : "cut piece"}`;
+}
+
+/* Panel-order stage flip. On Ready: + Σ panelLine.cut_piece_qty × line.qty
+   over every line (the cutting job's output, aggregated per design × cut
+   size). On Dispatched: − the same (409 if short — also guards direct
+   Received→Dispatched against missing stock). */
 app.post("/panel-order-status/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -2890,7 +2983,7 @@ app.post("/panel-order-status/:rowid", async (req, res) => {
       async () => {
         const order = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, panel, qty, sales_order, quote FROM PanelOrder WHERE ROWID = ${orderId} AND deleted_at is null`,
+            `SELECT ROWID, status, sales_order, quote, allocation FROM PanelOrder WHERE ROWID = ${orderId} AND deleted_at is null`,
           ),
         )[0];
         if (!order) throw badRequest(`Panel order not found: ${orderId}`, 404);
@@ -2898,37 +2991,44 @@ app.post("/panel-order-status/:rowid", async (req, res) => {
         if (!(PANEL_ORDER_TRANSITIONS[from] || []).includes(to))
           throw badRequest(`Cannot move panel order from ${from} to ${to}`, 409);
 
+        // CR-302: the need per (design, cut size) across all lines (CR-312: shared helper).
+        const needs = to === "Ready" || to === "Dispatched" ? await panelOrderNeeds(catalyst, orderId) : new Map();
         if (to === "Ready" || to === "Dispatched") {
-          const orderQty = Number(order.qty) || 0;
-          const lines = rowList(
-            await catalyst.zcql().executeZCQLQuery(
-              `SELECT design, cut_piece_size, cut_piece_qty FROM PanelLine WHERE panel = ${rowidParam(order.panel)} AND deleted_at is null`,
-            ),
-          );
           const sign = to === "Ready" ? 1 : -1;
-          const needs = lines
-            .map((l) => ({ l, need: (Number(l.cut_piece_qty) || 0) * orderQty }))
-            .filter((x) => x.need > 0);
-          // Deduction verifies EVERY line up front — a mid-loop 409 must not
-          // leave earlier lines already deducted (caught by the 2026-08-26 e2e).
+          // Deduction verifies EVERY need up front — a mid-loop 409 must not
+          // leave earlier rows already deducted (caught by the 2026-08-26 e2e).
           if (sign < 0) {
-            for (const { l, need } of needs) {
+            // CR-312: Dispatch consumes this order's BOOKING — every piece must be
+            // booked first; that is what keeps order A from taking pieces booked to B.
+            const booked = parseJsonCol(order.allocation);
+            for (const [k, n] of needs) {
+              const have = Number(booked[k]) || 0;
+              if (have < n.need)
+                throw badRequest(`Book ${n.need - have} more pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} before dispatch`, 409);
+            }
+            for (const n of needs.values()) {
               const row = rowList(
                 await catalyst.zcql().executeZCQLQuery(
-                  `SELECT qty FROM CutPieceStock WHERE design = ${rowidParam(l.design)} AND cut_piece_size = ${rowidParam(l.cut_piece_size)} AND deleted_at is null`,
+                  `SELECT qty FROM CutPieceStock WHERE design = ${rowidParam(n.design)} AND cut_piece_size = ${rowidParam(n.cut_piece_size)} AND deleted_at is null`,
                 ),
               )[0];
-              if ((row ? Number(row.qty) || 0 : 0) < need) throw badRequest("Insufficient cut-piece stock", 409);
+              if ((row ? Number(row.qty) || 0 : 0) < n.need) throw badRequest("Insufficient cut-piece stock", 409);
             }
           }
           // ponytail: apply pass is row-by-row, not transactional — safe now the
           // verify pass ran; single-writer app, races are theoretical.
-          for (const { l, need } of needs) {
-            await adjustCutStock(catalyst, ds, l.design, l.cut_piece_size, sign * need);
+          const actor = await currentActor(catalyst);
+          for (const n of needs.values()) {
+            await adjustCutStock(catalyst, ds, n.design, n.cut_piece_size, sign * n.need, {
+              kind: sign > 0 ? "order_ready" : "order_dispatch", ref_table: "PanelOrder", ref_rowid: orderId, performed_by: actor,
+            });
           }
         }
 
-        await ds.table("PanelOrder").updateRow({ ROWID: orderId, status: to });
+        // CR-312: Ready books its own cutting output to this order (the pieces were cut FOR it),
+        // so Received → In Cutting → Ready → Dispatch needs no separate Allocate click.
+        const booking = to === "Ready" ? { allocation: JSON.stringify(Object.fromEntries([...needs].map(([k, n]) => [k, n.need]))) } : {};
+        await ds.table("PanelOrder").updateRow({ ROWID: orderId, status: to, ...booking });
         await logTransition(catalyst, {
           entity_type: "PanelOrder", entity_rowid: orderId, from_status: from, to_status: to,
         });
@@ -2948,30 +3048,690 @@ app.post("/panel-order-status/:rowid", async (req, res) => {
   }
 });
 
-/* Manual cut-piece stock entry — sets the absolute on-hand qty for
-   (design, cut size), same shape as the Item opening-stock edit. */
-app.post("/cut-stock-adjust", async (req, res) => {
+/* CR-313: production checkpoints — MDF · Vinyl Printing · Cut Pieces: three
+   independent readiness marks per order (they run simultaneously and never
+   gate the lifecycle). Any direction; each save stamps who / when. Overall
+   readiness is derived on the client, never stored. */
+const CHECKPOINTS = {
+  mdf: ["Pending", "Ordered", "Received", "Ready"],
+  vinyl: ["Pending", "Printing", "Ready"],
+  cut: ["Pending", "Ready"],
+};
+const openOrderOr409 = (order) => {
+  if (!PANEL_ORDER_OPEN.has(String(order.status)))
+    throw badRequest(String(order.status) === "Dispatched" ? "Order already dispatched" : "Accept the request first", 409);
+};
+app.post("/panel-order-checkpoint/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const orderId = rowidParam(req.params.rowid);
+    const key = String((req.body || {}).key || "");
+    const status = String((req.body || {}).status || "");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PanelOrder", operation: "checkpoint", payload: { ROWID: orderId, key, status } },
+      async () => {
+        if (!CHECKPOINTS[key]) throw badRequest("key must be mdf, vinyl or cut");
+        if (!CHECKPOINTS[key].includes(status)) throw badRequest(`${key} status must be one of ${CHECKPOINTS[key].join(", ")}`);
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, sales_order, quote, checkpoints FROM PanelOrder WHERE ROWID = ${orderId} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!order) throw badRequest(`Panel order not found: ${orderId}`, 404);
+        openOrderOr409(order);
+        const next = parseJsonCol(order.checkpoints);
+        next[key] = { status, by: await currentActor(catalyst), at: stampNow() };
+        await ds.table("PanelOrder").updateRow({ ROWID: orderId, checkpoints: JSON.stringify(next) });
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }],
+          "panel-order-checkpoint",
+          { ROWID: orderId, key, status },
+        );
+        return { rowid: orderId, data: { ROWID: orderId, checkpoints: next } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-312: book cut pieces to an order — ABSOLUTE per design|cutSize figure
+   (lower = release, 0 / missing = none; unknown keys ignored). Each figure
+   must fit the need AND on-hand − what OTHER open orders have booked. Every
+   key is verified before the single write. */
+app.post("/panel-order-allocate/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const orderId = rowidParam(req.params.rowid);
+    const wanted = (req.body || {}).allocation;
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PanelOrder", operation: "allocate", payload: { ROWID: orderId, allocation: wanted } },
+      async () => {
+        if (!wanted || typeof wanted !== "object" || Array.isArray(wanted)) throw badRequest("allocation must be an object of design|cutSize → pcs");
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, sales_order, quote FROM PanelOrder WHERE ROWID = ${orderId} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!order) throw badRequest(`Panel order not found: ${orderId}`, 404);
+        openOrderOr409(order);
+        const needs = await panelOrderNeeds(catalyst, orderId);
+        const others = await otherAllocations(catalyst, orderId);
+        const next = {};
+        for (const [k, n] of needs) {
+          const q = Number(wanted[k] == null || wanted[k] === "" ? 0 : wanted[k]);
+          if (!Number.isInteger(q) || q < 0) throw badRequest("Booked pcs must be a whole number ≥ 0");
+          if (q === 0) continue;
+          if (q > n.need) throw badRequest(`Only ${n.need} pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} are needed`);
+          const free = (await cutOnHand(catalyst, n.design, n.cut_piece_size)) - (others.get(k) || 0);
+          if (q > free)
+            throw badRequest(`Only ${Math.max(0, free)} pcs free of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} — the rest are booked by other orders`, 409);
+          next[k] = q;
+        }
+        // ponytail: read-check-write, single-writer app — the /panel-order-status ceiling.
+        await ds.table("PanelOrder").updateRow({ ROWID: orderId, allocation: JSON.stringify(next) });
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }],
+          "panel-order-allocate",
+          { ROWID: orderId, allocation: next },
+        );
+        return { rowid: orderId, data: { ROWID: orderId, allocation: next } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-302: create / update a panel order = header + PanelOrderLine rows in
+   ONE call (the /panel-save shape). Create mints PNL/FY/NNN and is born
+   NewRequest; update is allowed only while New / Received (stock untouched)
+   and replaces the lines wholesale. status / order_number / source never
+   change here (status machine = /panel-order-status). */
+const PANEL_ORDER_EDITABLE = new Set(["NewRequest", "Received"]);
+const stampNow = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+app.post("/panel-order-save", async (req, res) => {
   try {
     const catalyst = init(req);
     const ds = catalyst.datastore();
     const body = req.body || {};
-    const qty = Number(body.qty);
+    const rowid = body.rowid ? rowidParam(body.rowid) : null;
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const header = {
+      customer: rowidParam(body.customer),
+      salesperson: String(body.salesperson || "").trim(),
+    };
+    if (String(body.order_date || "").trim()) header.order_date = String(body.order_date).trim(); // date cols reject ""
     const result = await withOpLog(
       catalyst,
-      { table_name: "CutPieceStock", operation: "set", payload: body },
+      { table_name: "PanelOrder", operation: rowid ? "update" : "insert", payload: body },
       async () => {
-        if (!Number.isInteger(qty) || qty < 0) throw badRequest("qty must be an integer >= 0");
+        // Validate everything up front — never write a header then fail on a line.
+        if (!header.customer) throw badRequest("Customer is required");
+        if (!lines.length) throw badRequest("Add at least one panel");
+        const seen = new Set();
+        const mdfIds = new Set();
+        for (const l of lines) {
+          const p = rowidParam(l.panel);
+          if (!p) throw badRequest("Every line needs a panel");
+          const q = Number(l.qty);
+          if (!Number.isInteger(q) || q <= 0) throw badRequest("qty must be a positive integer");
+          if (seen.has(p)) throw badRequest("A panel is listed twice — change its quantity instead");
+          seen.add(p);
+          if (rowidParam(l.mdf)) mdfIds.add(rowidParam(l.mdf)); // CR-309: optional MDF per line
+        }
+        if (mdfIds.size) {
+          const mdfs = rowList(
+            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Mdf WHERE ROWID IN (${[...mdfIds].join(",")}) AND deleted_at is null`),
+          );
+          if (mdfs.length !== mdfIds.size) throw badRequest("A picked MDF no longer exists", 404);
+        }
+        const found = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM Panel WHERE ROWID IN (${[...seen].join(",")}) AND deleted_at is null`,
+          ),
+        );
+        if (found.length !== seen.size) throw badRequest("A picked panel no longer exists", 404);
+
+        let id = rowid;
+        let orderNumber = "";
+        if (id) {
+          const cur = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT ROWID, status, order_number, allocation FROM PanelOrder WHERE ROWID = ${id} AND deleted_at is null`,
+            ),
+          )[0];
+          if (!cur) throw badRequest(`Panel order not found: ${id}`, 404);
+          if (!PANEL_ORDER_EDITABLE.has(String(cur.status)))
+            throw badRequest("Cutting has started — panels and quantities are locked", 409);
+          orderNumber = String(cur.order_number || "");
+          const old = await panelOrderLines(catalyst, id);
+          const stamp = stampNow();
+          for (const l of old) await ds.table("PanelOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
+          // CR-312: lines may change while pieces are booked (Received) — clamp the booking to the new need.
+          const needs = await panelOrderNeeds(catalyst, id, lines);
+          const oldAlloc = parseJsonCol(cur.allocation);
+          const kept = {};
+          for (const [k, n] of needs) if ((Number(oldAlloc[k]) || 0) > 0) kept[k] = Math.min(Number(oldAlloc[k]) || 0, n.need);
+          await ds.table("PanelOrder").updateRow({ ROWID: id, ...header, allocation: JSON.stringify(kept) });
+        } else {
+          orderNumber = await nextOrderNumber(catalyst, "PanelOrder", "PNL");
+          await assertUnique(catalyst, "PanelOrder", "order_number", orderNumber);
+          const row = { ...header, order_number: orderNumber, status: "NewRequest" };
+          // Source sale (CR-286) rides on the header; bigint cols reject "".
+          if (rowidParam(body.sales_order)) row.sales_order = rowidParam(body.sales_order);
+          if (rowidParam(body.quote)) row.quote = rowidParam(body.quote);
+          id = String((await ds.table("PanelOrder").insertRow(row)).ROWID);
+          // The request shows on the source Quote / SO Activity tab (blank refs are skipped).
+          await logRelated(
+            catalyst,
+            [{ table: "SalesOrder", rowid: row.sales_order }, { table: "Quote", rowid: row.quote }],
+            "panel-order-request",
+            { panel_orders: [id] },
+          );
+        }
+        await ds.table("PanelOrderLine").insertRows(
+          lines.map((l) => ({
+            panel_order: id, panel: rowidParam(l.panel), qty: Number(l.qty),
+            ...(rowidParam(l.mdf) ? { mdf: rowidParam(l.mdf) } : {}), // bigint cols reject ""
+          })),
+        );
+        return { rowid: id, data: { ROWID: id, order_number: orderNumber } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-302: soft-delete a panel order + its lines — only while New / Received
+   (later stages have moved stock). Reason mandatory (CR-270). */
+app.post("/panel-order-delete/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const reason = deleteReason(req, "PanelOrder");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PanelOrder", operation: "soft-delete", payload: { rowid: rid, reason } },
+      async () => {
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status FROM PanelOrder WHERE ROWID = ${rid} AND deleted_at is null`),
+        )[0];
+        if (!order) throw badRequest(`Panel order not found: ${rid}`, 404);
+        if (!PANEL_ORDER_EDITABLE.has(String(order.status)))
+          throw badRequest("Only a New or Received order can be deleted", 409);
+        const stamp = stampNow();
+        for (const l of await panelOrderLines(catalyst, rid)) await ds.table("PanelOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
+        await ds.table("PanelOrder").updateRow({ ROWID: rid, deleted_at: stamp });
+        return { rowid: rid, data: { ROWID: rid } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Sample Orders (CR-315/316) — a customer's request for item SAMPLES:
+   full tiles or cut pieces of any Item-master design, kept APART from
+   Panel Orders (separate order type, same Customer). Header + SampleOrderLine
+   rows save in one call (SMP/FY/NNN); status New → PartiallySupplied →
+   Supplied is DERIVED from the lines by /sample-order-supply (per-line
+   qty + date, partial allowed). A Cut line deducts cut-piece stock
+   (ledger kind "sample"); a Full tile is RECORD-ONLY — box stock has no
+   per-piece path, the godown writes the opened box off on Stock
+   Adjustments (reason "Sample / Display"). Edit / delete only while New.
+   ---------------------------------------------------------------- */
+const SAMPLE_PIECE_KINDS = new Set(["Full", "Cut"]);
+async function sampleOrderLines(catalyst, orderId) {
+  return rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, design, piece_kind, cut_piece_size, qty, supplied_qty, supplied_on FROM SampleOrderLine WHERE sample_order = ${orderId} AND deleted_at is null`,
+    ),
+  );
+}
+/* The one status rule (mirrored in client sampleOrderStatus.ts): every line
+   fully supplied → Supplied; any piece supplied → PartiallySupplied; else New. */
+function sampleStatus(lines) {
+  let any = false;
+  let all = lines.length > 0;
+  for (const l of lines) {
+    const s = Number(l.supplied_qty) || 0;
+    if (s > 0) any = true;
+    if (s < (Number(l.qty) || 0)) all = false;
+  }
+  return all ? "Supplied" : any ? "PartiallySupplied" : "New";
+}
+
+app.post("/sample-order-save", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const rowid = body.rowid ? rowidParam(body.rowid) : null;
+    const lines = Array.isArray(body.lines) ? body.lines : [];
+    const header = {
+      customer: rowidParam(body.customer),
+      salesperson: String(body.salesperson || "").trim(),
+      note: String(body.note || "").trim(),
+    };
+    if (String(body.order_date || "").trim()) header.order_date = String(body.order_date).trim(); // date cols reject ""
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SampleOrder", operation: rowid ? "update" : "insert", payload: body },
+      async () => {
+        // Validate everything up front — never write a header then fail on a line.
+        if (!header.customer) throw badRequest("Customer is required");
+        if (!lines.length) throw badRequest("Add at least one item");
+        const seen = new Set();
+        const designIds = new Set();
+        const cutIds = new Set();
+        const clean = [];
+        for (const l of lines) {
+          const d = rowidParam(l.design);
+          if (!d) throw badRequest("Every line needs an item");
+          const kind = String(l.piece_kind || "Full").trim();
+          if (!SAMPLE_PIECE_KINDS.has(kind)) throw badRequest("piece_kind must be Full or Cut");
+          const c = kind === "Cut" ? rowidParam(l.cut_piece_size) : "";
+          if (kind === "Cut" && !c) throw badRequest("A cut-piece sample needs a cut piece size");
+          const q = Number(l.qty);
+          if (!Number.isInteger(q) || q <= 0) throw badRequest("qty must be a positive whole number");
+          const key = `${d}|${kind}|${c}`;
+          if (seen.has(key)) throw badRequest("An item is listed twice with the same piece — change its quantity instead");
+          seen.add(key);
+          designIds.add(d);
+          if (c) cutIds.add(c);
+          clean.push({ design: d, piece_kind: kind, cut_piece_size: c, qty: q, note: String(l.note || "").trim() });
+        }
+        const found = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Design WHERE ROWID IN (${[...designIds].join(",")})`));
+        if (found.length !== designIds.size) throw badRequest("A picked item no longer exists", 404);
+        if (cutIds.size) {
+          const cs = rowList(
+            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM CutPieceSize WHERE ROWID IN (${[...cutIds].join(",")}) AND deleted_at is null`),
+          );
+          if (cs.length !== cutIds.size) throw badRequest("A picked cut piece size no longer exists", 404);
+        }
+
+        let id = rowid;
+        let orderNumber = "";
+        if (id) {
+          const cur = rowList(
+            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status, order_number FROM SampleOrder WHERE ROWID = ${id} AND deleted_at is null`),
+          )[0];
+          if (!cur) throw badRequest(`Sample order not found: ${id}`, 404);
+          if (String(cur.status) !== "New") throw badRequest("Samples have already been supplied — items and quantities are locked", 409);
+          orderNumber = String(cur.order_number || "");
+          const stamp = stampNow();
+          for (const l of await sampleOrderLines(catalyst, id)) await ds.table("SampleOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
+          await ds.table("SampleOrder").updateRow({ ROWID: id, ...header });
+        } else {
+          orderNumber = await nextOrderNumber(catalyst, "SampleOrder", "SMP");
+          await assertUnique(catalyst, "SampleOrder", "order_number", orderNumber);
+          const row = { ...header, order_number: orderNumber, status: "New" };
+          if (rowidParam(body.sales_order)) row.sales_order = rowidParam(body.sales_order); // bigint cols reject ""
+          if (rowidParam(body.quote)) row.quote = rowidParam(body.quote);
+          id = String((await ds.table("SampleOrder").insertRow(row)).ROWID);
+          // The request shows on the source Quote / SO and the Customer's Activity.
+          await logRelated(
+            catalyst,
+            [{ table: "SalesOrder", rowid: row.sales_order }, { table: "Quote", rowid: row.quote }, { table: "Customer", rowid: header.customer }],
+            "sample-order-request",
+            { sample_order: orderNumber, lines: clean.length },
+          );
+        }
+        await ds.table("SampleOrderLine").insertRows(
+          clean.map((l) => ({
+            sample_order: id, design: l.design, piece_kind: l.piece_kind, qty: l.qty, supplied_qty: 0, note: l.note,
+            ...(l.cut_piece_size ? { cut_piece_size: l.cut_piece_size } : {}), // bigint cols reject ""
+          })),
+        );
+        return { rowid: id, data: { ROWID: id, order_number: orderNumber } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* Soft-delete a sample order + its lines — only while New (nothing supplied). Reason mandatory (CR-270). */
+app.post("/sample-order-delete/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const reason = deleteReason(req, "SampleOrder");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SampleOrder", operation: "soft-delete", payload: { rowid: rid, reason } },
+      async () => {
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`),
+        )[0];
+        if (!order) throw badRequest(`Sample order not found: ${rid}`, 404);
+        if (String(order.status) !== "New") throw badRequest("Only a New sample order can be deleted — samples have been supplied", 409);
+        const stamp = stampNow();
+        for (const l of await sampleOrderLines(catalyst, rid)) await ds.table("SampleOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
+        await ds.table("SampleOrder").updateRow({ ROWID: rid, deleted_at: stamp });
+        return { rowid: rid, data: { ROWID: rid } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-316: record what went out — {date, note?, lines:[{line, qty}]}. Every
+   quantity is verified (≤ remaining; Cut lines ≤ free cut stock = on hand −
+   open panel-order bookings, the /cut-stock-entry removal rule) BEFORE any
+   write. Cut → adjustCutStock(−qty, kind "sample"); Full → record only.
+   Header status is re-derived from the lines; the supply mirrors onto the
+   source SO / Quote and the Customer's Activity. */
+app.post("/sample-order-supply/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const body = req.body || {};
+    const date = String(body.date || "").trim() || todayDate();
+    const note = String(body.note || "").trim();
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SampleOrder", operation: "sample-supplied", payload: { rowid: rid, ...body } },
+      async () => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("date must be yyyy-mm-dd");
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, status, order_number, customer, sales_order, quote FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!order) throw badRequest(`Sample order not found: ${rid}`, 404);
+        if (String(order.status) === "Supplied") throw badRequest("Every line of this order is already supplied", 409);
+        const lines = await sampleOrderLines(catalyst, rid);
+        const byId = new Map(lines.map((l) => [String(l.ROWID), l]));
+        const picks = [];
+        const seen = new Set();
+        for (const p of Array.isArray(body.lines) ? body.lines : []) {
+          const lid = rowidParam(p && p.line);
+          const line = byId.get(lid);
+          if (!line) throw badRequest("A line is not on this order", 404);
+          if (seen.has(lid)) throw badRequest("A line is listed twice");
+          seen.add(lid);
+          const q = Number(p.qty);
+          if (!Number.isInteger(q) || q < 0) throw badRequest("qty must be a whole number");
+          if (q === 0) continue; // 0 = skip this line
+          const remaining = (Number(line.qty) || 0) - (Number(line.supplied_qty) || 0);
+          if (q > remaining) throw badRequest(`Only ${remaining} pcs remain to supply of ${await designLabel(catalyst, line.design)}`);
+          picks.push({ line, qty: q });
+        }
+        if (!picks.length) throw badRequest("Enter a quantity on at least one line");
+        // Cut pieces: free = on hand − Σ booked by open panel orders (booking is their dispatch gate).
+        const want = new Map();
+        for (const p of picks) {
+          if (String(p.line.piece_kind) !== "Cut") continue;
+          const k = `${p.line.design}|${p.line.cut_piece_size}`;
+          want.set(k, { design: p.line.design, cut: p.line.cut_piece_size, qty: (want.get(k) ? want.get(k).qty : 0) + p.qty });
+        }
+        if (want.size) {
+          const booked = await otherAllocations(catalyst, null);
+          for (const [k, w] of want) {
+            const have = await cutOnHand(catalyst, w.design, w.cut);
+            const b = booked.get(k) || 0;
+            if (have - b < w.qty)
+              throw badRequest(
+                `Only ${Math.max(0, have - b)} pcs free of ${await cutPieceLabel(catalyst, w.design, w.cut)}${b ? ` — ${b} are booked by open panel orders` : ""}`,
+                409,
+              );
+          }
+        }
+        const actor = await currentActor(catalyst);
+        for (const p of picks) {
+          if (String(p.line.piece_kind) === "Cut")
+            await adjustCutStock(catalyst, ds, p.line.design, p.line.cut_piece_size, -p.qty, {
+              kind: "sample", entry_date: date, note, ref_table: "SampleOrder", ref_rowid: rid, performed_by: actor,
+            });
+          p.line.supplied_qty = (Number(p.line.supplied_qty) || 0) + p.qty;
+          await ds.table("SampleOrderLine").updateRow({ ROWID: p.line.ROWID, supplied_qty: p.line.supplied_qty, supplied_on: date });
+        }
+        const status = sampleStatus(lines);
+        if (status !== String(order.status)) {
+          await ds.table("SampleOrder").updateRow({ ROWID: rid, status });
+          await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: rid, from_status: order.status, to_status: status });
+        }
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }, { table: "Customer", rowid: order.customer }],
+          "sample-supplied",
+          { sample_order: order.order_number, date, lines: picks.map((p) => ({ design: p.line.design, piece_kind: p.line.piece_kind, qty: p.qty })) },
+        );
+        return { rowid: rid, data: { ROWID: rid, status } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-302 one-off: legacy one-panel rows (panel / qty on the header) become
+   header + one PanelOrderLine, and blank order_numbers get PNL/FY/NNN.
+   Idempotent — re-running is a no-op. Admin only. */
+app.post("/migrate-panel-orders", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const ds = catalyst.datastore();
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PanelOrder", operation: "migrate-lines", payload: {} },
+      async () => {
+        // ponytail: a handful of rows on LIVE — one page, no paging.
+        const orders = rowList(
+          await catalyst.zcql().executeZCQLQuery("SELECT ROWID, panel, qty, order_number, status, allocation FROM PanelOrder WHERE deleted_at is null"),
+        );
+        let migrated = 0;
+        let numbered = 0;
+        let booked = 0;
+        for (const o of orders) {
+          const id = String(o.ROWID);
+          if (rowidParam(o.panel) && (await panelOrderLines(catalyst, id)).length === 0) {
+            await ds.table("PanelOrderLine").insertRow({ panel_order: id, panel: rowidParam(o.panel), qty: Number(o.qty) || 1 });
+            migrated++;
+          }
+          if (!String(o.order_number || "").trim()) {
+            // Sequential on purpose — each max-scan must see the previous assignment.
+            await ds.table("PanelOrder").updateRow({ ROWID: id, order_number: await nextOrderNumber(catalyst, "PanelOrder", "PNL") });
+            numbered++;
+          }
+          // CR-312: an order already Ready before booking existed holds its own cutting output.
+          if (String(o.status) === "Ready" && !String(o.allocation || "").trim()) {
+            const needs = await panelOrderNeeds(catalyst, id);
+            await ds.table("PanelOrder").updateRow({ ROWID: id, allocation: JSON.stringify(Object.fromEntries([...needs].map(([k, n]) => [k, n.need]))) });
+            booked++;
+          }
+        }
+        return { rowid: null, data: { migrated, numbered, booked } };
+      },
+    );
+    res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* ----------------------------------------------------------------
+   Cut-piece stock ledger (CR-306…308). CutPieceStock.qty stays the cached
+   on-hand per (design, cut size) and the row IS the cut-piece ITEM (CR-306:
+   weight_kg; qty 0 = defined, nothing on hand — "in the Panel module" means
+   the design has at least one such row). Every movement also writes a dated
+   CutStockEntry row: receipt (bulk Add Stock), adjustment (signed, reason
+   mandatory), order_ready / order_dispatch (panel-order lifecycle). Generic
+   writes to both tables are refused (closes DF-02).
+   ---------------------------------------------------------------- */
+const CUT_ENTRY_KINDS = new Set(["receipt", "adjustment"]);
+const todayDate = () => new Date().toISOString().slice(0, 10);
+
+/* The cut-piece item row for (design, cut size); created at qty 0 when missing. */
+async function ensureCutPiece(catalyst, ds, designId, cutSizeId, extra = {}) {
+  const d = rowidParam(designId);
+  const c = rowidParam(cutSizeId);
+  if (!d || !c) throw badRequest("design and cut_piece_size are required");
+  const row = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, qty, weight_kg FROM CutPieceStock WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null`,
+    ),
+  )[0];
+  if (row) return row;
+  const ins = await ds.table("CutPieceStock").insertRow({ design: d, cut_piece_size: c, qty: 0, ...extra });
+  return { ROWID: String(ins.ROWID), qty: 0, weight_kg: extra.weight_kg == null ? null : extra.weight_kg, fresh: true };
+}
+
+async function designLabel(catalyst, designId) {
+  const d = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT design_name, unique_name FROM Design WHERE ROWID = ${rowidParam(designId)}`),
+  )[0];
+  return d ? String(d.unique_name || d.design_name || designId) : String(designId);
+}
+
+/* Bulk stock movement (CR-307 receipt / CR-308 adjustment): one dated
+   submission, N (design, cut size, qty) lines. Every deduction is verified
+   before any write — all-or-nothing, the /panel-order-status rule. */
+app.post("/cut-stock-entry", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const kind = String(body.kind || "receipt");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "CutPieceStock", operation: `entry-${kind}`, payload: body },
+      async () => {
+        if (!CUT_ENTRY_KINDS.has(kind)) throw badRequest("kind must be receipt or adjustment");
+        const entryDate = String(body.entry_date || "").trim() || todayDate();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) throw badRequest("entry_date must be yyyy-mm-dd");
+        const reason = String(body.reason || "").trim();
+        if (kind === "adjustment" && !reason) throw badRequest("A reason is required for an adjustment");
+        const note = String(body.note || "").trim();
+        const merged = new Map(); // design|cut → line (duplicates summed)
+        for (const l of Array.isArray(body.lines) ? body.lines : []) {
+          const d = rowidParam(l && l.design);
+          const c = rowidParam(l && l.cut_piece_size);
+          if (!d || !c) throw badRequest("Every line needs an item and a cut piece size");
+          const q = Number(l.qty);
+          if (!Number.isInteger(q) || q === 0 || (kind === "receipt" && q < 0))
+            throw badRequest(kind === "receipt" ? "qty must be a positive whole number" : "qty must be a non-zero whole number");
+          const k = `${d}|${c}`;
+          const cur = merged.get(k) || { d, c, qty: 0, note: "" };
+          cur.qty += q;
+          if (l.note) cur.note = String(l.note).trim();
+          merged.set(k, cur);
+        }
+        if (!merged.size) throw badRequest("Add at least one line");
+        // CR-312: a removal may never dip below what open panel orders have booked — booking is the dispatch gate.
+        const booked = [...merged.values()].some((m) => m.qty < 0) ? await otherAllocations(catalyst, null) : new Map();
+        for (const m of merged.values()) {
+          if (m.qty >= 0) continue;
+          const row = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT qty FROM CutPieceStock WHERE design = ${m.d} AND cut_piece_size = ${m.c} AND deleted_at is null`,
+            ),
+          )[0];
+          const have = row ? Number(row.qty) || 0 : 0;
+          if (have + m.qty < 0) throw badRequest(`Only ${have} pcs on hand of ${await designLabel(catalyst, m.d)} for that cut size`, 409);
+          const b = booked.get(`${m.d}|${m.c}`) || 0;
+          if (have + m.qty < b)
+            throw badRequest(`Only ${have - b} pcs free of ${await designLabel(catalyst, m.d)} for that cut size — ${b} are booked by open panel orders`, 409);
+        }
+        const actor = await currentActor(catalyst);
+        let n = 0;
+        for (const m of merged.values()) {
+          await adjustCutStock(catalyst, ds, m.d, m.c, m.qty, {
+            kind, entry_date: entryDate, reason, note: m.note || note, performed_by: actor,
+          });
+          n++;
+        }
+        return { rowid: null, data: { lines: n } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-306: the cut-piece ITEM — upsert its weight for (design, cut size).
+   A blank cut_piece_size = the design's full size (CR-289 rule). qty is
+   never touched here; stock moves only via /cut-stock-entry and orders. */
+app.post("/cut-piece-save", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "CutPieceStock", operation: "cut-piece-save", payload: body },
+      async () => {
+        const d = rowidParam(body.design);
+        if (!d) throw badRequest("design is required");
+        const c = rowidParam(body.cut_piece_size) || (await fullSizeCutPiece(catalyst, ds, d));
+        const weight = body.weight_kg === "" || body.weight_kg == null ? null : Number(body.weight_kg);
+        if (weight != null && (!isFinite(weight) || weight < 0)) throw badRequest("weight_kg must be 0 or more");
+        const row = await ensureCutPiece(catalyst, ds, d, c, weight != null ? { weight_kg: weight } : {});
+        if (weight != null && !row.fresh) await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, weight_kg: weight });
+        return { rowid: String(row.ROWID), data: { ROWID: String(row.ROWID), cut_piece_size: c } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-306: remove a cut-piece item — only when nothing is on hand and no
+   panel line uses the pair. Reason mandatory (delete-reason standard). */
+app.post("/cut-piece-delete", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const reason = deleteReason(req, "CutPieceStock");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "CutPieceStock", operation: "soft-delete", payload: { ...body, reason } },
+      async () => {
         const d = rowidParam(body.design);
         const c = rowidParam(body.cut_piece_size);
         if (!d || !c) throw badRequest("design and cut_piece_size are required");
         const row = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID FROM CutPieceStock WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null`,
+            `SELECT ROWID, qty FROM CutPieceStock WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null`,
           ),
         )[0];
-        if (row) await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, qty });
-        else await ds.table("CutPieceStock").insertRow({ design: d, cut_piece_size: c, qty });
-        return { rowid: d, data: { qty } };
+        if (!row) throw badRequest("Cut piece not found", 404);
+        if ((Number(row.qty) || 0) > 0) throw badRequest(`Still ${row.qty} pcs on hand — adjust the stock to 0 first`, 409);
+        const used = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID FROM PanelLine WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null LIMIT 1`,
+          ),
+        );
+        if (used.length) throw badRequest("Cannot remove — a showcase panel uses this cut piece. Edit that panel first.", 409);
+        await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, deleted_at: stampNow() });
+        return { rowid: String(row.ROWID), data: { ROWID: String(row.ROWID) } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -2983,8 +3743,8 @@ app.post("/cut-stock-adjust", async (req, res) => {
 /* ----------------------------------------------------------------
    Panel save / delete (2026-08-27): a Panel is pure master data — a
    spec of the cut pieces it needs, never a stock movement. CutPieceStock
-   moves only via /panel-order-status (Ready +, Dispatched −) and manual
-   /cut-stock-adjust. Generic writes to PanelLine (and soft Panel
+   moves only via /panel-order-status (Ready +, Dispatched −) and the
+   /cut-stock-entry ledger (CR-307). Generic writes to PanelLine (and soft Panel
    deletes) are still rejected so lines only change through here.
    ---------------------------------------------------------------- */
 /* Panel numbers PANEL-001… (CR-280) — max numeric suffix + 1 over every Panel
@@ -3077,6 +3837,8 @@ app.post("/panel-save", async (req, res) => {
               cut_piece_qty: Number(l.cut_piece_qty) || 0,
             })),
           );
+        // CR-306: a pair used on a panel is a cut-piece item — make sure it shows under the item (qty 0).
+        for (const l of lines) await ensureCutPiece(catalyst, ds, l.design, l.cut_piece_size);
         return { rowid: id, data: { ROWID: id } };
       },
     );
@@ -3101,9 +3863,10 @@ app.post("/panel-delete/:rowid", async (req, res) => {
           await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Panel WHERE ROWID = ${rid} AND deleted_at is null`),
         )[0];
         if (!panel) throw badRequest(`Panel not found: ${rid}`, 404);
+        // CR-302: orders reference panels through their lines.
         const orders = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID FROM PanelOrder WHERE panel = ${rid} AND deleted_at is null LIMIT 1`,
+            `SELECT ROWID FROM PanelOrderLine WHERE panel = ${rid} AND deleted_at is null LIMIT 1`,
           ),
         );
         if (orders.length)
@@ -3613,9 +4376,11 @@ async function writeLineIntoBox(ds, line, boxRowid, n) {
       try { await ds.table("PalletizationPlanLine").deleteRow(rem.ROWID); } catch (_) {}
       throw e;
     }
-  } else {
-    await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: boxRowid });
+    // CR-301: the caller (a multi-container save) needs the remainder's id to load the rest elsewhere.
+    return String(rem.ROWID);
   }
+  await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, load_box: boxRowid });
+  return null;
 }
 
 /* First allocation pulls a Planning plan into Loading. */
@@ -3671,7 +4436,9 @@ app.post("/pal-lines-box", async (req, res) => {
           }
           return { line, n };
         });
-        for (const { line, n } of jobs) await writeLineIntoBox(ds, line, String(box.ROWID), n);
+        // CR-301: per entry (same order) the Ready remainder a partial load split off, null when whole.
+        const remainders = [];
+        for (const { line, n } of jobs) remainders.push({ id: String(line.ROWID), remainder: await writeLineIntoBox(ds, line, String(box.ROWID), n) });
         await promotePlansToLoading(catalyst, ds, [...new Set(jobs.map(({ line }) => String(line.plan || "")))]);
         await recountOrderItems(catalyst, ds, [...new Set(jobs.map(({ line }) => line.order_item))]);
         // One "loaded" event per owning order + plan (deduped).
@@ -3684,7 +4451,7 @@ app.post("/pal-lines-box", async (req, res) => {
           boxes: jobs.reduce((s, { line, n }) => s + (n !== undefined ? n : Number(line.boxes) || 0), 0),
           box: String(box.ROWID),
         });
-        return { rowid: String(box.ROWID), data: { ROWID: String(box.ROWID), lines: jobs.length } };
+        return { rowid: String(box.ROWID), data: { ROWID: String(box.ROWID), lines: jobs.length, remainders } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -4181,7 +4948,7 @@ async function zcqlAllRows(catalyst, sqlNoLimit) {
    FIFO spill of blank-batch loads and the legacy PalletisedBatch consumption,
    so it can read slightly HIGH (permissive), never low; the picker shows the
    exact figure. Port the reducer here if that gap ever bites. */
-async function serverFreeStock(catalyst, designId) {
+async function serverFreeStock(catalyst, designId, opts = {}) {
   const logs = await zcqlAllRows(
     catalyst,
     `SELECT entry_type, batch_number, qty_boxes, order_item FROM ProductionLog WHERE design = ${designId} AND deleted_at is null`,
@@ -4200,6 +4967,11 @@ async function serverFreeStock(catalyst, designId) {
   for (const r of logs) {
     const type = String(r.entry_type || "");
     const qty = Number(r.qty_boxes) || 0;
+    // CR-308: adjustments are SIGNED supply — handled before the qty guard.
+    if (type === "adjust") {
+      if (qty) add(String(r.batch_number || ""), qty);
+      continue;
+    }
     if (qty <= 0) continue;
     const batch = type === "plan" ? "" : String(r.batch_number || "");
     if (type === "record" || type === "opening" || type === "plan") add(batch, qty);
@@ -4214,9 +4986,111 @@ async function serverFreeStock(catalyst, designId) {
     const k = `${String(l.order_item || "")}|${batch}`;
     if (claim.has(k)) claim.set(k, claim.get(k) - n);
   }
-  for (const [k, left] of claim) if (left > 0) add(k.slice(k.indexOf("|") + 1), -left);
+  // { onHand: true } = physical on-hand only (no claim netting) — /stock-adjust's floor.
+  if (!opts.onHand) for (const [k, left] of claim) if (left > 0) add(k.slice(k.indexOf("|") + 1), -left);
   return free;
 }
+
+/* ================================================================
+   Inventory adjustment for BOX stock (CR-308, Zoho Books shape): one dated
+   submission with a reason and N (item, batch, ± boxes) lines, stored as
+   SIGNED entry_type="adjust" ProductionLog rows sharing request_group
+   "adj-<stamp>". A negative line may not exceed that batch's physical
+   on-hand (it MAY dip below what sales orders have reserved — breakage is
+   reality; `free` then clamps at 0). All-or-nothing: every line is checked
+   before the first insert; a failed insert rolls the earlier ones back.
+   No document number, no edit / delete — reverse with the opposite entry.
+   ================================================================ */
+app.post("/stock-adjust", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "ProductionLog", operation: "stock-adjust", payload: body },
+      async () => {
+        const date = String(body.date || "").trim() || new Date().toISOString().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("date must be yyyy-mm-dd");
+        const reason = String(body.reason || "").trim();
+        if (!reason) throw badRequest("A reason is required");
+        const note = String(body.note || "").trim();
+        const merged = new Map(); // design|batch → line (duplicates summed)
+        for (const l of Array.isArray(body.lines) ? body.lines : []) {
+          const d = rowidParam(l && l.design);
+          if (!d) throw badRequest("Every line needs an item");
+          const q = Number(l.qty_boxes);
+          if (!Number.isInteger(q) || q === 0) throw badRequest("qty_boxes must be a non-zero whole number");
+          const batch = String((l && l.batch_number) || "").trim();
+          const k = `${d}|${batch}`;
+          const cur = merged.get(k) || { d, batch, qty: 0, note: "" };
+          cur.qty += q;
+          if (l.note) cur.note = String(l.note).trim();
+          merged.set(k, cur);
+        }
+        if (!merged.size) throw badRequest("Add at least one line");
+        // Item facts once per design; a singular item has no batches → "" bucket.
+        const designs = new Map();
+        for (const m of merged.values()) {
+          if (designs.has(m.d)) continue;
+          const d = rowList(
+            await catalyst.zcql().executeZCQLQuery(
+              `SELECT is_batched, design_name, unique_name FROM Design WHERE ROWID = ${m.d} AND deleted_at is null`,
+            ),
+          )[0];
+          if (!d) throw badRequest(`Item not found: ${m.d}`, 404);
+          designs.set(m.d, { batched: d.is_batched === true || String(d.is_batched) === "true", name: String(d.unique_name || d.design_name || m.d) });
+        }
+        const lines = new Map();
+        for (const m of merged.values()) {
+          const batch = designs.get(m.d).batched ? m.batch : "";
+          const k = `${m.d}|${batch}`;
+          const cur = lines.get(k) || { ...m, batch, qty: 0 };
+          cur.qty += m.qty;
+          lines.set(k, cur);
+        }
+        const onHandOf = new Map();
+        for (const m of lines.values()) {
+          if (m.qty >= 0) continue;
+          if (!onHandOf.has(m.d)) onHandOf.set(m.d, await serverFreeStock(catalyst, m.d, { onHand: true }));
+          const have = Math.max(0, onHandOf.get(m.d).get(m.batch) || 0);
+          if (-m.qty > have)
+            throw badRequest(`Only ${have} boxes on hand in ${m.batch ? `batch ${m.batch}` : "unbatched stock"} of ${designs.get(m.d).name}`, 409);
+        }
+        const actor = await currentActor(catalyst);
+        const group = `adj-${Date.now()}`;
+        const inserted = [];
+        try {
+          for (const m of lines.values()) {
+            if (m.qty === 0) continue; // a +5 and −5 on the same batch cancel out
+            const row = await ds.table("ProductionLog").insertRow({
+              entry_type: "adjust",
+              design: m.d,
+              batch_number: m.batch,
+              qty_boxes: m.qty,
+              qty_requested: 0,
+              status: "Adjusted",
+              stage: "Completed",
+              request_group: group,
+              production_date: date,
+              performed_by: String(actor || ""),
+              reason,
+              note: m.note || note,
+            });
+            inserted.push(String(row.ROWID));
+          }
+        } catch (e) {
+          for (const id of inserted) { try { await ds.table("ProductionLog").deleteRow(id); } catch (_) {} }
+          throw e;
+        }
+        return { rowid: inserted[0] || null, data: { request_group: group, lines: inserted.length } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
 
 app.post("/allocate-stock", async (req, res) => {
   try {
@@ -4313,11 +5187,13 @@ app.post("/allocate-stock", async (req, res) => {
   }
 });
 
-/* Undo ONE alloc row. Refused once its boxes have moved past the Planning
-   queue (palletising/ready/loaded) — unpack first, same rule as /production-delete.
-   Auto Planning cards of that batch shrink with it; a user-pinned (manual_edit)
-   card is the user's decision, so it blocks instead of being trimmed. */
-async function deallocateCore(catalyst, ds, rowid) {
+/* Undo ONE alloc row — all of it, or `boxes` of it (CR-297: a partial return
+   trims the row's qty_boxes; a full return soft-deletes it). Refused once the
+   boxes have moved past the Planning queue (palletising/ready/loaded) — unpack
+   first, same rule as /production-delete. Auto Planning cards of that batch
+   shrink with it; a user-pinned (manual_edit) card is the user's decision, so
+   it blocks instead of being trimmed. */
+async function deallocateCore(catalyst, ds, rowid, boxes) {
   const a = rowList(
     await catalyst.zcql().executeZCQLQuery(
       `SELECT ROWID, order_item, sales_order, batch_number, qty_boxes FROM ProductionLog WHERE ROWID = ${rowid} AND entry_type = 'alloc' AND deleted_at is null`,
@@ -4326,7 +5202,9 @@ async function deallocateCore(catalyst, ds, rowid) {
   if (!a) throw badRequest(`Allocation not found: ${rowid}`, 404);
   const oiId = String(a.order_item);
   const batch = String(a.batch_number || "");
-  const qty = Number(a.qty_boxes) || 0;
+  const rowQty = Number(a.qty_boxes) || 0;
+  const qty = boxes == null ? rowQty : boxes;
+  if (!Number.isInteger(qty) || qty <= 0 || qty > rowQty) throw badRequest(`Can return 1 to ${rowQty} boxes of this allocation`);
   const oi = (await loadOrderItems(catalyst, [oiId], "ROWID, produced_qty_boxes, palletized_qty_boxes, stage")).get(oiId);
   if (!oi) throw badRequest(`Order item not found: ${oiId}`, 404);
   const produced = Number(oi.produced_qty_boxes) || 0;
@@ -4364,7 +5242,7 @@ async function deallocateCore(catalyst, ds, rowid) {
   const toPo = newProduced <= 0 && stage === "prod";
   await ds.table("OrderItem").updateRow({ ROWID: oiId, produced_qty_boxes: newProduced, ...(toPo ? { stage: "po" } : {}) });
   if (toPo) await logTransition(catalyst, { entity_type: "OrderItem", entity_rowid: oiId, from_status: stage, to_status: "po" });
-  await ds.table("ProductionLog").updateRow({ ROWID: a.ROWID, deleted_at: deletedAt });
+  await ds.table("ProductionLog").updateRow(qty < rowQty ? { ROWID: a.ROWID, qty_boxes: rowQty - qty } : { ROWID: a.ROWID, deleted_at: deletedAt });
   await recountOrderItems(catalyst, ds, [oiId]);
   await logRelated(catalyst, [{ table: "SalesOrder", rowid: String(a.sales_order || "") }], "stock-deallocated", { order_item: oiId, boxes: qty });
   return qty;
@@ -4375,12 +5253,14 @@ app.post("/deallocate-stock/:rowid", async (req, res) => {
     const catalyst = init(req);
     const ds = catalyst.datastore();
     const rowid = String(req.params.rowid || "").replace(/[^0-9]/g, "");
+    // CR-297: optional `boxes` = return part of the row; absent = the whole row.
+    const boxes = req.body?.boxes == null || req.body.boxes === "" ? undefined : Number(req.body.boxes);
     const result = await withOpLog(
       catalyst,
-      { table_name: "ProductionLog", operation: "deallocate-stock", payload: { ROWID: rowid } },
+      { table_name: "ProductionLog", operation: "deallocate-stock", payload: { ROWID: rowid, boxes } },
       async () => {
         if (!rowid) throw badRequest("Allocation id is required");
-        const qty = await deallocateCore(catalyst, ds, rowid);
+        const qty = await deallocateCore(catalyst, ds, rowid, boxes);
         return { rowid, data: { deallocated: qty } };
       },
     );
@@ -5767,10 +6647,15 @@ const STATE_COLUMNS = [
   ["PalletizationPlanLine", "status", "Palletization line status cannot be set directly — use /pal-line-status"],
   ["PalletizationPlanLine", "load_box", "Line box allocation cannot be set directly — use /pal-line-box"],
   ["PanelOrder", "status", "Panel order status cannot be set directly — use /panel-order-status"],
+  ["PanelOrder", "checkpoints", "Panel order checkpoints are set via /panel-order-checkpoint"], // CR-313
+  ["PanelOrder", "allocation", "Cut-piece booking is set via /panel-order-allocate"], // CR-312
+  ["SampleOrder", "status", "Sample order status is derived by /sample-order-supply"], // CR-316
+  ["SampleOrderLine", "supplied_qty", "Supplies are recorded via /sample-order-supply"],
+  ["SampleOrderLine", "supplied_on", "Supplies are recorded via /sample-order-supply"],
 ];
 // The only state a generic insert may carry: the record's initial one.
-// CR-286: a panel order is born Received (direct) or NewRequest (raised from a Quote / SO).
-const INSERT_INITIAL = { PanelOrder: { status: ["Received", "NewRequest"] } };
+// CR-302: empty — PanelOrder (born NewRequest) now inserts via /panel-order-save only.
+const INSERT_INITIAL = {};
 function assertNoStateWrite(table, row, isInsert) {
   for (const [t, col, msg] of STATE_COLUMNS) {
     const v = (row || {})[col];
@@ -5789,6 +6674,10 @@ app.post("/:table", async (req, res) => {
     // Born status, numbering and totals are decided server-side by these routes.
     if (table === "Quote") throw badRequest("Quotes are created via /quote-with-items");
     if (table === "SalesOrder") throw badRequest("Sales orders are created via /so-with-items or /convert-quote");
+    if (table === "PanelOrder" || table === "PanelOrderLine") throw badRequest("Panel orders are created via /panel-order-save"); // CR-302
+    if (table === "SampleOrder" || table === "SampleOrderLine") throw badRequest("Sample orders are created via /sample-order-save"); // CR-315
+    // CR-306/307: the cut-piece item row and its ledger are route-only (closes DF-02 duplicate on-hand rows).
+    if (table === "CutPieceStock" || table === "CutStockEntry") throw badRequest("Cut-piece stock is written via /cut-piece-save and /cut-stock-entry");
     const ds = catalyst.datastore();
     const body = req.body || {};
     const rows = Array.isArray(body.rows) ? body.rows : [body];
@@ -5807,16 +6696,6 @@ app.post("/:table", async (req, res) => {
         const inserted = await ds.table(table).insertRows(rows);
         const ids = (Array.isArray(inserted) ? inserted : [inserted]).map((r) => r.ROWID);
         delete _cache[table]; // FK-name lookup map is now stale
-        // CR-286: a panel request shows on the source Quote / SO Activity tab.
-        // ponytail: NewRequest without a source is not rejected — only the prefilled form sends it.
-        if (table === "PanelOrder") {
-          await logRelated(
-            catalyst,
-            rows.flatMap((r) => [{ table: "SalesOrder", rowid: r.sales_order }, { table: "Quote", rowid: r.quote }]),
-            "panel-order-request",
-            { panel_orders: ids },
-          );
-        }
         return { rowid: ids[0], data: { rowids: ids } };
       },
     );
@@ -5896,6 +6775,12 @@ app.patch("/:table/:rowid", async (req, res) => {
         assertNoStateWrite(table, patch, false);
         if (table === "PanelLine")
           throw badRequest("Panel lines are managed via /panel-save (they consume cut-piece stock)");
+        if (table === "PanelOrderLine")
+          throw badRequest("Panel order lines are managed via /panel-order-save"); // CR-302
+        if (table === "SampleOrder" || table === "SampleOrderLine")
+          throw badRequest("Sample orders are edited via /sample-order-save"); // CR-315
+        if (table === "CutPieceStock" || table === "CutStockEntry")
+          throw badRequest("Cut-piece stock moves via /cut-stock-entry; weight via /cut-piece-save"); // CR-306/307
         if (table === "LoadBox")
           throw badRequest("Load boxes are managed via the /load-box routes");
         // Batch-tracking can't flip once the item carries stock — opening would
@@ -5913,7 +6798,7 @@ app.patch("/:table/:rowid", async (req, res) => {
             const hasStock = (Number(prev && prev.accounting_stock) || 0) > 0;
             const logs = rowList(
               await catalyst.zcql().executeZCQLQuery(
-                `SELECT ROWID FROM ProductionLog WHERE design = ${rid} AND (entry_type = 'record' OR entry_type = 'opening') AND deleted_at is null LIMIT 1`,
+                `SELECT ROWID FROM ProductionLog WHERE design = ${rid} AND (entry_type = 'record' OR entry_type = 'opening' OR entry_type = 'adjust') AND deleted_at is null LIMIT 1`,
               ),
             );
             if (hasStock || logs.length)
@@ -6082,6 +6967,13 @@ app.delete("/:table/:rowid", async (req, res) => {
     // stock; ?hard=1 stays open for admin/e2e cleanup (no stock movement).
     if (!hard && (table === "Panel" || table === "PanelLine"))
       throw badRequest("Panels are deleted via /panel-delete (returns pieces to cut stock)");
+    // CR-302: panel orders delete with their lines, only while New / Received.
+    if (!hard && (table === "PanelOrder" || table === "PanelOrderLine"))
+      throw badRequest("Panel orders are deleted via /panel-order-delete");
+    if (!hard && (table === "SampleOrder" || table === "SampleOrderLine"))
+      throw badRequest("Sample orders are deleted via /sample-order-delete"); // CR-315
+    if (!hard && (table === "CutPieceStock" || table === "CutStockEntry"))
+      throw badRequest("Cut pieces are removed via /cut-piece-delete"); // CR-306
 
     // HARD delete-guard: refuse to delete a record still referenced by a
     // DOWNSTREAM transaction (its own line items don't count — a Quote owns

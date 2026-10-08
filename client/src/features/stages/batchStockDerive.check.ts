@@ -16,7 +16,7 @@ const rowOf = (rows: ReturnType<typeof deriveBatchStock>, batch: string, designI
 /** The conservation law: Σ current = Σ supply − Σ absorbed loaded. */
 const conserve = (rows: ReturnType<typeof deriveBatchStock>, designId = "D1") => {
   const mine = rows.filter((r) => r.designId === designId);
-  const supply = mine.reduce((s, r) => s + r.opening + r.produced, 0);
+  const supply = mine.reduce((s, r) => s + r.opening + r.produced + r.adjusted, 0);
   const loaded = mine.reduce((s, r) => s + r.loaded, 0);
   const over = mine.reduce((s, r) => s + r.over, 0);
   const current = mine.reduce((s, r) => s + r.current, 0);
@@ -116,6 +116,31 @@ const conserve = (rows: ReturnType<typeof deriveBatchStock>, designId = "D1") =>
   assert.strictEqual(rowOf(rows, "", "D2")!.over, 93, "D2's unabsorbable 93 flagged");
   conserve(rows, "D1");
   conserve(rows, "D2");
+}
+
+// 8. CR-308 adjustments: signed supply. −30 on B1 nets on hand; +10 onto a batch
+// nothing else ever touched still EMITS a row (the emission-filter trap); a
+// blank-batch adjustment is spent FIFO like any other "" supply.
+{
+  const rows = deriveBatchStock(
+    [
+      S({ batch: "B1", qty: 100, date: "2026-08-01" }),
+      S({ batch: "B1", qty: -30, kind: "adjust" }),
+      S({ batch: "B9", qty: 10, kind: "adjust" }),
+      S({ qty: 5, kind: "adjust" }),
+    ],
+    [C({ boxes: 8, loaded: true })],
+  );
+  assert.strictEqual(rowOf(rows, "B1")!.adjusted, -30);
+  assert.strictEqual(rowOf(rows, "B1")!.current, 70, "100 − 30; the blank load never reaches the dated batch");
+  assert.strictEqual(rowOf(rows, "B9")!.current, 7, "adjust-only batch is a row; dateless, so it absorbs the spill after \"\"");
+  assert.strictEqual(rowOf(rows, "")!.loaded, 5, "blank adjustment absorbed first");
+  assert.strictEqual(rows.reduce((s, r) => s + r.current, 0), 77);
+  conserve(rows);
+  // Over-adjusting below what was loaded flags `over`, never a negative current.
+  const neg = deriveBatchStock([S({ batch: "B1", qty: 10 }), S({ batch: "B1", qty: -4, kind: "adjust" })], [C({ batch: "B1", boxes: 8, loaded: true })]);
+  assert.strictEqual(rowOf(neg, "B1")!.current, 0);
+  assert.strictEqual(rowOf(neg, "B1")!.over, 2);
 }
 
 console.log("batch stock derive check: OK");

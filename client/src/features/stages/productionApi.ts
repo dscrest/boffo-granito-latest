@@ -121,6 +121,10 @@ export function cachedAllocByDesign(): Map<string, number> {
 export function cachedOpeningEntries(): ProductionRecordRow[] {
   return cache.cached()?.openingEntries ?? [];
 }
+/** Stock adjustment rows (entry_type="adjust", CR-308) — signed boxes, never plan lines. */
+export function cachedAdjustEntries(): AdjustEntry[] {
+  return cache.cached()?.adjustEntries ?? [];
+}
 export function invalidateProductionLogs(): void {
   cache.invalidate();
 }
@@ -161,12 +165,31 @@ export interface AllocEntry {
   createdTime: string;
 }
 
+/** One stock adjustment line (CR-308): signed `qtyBoxes`, reason from the AdjustmentReason master. */
+export interface AdjustEntry {
+  id: string;
+  designId: string;
+  design: string; // design_name (stock key)
+  size: string;
+  finish: string;
+  batchNumber: string;
+  qtyBoxes: number; // signed
+  reason: string;
+  note: string;
+  adjDate: string; // production_date
+  requestGroup: string; // "adj-<stamp>" — one submission
+  performedBy: string;
+  createdTime: string;
+}
+
 export interface ProductionLogResult {
   ok: boolean;
   entries: ProductionEntry[];
   openingEntries: ProductionRecordRow[];
   /** Stock allocations (entry_type "alloc") — free stock claimed by an order item (CR-199). */
   allocEntries: AllocEntry[];
+  /** Stock adjustments (entry_type "adjust") — signed on-hand corrections (CR-308). */
+  adjustEntries: AdjustEntry[];
   error?: string;
 }
 
@@ -185,7 +208,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     listAll("Customer", { columns: ["name"] }),
     listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
   ]);
-  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], error: logs.error };
+  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], adjustEntries: [], error: logs.error };
 
   const designName = mapBy(designs.rows, "design_name");
   const sizeName = mapBy(sizes.rows, "code");
@@ -270,10 +293,32 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       createdTime: str(r.CREATEDTIME),
     }));
 
+  const adjustEntries: AdjustEntry[] = rows
+    .filter((r) => str(r.entry_type) === "adjust")
+    .map((r) => {
+      const designId = str(r.design);
+      const { size, finish } = hydrateSizeFinish(designId);
+      return {
+        id: String(r.ROWID),
+        designId,
+        design: designName.get(designId) || designId || "—",
+        size,
+        finish,
+        batchNumber: str(r.batch_number),
+        qtyBoxes: num(r.qty_boxes),
+        reason: str(r.reason),
+        note: str(r.note),
+        adjDate: str(r.production_date).slice(0, 10),
+        requestGroup: str(r.request_group),
+        performedBy: str(r.performed_by),
+        createdTime: str(r.CREATEDTIME),
+      };
+    });
+
   // Plan lines carry qty_requested; produced-so-far is derived from their
-  // records. Record, opening and alloc rows are excluded (none is a plan line).
+  // records. Record, opening, alloc and adjust rows are excluded (none is a plan line).
   const entries: ProductionEntry[] = rows
-    .filter((r) => !["record", "opening", "alloc"].includes(str(r.entry_type)))
+    .filter((r) => !["record", "opening", "alloc", "adjust"].includes(str(r.entry_type)))
     .map((r) => {
       const designId = str(r.design);
       const { size, finish } = hydrateSizeFinish(designId);
@@ -317,7 +362,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       };
     });
 
-  return { ok: true, entries, openingEntries, allocEntries };
+  return { ok: true, entries, openingEntries, allocEntries, adjustEntries };
 }
 
 /** One line of a production request. */
@@ -424,15 +469,28 @@ export function recordProduction(rowid: string, input: ProductionRecordInput) {
 export function allocateStock(input: { order_item: string; rows: { batch_number: string; qty_boxes: number }[] }) {
   return bustStock(op<{ allocated: number; rows: number }>("allocate-stock", input));
 }
-/** Undo one allocation row — refused once its boxes are palletised. */
-export function deallocateStock(rowid: string) {
-  return bustStock(op<{ deallocated: number }>(`deallocate-stock/${encodeURIComponent(rowid)}`, {}));
+/** Undo one allocation row, or `boxes` of it (CR-297) — refused once those boxes are palletised. */
+export function deallocateStock(rowid: string, boxes?: number) {
+  return bustStock(op<{ deallocated: number }>(`deallocate-stock/${encodeURIComponent(rowid)}`, boxes ? { boxes } : {}));
 }
 
 /** Record several batches at once on a plan line (batch-tracked items). Atomic:
     validates Σ qty ≤ remaining, inserts one record child per batch, bumps produced. */
 export function recordProductionLines(rowid: string, input: ProductionRecordLinesInput) {
   return bustStock(op<{ recorded: number; rows: number; batch_numbers: string[] }>(`production-record-lines/${encodeURIComponent(rowid)}`, input));
+}
+
+/** One adjustment line for POST /stock-adjust (CR-308). */
+export interface StockAdjustLine {
+  design: string; // Design ROWID
+  batch_number?: string;
+  qty_boxes: number; // signed, ≠ 0
+  note?: string;
+}
+/** Inventory adjustment (CR-308): signed box corrections, dated, with a reason —
+    both modules' "Zoho Books" adjustment. All-or-nothing on the server. */
+export function adjustStock(input: { date: string; reason: string; note?: string; lines: StockAdjustLine[] }) {
+  return bustStock(op<{ request_group: string; lines: number }>("stock-adjust", input));
 }
 
 /** Set/append a batch-tracked item's opening stock as batch rows. First save is

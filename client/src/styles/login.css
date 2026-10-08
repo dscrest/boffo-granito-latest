@@ -29,14 +29,12 @@
   font-family: var(--font-sans);
 }
 
-/* The "checking…" state is a single centered line. */
+/* The "checking…" state is the centered BoffoLoader (CR-293). */
 .boffo-auth--center {
   align-items: center;
   justify-content: center;
 }
-.boffo-auth--center .mono {
-  color: var(--lg-dim) !important;
-}
+.boffo-auth--center .boffo-loader-label { color: var(--lg-dim); }
 
 /* The split card: form pane + illustration pane, side by side. */
 .boffo-auth-split {

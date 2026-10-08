@@ -5,35 +5,56 @@
    e-commerce tile (CR-192) with one search box matching all of
    them: code, panel/vinyl size, design names, sizes and cut-piece
    sizes. Multi-select (CR-193): a click toggles a tile, Done closes.
+   CR-310: Design · Panel Size · Cut Piece Size filters + "In stock only"
+   (every cut piece the panel needs is on hand) narrow the tiles with the search.
    ============================================================ */
 import { useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { useModalA11y } from "@/ui/useModalA11y";
-import { PanelTile } from "./pcBits";
+import { FilterSelect, PanelTile } from "./pcBits";
 import type { PanelRow } from "./panelsApi";
+import { shortagesFor } from "./panelOrderNeeds";
 
 export function PanelPickerModal({
   panels,
   selectedIds,
   onToggle,
   onClose,
+  stock,
 }: {
   panels: PanelRow[];
   selectedIds: string[];
   onToggle: (id: string) => void;
   onClose: () => void;
+  /** On-hand cut pieces keyed stockKey(design, cutSize) — enables "In stock only". */
+  stock?: Map<string, number>;
 }) {
   const [q, setQ] = useState("");
+  const [design, setDesign] = useState("");
+  const [panelSize, setPanelSize] = useState("");
+  const [cutSize, setCutSize] = useState("");
+  const [inStock, setInStock] = useState(false);
+
+  const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))].sort();
+  const designOptions = useMemo(() => uniq(panels.flatMap((p) => p.lines.map((l) => l.designName))), [panels]);
+  const sizeOptions = useMemo(() => uniq(panels.map((p) => p.panelSize)), [panels]);
+  const cutOptions = useMemo(() => uniq(panels.flatMap((p) => p.lines.map((l) => l.cutSizeName))), [panels]);
+  const panelsById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
 
   const listed = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return panels;
-    return panels.filter((p) =>
-      [p.panelCode, p.panelSize, p.vinylSize, ...p.lines.flatMap((l) => [l.designName, l.sizeLabel, l.cutSizeName])].some(
-        (s) => s && s.toLowerCase().includes(t),
-      ),
+    return panels.filter(
+      (p) =>
+        (!design || p.lines.some((l) => l.designName === design)) &&
+        (!panelSize || p.panelSize === panelSize) &&
+        (!cutSize || p.lines.some((l) => l.cutSizeName === cutSize)) &&
+        (!inStock || !stock || shortagesFor([{ panelId: p.id, qty: 1 }], panelsById, stock).length === 0) &&
+        (!t ||
+          [p.panelCode, p.panelSize, p.vinylSize, ...p.lines.flatMap((l) => [l.designName, l.sizeLabel, l.cutSizeName])].some(
+            (s) => s && s.toLowerCase().includes(t),
+          )),
     );
-  }, [panels, q]);
+  }, [panels, q, design, panelSize, cutSize, inStock, stock, panelsById]);
 
   const panelRef = useModalA11y(onClose);
   const selected = new Set(selectedIds);
@@ -64,6 +85,19 @@ export function PanelPickerModal({
                 onChange={(e) => setQ(e.target.value)}
                 aria-label="Search panels"
               />
+            </div>
+            {/* CR-310: column filters, the /panels fbar style. */}
+            <div className="fbar" style={{ margin: 0, padding: "6px 10px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+              <FilterSelect label="Design" value={design} onChange={setDesign} options={designOptions} />
+              <FilterSelect label="Panel Size" value={panelSize} onChange={setPanelSize} options={sizeOptions} />
+              <FilterSelect label="Cut Piece Size" value={cutSize} onChange={setCutSize} options={cutOptions} />
+              {stock && (
+                <label className="row" style={{ gap: 6, fontSize: "var(--t-sm)", cursor: "pointer" }} title="Only panels whose cut pieces are all on hand">
+                  <input type="checkbox" checked={inStock} onChange={(e) => setInStock(e.target.checked)} /> In stock only
+                </label>
+              )}
+              <span style={{ flex: 1 }} />
+              <span className="dim" style={{ fontSize: "var(--t-sm)" }}>{listed.length} of {panels.length}</span>
             </div>
             {/* CR-192: e-commerce tiles (PanelTile, shared with the /panels Photo view). */}
             <div

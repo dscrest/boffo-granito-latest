@@ -21,15 +21,14 @@ import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
-import { cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
-import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
+import { cachedAdjustEntries, cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type AdjustEntry, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
+import { cachedAdjustedByDesign, cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { designStock, openingStockFor } from "@/lib/stock";
 import { OpeningStockForm } from "./OpeningStockForm";
 import { InProductionModal } from "@/features/stages/InProductionModal";
 import type { Order } from "@/data";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
-import { PanelsPanel } from "@/features/panels/PanelsPanel";
 import { ImageManager } from "@/features/common/ImageManager";
 import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
@@ -135,21 +134,23 @@ export function ItemDetail() {
   // `allOrders` — pull the production log to fold its output into available stock.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
+  const [adjustedByDesign, setAdjustedByDesign] = useState<Map<string, number>>(() => cachedAdjustedByDesign());
   const [openingEntries, setOpeningEntries] = useState<ProductionRecordRow[]>(() => cachedOpeningEntries());
+  const [adjustEntries, setAdjustEntries] = useState<AdjustEntry[]>(() => cachedAdjustEntries()); // CR-308
   const [openingOpen, setOpeningOpen] = useState(false); // batch-wise opening-stock editor
-  // Overview (default) | Stock | Panels — deep-linkable via ?tab= (from Stock Details grid).
+  // Overview (default) | Stock — deep-linkable via ?tab= (from Stock Details grid). Panels tab hidden (CR-296).
   const [sp, setSp] = useSearchParams();
   const spTab = sp.get("tab");
-  const tab = spTab === "stock" ? "stock" : spTab === "panels" ? "panels" : "overview";
-  const setTab = (t: "overview" | "stock" | "panels") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
+  const tab = spTab === "stock" ? "stock" : "overview";
+  const setTab = (t: "overview" | "stock") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   const reloadStock = () => {
     void listProductionLogs().then((res) => {
-      if (res.ok) { setProdLogs(res.entries); setOpeningEntries(res.openingEntries); }
+      if (res.ok) { setProdLogs(res.entries); setOpeningEntries(res.openingEntries); setAdjustEntries(res.adjustEntries); }
     });
     void listBatchStock().then((res) => {
-      if (res.ok) setOpeningByDesign(res.openingByDesign);
+      if (res.ok) { setOpeningByDesign(res.openingByDesign); setAdjustedByDesign(res.adjustedByDesign); }
     });
   };
   useEffect(() => {
@@ -165,7 +166,7 @@ export function ItemDetail() {
   // These hooks MUST run before the `designs === null` early-return below,
   // else the hook count changes between renders (React error #310).
   const myProductionRows = useMemo(() => {
-    if (!design) return [] as (ProductionRecordRow & { kind: "production" | "opening" })[];
+    if (!design) return [] as (ProductionRecordRow & { kind: "production" | "opening" | "adjust" })[];
     const recs = prodLogs
       .filter((e) => e.design === design.designName)
       .flatMap((e) => e.records)
@@ -173,8 +174,15 @@ export function ItemDetail() {
     const opens = openingEntries
       .filter((e) => e.design === design.designName)
       .map((r) => ({ ...r, kind: "opening" as const }));
-    return [...opens, ...recs].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
-  }, [design, prodLogs, openingEntries]);
+    // CR-308: signed adjustments sit in the same list (breakage, count correction…).
+    const adjusts = adjustEntries
+      .filter((e) => e.design === design.designName)
+      .map((a): ProductionRecordRow & { kind: "adjust" } => ({
+        id: a.id, parentId: "", design: a.design, size: a.size, finish: a.finish, qtyBoxes: a.qtyBoxes, productionDate: a.adjDate, shift: "",
+        performedBy: a.performedBy, note: [a.reason, a.note].filter(Boolean).join(" — "), batchNumber: a.batchNumber, boxBrandId: "", orderItemId: "", createdTime: a.createdTime, kind: "adjust",
+      }));
+    return [...opens, ...recs, ...adjusts].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
+  }, [design, prodLogs, openingEntries, adjustEntries]);
   if (designs === null) return <SkeletonRows rows={6} />;
 
   const needle = q.trim().toLowerCase();
@@ -183,16 +191,19 @@ export function ItemDetail() {
     ? railRows.filter((d) => `${d.uniqueName || d.designName} ${d.sku}`.toLowerCase().includes(needle))
     : railRows;
 
-  const orders = design ? allOrders.filter((o) => o.design === design.designName) : [];
+  // Order.design is the full unique label; the plain designName is the stock key
+  // (same match as designStock — CR-298: the old `o.design ===` never matched).
+  const orders = design ? allOrders.filter((o) => (o.designName || o.design) === design.designName) : [];
   const openQty = orders.reduce((s, o) => s + (o.orderQty - o.loadedQty), 0);
 
   // Live stock summary — single source of truth (lib/stock.ts), shared with the
   // transaction line-item rows and Reports. Batch-tracked items read opening from
   // their opening rows (openingByDesign); singular items from accounting_stock.
   const openingStock = openingStockFor(design, openingByDesign);
-  const stock = designStock(design?.designName ?? "", { openingStock, allocated: cachedAllocByDesign().get(design?.designName ?? ""), orders: allOrders, prodLogs });
+  const stock = designStock(design?.designName ?? "", { openingStock, adjusted: adjustedByDesign.get(design?.designName ?? ""), allocated: cachedAllocByDesign().get(design?.designName ?? ""), orders: allOrders, prodLogs });
   const inProduction = stock.inProduction;
   const inLoading = stock.inLoading;
+  const awaitingPal = stock.awaitingPalletization;
   const availableStock = stock.available;
 
   const productionTotal = myProductionRows.reduce((s, r) => s + r.qtyBoxes, 0);
@@ -203,6 +214,14 @@ export function ItemDetail() {
   const custCol = { head: "Customer", val: (o: Order) => o.party || "—" };
   // In production uses the shared per-SO drill-down (designStock.inProductionOrders),
   // so the popup matches Order detail / Production form everywhere.
+  const bdAwaitingPal: StockBreakdown<Order> = {
+    title: "Awaiting palletization", note: "Boxes produced or allocated to an order that are not on a pallet yet — across every open order for this item.",
+    rows: orders.filter((o) => o.producedQty - o.palletizedQty > 0),
+    columns: [orderCol, custCol,
+      { head: "Produced", num: true, val: (o) => fmt(o.producedQty) },
+      { head: "Palletized", num: true, val: (o) => fmt(o.palletizedQty) },
+      { head: "Awaiting", num: true, val: (o) => fmt(Math.max(0, o.producedQty - o.palletizedQty)) }],
+  };
   const bdInLoading: StockBreakdown<Order> = {
     title: "In loading", note: "Palletized boxes waiting to be loaded — across every open order for this item.",
     rows: orders.filter((o) => o.palletizedQty - o.loadedQty > 0),
@@ -421,19 +440,11 @@ export function ItemDetail() {
                 )}
               </div>
 
-              {/* Overview | Production | Panels tabs (batch-wise production lives under Production;
-                  Panels = the showcase panels this design appears on, from Panel Craft). */}
+              {/* Overview | Production tabs (batch-wise production lives under Production). */}
               <div className="row" style={{ gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
                 <button onClick={() => setTab("overview")} style={tabStyle(tab === "overview")}>Overview</button>
                 <button onClick={() => setTab("stock")} style={tabStyle(tab === "stock")}>Production</button>
-                <button onClick={() => setTab("panels")} style={tabStyle(tab === "panels")}>Panels</button>
               </div>
-
-              {tab === "panels" && (
-                <div style={{ marginTop: 14 }}>
-                  <PanelsPanel scope={{ kind: "design", designId: design.id }} />
-                </div>
-              )}
 
               {tab === "stock" && (
                 <div style={{ marginTop: 14 }}>
@@ -460,10 +471,10 @@ export function ItemDetail() {
                         {myProductionRows.map((r) => (
                           <tr key={r.id}>
                             <td className="mono">{r.batchNumber || <span className="dim">—</span>}</td>
-                            <td className="num mono">{fmt(r.qtyBoxes)}</td>
+                            <td className="num mono" style={r.kind === "adjust" ? { color: r.qtyBoxes < 0 ? "var(--c-red)" : "var(--c-green)" } : undefined}>{r.kind === "adjust" && r.qtyBoxes > 0 ? "+" : ""}{fmt(r.qtyBoxes)}</td>
                             <td>{r.productionDate || <span className="dim">—</span>}</td>
                             <td>{r.note || <span className="dim">—</span>}</td>
-                            <td>{r.kind === "opening" ? <span className="chip">Opening</span> : ""}</td>
+                            <td>{r.kind === "opening" ? <span className="chip">Opening</span> : r.kind === "adjust" ? <span className="chip">Adjust</span> : ""}</td>
                           </tr>
                         ))}
                         {myProductionRows.length === 0 && (
@@ -595,6 +606,7 @@ export function ItemDetail() {
                     )}
                   </div>
                   <StockRow label="In production" value={inProduction} onClick={inProduction > 0 ? () => setIpOpen(true) : undefined} />
+                  <StockRow label="Awaiting palletization" value={awaitingPal} onClick={() => setBreakdown(bdAwaitingPal)} />
                   <StockRow label="In loading" value={inLoading} onClick={() => setBreakdown(bdInLoading)} />
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0 0", marginTop: 4, borderTop: "1px solid var(--border)" }}>
                     <span style={{ fontWeight: 600, fontSize: "var(--t-sm)" }}>Available stock</span>

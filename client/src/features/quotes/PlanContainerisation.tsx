@@ -54,7 +54,7 @@ import type { DesignRow } from "@/features/masters/designsApi";
 import { cachedOrders, invalidateOrders, listOrders, soStatusLabel, SO_STATUS_CHIP } from "@/features/orders/ordersApi";
 import { STATUS_CHIP, STATUS_LABEL, quoteToInput } from "./QuotesTable";
 import { cellsOfSegs, emptyCells, packItemWise } from "./containerPack";
-import { resolveFormatBySize } from "./containerOptions";
+import { formatsForPallet, resolveFormatBySize } from "./containerOptions";
 import {
   cachedQuotes,
   invalidateQuotes,
@@ -80,7 +80,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
  *  `group`, so grouped packing rebuilds the merge exactly. */
 // ponytail: a split whose first part exactly fills a container merges back to one row — it repacks to the identical plan, only the visual row split is lost
 function planRowGroups(plan: ContainerPlan | null) {
-  const groups = new Map<string, { qty: number; palletId: string; group?: string; over?: boolean }[]>();
+  const groups = new Map<string, { qty: number; palletId: string; formatId: string; group?: string; over?: boolean }[]>();
   const containers = plan?.containers ?? [];
   containers.forEach((c, i) => {
     // An overridden (>100%) container reseeds grouped + over even when single-line (CR-196).
@@ -90,9 +90,11 @@ function planRowGroups(plan: ContainerPlan | null) {
       const prev = i > 0 ? containers[i - 1] : undefined;
       const overflow =
         !mixed && j === 0 && prev?.lines.length === 1 && !prev.over && prev.fillPct >= 100 &&
-        prev.lines[0].design === ln.design && (prev.lines[0].palletId || "") === (ln.palletId || "");
+        prev.lines[0].design === ln.design && (prev.lines[0].palletId || "") === (ln.palletId || "") &&
+        (prev.containerFormat || "") === (c.containerFormat || "");
       if (overflow && list.length) list[list.length - 1].qty += ln.boxes;
-      else list.push({ qty: ln.boxes, palletId: ln.palletId || "", ...(mixed ? { group: `C${c.no ?? i + 1}` } : {}), ...(c.over ? { over: true } : {}) });
+      // CR-300: the row's container pick reseeds from its container (a mixed container's lines share the owner's).
+      else list.push({ qty: ln.boxes, palletId: ln.palletId || "", formatId: c.containerFormat || "", ...(mixed ? { group: `C${c.no ?? i + 1}` } : {}), ...(c.over ? { over: true } : {}) });
       groups.set(ln.design, list);
     });
   });
@@ -119,6 +121,7 @@ interface DraftLine {
   discount: number; // percent (preserved)
   description: string; // preserved
   palletId: string; // chosen pallet ROWID ("" = auto best-size match)
+  formatId: string; // chosen Container Master ROWID ("" = auto: the largest container built from the pallet) — CR-300
   ordered?: number; // original quote qty for this row (reference only; undefined for new lines)
   group?: string; // rows sharing a group pack into ONE (mixed) container — set by a Move
   over?: boolean; // manual override: the group's container may exceed 100% (CR-196)
@@ -142,6 +145,9 @@ interface ResolvedLine {
   palletId: string;
   palletName: string;
   palletOptions: { value: string; label: string }[];
+  formatId: string; // Container Master row this line packs into (CR-300): the row's pick when it is built from the pallet, else the largest that is
+  formatName: string;
+  formatOptions: { value: string; label: string }[]; // containers of the size built from the chosen pallet (CR-300)
   boxesPerPallet: number;
   boxesPerContainer: number; // Pallet format: total boxes per container (arr. A + B)
   palletsPerContainer: number; // Pallet format: total pallets per container (arr. A + B)
@@ -195,9 +201,6 @@ function ContainerisePlanner({
   docNo, statusChip, customer, partyCode, subtitleExtras, closeTo, embedded,
   seedLines, seedKey, savedPlan, pallets, formats, canSave, saving, saveTitle, linesDirty, onSave,
 }: PlannerProps) {
-  // CR-274: the plan's container pick per Size (Size ROWID → ContainerFormat ROWID); unpicked = largest.
-  const [formatPick, setFormatPick] = useState<Record<string, string>>({});
-  const formatOfSize = useMemo(() => resolveFormatBySize(formats, formatPick), [formats, formatPick]);
   const navigate = useNavigate();
   const { designRows, designs } = useMasters();
 
@@ -247,7 +250,6 @@ function ContainerisePlanner({
       if (c.tonCapacity && c.tonCapacity > 0 && c.tonCapacity !== g) caps[i] = c.tonCapacity;
     });
     setCapByIdx(caps);
-    setFormatPick(saved?.formats ?? {});
   }, [seedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---- resolve each draft line: design → size-matched pallet → weight capacity ---- */
@@ -267,6 +269,9 @@ function ContainerisePlanner({
         palletId: extra.palletId ?? "",
         palletName: "",
         palletOptions: extra.palletOptions ?? [],
+        formatId: "",
+        formatName: "",
+        formatOptions: extra.formatOptions ?? [],
         boxesPerPallet: 0,
         boxesPerContainer: 0,
         palletsPerContainer: 0,
@@ -297,8 +302,12 @@ function ContainerisePlanner({
       // same order as the server loading-capacity check.
       const boxWeightKg = d.boxWeightKg || chosen.boxWeightKg;
       const tonnes = base.qty * boxWeightKg / 1000;
-      // CR-261: what a container holds comes from the Container Master, per SIZE.
-      const format = formatOfSize.get(d.sizeId);
+      // CR-261: what a container holds comes from the Container Master, per SIZE. CR-300: each ROW
+      // picks its own among the size's containers built from its pallet; unpicked (or a pick not in
+      // that list) = the largest of them (resolveFormatBySize = the one "largest" rule).
+      const fs = formatsForPallet(formats, d.sizeId, chosen.id);
+      const format = resolveFormatBySize(fs, dl.formatId ? { [d.sizeId]: dl.formatId } : {}).get(d.sizeId);
+      const formatOptions = fs.map((f) => ({ value: f.id, label: `${f.totalPallets} pallets = ${f.totalBoxes} boxes` }));
       const capacityBoxes =
         mode === "boxes"
           ? format?.totalBoxes ?? 0
@@ -316,6 +325,7 @@ function ContainerisePlanner({
           tonnes,
           palletId: chosen.id,
           palletOptions,
+          formatOptions,
         });
       }
       return {
@@ -329,6 +339,9 @@ function ContainerisePlanner({
         palletId: chosen.id,
         palletName: chosen.name,
         palletOptions,
+        formatId: format?.id ?? "",
+        formatName: format?.name ?? "",
+        formatOptions,
         boxesPerPallet: chosen.boxesPerPallet,
         boxesPerContainer: format?.totalBoxes ?? 0,
         palletsPerContainer: format?.totalPallets ?? 0,
@@ -338,22 +351,10 @@ function ContainerisePlanner({
         reason: base.qty > 0 ? undefined : "quantity is 0",
       };
     });
-  }, [draftLines, mode, tonCapacity, designRows, pallets, formatOfSize]);
+  }, [draftLines, mode, tonCapacity, designRows, pallets, formats]);
 
   const lines = useMemo(() => rows.filter((r) => r.packable), [rows]);
 
-  // Sizes on the plan that have at least one Container Master format — one picker each (CR-274).
-  const planSizes = useMemo(() => {
-    const seen = new Map<string, string>();
-    rows.forEach((r) => { if (r.sizeId && !seen.has(r.sizeId)) seen.set(r.sizeId, r.sizeLabel); });
-    return [...seen]
-      .map(([sizeId, sizeLabel]) => ({
-        sizeId,
-        sizeLabel,
-        options: formats.filter((f) => f.sizeId === sizeId).map((f) => ({ value: f.id, label: `${f.totalPallets} pallets = ${f.totalBoxes} boxes` })),
-      }))
-      .filter((s) => s.options.length > 0);
-  }, [rows, formats]);
 
   /* ---- pack item-wise: each container starts with a single item, in line
      order. Boxes mode: capacity from the item's Pallet-format boxes-per-
@@ -507,9 +508,7 @@ function ContainerisePlanner({
     const plan: ContainerPlan = {
       v: 1,
       mode,
-      ...(mode === "weight"
-        ? { tonCapacity: Math.max(1, tonCapacity) }
-        : { formats: Object.fromEntries(planSizes.flatMap((s) => { const f = formatOfSize.get(s.sizeId); return f ? [[s.sizeId, f.id]] : []; })) }),
+      ...(mode === "weight" ? { tonCapacity: Math.max(1, tonCapacity) } : {}), // CR-300: the pick lives per container (`containerFormat`), no plan-level `formats`
       containers: containers.map((c, i) => {
         const segLines = c.segs.flatMap((s) => {
           const l = lineOf(s.idx);
@@ -528,8 +527,7 @@ function ContainerisePlanner({
             ? { tonCapacity: c.capTons }
             : (() => {
                 const owner = lineOf(c.segs[0]?.idx);
-                const f = owner ? formatOfSize.get(owner.sizeId) : undefined;
-                return { palletCapacity: owner?.palletsPerContainer ?? 0, ...(f ? { containerFormat: f.id, containerFormatName: f.name } : {}) };
+                return { palletCapacity: owner?.palletsPerContainer ?? 0, ...(owner?.formatId ? { containerFormat: owner.formatId, containerFormatName: owner.formatName } : {}) };
               })()),
           lines: segLines,
         };
@@ -537,7 +535,7 @@ function ContainerisePlanner({
     };
     return JSON.stringify(plan);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [containers, lines, mode, tonCapacity, formatOfSize, planSizes]);
+  }, [containers, lines, mode, tonCapacity]);
 
   /** Colored pallet cells of a container (single item): ceil(boxes / box-per-pallet). */
   const cellsOf = (c: PackedContainer) =>
@@ -572,7 +570,7 @@ function ContainerisePlanner({
   const cloneLine = (key: string) =>
     setDraftLines((ls) => ls.flatMap((l) => (l.key === key ? [l, { ...l, key: nextKey(), ordered: undefined, qty: 0 }] : [l])));
   const addLine = () =>
-    setDraftLines((ls) => [...ls, { key: nextKey(), item: "", qty: 1, rate: 0, discount: 0, description: "", palletId: "" }]);
+    setDraftLines((ls) => [...ls, { key: nextKey(), item: "", qty: 1, rate: 0, discount: 0, description: "", palletId: "", formatId: "" }]);
   const setQtyByIdx = (idx: number, raw: string) => {
     const r = rows[idx];
     if (r) setLine(r.key, { qty: Math.max(0, Number(raw) || 0) });
@@ -710,6 +708,7 @@ function ContainerisePlanner({
                 <th className="num" style={{ textAlign: "right" }}>Tonnes</th>
                 {/* Rate stays in DraftLine state + quote save; only the column is hidden (CR). */}
                 <th style={{ minWidth: 220 }}>Pallet Type</th>
+                <th style={{ minWidth: 200 }}>Container</th>
                 <th className="num" style={{ textAlign: "right" }}>Pallets</th>
                 <th style={{ width: 64 }} />
               </tr>
@@ -724,7 +723,7 @@ function ContainerisePlanner({
                         <Combobox
                           value={l.item}
                           options={itemOptions}
-                          onChange={(v) => setLine(l.key, { item: v, palletId: "" })}
+                          onChange={(v) => setLine(l.key, { item: v, palletId: "", formatId: "" })}
                           placeholder="Search item…"
                           ariaLabel="Item"
                         />
@@ -770,6 +769,17 @@ function ContainerisePlanner({
                       ariaLabel={`${l.item || "item"} pallet`}
                     />
                   </td>
+                  <td>
+                    {/* CR-300: this row's own container; options = the size's containers built from this row's pallet. */}
+                    <Combobox
+                      value={l.formatId}
+                      options={l.formatOptions}
+                      onChange={(v) => setLine(l.key, { formatId: v })}
+                      placeholder={l.formatOptions.length ? "Choose container…" : "—"}
+                      disabled={!canSave}
+                      ariaLabel={`${l.item || "item"} container`}
+                    />
+                  </td>
                   <td
                     className="num mono"
                     style={{ fontWeight: 600 }}
@@ -793,7 +803,7 @@ function ContainerisePlanner({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>No items yet — add one below.</td>
+                  <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>No items yet — add one below.</td>
                 </tr>
               )}
             </tbody>
@@ -804,6 +814,7 @@ function ContainerisePlanner({
                 <td className="num mono">{fmt(totalBoxes)}</td>
                 <td className="num mono dim">{fmt(totalRemaining)}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>{round1(totalTonnes).toFixed(1)} t</td>
+                <td />
                 <td />
                 <td className="num mono" style={{ fontWeight: 600 }}>{fmt(totalPalletsCount)} pallets</td>
                 <td />
@@ -830,7 +841,7 @@ function ContainerisePlanner({
               : "No packable quantities yet"}
           </span>
           <span style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Fitting basis" title="Switch fitting basis">
-            <button onClick={() => switchMode("boxes")} title="Capacity from the Container Master: the container picked for each size"
+            <button onClick={() => switchMode("boxes")} title="Capacity from the Container Master: the container picked on each row"
               style={{ background: mode === "boxes" ? "var(--accent-soft)" : "transparent", color: mode === "boxes" ? "var(--fg)" : "var(--muted)", border: 0, padding: "5px 12px", cursor: "pointer", fontSize: "var(--t-sm)" }}>
               Box Fitting
             </button>
@@ -839,20 +850,6 @@ function ContainerisePlanner({
               Weight Fitting
             </button>
           </span>
-          {mode === "boxes" && planSizes.map((s) => (
-            <label key={s.sizeId} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title={`Container every ${s.sizeLabel} container packs into (Container Master)`}>
-              <span className="dim">{s.sizeLabel}</span>
-              <span style={{ width: 230 }}>
-                <Combobox
-                  value={formatOfSize.get(s.sizeId)?.id ?? ""}
-                  options={s.options}
-                  onChange={(v) => setFormatPick((p) => ({ ...p, [s.sizeId]: v }))}
-                  disabled={!canSave}
-                  ariaLabel={`Container for ${s.sizeLabel}`}
-                />
-              </span>
-            </label>
-          ))}
           {mode === "weight" && (
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--t-sm)" }} title="Default container weight capacity — override any container below">
               <span className="dim">Default</span>
@@ -1223,8 +1220,8 @@ export function PlanContainerisation() {
         return quote.lines.flatMap<Omit<DraftLine, "key">>((l) => {
           const base = { item: l.item, rate: l.rate, discount: l.discount, description: l.description || "" };
           const gs = groups.get(l.item);
-          if (!gs?.length) return [{ ...base, qty: l.qty, palletId: "", ordered: l.qty }];
-          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, group: g.group, over: g.over, ordered: k === 0 ? l.qty : undefined }));
+          if (!gs?.length) return [{ ...base, qty: l.qty, palletId: "", formatId: "", ordered: l.qty }];
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, formatId: g.formatId, group: g.group, over: g.over, ordered: k === 0 ? l.qty : undefined }));
         });
       })()}
       seedKey={`${quote.id}:${quote.modifiedTime}`}
@@ -1339,16 +1336,16 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
           const item = o.design || o.designName; // o.design hydrates as unique_name || design_name — must match itemOptions keys
           const base = { item, rate: o.rate || 0, discount: o.discount || 0, description: o.description || "" };
           const gs = groups.get(item);
-          if (!gs?.length) return [{ ...base, qty: plan ? 0 : o.orderQty, palletId: o.palletId || "", ordered: o.orderQty }];
+          if (!gs?.length) return [{ ...base, qty: plan ? 0 : o.orderQty, palletId: o.palletId || "", formatId: "", ordered: o.orderQty }];
           if (emitted.has(item)) return [];
           emitted.add(item);
-          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId || o.palletId || "", group: g.group, over: g.over, ordered: k === 0 ? o.orderQty : undefined }));
+          return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId || o.palletId || "", formatId: g.formatId, group: g.group, over: g.over, ordered: k === 0 ? o.orderQty : undefined }));
         });
         // Planner-added designs that live only in the plan (no OrderItem) used
         // to drop silently on reopen — seed them as reference-less rows.
         for (const [design, gs] of groups) {
           if (emitted.has(design)) continue;
-          for (const g of gs) out.push({ item: design, qty: g.qty, rate: 0, discount: 0, description: "", palletId: g.palletId, group: g.group, over: g.over, ordered: undefined });
+          for (const g of gs) out.push({ item: design, qty: g.qty, rate: 0, discount: 0, description: "", palletId: g.palletId, formatId: g.formatId, group: g.group, over: g.over, ordered: undefined });
         }
         return out;
       })()}

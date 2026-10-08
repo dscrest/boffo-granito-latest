@@ -89,8 +89,8 @@ const MODULE_NAV = {
   orders: ["byorder", "packing"],
   customers: ["parties"],
   // "containers" = Container Master (CR-261), an Items master like Pallet Master.
-  items: ["design", "stock", "sizes", "pallets", "containers", "prod"],
-  panel_craft: ["panels", "panel-orders", "cut-stock"],
+  items: ["design", "stock", "stock-adjustments", "sizes", "pallets", "containers", "prod"],
+  panel_craft: ["panel-dashboard", "panel-items", "panels", "panel-orders", "sample-orders", "cut-stock", "pending-cut-stock"], // CR-315 sample-orders
   stages: ["po", "qc", "container-shipments", "fit", "loadplan", "loading", "final"],
   invoices: ["invoices"],
   reports: ["reports", "ops"],
@@ -109,8 +109,10 @@ const TABLE_MODULE = {
   Customer: "customers",
   Design: "items", DesignPallet: "items", Size: "items", Pallet: "items", ContainerFormat: "items",
   Brand: "items", Grade: "items", Finish: "items", Glaze: "items", Category: "items",
-  Panel: "panel_craft", PanelLine: "panel_craft", PanelOrder: "panel_craft",
-  CutPieceSize: "panel_craft", CutPieceStock: "panel_craft",
+  Panel: "panel_craft", PanelLine: "panel_craft", PanelOrder: "panel_craft", PanelOrderLine: "panel_craft", // PanelOrderLine was missing (CR-315 drive-by)
+  SampleOrder: "panel_craft", SampleOrderLine: "panel_craft", // CR-315
+  CutPieceSize: "panel_craft", CutPieceStock: "panel_craft", CutStockEntry: "panel_craft", Mdf: "panel_craft",
+  AdjustmentReason: "items",
   Container: "stages", ContainerLoading: "stages",
   PalletizationPlan: "stages", PalletizationPlanLine: "stages", LoadBox: "stages",
   Invoice: "invoices",
@@ -125,6 +127,7 @@ const TABLE_MODULE = {
 const GET_SHARED = new Set([
   "Currency", "SalesPerson", "Notification", "PaymentTerm",
   "PartyBrand", "StatusTransition", "Vehicle", "TransactionSeries",
+  "AdjustmentReason", // CR-308: both modules' adjustment sheets read the reasons
 ]);
 
 /* Business route (first path segment) -> [module, action]. Approval verdicts
@@ -152,8 +155,18 @@ const ROUTE_PERM = {
   "pal-topup": ["stages", "edit"],
   "panel-save": ["panel_craft", "edit"],
   "panel-delete": ["panel_craft", "delete"],
+  "panel-order-save": ["panel_craft", "create"], // was unmapped (CR-315 drive-by)
+  "panel-order-delete": ["panel_craft", "delete"],
   "panel-order-status": ["panel_craft", "edit"],
-  "cut-stock-adjust": ["panel_craft", "edit"],
+  "sample-order-save": ["panel_craft", "create"], // CR-315
+  "sample-order-delete": ["panel_craft", "delete"],
+  "sample-order-supply": ["panel_craft", "edit"], // CR-316
+  "panel-order-checkpoint": ["panel_craft", "edit"], // CR-313
+  "panel-order-allocate": ["panel_craft", "edit"], // CR-312
+  "cut-stock-entry": ["panel_craft", "edit"],
+  "cut-piece-save": ["panel_craft", "edit"],
+  "cut-piece-delete": ["panel_craft", "delete"],
+  "stock-adjust": ["items", "edit"],
   "load-box": ["stages", "edit"],
   "load-box-share": ["stages", "edit"],
   "load-box-update": ["stages", "edit"],

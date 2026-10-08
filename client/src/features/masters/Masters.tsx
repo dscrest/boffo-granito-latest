@@ -133,6 +133,32 @@ const MASTERS: MasterDef[] = [
       { key: "seq_code", label: "Seq", auto: true },
     ],
   },
+  // CR-309: the board a showcase panel is mounted on — picked per panel-order line; its weight joins the panel weight.
+  {
+    key: "mdf",
+    label: "MDF",
+    icon: "tile",
+    table: "Mdf",
+    lead: "size",
+    fields: [
+      { key: "size", label: "Size", required: true },
+      { key: "thickness", label: "Thickness" },
+      { key: "weight_kg", label: "Weight (kg)", type: "number" },
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
+  // CR-308: why stock was adjusted (breakage, theft, count correction…) — both modules' adjustment sheets.
+  {
+    key: "adjustment_reason",
+    label: "Adjustment Reason",
+    icon: "check",
+    table: "AdjustmentReason",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
   {
     key: "vehicle",
     label: "Vehicle",

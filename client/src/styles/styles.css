@@ -2042,6 +2042,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.cf-line {
   grid-template-columns: 2.2fr 1fr 1fr 1fr 26px;
 }
+/* Panel Order lines (CR-302) — panel, details (thumb + sizes + designs), qty, remove. */
+/* CR-309: Panel · Details · MDF · Weight · Qty · ✕ */
+.ord-line.pnl-line {
+  grid-template-columns: 2fr 1.6fr 1.2fr 0.9fr 0.7fr 26px;
+}
+/* Sample Order lines (CR-315) — Item (thumb + picker) · Piece · Cut Piece Size · Qty · Note · ✕ */
+.ord-line.smp-line {
+  grid-template-columns: 2.2fr 1fr 1.3fr 0.7fr 1.4fr 26px;
+}
 /* Sales-order lines add a required Pallet column after Design (chosen at
    creation; pre-seeds palletization). Scoped so Quotes keep their 6-col grid. */
 .ord-line.qt-line.so-line {

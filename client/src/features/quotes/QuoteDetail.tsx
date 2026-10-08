@@ -297,8 +297,10 @@ export function QuoteDetail() {
     ...(canConvert ? [{ label: "Convert to Sales Order", onClick: () => navigate(`/orders/new?quote=${encodeURIComponent(quote?.id || "")}`) }] : []),
     ...(quote && can("quotes", "create") ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }] : []),
     { label: "Plan Containerisation", onClick: () => navigate(`/quotes/${quote.id}/containerise`) },
-    // Request Panels (CR-286): showcase panels for this quote → Panel Orders queue as New Request.
+    // Request Panels (CR-286): showcase panels for this quote → Panel Orders queue as New.
     ...(can("panel_craft", "create") ? [{ label: "Request Panels", onClick: () => navigate(`/panel-orders/new?fromQuote=${encodeURIComponent(quote.id)}`) }] : []),
+    // Request Samples (CR-317): item samples for this quote → Sample Orders as New.
+    ...(can("panel_craft", "create") ? [{ label: "Request Samples", onClick: () => navigate(`/sample-orders/new?fromQuote=${encodeURIComponent(quote.id)}`) }] : []),
     { label: "Print Quote", onClick: () => setPrinting(true) },
     { label: "Download PDF", onClick: () => void onPdf() },
     { label: "Copy Share Link", onClick: () => void onShare() },

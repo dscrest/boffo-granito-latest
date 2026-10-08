@@ -23,6 +23,7 @@ import { useOrders } from "@/features/orders/useOrders";
 import { ActivityLog } from "@/features/common/RecordDetail";
 import { DispatchTab } from "@/features/stages/DispatchTab";
 import { PanelsPanel } from "@/features/panels/PanelsPanel";
+import { CustomerSamples } from "@/features/panels/CustomerSamples";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS } from "./PartyForm";
 import {
@@ -550,6 +551,10 @@ export function CustomerDetail() {
                 order's lifecycle says whether it was sent (Dispatched). */}
             <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Showcase Panels</div>
             <PanelsPanel scope={{ kind: "customer", customerId: party.id }} />
+
+            {/* CR-317: every sample line supplied (or pending) for this customer, with the order it came from. */}
+            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Samples</div>
+            <CustomerSamples customerId={party.id} />
 
             {/* Everything shipped to this customer, across all their orders.
                 This page is sections, not tabs — so Dispatch is a section. */}

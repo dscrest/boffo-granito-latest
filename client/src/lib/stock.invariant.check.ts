@@ -66,4 +66,12 @@ assert.strictEqual(ip([line({ requestGroup: "PR-1-x" })]), 500, "manual PR- requ
   assert.strictEqual(l.free, N + M - 30, "a loaded allocation is not reserved twice");
 }
 
+// CR-308: a signed adjustment moves on-hand AND free by exactly its amount.
+{
+  const a = designStock("TILE-A", { openingStock: N, adjusted: -10, orders: [], prodLogs });
+  assert.strictEqual(a.available, N + M - 10, "negative adjustment reduces on-hand");
+  assert.strictEqual(a.free, N + M - 10, "…and free");
+  assert.strictEqual(designStock("TILE-A", { openingStock: N, adjusted: 4, orders: [], prodLogs }).available, N + M + 4);
+}
+
 console.log("stock invariant check: OK (available =", s.available, ", inProduction =", s.inProduction, ")");

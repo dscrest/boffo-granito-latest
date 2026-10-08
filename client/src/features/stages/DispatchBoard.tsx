@@ -190,7 +190,7 @@ export function DispatchBoard({
         render: ({ l }) => {
           const prog = oiProgress.get(l.orderItemId);
           // CR-176: per-ROW chip. A recorded slice held back by the batch gate
-          // reads "Recorded"; only the not-yet-recorded rows read "Partial"
+          // reads "Palletized" (CR-299, was "Recorded"); only the not-yet-recorded rows read "Partial"
           // (same rule as PalPlanDetail's status column).
           const done = l.status === "ReadyToLoad" || !!l.loadBoxId;
           const partialItem = !!prog && prog.done > 0 && prog.done < prog.total;
@@ -204,7 +204,7 @@ export function DispatchBoard({
               )}
               {partialItem && done && (
                 <span className="chip palstatus p-ready" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Palletized — waiting for the rest of this batch before loading">
-                  Recorded
+                  Palletized
                 </span>
               )}
               {partialItem && !done && (
@@ -572,7 +572,7 @@ export function DispatchBoard({
       // it moves on when the rest of its batch is palletised.
       disabled: l.status === "ReadyToLoad",
       title: l.status === "ReadyToLoad"
-        ? "Recorded — waiting for the rest of this batch to be palletized"
+        ? "Palletized — waiting for the rest of this batch before loading"
         : "Record palletized boxes — they move to Ready for Loading",
       onClick: () => openPalletise(stage === "Palletizing" ? recordTargets(l) : palletiseTargets(l), "ReadyToLoad"),
     },
@@ -958,7 +958,7 @@ export function DispatchBoard({
                             <>
                               <td className="num" style={{ textAlign: "right" }} onClick={(ev) => ev.stopPropagation()}>
                                 {l.status === "ReadyToLoad" ? (
-                                  <span className="dim" title="Recorded — waiting for the rest of this batch to be palletized">—</span>
+                                  <span className="dim" title="Palletized — waiting for the rest of this batch before loading">—</span>
                                 ) : (
                                   <NumberInput
                                     value={d?.qty ?? ""}

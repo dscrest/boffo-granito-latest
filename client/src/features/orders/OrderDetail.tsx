@@ -7,7 +7,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDelete, confirmDialog, promptDialog } from "@/ui/ConfirmDialog";
+import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
 import { can, canApprove } from "@/lib/auth";
 import { type Order, type Quote } from "@/data";
 import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
@@ -22,7 +22,7 @@ import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages
 import { SourcePanelOrders } from "@/features/panels/SourcePanelOrders";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
-import { deallocateStock, listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
+import { listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
 import { AllocateStockModal } from "./AllocateStockModal";
 import { ChangeStatusModal } from "./ChangeStatusModal";
 import { useOrders } from "./useOrders";
@@ -36,11 +36,12 @@ import { useMasters } from "@/features/masters/useMasters";
 // In Production / Available columns from this page).
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 
-function SoProduction({ salesOrderId, onChanged }: { salesOrderId: string; onChanged: () => void }) {
+// CR-297: Deallocate opens the shared Deallocate Stock modal (scoped to that line) —
+// one place owns the confirm + partial-return rule.
+function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; onDeallocate: (orderItemId: string) => void }) {
   const [rows, setRows] = useState<ProductionEntry[] | null>(null);
   // Stock allocated to this order (CR-199) — the production-first supply trail.
   const [allocs, setAllocs] = useState<AllocEntry[]>([]);
-  const [tick, setTick] = useState(0);
   useEffect(() => {
     let alive = true;
     void listProductionLogs().then((res) => {
@@ -51,18 +52,7 @@ function SoProduction({ salesOrderId, onChanged }: { salesOrderId: string; onCha
     return () => {
       alive = false;
     };
-  }, [salesOrderId, tick]);
-  const onDeallocate = async (a: AllocEntry) => {
-    if (!(await confirmDialog({ title: "De-allocate stock", message: `Return ${fmt(a.qtyBoxes)} boxes of ${a.design}${a.batchNumber ? ` (batch ${a.batchNumber})` : ""} to free stock?`, confirmLabel: "De-allocate", danger: true }))) return;
-    const res = await deallocateStock(a.id);
-    if (!res.ok) {
-      toast.error(res.error || "Could not de-allocate");
-      return;
-    }
-    toast.success(`${fmt(a.qtyBoxes)} boxes returned to free stock`);
-    setTick((t) => t + 1);
-    onChanged();
-  };
+  }, [salesOrderId]);
 
   if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading production…</div>;
   return (
@@ -90,7 +80,7 @@ function SoProduction({ salesOrderId, onChanged }: { salesOrderId: string; onCha
                 <td className="muted nw">{a.performedBy || "—"}</td>
                 <td style={{ textAlign: "right" }}>
                   {can("stages", "edit") && (
-                    <button type="button" className="btn ord-rm" title="De-allocate — return these boxes to free stock" onClick={() => void onDeallocate(a)}>✕</button>
+                    <button type="button" className="btn" title="Return boxes of this line to free stock" onClick={() => onDeallocate(a.orderItemId)}>Deallocate</button>
                   )}
                 </td>
               </tr>
@@ -391,6 +381,18 @@ export function OrderDetail() {
     !!head.salesOrderId && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit") && items.some((o) => o.producedQty < o.orderQty);
   const noStockReason =
     totalAvail > 0 ? "" : items.every((o) => o.palletizedQty >= o.orderQty) ? "Nothing left to palletize" : "Allocate stock to this order first";
+  // CR-297: Allocate / Deallocate are always on the Items card — greyed with the reason, never hidden.
+  const canDeallocate = !!head.salesOrderId && can("stages", "edit") && items.some((o) => o.producedQty > 0);
+  const stockWaiting = items.some((o) => ["Stock ready", "Partial stock"].includes(supplyById.get(o.id)?.status ?? ""));
+  const allocateReason = ["Draft", "PendingApproval"].includes(status)
+    ? "Approve the order first"
+    : ["Cancelled", "Rejected"].includes(status)
+      ? "Order is closed"
+      : items.every((o) => o.producedQty >= o.orderQty)
+        ? "Every line is fully allocated"
+        : !stockWaiting
+          ? "No free stock for these items yet"
+          : "";
   const changeStatus = async (next: string, label: string, reason?: string) => {
     if (!head.salesOrderId || statusBusy) return;
     setStatusBusy(true);
@@ -596,16 +598,20 @@ export function OrderDetail() {
               ...(head.salesOrderId && !["Draft", "PendingApproval"].includes(status) && can("stages", "edit")
                 ? [{ label: "New Loading", onClick: newLoading }]
                 : []),
-              // Request Panels (CR-286): showcase panels for this sale → Panel Orders queue as New Request.
+              // Request Panels (CR-286): showcase panels for this sale → Panel Orders queue as New.
               ...(head.salesOrderId && can("panel_craft", "create")
                 ? [{ label: "Request Panels", onClick: () => navigate(`/panel-orders/new?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
+                : []),
+              // Request Samples (CR-317): item samples for this sale → Sample Orders as New.
+              ...(head.salesOrderId && can("panel_craft", "create")
+                ? [{ label: "Request Samples", onClick: () => navigate(`/sample-orders/new?fromOrder=${encodeURIComponent(head.salesOrderId!)}`) }]
                 : []),
               // Allocate Stock (CR-199): hand free stock to this order's lines.
               ...(canAllocate
                 ? [{ label: "Allocate Stock", onClick: () => setAllocating(true) }]
                 : []),
               // Deallocate Stock (CR-263): return allocated boxes to free stock.
-              ...(head.salesOrderId && can("stages", "edit") && items.some((o) => o.producedQty > 0)
+              ...(canDeallocate
                 ? [{ label: "Deallocate Stock", onClick: () => setDeallocating("*") }]
                 : []),
               // ponytail: "Record New Production" retired here (CR-198) — production is
@@ -643,7 +649,7 @@ export function OrderDetail() {
       extraTabs={
         head.salesOrderId
           ? [
-              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onChanged={() => void load()} /> },
+              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onDeallocate={(id) => setDeallocating(id)} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
               { id: "panels", label: "Panel Orders", content: <SourcePanelOrders salesOrderId={head.salesOrderId} /> },
               {
@@ -686,11 +692,27 @@ export function OrderDetail() {
                open the same PalPlan screen scoped to this order. */}
             {/* Stock is waiting to be claimed — the one action that unblocks the rest. */}
             {/* Per line, not the header label — allocating one line moves the header
-               on while another line still has free stock to claim. */}
-            {canAllocate && items.some((o) => ["Stock ready", "Partial stock"].includes(supplyById.get(o.id)?.status ?? "")) && (
-              <button className="btn primary" onClick={() => setAllocating(true)} title="Hand free stock to this order's lines">
-                Allocate Stock
-              </button>
+               on while another line still has free stock to claim. CR-297: both
+               stock actions always sit here, greyed with the reason when not applicable. */}
+            {can("stages", "edit") && (
+              <>
+                <button
+                  className="btn primary"
+                  disabled={!canAllocate || !stockWaiting}
+                  onClick={() => setAllocating(true)}
+                  title={allocateReason || "Hand free stock to this order's lines"}
+                >
+                  Allocate Stock
+                </button>
+                <button
+                  className="btn"
+                  disabled={!canDeallocate}
+                  onClick={() => setDeallocating("*")}
+                  title={canDeallocate ? "Return allocated boxes to free stock" : "Nothing allocated to this order yet"}
+                >
+                  Deallocate Stock
+                </button>
+              </>
             )}
             <button
               className="btn"
@@ -848,6 +870,7 @@ export function OrderDetail() {
           title={[head.orderNumber || head.poNumber, head.party, deallocating !== "*" ? items.find((o) => o.id === deallocating)?.design : ""].filter(Boolean).join("  ·  ")}
           salesOrderId={head.salesOrderId}
           orderItemId={deallocating === "*" ? undefined : deallocating}
+          items={items}
           onDone={() => void load()}
           onClose={() => setDeallocating("")}
         />

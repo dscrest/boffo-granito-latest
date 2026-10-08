@@ -83,22 +83,33 @@ export function useContainerPlanBySo() {
   return { planBySo, designIdOf, defaultPalletFor };
 }
 
-/** First not-yet-Sent container of the SO's LATEST plan — what the next
-    loading is slated to carry. Plan-only loadings render this live instead
-    of their minted load_plan snapshot (which stays as the fallback), so a
-    plan edit shows everywhere immediately. null = no parseable plan.
-    ponytail: several simultaneously-planned loadings on one multi-container
-    plan all show this same "next" container — fine while group is unused. */
+/** Every not-yet-Sent container of the SO's LATEST plan, in plan order — what the next loadings are
+    slated to carry. Plan-only loadings render the first live instead of their minted load_plan
+    snapshot (which stays as the fallback), so a plan edit shows everywhere immediately. [] = no
+    parseable plan. ponytail: progress counts DISPATCHED boxes only, so Open loadings planned
+    earlier still list their container here; the multi-container page (CR-301) de-dupes within
+    its own session via each section's `planCi`, nothing more. */
+export type PlanSlice = { ci: number; lines: ContainerPlanLine[]; containerFormat?: string };
+export function unsentPlanContainers(
+  soId: string,
+  planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
+  plans: PalPlan[],
+  boxes: LoadBox[],
+  designIdOf: (name: string) => string,
+): PlanSlice[] {
+  const cp = soId ? planBySo.get(soId) : undefined;
+  if (!cp) return [];
+  const prog = planProgress(cp.plan, dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] })), designIdOf);
+  return cp.plan.containers.flatMap((c, ci) => (prog[ci]?.status !== "Sent" ? [{ ci, lines: c.lines, containerFormat: c.containerFormat }] : []));
+}
+
+/** The first unsent container (null = no plan / all sent). */
 export function nextPlanContainer(
   soId: string,
   planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
   plans: PalPlan[],
   boxes: LoadBox[],
   designIdOf: (name: string) => string,
-): { ci: number; lines: ContainerPlanLine[]; containerFormat?: string } | null {
-  const cp = soId ? planBySo.get(soId) : undefined;
-  if (!cp) return null;
-  const prog = planProgress(cp.plan, dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] })), designIdOf);
-  const ci = cp.plan.containers.findIndex((_, i) => prog[i]?.status !== "Sent");
-  return ci >= 0 ? { ci, lines: cp.plan.containers[ci].lines, containerFormat: cp.plan.containers[ci].containerFormat } : null;
+): PlanSlice | null {
+  return unsentPlanContainers(soId, planBySo, plans, boxes, designIdOf)[0] ?? null;
 }

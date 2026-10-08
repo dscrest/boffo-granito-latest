@@ -4,9 +4,10 @@
    PanelFormPage (/panels/new|:id/edit|:id/clone).
    Header: Panel Code (server-assigned PANEL-NNN on create, CR-280 —
    read-only here), Panel Size, Vinyl Size. Design lines: Design
-   picker → its Available Size auto-fills read-only; Cut Piece Size
-   picker offers "Create …" for a missing size (write-through to the
-   CutPieceSize master); Cut Piece Qty = pieces on the panel.
+   picker (CR-306: the Panel Items only) → its Available Size auto-fills
+   read-only; Cut Piece Size picker lists THAT item's cut pieces and offers
+   "Create …" (write-through to the CutPieceSize master + registered as a
+   cut piece of the item); Cut Piece Qty = pieces on the panel.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -16,6 +17,7 @@ import { FormPage, useFormSave } from "@/ui/FormPage";
 import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { createCutSize, listPanels, cachedCutSizes, type CutSizeOption, type PanelInput, type PanelRow } from "./panelsApi";
+import { cachedCutStockRows, listCutStock, saveCutPiece, type CutStockRow } from "./panelOrdersApi";
 
 interface LineDraft {
   design: string; // Design ROWID
@@ -57,21 +59,31 @@ export function PanelForm({
   );
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
+  const [pieces, setPieces] = useState<CutStockRow[]>(() => cachedCutStockRows() ?? []);
 
   useEffect(() => {
     void listDesigns().then((r) => r.ok && setDesigns(r.designs));
     void listPanels().then((r) => r.ok && setCutSizes(r.cutSizes));
+    void listCutStock().then((r) => r.ok && setPieces(r.rows));
   }, []);
 
   const designById = useMemo(() => new Map(designs.map((d) => [d.id, d])), [designs]);
+  // CR-306: only the Panel Items (designs with a cut-piece row) are offered.
+  const piecesByDesign = useMemo(() => {
+    const m = new Map<string, CutStockRow[]>();
+    for (const r of pieces) (m.get(r.designId) ?? m.set(r.designId, []).get(r.designId)!).push(r);
+    return m;
+  }, [pieces]);
   const designOptions = useMemo(
     () =>
       designs
-        .filter((d) => d.status !== "Inactive" && d.status !== "Discontinued")
+        .filter((d) => d.status !== "Inactive" && d.status !== "Discontinued" && piecesByDesign.has(d.id))
         .map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.sizeLabel || undefined })),
-    [designs],
+    [designs, piecesByDesign],
   );
-  const cutOptions = useMemo(() => cutSizes.map((c) => ({ value: c.id, label: c.label })), [cutSizes]);
+  const cutName = useMemo(() => new Map(cutSizes.map((c) => [c.id, c.label])), [cutSizes]);
+  const cutOptionsFor = (designId: string) =>
+    (piecesByDesign.get(designId) ?? []).map((r) => ({ value: r.cutSizeId, label: cutName.get(r.cutSizeId) || "—", hint: `${r.qty} on hand` }));
 
   const setLine = (i: number, patch: Partial<LineDraft>) => {
     form.touch();
@@ -91,6 +103,12 @@ export function PanelForm({
       return;
     }
     setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
+    // CR-306: the new size becomes a cut piece OF THIS ITEM (weight set later on Panel Items).
+    const design = lines[i]?.design;
+    if (design) {
+      const reg = await saveCutPiece({ design, cut_piece_size: res.rowid });
+      if (reg.ok) setPieces((prev) => [...prev, { id: reg.rowid || `${design}|${res.rowid}`, designId: design, cutSizeId: res.rowid!, qty: 0, weightKg: null, modifiedTime: "" }]);
+    }
     setLine(i, { cut_piece_size: res.rowid });
   };
 
@@ -182,8 +200,8 @@ export function PanelForm({
                 <Combobox
                   value={l.design}
                   options={designOptions}
-                  onChange={(v) => setLine(i, { design: v })}
-                  placeholder="Select design…"
+                  onChange={(v) => setLine(i, { design: v, ...(v !== l.design ? { cut_piece_size: "" } : {}) })}
+                  placeholder={designOptions.length ? "Select design…" : "Add items on Panel Items first"}
                   ariaLabel="Design"
                 />
               </label>
@@ -202,9 +220,9 @@ export function PanelForm({
                 {i === 0 && <span className="lbl">Cut Piece Size</span>}
                 <Combobox
                   value={l.cut_piece_size}
-                  options={cutOptions}
+                  options={cutOptionsFor(l.design)}
                   onChange={(v) => setLine(i, { cut_piece_size: v })}
-                  onCreate={(name) => void onCreateCutSize(i, name)}
+                  onCreate={l.design ? (name) => void onCreateCutSize(i, name) : undefined}
                   placeholder={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"}
                   ariaLabel="Cut piece size"
                 />

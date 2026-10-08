@@ -372,3 +372,23 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
   transition: border-color 0.1s;
 }
 .pc-job-card:hover { border-color: var(--border-mid); }
+
+/* ---- BoffoLoader (CR-293): the BOFFO wordmark as the processing indicator ---- */
+.boffo-loader { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+.boffo-loader-word {
+  font-family: var(--font-display); font-weight: 600; letter-spacing: 0.18em;
+  color: #EF7F1A; /* BOFFO logo orange (login.css), not the indigo --accent */
+  line-height: 1; white-space: nowrap;
+}
+.boffo-loader.md .boffo-loader-word { font-size: 22px; }
+.boffo-loader.sm .boffo-loader-word { font-size: 14px; }
+.boffo-loader-word span { display: inline-block; animation: boffo-wave 1.2s ease-in-out infinite; }
+.boffo-loader-label { font-size: var(--t-sm); color: var(--dim); }
+@keyframes boffo-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boffo-loader-word span { animation: boffo-fade 1.2s ease-in-out infinite; }
+  @keyframes boffo-fade { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+}

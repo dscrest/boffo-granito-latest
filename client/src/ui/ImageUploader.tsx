@@ -5,6 +5,7 @@
    ============================================================ */
 import { useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { BoffoLoader } from "@/ui/BoffoLoader";
 import { toast } from "@/ui/Toast";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
 import type { DesignImage } from "@/features/masters/designsApi";
@@ -67,19 +68,25 @@ export function ImageUploader({
       <div style={tile} title={value ? "Click to replace" : "Click or drop an image"} onClick={() => !busy && inputRef.current?.click()}>
         {value ? (
           <img src={designImageUrl(value.id)} alt={value.name || "image"} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        ) : busy ? (
+          <BoffoLoader size="sm" label="Uploading…" />
         ) : (
           <>
             <Icon name="upload" size={20} />
-            <span>{busy ? "Uploading…" : "Upload image"}</span>
+            <span>Upload image</span>
           </>
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         {value ? (
           <>
-            <span className="dim" style={{ fontSize: "var(--t-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }} title={value.name}>
-              {busy ? "Uploading…" : value.name || "Image"}
-            </span>
+            {busy ? (
+              <BoffoLoader size="sm" label="Uploading…" />
+            ) : (
+              <span className="dim" style={{ fontSize: "var(--t-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }} title={value.name}>
+                {value.name || "Image"}
+              </span>
+            )}
             <div style={{ display: "flex", gap: 6 }}>
               <button type="button" className="btn" disabled={busy} onClick={() => inputRef.current?.click()} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <Icon name="refresh" size={12} /> Replace

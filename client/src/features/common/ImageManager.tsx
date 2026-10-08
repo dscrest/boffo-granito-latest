@@ -8,6 +8,7 @@
    ============================================================ */
 import { useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { BoffoLoader } from "@/ui/BoffoLoader";
 import { toast } from "@/ui/Toast";
 import { confirmDialog } from "@/ui/ConfirmDialog";
 import { designImageUrl, uploadDesignImage } from "@/lib/api";
@@ -57,9 +58,9 @@ function ImageSlot({
               title={`Delete ${label}`}
               onClick={onDelete}
               disabled={busy}
-              style={{ position: "absolute", top: -8, right: -8, width: 20, height: 20, padding: 0, borderRadius: "50%", lineHeight: "18px", background: "var(--panel)" }}
+              style={{ position: "absolute", top: -8, right: -8, width: 20, height: 20, padding: 0, borderRadius: "50%", display: "grid", placeItems: "center", background: "var(--panel)" }}
             >
-              ✕
+              <Icon name="x" size={11} />
             </button>
           )}
         </div>
@@ -69,8 +70,15 @@ function ImageSlot({
           title={`Upload ${label}`}
           style={{ width: size, height: size, display: "flex", flexDirection: "column", gap: 4, alignItems: "center", justifyContent: "center", border: "1px dashed var(--border)", borderRadius: 8, fontSize: "var(--t-sm)", cursor: busy ? "wait" : "pointer" }}
         >
-          <Icon name="plus" size={14} />
-          {busy ? "Uploading…" : "Upload"}
+          {/* CR-293: processing = the BOFFO wordmark loader, never a bare glyph/filename. */}
+          {busy ? (
+            <BoffoLoader size="sm" label="Uploading…" />
+          ) : (
+            <>
+              <Icon name="plus" size={14} />
+              Upload
+            </>
+          )}
           <input
             type="file"
             accept="image/*"
@@ -125,8 +133,11 @@ export function ImageManager({
 
   const saveImages = async (next: DesignImage[]) => {
     setBusy(true);
-    await onSave(next);
-    setBusy(false);
+    try {
+      await onSave(next);
+    } finally {
+      setBusy(false); // CR-293: a throwing onSave no longer leaves the control stuck on "Uploading…"
+    }
   };
 
   /** Multi-select upload (2026-07 request): pick many at once, fill the
@@ -243,7 +254,7 @@ export function ImageManager({
               onClick={() => void deleteAt(i + fixedSlots)}
               title="Delete image"
             >
-              ✕
+              <Icon name="x" size={12} />
             </button>
           </div>
         ))}
@@ -255,8 +266,14 @@ export function ImageManager({
             className="btn"
             style={{ alignSelf: "flex-start", marginTop: 4, cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            <Icon name="plus" size={12} />
-            {busy ? "Uploading…" : "Add Image"}
+            {busy ? (
+              <BoffoLoader size="sm" />
+            ) : (
+              <>
+                <Icon name="plus" size={12} />
+                Add Image
+              </>
+            )}
             <input
               type="file"
               accept="image/*"
@@ -270,13 +287,17 @@ export function ImageManager({
             />
           </label>
         )}
-        {uploads.length > 0 && (
+        {/* CR-293: per-file list only in multi mode (the single tile already shows the loader);
+            icon states instead of bare glyphs. */}
+        {!single && uploads.length > 0 && (
           <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 3 }}>
-            <div className="muted" style={{ fontSize: "var(--t-sm)" }}>Uploading…</div>
+            <div className="muted" style={{ fontSize: "var(--t-sm)" }}>
+              Uploading {uploads.some((u) => u.status === "pending") ? uploads.findIndex((u) => u.status === "pending") + 1 : uploads.length} of {uploads.length}…
+            </div>
             {uploads.map((u, i) => (
               <div key={i} style={{ fontSize: "var(--t-sm)", display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ width: 12, textAlign: "center", color: u.status === "done" ? "var(--c-green)" : u.status === "error" ? "var(--c-red)" : "var(--dim)" }}>
-                  {u.status === "done" ? "✓" : u.status === "error" ? "✗" : "…"}
+                <span style={{ display: "inline-flex", color: u.status === "done" ? "var(--c-green)" : u.status === "error" ? "var(--c-red)" : "var(--dim)" }}>
+                  <Icon name={u.status === "done" ? "check" : u.status === "error" ? "x" : "clock"} size={12} />
                 </span>
                 <span className="dim" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</span>
               </div>

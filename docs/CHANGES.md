@@ -3,6 +3,216 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-08 — Sample Orders: a separate order type for customer samples (CR-315…317)
+
+**BUILT 2026-10-08 (tsc + build + self-check; LIVE schema: `SampleOrder`, `SampleOrderLine`); deploy + API drive + commit pending.**
+
+- **Sample Orders** (CR-315). Panel Craft gains a second order type: a customer's request for item
+  samples — a full tile or a cut piece of any item in the Item master — numbered SMP/FY/NNN, kept apart
+  from Panel Orders but linked to the same customer. New Sample Order is the Sales Order shape (item,
+  Full tile / Cut piece, cut size, qty, note); the order page shows Requested · Supplied · Remaining per
+  line. Edit and Delete only while nothing has gone out.
+- **Record Supply** (CR-316). One button on the order: date, note and how many of each line go out now —
+  partial supplies are fine, the status reads New / Partially Supplied / Supplied on its own. A cut-piece
+  sample comes off cut stock (Cut Stock history shows "Sample supplied"); a full tile is recorded only —
+  write the opened box off on Stock Adjustments with the "Sample / Display" reason.
+- **Request Samples + Customer Samples** (CR-317). "Request Samples" next to "Request Panels" on a Quote or
+  Sales Order pre-fills the customer and items; the Customer page gains a Samples section listing every
+  sample line with order, quantities, supplied date, status and source — the answer to "what did we send
+  this customer, how much, against which request?".
+
+---
+
+## 2026-10-07 — Cut-piece booking, production checkpoints, Pending Cut Stock (CR-312…314)
+
+**LIVE 2026-10-07 (functions + client; LIVE schema: `PanelOrder.checkpoints`, `PanelOrder.allocation`); API drive passed (28 checks, ZZT data removed); commit pending.**
+
+- **Cut pieces are booked to a panel order** (CR-312). The Requirements card shows Allocated and Short
+  (what must still be cut after this order's booking and the free pieces) and an Allocate Stock button:
+  one modal, type the booked figure per cut piece — higher books free pieces, lower releases them.
+  Free = on hand not booked by any open order. Dispatch now needs every piece booked; Ready books the
+  order's own cutting output automatically. A stock removal can no longer dip below what open orders hold.
+- **Production checkpoints** (CR-313). MDF (Pending · Ordered · Received · Ready), Vinyl Printing
+  (Pending · Printing · Ready) and Cut Pieces (Pending · Ready) are marked independently on the order page,
+  with who marked them and when; Overall Readiness reads Pending / In Progress / Ready for Production.
+  The orders sheet, kanban cards and dashboard show them.
+- **Pending Cut Stock** (CR-314). New Panel Craft page: per cut piece Required · On Hand · Booked · Free ·
+  Shortage · Orders, zero-stock items included, Short only / Zero stock only toggles. Cut Stock gains
+  Booked and Free columns; the dashboard shortage card links to the page.
+
+---
+
+## 2026-10-07 — Panel Craft as an inventory module: Panel Items, bulk cut stock, adjustments in both modules, MDF weight, filters, dashboard (CR-306…311)
+
+**LIVE 2026-10-07 (functions + client; LIVE schema: tables `CutStockEntry`, `Mdf`, `AdjustmentReason`; columns `CutPieceStock.weight_kg`, `PanelOrderLine.mdf`, `ProductionLog.reason`); API drive passed (22 checks, ZZT data removed); commit pending.**
+
+- **Panel Items** (CR-306). Panel Craft ▸ Panel Items lists the designs you picked from the Item master;
+  Add Item pulls one in with its full-size cut piece (weight = box weight ÷ pcs per box). Open an item to add,
+  weigh, or remove its cut pieces — the weight of a `600x600` cut is pre-filled from the tile's face share
+  and can be typed over. The Panel form now offers only these items and their cut pieces.
+- **Cut Stock is a list of cut-piece items** (CR-307): image, item, size, cut piece size, weight per piece,
+  on hand, stock weight. **Add Stock is a bulk sheet** with an Entry date (like Bulk Record Production);
+  the one-at-a-time modal is gone. Every movement is kept in a dated ledger (receipt, adjustment, cutting
+  output, dispatch) that the item page shows as Stock History.
+- **Inventory adjustments, both modules** (CR-308). Inventory ▸ Stock Adjustments lists every box-stock
+  correction; New Adjustment is a sheet (date, reason, note; Item · Batch · Add / Remove · Qty). Cut Stock ▸
+  Adjust Stock is the same sheet for cut pieces. Reasons come from the new Adjustment Reason master
+  (Breakage, Damaged in transit, Theft, Count correction, Sample / Display, Other). A removal can never go
+  below what is physically on hand; it warns when it eats into boxes a sales order reserved. On-hand
+  everywhere (Stock Details, Item STOCK card, reports, batch pickers, allocation) now includes adjustments.
+- **MDF per panel-order line + auto weight** (CR-309). New MDF master (Size · Thickness · Weight). Each line
+  on a panel order picks its MDF (defaulting to the one matching the panel size); the line and the order
+  show Weight = cut pieces × their weight + MDF, × qty.
+- **Pick from showcase filters** (CR-310): Design, Panel Size, Cut Piece Size and In stock only.
+- **Panel Craft dashboard** (CR-311): open / in-cutting / ready / short counts, cut stock pcs + kg,
+  pipeline strip, panels by status, orders per week, what is short, most-ordered panels, latest orders.
+
+---
+
+## 2026-10-07 — Requirements card drops the "Short:" sentence (CR-305)
+
+**LIVE 2026-10-07 (client only); commit pending.**
+
+- The long amber "Short: … have 0 of N" line is gone from the Requirements card. A short row's In Stock
+  figure is now red; the status chip and Dispatch button still explain the shortfall on hover.
+
+---
+
+## 2026-10-07 — Panel Order form picks panels from the showcase only (CR-304)
+
+**LIVE 2026-10-07 (client only); commit pending.**
+
+- **"Add panel" is gone.** Panels come in only through Pick from showcase, which already lets you tick
+  several tiles and press Done once; each ticked panel becomes a line with Qty 1.
+
+---
+
+## 2026-10-07 — Requirements rows name their panels (CR-303)
+
+**LIVE 2026-10-07 (client only); commit pending.**
+
+- **Panels column on the Requirements checklist.** Every design × cut size row on the panel order page now
+  lists which panels it serves and how many pieces each takes (`PANEL-001 ×1 · 456 ×2`); the codes open the
+  panel. Rows stay summed per design × cut size so the Available tick and In Stock keep their meaning.
+- The form's Cut Piece Stock Check carries the same panel suffix.
+
+---
+
+## 2026-10-07 — Panel Orders hold several panels, like a Sales Order (CR-302)
+
+**LIVE 2026-10-07 (functions + client; schema live, legacy rows migrated); drive + commit pending.**
+
+- **One order, many panels.** A Panel Order is now a customer order with a line per showcase panel
+  (Panel + Qty), numbered `PNL/2026-27/NNN`. Earlier, every panel was its own order.
+- **Form like the Sales Order.** Order Details on top; a Panels table below with Add panel / Pick from
+  showcase, a total of panels and pieces, and the cut-piece stock check summed across all lines.
+  Edit and Clone are full pages (`/panel-orders/:id/edit`, `/:id/clone`).
+- **Detail like the Sales Order.** PNL number + status, customer link, Edit · stage buttons · More
+  (Clone, Delete) on the right; an Items card lists the panels; the Requirements checklist sums every
+  line. Edit and Delete work only while the order is New or Received — once cutting starts they are
+  greyed with the reason.
+- **Stock moves per order.** Ready adds, Dispatch deducts, the pieces of ALL lines at once; Dispatch
+  still refuses when any piece is short.
+- Grid, board, the Panel Orders tab on Quote / SO, the Panel detail and the Customer section each show
+  one row per order with its panel codes and total quantity.
+
+---
+
+## 2026-10-07 — New Loading holds several containers (CR-301)
+
+**LIVE 2026-10-07 (functions + client); drive + commit pending.**
+
+- **One section per container.** New Loading shows `Container 1`, `Container 2`, … each with its own
+  Container Master pick in the header, its own Item Table, its own Loading Details | Vehicle Details.
+  **+ Add Container** adds one; ✕ removes one. The footer totals the containers.
+- **Shared stock.** Pallets one container took are gone from the others, so an item can be split
+  10 + 20 pallets across two containers and nothing can be loaded twice.
+- **Fill from plan, one container per click.** Each section offers the order's next planned container
+  no other section has taken, and starts on that container's format.
+- **One Save, N loadings.** Each container becomes its own LOAD/… loading with its own vehicle; they are
+  linked (the grid shows `C1/2`, `C2/2`; a loading's page lists its siblings). Server: the line-attach
+  route now reports the remainder a partial load splits off, which the next container loads.
+- Edit Loading is unchanged: one container.
+
+---
+
+## 2026-10-07 — Container column on the planner rows (CR-300)
+
+**LIVE 2026-10-07; browser drive + commit pending.**
+
+- **Where the container is picked.** Plan Containerisation (Quote + SO) now has a **Container** column
+  right after Pallet Type on every item row. The toolbar strip of CR-274 is removed.
+- **Each row picks its own container, narrowed by pallet.** A row lists the Container Master containers of
+  its size that are built from the row's chosen pallet (none use it → all of the size); default = the
+  largest of those. Two items of one size may pack into different containers; the plan repacks live.
+- **Saved per container.** The pick persists as the `containerFormat` each container already carried since
+  CR-274 and reseeds per row on reopen; the plan-level `formats` key is no longer written. The Container
+  Planning tab and the loading prefills read per container, so they keep working unchanged.
+
+## 2026-10-07 — "Palletized" chip; Ready for Palletization is the queue only (CR-299)
+
+**LIVE 2026-10-07; commit pending.**
+
+- **Chip.** A recorded slice of a partially palletized item now wears **Palletized** (was Recorded);
+  the unrecorded rows still read Partial.
+- **No All on Ready for Palletization.** `/packing` lists only its queue — the status dropdown has no
+  All option, so palletized rows never appear there. They live under In Palletization (which keeps
+  All) and Ready for Loading on Loading and Dispatch.
+
+## 2026-10-07 — Item STOCK card: Awaiting palletization + drill-downs that work (CR-298)
+
+**LIVE 2026-10-07; commit pending.**
+
+- **Awaiting palletization.** A new row between In production and In loading: boxes an order owns
+  (produced or allocated) that are not on a pallet yet, with a per-order drill-down. Available stock
+  now itemises on screen — 520 = 40 awaiting + 480 in loading.
+- **Bug.** The In loading drill-down (and Overview's "Open quantity across orders") always showed
+  nothing: Item detail matched orders on the full item label while the number came from the plain
+  design name. One key now.
+
+## 2026-10-07 — Deallocate part of an allocation; stock buttons always visible (CR-297)
+
+**LIVE 2026-10-07 (client + functions); commit pending.**
+
+- **Partial deallocate.** Each allocation row in Deallocate Stock has a Return box (default the whole
+  row, capped at allocated − palletised) and a Deallocate button; "5 of 520" trims the row to 515 and
+  frees 5. The confirm spells out the split; an amber note flags boxes already palletised.
+  `/deallocate-stock/:rowid` accepts `boxes`; without it the whole row goes, as before.
+- **Buttons.** Allocate Stock and Deallocate Stock sit side by side on the SO Items card for every
+  stages editor, greyed with the reason rather than hidden. The Production tab's ✕ opens the same modal.
+
+## 2026-10-07 — Panel Craft: born New, Available / Unavailable, no Panels tab (CR-294…296)
+
+**LIVE 2026-10-07 (client + functions); commit pending.**
+
+- **Born "New" (CR-294).** Every panel order starts at the first stage, relabelled "New" (chip
+  `NEW`) — direct orders no longer start as Received. Accept moves it to Received. The stored value
+  is still `NewRequest`; the server's insert rule accepts only that now.
+- **Stock column (CR-295).** `/panel-orders` reads `Available` / `Unavailable · n` instead of
+  `Covered` / `Short · n`; the pieces still sit in the tooltip.
+- **Item detail (CR-296).** Overview | Production only; the Panels tab is hidden. Customer detail
+  keeps its Showcase Panels section.
+
+## 2026-10-07 — Upload shows a BOFFO processing state (CR-293)
+
+**LIVE 2026-10-07; commit pending.**
+
+- **BOFFO loader.** New `BoffoLoader` (`ui/BoffoLoader.tsx`): the BOFFO wordmark with its letters
+  pulsing in sequence, the house indicator for anything that waits on a request.
+- **Image upload.** The Item / Panel image tile shows the loader + "Uploading…" while the file goes
+  up. The old `…` glyph + raw filename rows are gone from the single-slot Panel tile; the Item
+  master's multi-upload list reads "Uploading N of M…" with check / x / clock icons. Box Brand
+  logo tile and the sign-in "checking" screen use the same loader. A failed save no longer leaves
+  the tile stuck on "Uploading…".
+
+## 2026-10-07 — Container name spells out the pallet lines (CR-292)
+
+**LIVE 2026-10-07; commit pending.**
+
+- **Container Master auto-name.** `800x1600 - GVT - 2 · [(48*10) + (10*6)] = 540 boxes`: one
+  `(boxes per pallet * pallets per container)` term per pallet line, then the box total. The old
+  `16 pallets = 540 boxes` form is gone from new saves; existing rows keep their name until re-saved.
+
 ## 2026-10-06 (night, Panel Craft) — one image per panel (CR-291)
 
 **Deployed live (client); committed `dd54401`.**
@@ -41,7 +251,7 @@ placeholder change for CR-289.**
 
 ## 2026-10-06 (late, Panel Craft) — Add Stock, row-click grid + photo view, PANEL numbers, Panel form page (CR-282…285)
 
-**Built; deploy (client + functions) + commit pending.**
+**LIVE 2026-10-07 (client + functions); committed `dd54401`.**
 
 - **"Add Stock."** The cut-piece stock button on Panel Orders and Cut Stock, and its dialog title, now say
   Add Stock. Wording only; the dialog still sets the on-hand for a design + cut size.
@@ -59,7 +269,7 @@ placeholder change for CR-289.**
 
 ## 2026-10-06 (late) — Palletization pages read in pallets; partial remainder re-queues (CR-278…281)
 
-**Built; deploy (client + functions) + commit pending.**
+**LIVE 2026-10-07 (client + functions); committed `dd54401`.**
 
 - **Each page shows its own rows.** Ready for Palletization opens on the queue, In Palletization opens on
   its own rows plus the recorded (not yet loaded) ones; "All" is still in the dropdown as the overview.
@@ -73,7 +283,7 @@ placeholder change for CR-289.**
 
 ## 2026-10-06 (night) — Form rows tightened: label gap, one-control-wide full rows, Notes boxes (CR-277)
 
-**Built; deploy + commit pending.**
+**LIVE 2026-10-07; committed `dd54401`.**
 
 - **Label hugs its control.** The label column on every form page is now only as wide as the longest
   label in that section (capped where it was), so *Name* no longer sits a hand's width from its box.
@@ -85,7 +295,7 @@ placeholder change for CR-289.**
 
 ## 2026-10-06 (evening) — Zoho-style form layout + Customer search modal (CR-275, CR-276)
 
-**Built; deploy + commit pending.**
+**LIVE 2026-10-07; committed `dd54401`.**
 
 - **Every form page** (Quote, Sales Order, Item, Pallet, Container Master, Customer, Production,
   Palletization, New Loading) now lays its header fields out label-left / control-right, two pairs per
@@ -127,7 +337,7 @@ placeholder change for CR-289.**
 
 ## 2026-10-03 (evening) — SO Delete obeys "work recorded"; DATA-FLOW.md (CR-271, CR-272)
 
-**Built; deploy + commit pending.**
+**LIVE 2026-10-07; committed `dd54401`.**
 
 - **Sales Order ▸ Delete**: refused once any line has work (allocated / palletised / loaded /
   dispatched / on a plan) — "Work is recorded on this order — it can't be deleted. Cancel it

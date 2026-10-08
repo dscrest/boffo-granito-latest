@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
 import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
-import { cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
+import { cachedAdjustedByDesign, cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { designStock, openingStockFor, type DesignStock } from "@/lib/stock";
 import { fmt } from "@/lib/format";
 import { InProductionModal } from "@/features/stages/InProductionModal";
@@ -20,9 +20,10 @@ export function useStockLookup(): (designName: string) => DesignStock {
   const { designRows } = useMasters();
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
+  const [adjustedByDesign, setAdjustedByDesign] = useState<Map<string, number>>(() => cachedAdjustedByDesign());
   useEffect(() => {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
-    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
+    void listBatchStock().then((r) => { if (r.ok) { setOpeningByDesign(r.openingByDesign); setAdjustedByDesign(r.adjustedByDesign); } });
   }, []);
   // First row per name — same pick as the old designRows.find().
   const designByName = useMemo(() => {
@@ -39,7 +40,7 @@ export function useStockLookup(): (designName: string) => DesignStock {
   return (designName: string) => {
     const opening = openingStockFor(designByName.get(designName), openingByDesign);
     allocBy ??= cachedAllocByDesign();
-    return designStock(designName, { openingStock: opening, allocated: allocBy.get(designName), orders, prodLogs });
+    return designStock(designName, { openingStock: opening, adjusted: adjustedByDesign.get(designName), allocated: allocBy.get(designName), orders, prodLogs });
   };
 }
 

@@ -5,7 +5,8 @@
 import { Icon } from "@/ui/Icon";
 import type { ChipTone } from "@/ui/Chip";
 import { designImageUrl } from "@/lib/api";
-import type { PanelOrderStatus } from "./panelOrdersApi";
+import type { PanelOrderStatus, Readiness } from "./panelOrdersApi";
+import type { SampleOrderStatus } from "./sampleOrderStatus";
 import type { PanelRow } from "./panelsApi";
 
 export const ORDER_STATUS_TONE: Record<PanelOrderStatus, ChipTone> = {
@@ -14,6 +15,13 @@ export const ORDER_STATUS_TONE: Record<PanelOrderStatus, ChipTone> = {
   InCutting: "blue",
   Ready: "teal",
   Dispatched: "green",
+};
+
+/** CR-315: sample order status → chip tone. */
+export const SAMPLE_STATUS_TONE: Record<SampleOrderStatus, ChipTone> = {
+  New: "slate",
+  PartiallySupplied: "amber",
+  Supplied: "green",
 };
 
 export function IconBtn({
@@ -123,3 +131,13 @@ export function PanelTile({
     </button>
   );
 }
+
+/* CR-313: production-readiness chip tones (derived readiness + per-checkpoint status). */
+export const READINESS_TONE: Record<Readiness, ChipTone> = {
+  Pending: "slate",
+  "In Progress": "amber",
+  "Ready for Production": "green",
+  "—": "gray",
+};
+export const checkpointTone = (status: string): ChipTone =>
+  status === "Ready" ? "green" : status === "Pending" ? "slate" : status === "Received" ? "blue" : "amber";

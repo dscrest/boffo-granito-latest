@@ -13,26 +13,39 @@ import type { LoadBox, LoadingCapture } from "./palPlansApi";
 
 export type VehicleDraft = { vehicle_number: string; driver_name: string; mobile_number: string };
 
+/** The seed of one container's details — blank, or a LoadBox's current values. Pure, so the
+    multi-container page (CR-301) can hold N of these without N hooks. */
+export function blankDetails(
+  initialVehicle?: Pick<LoadBox, "vehicleNumber" | "driverName" | "mobileNumber">,
+  initialCapture?: LoadingCapture,
+): { vehicle: VehicleDraft; capture: LoadingCapture } {
+  return {
+    vehicle: {
+      vehicle_number: initialVehicle?.vehicleNumber || "",
+      driver_name: initialVehicle?.driverName || "",
+      mobile_number: initialVehicle?.mobileNumber || "",
+    },
+    capture: {
+      container_number: initialCapture?.container_number || "",
+      line_seal: initialCapture?.line_seal || "",
+      electronic_seal: initialCapture?.electronic_seal || "",
+      loading_supervisor: initialCapture?.loading_supervisor || "",
+      container_size: initialCapture?.container_size || "",
+      container_format: initialCapture?.container_format || "",
+      transporter: initialCapture?.transporter || "",
+      lr_number: initialCapture?.lr_number || "",
+      destination: initialCapture?.destination || "",
+    },
+  };
+}
+
 export function useLoadDetails(
   initialVehicle?: Pick<LoadBox, "vehicleNumber" | "driverName" | "mobileNumber">,
   initialCapture?: LoadingCapture,
 ) {
-  const [vehicle, setVehicle] = useState<VehicleDraft>({
-    vehicle_number: initialVehicle?.vehicleNumber || "",
-    driver_name: initialVehicle?.driverName || "",
-    mobile_number: initialVehicle?.mobileNumber || "",
-  });
-  const [capture, setCapture] = useState<LoadingCapture>({
-    container_number: initialCapture?.container_number || "",
-    line_seal: initialCapture?.line_seal || "",
-    electronic_seal: initialCapture?.electronic_seal || "",
-    loading_supervisor: initialCapture?.loading_supervisor || "",
-    container_size: initialCapture?.container_size || "",
-    container_format: initialCapture?.container_format || "",
-    transporter: initialCapture?.transporter || "",
-    lr_number: initialCapture?.lr_number || "",
-    destination: initialCapture?.destination || "",
-  });
+  const seed = blankDetails(initialVehicle, initialCapture);
+  const [vehicle, setVehicle] = useState<VehicleDraft>(seed.vehicle);
+  const [capture, setCapture] = useState<LoadingCapture>(seed.capture);
   return {
     vehicle,
     capture,
@@ -57,8 +70,9 @@ export const captureOf = (b: LoadBox): LoadingCapture => ({
 export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned, part }: ReturnType<typeof useLoadDetails> & {
   /** Hide the fields the Loading Sheet owns (Vehicle No., Container No., seals, LR). */
   sheetOwned?: boolean;
-  /** Loading page (CR-247) renders the ONE field set in two places: "details" on top
-      (Size, Destination, Transporter, Supervisor), "vehicle" at the bottom (vehicle + container/seals/LR).
+  /** Loading page (CR-247) renders the ONE field set in two places per container: "details"
+      (Size, Destination, Transporter, Supervisor — Container is picked in the section header, CR-301),
+      "vehicle" (vehicle + container/seals/LR).
       Omitted = everything, as in VehicleLoadModal. Returns bare fields for the caller's .form-grid. */
   part?: "details" | "vehicle";
 }) {
@@ -114,10 +128,10 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
       />
     </label>
   );
+  // "details" has no Container: the loading page's section header owns that pick (CR-301).
   if (part === "details")
     return (
       <>
-        {container}
         {size}
         {text("Destination / Port", "destination", "Port / city")}
         {text("Transporter", "transporter", "Carrier company")}

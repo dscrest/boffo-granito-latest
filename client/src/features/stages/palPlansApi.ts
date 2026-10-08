@@ -593,7 +593,8 @@ export function setLineBox(lineId: string, box: string, boxes?: number) {
     call — one bad line rejects the whole batch server-side. */
 export function setLinesBox(box: string, entries: { lineId: string; boxes?: number }[]) {
   return bust(
-    op<{ ROWID: string; lines: number }>("pal-lines-box", {
+    // CR-301: `remainders` (entry order) = the Ready remainder id a partial load split off, null when the line went whole.
+    op<{ ROWID: string; lines: number; remainders?: { id: string; remainder: string | null }[] }>("pal-lines-box", {
       box,
       lines: entries.map((e) => ({ id: e.lineId, ...(e.boxes !== undefined ? { boxes: e.boxes } : {}) })),
     }),

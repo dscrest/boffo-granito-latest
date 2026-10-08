@@ -6,7 +6,7 @@
    singular items keep a single Design.accounting_stock number; batch-tracked
    items carry it as ProductionLog entry_type="opening" rows (summed per design
    by batchStockApi). Use openingStockFor() to read the right one per item.
-     available     = opening + produced − loaded
+     available     = opening + adjusted + produced − loaded   (adjusted = signed stock adjustments, CR-308)
      inProduction  = boxes on an OPEN production order not yet produced
                      (New/InProduction ProductionLog lines, per line remaining).
                      Crucially NOT "ordered − produced" on SO lines — merely
@@ -16,6 +16,8 @@
                      (output recorded or dragged out of New). Manual "PR-…"
                      requests count from creation.
      inLoading     = palletised boxes waiting to be loaded.
+     awaitingPalletization = boxes an order line owns (produced / allocated)
+                     that are not on a pallet yet (CR-298).
    ============================================================ */
 import type { Order } from "@/data";
 import type { ProductionEntry } from "@/features/stages/productionApi";
@@ -47,6 +49,7 @@ export interface DesignStock {
   inProduction: number; // committed to production, not yet produced
   inProductionOrders: InProductionOrder[]; // that total, broken down per SO
   inLoading: number; // palletised, awaiting loading
+  awaitingPalletization: number; // owned by an order line, not yet palletised (CR-298)
   available: number; // opening + produced − loaded (physically on hand)
   free: number; // available − boxes order items already own but have not loaded (CR-199)
 }
@@ -55,9 +58,9 @@ export interface DesignStock {
     lists — filtering by design name happens here. */
 export function designStock(
   designName: string,
-  opts: { openingStock?: number; allocated?: number; orders: Order[]; prodLogs: ProductionEntry[] },
+  opts: { openingStock?: number; adjusted?: number; allocated?: number; orders: Order[]; prodLogs: ProductionEntry[] },
 ): DesignStock {
-  const { openingStock = 0, allocated = 0, orders, prodLogs } = opts;
+  const { openingStock = 0, adjusted = 0, allocated = 0, orders, prodLogs } = opts;
   // Key on the plain design_name — the shared stock key. Order.design is the
   // full unique label (name · size · finish) for display, so match on
   // Order.designName (plain), which lines up with ProductionEntry.design.
@@ -104,7 +107,8 @@ export function designStock(
     inProduction,
     inProductionOrders,
     inLoading: ords.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
-    available: openingStock + producedTot - loadedTot,
-    free: Math.max(0, openingStock + producedTot - loadedTot - ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.loadedQty), 0)),
+    awaitingPalletization: ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.palletizedQty), 0),
+    available: openingStock + adjusted + producedTot - loadedTot,
+    free: Math.max(0, openingStock + adjusted + producedTot - loadedTot - ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.loadedQty), 0)),
   };
 }

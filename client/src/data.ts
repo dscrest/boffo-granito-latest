@@ -257,7 +257,7 @@ export interface ContainerPlan {
   v: 1;
   mode?: "boxes" | "weight"; // fitting basis; absent on older plans (= weight)
   tonCapacity?: number; // weight mode: per-container weight cap the plan was packed at (default 28)
-  formats?: Record<string, string>; // box mode: Size ROWID → ContainerFormat ROWID picked in the planner (CR-274); absent = size's largest
+  formats?: Record<string, string>; // LEGACY (CR-274 plans only): Size ROWID → ContainerFormat ROWID; since CR-300 the pick is per container (`containerFormat`) and this key is no longer written
   containers: ContainerPlanContainer[];
 }
 /** Parse a Quote.containerPlan JSON string; null when absent/invalid. */

@@ -70,6 +70,14 @@ const STOCK_COLUMNS: ColumnDef<BatchStockRow>[] = [
     style: { textAlign: "right" },
     render: (r) => fmt(r.loaded),
   },
+  // CR-308: Σ signed stock adjustments (breakage, count correction…) on this batch.
+  {
+    key: "adjusted",
+    label: "Adjusted",
+    className: "num mono muted",
+    style: { textAlign: "right" },
+    render: (r) => (r.adjusted ? <span style={r.adjusted < 0 ? { color: "var(--c-red)" } : undefined}>{fmt(r.adjusted)}</span> : dash),
+  },
 ];
 
 export function StockDetails() {
@@ -81,6 +89,7 @@ export function StockDetails() {
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("stockTableColumns", STOCK_COLUMNS, [
     "produced",
     "loaded",
+    "adjusted",
   ]);
 
   const load = async () => {

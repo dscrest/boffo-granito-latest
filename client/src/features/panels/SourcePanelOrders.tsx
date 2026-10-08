@@ -1,7 +1,8 @@
 /* ============================================================
    Panel Orders raised from one Quote / Sales Order (CR-286) — the
-   "Panel Orders" tab on QuoteDetail and OrderDetail. Read-only list;
-   a row opens the panel order (status is changed there, CR-287).
+   "Panel Orders" tab on QuoteDetail and OrderDetail. Read-only list,
+   one row per order (CR-302: an order holds several panels); a row
+   opens the panel order (status is changed there, CR-287).
    ============================================================ */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -39,16 +40,17 @@ export function SourcePanelOrders({ salesOrderId, quoteId }: { salesOrderId?: st
         <table className="tbl">
           <thead>
             <tr>
-              <th>Panel</th>
+              <th>Order No</th>
+              <th>Panels</th>
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
-              <th>Sales Person</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((o) => {
               const to = `/panel-orders/${encodeURIComponent(o.id)}`;
+              const codes = o.lines.map((l) => l.panelCode).join(", ");
               return (
                 <tr
                   key={o.id}
@@ -60,15 +62,15 @@ export function SourcePanelOrders({ salesOrderId, quoteId }: { salesOrderId?: st
                     if (e.key === "Enter" && e.target === e.currentTarget) navigate(to);
                   }}
                 >
-                  <td className="mono">
+                  <td className="mono">{o.orderNumber || "—"}</td>
+                  <td>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <ImageThumb images={panelById.get(o.panelId)?.images ?? []} alt={o.panelCode} />
-                      {o.panelCode}
+                      <ImageThumb images={panelById.get(o.lines[0]?.panelId ?? "")?.images ?? []} alt={codes} />
+                      <span className="mono" title={codes}>{codes || "—"}</span>
                     </span>
                   </td>
-                  <td className="num mono">{fmt(o.qty)}</td>
+                  <td className="num mono">{fmt(o.totalQty)}</td>
                   <td className="mono muted">{o.orderDate || "—"}</td>
-                  <td>{o.salesperson || "—"}</td>
                   <td>
                     <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />
                   </td>

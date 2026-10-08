@@ -20,7 +20,7 @@ import { toast } from "@/ui/Toast";
 import { fmt } from "@/lib/format";
 import { listMaster, type MasterRow } from "@/features/masters/mastersApi";
 import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill";
-import { groupReady, openLines, palletsOfLine, partialNote, spreadPallets, spreadQty, type DesignRow, type PickLine, type SoBand } from "./newLoadingRows";
+import { groupReady, loadPlanJson, openLines, partialNote, pickEntries, pickTotals, planFill, spreadPallets, spreadQty, type DesignRow, type PickLine, type SoBand } from "./newLoadingRows";
 import { SessionSheetView } from "./SessionSheetView";
 import {
   boxFill,
@@ -125,34 +125,21 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
       toast.error("Every planned container of this order is already sent");
       return [];
     }
-    const want = new Map<string, number>();
-    for (const ln of slice.lines) want.set(designIdOf(ln.design), (want.get(designIdOf(ln.design)) || 0) + ln.boxes);
-    const filled: { rowKey: string; lineId: string }[] = [];
-    for (const row of band.designs) {
-      if (!want.has(row.designId)) continue;
-      setDesign(row, want.get(row.designId)!);
-      for (const [lineId, n] of spreadQty(openLines(row), want.get(row.designId)!)) if (n > 0) filled.push({ rowKey: row.key, lineId });
-    }
-    return filled;
+    const m = planFill(slice.lines, band, designIdOf);
+    merge(m);
+    return band.designs.flatMap((row) => openLines(row).filter((l) => (m.get(l.id) || 0) > 0).map((l) => ({ rowKey: row.key, lineId: l.id })));
   };
 
   // anyCustomer: picks outlive the Customer filter, so count them over every band.
-  const picked = (anyCustomer ? allBands : bands).flatMap((b) => b.designs.flatMap(openLines)).filter((l) => (qty.get(l.id) || 0) > 0);
-  const totalBoxes = picked.reduce((s, l) => s + qty.get(l.id)!, 0);
-  const totalPallets = picked.reduce((s, l) => s + palletsOfLine(qty.get(l.id)!, l.boxesPerPallet), 0);
+  const scope = anyCustomer ? allBands : bands;
   // Share of a container (boxFill idiom): already loaded + picked — advisory, never blocks (CR-195).
   const capOf = (l: PalPlanLine) => capacityOverride || l.palletCapacity;
   const loadedFill = capacityOverride ? boxLines.reduce((s, l) => s + l.boxes / capacityOverride, 0) : boxFill(boxLines);
-  const fill = loadedFill + picked.reduce((s, l) => (capOf(l) > 0 ? s + qty.get(l.id)! / capOf(l) : s), 0);
-  const over = fill > 1.001;
+  const { picked, boxes: totalBoxes, pallets: totalPallets, fill, over } = pickTotals(scope, qty, capOf, loadedFill);
 
-  const entriesOf = () => picked.map((l) => ({ lineId: l.id, ...(qty.get(l.id)! < l.boxes ? { boxes: qty.get(l.id)! } : {}) }));
+  const entriesOf = () => pickEntries(scope, qty);
   /** load_plan snapshot of the picks — keeps Planned rows rendering if the line assignment fails. */
-  const loadPlan = () =>
-    JSON.stringify({
-      v: 1,
-      lines: picked.map((l) => ({ so: l.salesOrderId, design: l.designLabel, batch: l.batchNumber, boxes: qty.get(l.id)!, palletId: l.palletId })),
-    }).slice(0, 10000);
+  const loadPlan = () => loadPlanJson(scope, qty);
   /** The single-page session's Save: land the picks in `boxId`. "" = ok / nothing picked. */
   const saveAdds = async (boxId: string): Promise<string> => {
     const entries = entriesOf();
@@ -217,7 +204,7 @@ export function useSessionPick({ plans, boxes, box, presetSalesOrderId, anyCusto
 
   return {
     brandName, customers, customerId, showRail, pickCustomer, bands, allBands, qty, setLine, setDesign, setDesignPallets, fillFromPlan, planNext,
-    planBySo, boxLines, picked, totalBoxes, totalPallets, fill, over, busy, onSave, saveAdds, loadPlan,
+    planBySo, designIdOf, boxLines, picked, totalBoxes, totalPallets, fill, over, busy, onSave, saveAdds, loadPlan,
   };
 }
 

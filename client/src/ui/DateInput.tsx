@@ -85,13 +85,14 @@ export function DateInput({ value = "", onChange, min, max, style, disabled, ...
   const sel: CSSProperties = { fontSize: 12, height: 24, padding: "0 20px 0 6px", backgroundPosition: "right 5px center" };
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex", width: style?.width }}>
+    <div ref={ref} style={{ position: "relative", display: "inline-flex", width: style?.width ?? 150 /* fits dd/mm/yyyy; callers widen explicitly */ }}>
       <input
         type="text"
         inputMode="numeric"
         placeholder="dd/mm/yyyy"
         value={text}
         disabled={disabled}
+        onClick={() => { if (!pos) openCal(); }}
         onChange={(e) => setText(e.target.value)}
         onBlur={commitText}
         onKeyDown={(e) => { if (e.key === "Enter") { commitText(); setPos(null); } if (e.key === "Escape") setPos(null); }}

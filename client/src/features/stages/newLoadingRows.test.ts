@@ -1,7 +1,7 @@
 /* Self-check for newLoadingRows — run with:  npx tsx client/src/features/stages/newLoadingRows.test.ts
    Plain asserts, no framework (same style as allocateFifo.test.ts). */
 import assert from "node:assert";
-import { batchSummary, groupReady, itemOptions, openLines, palletBoxesLabel, palletSplit, palletsOfLine, pickerEntries, readyLabel, spreadPallets, spreadQty } from "./newLoadingRows";
+import { batchSummary, groupReady, itemOptions, loadPlanJson, openLines, palletBoxesLabel, palletSplit, palletsOfLine, pickEntries, pickTotals, pickerEntries, planFill, readyLabel, scopeBands, spreadPallets, spreadQty } from "./newLoadingRows";
 import type { PalPlanLine } from "./palPlansApi";
 
 const line = (p: Partial<PalPlanLine>): PalPlanLine =>
@@ -87,5 +87,25 @@ const entries = pickerEntries(groupReady(mixed, () => true));
 assert.deepStrictEqual(entries.map((e) => [e.key, e.mixed, e.boxes]), [["g1", true, 32], ["m3", false, 10]]);
 assert.deepStrictEqual(entries[0].lines.map((p) => [p.line.id, p.rowKey]), [["m1", "20|grey"], ["m2", "20|nero"]]);
 assert.strictEqual(pickerEntries(bands).every((e) => !e.mixed), true);
+
+// Multi-container (CR-301): another container's picks shrink what this one sees; 0 drops the line / design / band.
+const other = new Map([["a", 150], ["b", 20], ["d", 80]]);
+const scoped = scopeBands(bands, other);
+assert.deepStrictEqual(scoped.map((b) => b.salesOrderId), ["10"]); // SO 11's only line is used up
+assert.deepStrictEqual(scoped[0].designs.map((r) => [r.key, r.ready]), [["10|grey", 30], ["10|nero", 300]]);
+assert.deepStrictEqual(openLines(scoped[0].designs[0]).map((l) => [l.id, l.boxes]), [["b", 30]]);
+assert.strictEqual(openLines(grey)[0].boxes, 150); // the originals are untouched
+assert.strictEqual(scopeBands(bands, new Map()).length, bands.length);
+// Totals / entries / plan over ONE container's qty; `boxes` always sent (a scoped line is not the stored line).
+const q = new Map([["a", 150], ["b", 20], ["zzz", 5]]);
+const t = pickTotals(bands, q, () => 200);
+assert.deepStrictEqual([t.boxes, t.pallets, Math.round(t.fill * 100), t.over], [170, 2, 85, false]);
+assert.deepStrictEqual(pickEntries(bands, q), [{ lineId: "a", boxes: 150 }, { lineId: "b", boxes: 20 }]);
+const lp = JSON.parse(loadPlanJson(bands, q, { id: "p", no: 2, of: 3 }));
+assert.deepStrictEqual([lp.lines.length, lp.lines[0].boxes, lp.group], [2, 150, { id: "p", no: 2, of: 3 }]);
+assert.strictEqual("group" in JSON.parse(loadPlanJson(bands, q)), false);
+// Fill from plan: planned boxes per design FIFO over the band's lines, capped by what they hold.
+const pf = planFill([{ design: "GREY", boxes: 170 }, { design: "GREY", boxes: 10 }, { design: "nope", boxes: 9 }], bands[1], (n) => n.toLowerCase());
+assert.deepStrictEqual([...pf], [["a", 150], ["b", 30]]);
 
 console.log("newLoadingRows self-check passed");

@@ -176,3 +176,60 @@ export function pickerEntries(bands: SoBand[]): PickEntry[] {
   }
   return out;
 }
+
+/* ---- Multi-container New Loading (CR-301): one picks Map per container, the Ready stock shared.
+   Every helper is pure over (bands, qty) so the page's N sections and the CR-227 trial hook share them. ---- */
+
+/** The bands as ONE container sees them: boxes other containers already picked are gone — lines at 0
+    dropped, `ready` recomputed, empty designs/bands dropped. Lines are CLONED (reduced `boxes`), so a
+    section must use ITS scoped rows everywhere (options, picker, spreads, identity checks). */
+export function scopeBands(bands: SoBand[], otherUse: Map<string, number>): SoBand[] {
+  return bands.flatMap((b) => {
+    const designs = b.designs.flatMap((r) => {
+      const lines = r.lines.flatMap((p) => {
+        const left = p.line.boxes - (otherUse.get(p.line.id) || 0);
+        return left > 0 ? [{ ...p, line: { ...p.line, boxes: left } }] : [];
+      });
+      return lines.length ? [{ ...r, lines, ready: lines.reduce((s, p) => s + p.line.boxes, 0) }] : [];
+    });
+    return designs.length ? [{ ...b, designs }] : [];
+  });
+}
+
+/** Lines a container picked (qty > 0), in band order. */
+export const pickedLines = (bands: SoBand[], qty: Map<string, number>): PalPlanLine[] =>
+  bands.flatMap((b) => b.designs.flatMap(openLines)).filter((l) => (qty.get(l.id) || 0) > 0);
+
+/** Totals row + fill share for one container. `capOf` = the container's format capacity, else the line's
+    size default (CR-273); `loadedFill` = share already in the box (edit). Advisory, never blocks (CR-195). */
+export function pickTotals(bands: SoBand[], qty: Map<string, number>, capOf: (l: PalPlanLine) => number, loadedFill = 0) {
+  const picked = pickedLines(bands, qty);
+  const boxes = picked.reduce((s, l) => s + qty.get(l.id)!, 0);
+  const pallets = picked.reduce((s, l) => s + palletsOfLine(qty.get(l.id)!, l.boxesPerPallet), 0);
+  const fill = loadedFill + picked.reduce((s, l) => (capOf(l) > 0 ? s + qty.get(l.id)! / capOf(l) : s), 0);
+  return { picked, boxes, pallets, fill, over: fill > 1.001 };
+}
+
+/** /pal-lines-box entries. `boxes` is ALWAYS sent: a scoped line's `boxes` is what is left for this
+    container, not the stored line, so "whole" can only be judged by the server. */
+export const pickEntries = (bands: SoBand[], qty: Map<string, number>): { lineId: string; boxes: number }[] =>
+  pickedLines(bands, qty).map((l) => ({ lineId: l.id, boxes: qty.get(l.id)! }));
+
+/** LoadBox.load_plan snapshot of the picks (keeps Planned rows rendering if the line assignment fails);
+    `group` = this container's place in a multi-container save (primary's ROWID, 1-based no, of). */
+export const loadPlanJson = (bands: SoBand[], qty: Map<string, number>, group?: { id: string; no: number; of: number }) =>
+  JSON.stringify({
+    v: 1,
+    lines: pickedLines(bands, qty).map((l) => ({ so: l.salesOrderId, design: l.designLabel, batch: l.batchNumber, boxes: qty.get(l.id)!, palletId: l.palletId })),
+    ...(group ? { group } : {}),
+  }).slice(0, 10000);
+
+/** A planned container laid over a band: planned boxes per design, FIFO over that design's lines
+    (every touched row's lines get an entry, 0 when untouched). Caps at what the lines hold. */
+export function planFill(planLines: { design: string; boxes: number }[], band: SoBand, designIdOf: (name: string) => string): Map<string, number> {
+  const want = new Map<string, number>();
+  for (const ln of planLines) want.set(designIdOf(ln.design), (want.get(designIdOf(ln.design)) || 0) + ln.boxes);
+  const out = new Map<string, number>();
+  for (const row of band.designs) if (want.has(row.designId)) for (const [id, n] of spreadQty(openLines(row), want.get(row.designId)!)) out.set(id, n);
+  return out;
+}

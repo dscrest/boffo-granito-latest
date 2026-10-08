@@ -1,14 +1,18 @@
 /* ============================================================
    Panel Orders (Panel Craft) — the cutting-job board. One card per
-   PanelOrder across five stage columns:
-     New Request → Received → In Cutting → Ready → Dispatched
-   New Request (CR-286) = raised from a Quote / SO; Received = direct or
-   accepted. Each open card carries a stock signal (green = cut-piece
-   stock covers the order; red = short, with the missing pieces in the
-   tooltip / Stock column — CR-288). Ready ADDS the job's cut pieces to
+   PanelOrder (CR-302: a customer order holding several panel lines,
+   numbered PNL/FY/NNN) across five stage columns:
+     New → Received → In Cutting → Ready → Dispatched
+   New (status NewRequest) = where every order is born, direct or raised
+   from a Quote / SO (CR-286/294); Received = accepted. Each open card
+   carries a stock signal (green = Available; red = Unavailable, with the
+   missing pieces in the tooltip / Stock column — CR-288/295). Ready ADDS the job's cut pieces to
    stock, Dispatch DEDUCTS them — via the server status machine.
+   CR-312/313: Stock reads the BOOKING (what still has to be cut after
+   booked + free); MDF · Vinyl Printing · Cut Pieces · Readiness columns
+   show the production checkpoints.
    CR-287: no stage buttons here — a row / card opens /panel-orders/:id
-   where the status is changed. Kanban/Sheet toggle + New Order + Add Stock.
+   where the status is changed. Kanban/Sheet toggle + New Order + Add Stock (opens the bulk sheet, CR-307).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -22,24 +26,30 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { usePersistedState, useViewState } from "@/lib/usePersistedState";
-import { FilterSelect, IconBtn, ORDER_STATUS_TONE } from "./pcBits";
-import { CutStockForm } from "./CutStockForm";
+import { checkpointTone, FilterSelect, IconBtn, ORDER_STATUS_TONE, READINESS_TONE } from "./pcBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
 import {
-  setCutPieceStock,
+  allocatedByKey,
   cachedCutStock,
   cachedPanelOrders,
+  CHECKPOINT_LABEL,
+  checkpointStatus,
   listCutStock,
   listPanelOrders,
   PANEL_ORDER_STATUS_LABEL,
   PANEL_ORDER_STATUSES,
-  shortagesFor,
+  readiness,
+  requirementsFor,
   shortageText,
+  type CheckpointKey,
   type PanelOrderRow,
   type PanelOrderStatus,
+  type Readiness,
   type Shortage,
 } from "./panelOrdersApi";
+
+const READINESS_ORDER: Readiness[] = ["—", "Pending", "In Progress", "Ready for Production"];
 
 /* Stage dots match the status-chip tones (pcBits ORDER_STATUS_TONE). */
 const STAGE_COLOR: Record<PanelOrderStatus, string> = {
@@ -50,8 +60,17 @@ const STAGE_COLOR: Record<PanelOrderStatus, string> = {
   Dispatched: "var(--ok)",
 };
 
-/** A grid row = the order + its panel + the pieces it still lacks. */
-type Row = PanelOrderRow & { panel?: PanelRow; shortages: Shortage[] };
+/** A grid row = the order + the first panel's thumb + the pieces it still lacks (CR-312: after booking + free). */
+type Row = PanelOrderRow & { panel?: PanelRow; shortages: Shortage[]; readiness: Readiness };
+
+/** CR-313: one checkpoint's status chip; dispatched orders read "—". */
+function CpChip({ o, k }: { o: Row; k: CheckpointKey }) {
+  if (o.status === "Dispatched") return <span className="dim">—</span>;
+  const st = checkpointStatus(o.checkpoints, k);
+  return <Chip tone={checkpointTone(st)} label={st} title={`${CHECKPOINT_LABEL[k]}: ${st}${o.checkpoints[k] ? ` · ${o.checkpoints[k]!.by}` : ""}`} />;
+}
+
+const panelCodes = (o: PanelOrderRow) => o.lines.map((l) => l.panelCode).join(", ");
 
 const detailUrl = (id: string) => `/panel-orders/${encodeURIComponent(id)}`;
 const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -67,19 +86,27 @@ function SourceLink({ o }: { o: PanelOrderRow }) {
 
 /* Data-driven columns (grid standard). Created/Modified default-hidden. */
 const PANEL_ORDER_COLUMNS: ColumnDef<Row>[] = [
+  { key: "number", label: "Order No", className: "mono", render: (o) => o.orderNumber || "—" },
+  { key: "customer", label: "Customer", render: (o) => o.customerName },
   {
-    key: "panel",
-    label: "Panel",
-    className: "mono",
+    key: "panels",
+    label: "Panels",
     render: (o) => (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-        <ImageThumb images={o.panel?.images ?? []} alt={o.panelCode} />
-        <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} onClick={stop} title="Open panel">{o.panelCode}</Link>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, maxWidth: 320 }}>
+        <ImageThumb images={o.panel?.images ?? []} alt={o.orderNumber} />
+        <span className="mono" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={panelCodes(o)}>
+          {o.lines.map((l, i) => (
+            <span key={l.id}>
+              {i > 0 && ", "}
+              <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} onClick={stop} title="Open panel">{l.panelCode}</Link>
+            </span>
+          ))}
+          {o.lines.length === 0 && "—"}
+        </span>
       </span>
     ),
   },
-  { key: "customer", label: "Customer", render: (o) => o.customerName },
-  { key: "qty", label: "Qty", className: "num mono", style: { textAlign: "right" }, render: (o) => fmt(o.qty) },
+  { key: "qty", label: "Qty", className: "num mono", style: { textAlign: "right" }, render: (o) => fmt(o.totalQty) },
   { key: "date", label: "Order Date", className: "mono muted", render: (o) => o.orderDate || "—" },
   { key: "sales", label: "Sales Person", render: (o) => o.salesperson || "—" },
   {
@@ -87,14 +114,24 @@ const PANEL_ORDER_COLUMNS: ColumnDef<Row>[] = [
     label: "Status",
     render: (o) => <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />,
   },
+  // CR-313: the three production checkpoints + the derived overall readiness.
+  { key: "mdf", label: "MDF", render: (o) => <CpChip o={o} k="mdf" /> },
+  { key: "vinyl", label: "Vinyl Printing", render: (o) => <CpChip o={o} k="vinyl" /> },
+  { key: "cutPieces", label: "Cut Pieces", render: (o) => <CpChip o={o} k="cut" /> },
   {
-    // CR-288 (5.1): the missing-items hint — "Short · n" with the pieces in the tooltip.
+    key: "readiness",
+    label: "Readiness",
+    render: (o) => (o.readiness === "—" ? <span className="dim">—</span> : <Chip tone={READINESS_TONE[o.readiness]} label={o.readiness} title="MDF · Vinyl Printing · Cut Pieces all Ready → Ready for Production" />),
+  },
+  {
+    // CR-288 (5.1): the missing-items hint — "Unavailable · n" (CR-295 wording) with the pieces in the tooltip.
+    // CR-312: a row is short only when need exceeds booked + free (pieces that must still be cut).
     key: "stock",
     label: "Stock",
     render: (o) =>
       o.status === "Dispatched" ? <span className="dim">—</span>
-      : o.shortages.length ? <span style={{ color: "var(--c-amber)", fontWeight: 600, whiteSpace: "nowrap" }} title={shortageText(o.shortages)}>Short · {o.shortages.length}</span>
-      : <span style={{ color: "var(--c-green)" }} title="Cut-piece stock covers this order">Covered</span>,
+      : o.shortages.length ? <span style={{ color: "var(--c-amber)", fontWeight: 600, whiteSpace: "nowrap" }} title={shortageText(o.shortages)}>Unavailable · {o.shortages.length}</span>
+      : <span style={{ color: "var(--c-green)" }} title="Cut-piece stock available for this order">Available</span>,
   },
   { key: "source", label: "Source", render: (o) => <SourceLink o={o} /> },
   { key: "created", label: "Created", className: "mono muted nw", render: (o) => fmtDateTime(o.createdTime) },
@@ -110,7 +147,6 @@ export function PanelOrders() {
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [loading, setLoading] = useState(() => cachedPanelOrders() == null);
   const [error, setError] = useState<string | null>(null);
-  const [showStock, setShowStock] = useState(false);
   const [query, setQuery] = usePersistedState("panelOrders.query", "");
   const [statusFilter, setStatusFilter] = useState("");
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelOrdersColumns", PANEL_ORDER_COLUMNS, ["created", "modified"]);
@@ -133,6 +169,7 @@ export function PanelOrders() {
   }, []);
 
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
+  const booked = useMemo(() => allocatedByKey(orders), [orders]); // CR-312
 
   // Search + status filter apply to both views; every row carries its shortages once.
   const shown = useMemo((): Row[] => {
@@ -141,38 +178,40 @@ export function PanelOrders() {
       .filter(
         (o) =>
           (!statusFilter || PANEL_ORDER_STATUS_LABEL[o.status] === statusFilter) &&
-          (!q || o.panelCode.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q) || o.salesOrderNo.toLowerCase().includes(q) || o.quoteNo.toLowerCase().includes(q)),
+          (!q ||
+            o.orderNumber.toLowerCase().includes(q) ||
+            panelCodes(o).toLowerCase().includes(q) ||
+            o.customerName.toLowerCase().includes(q) ||
+            o.salesOrderNo.toLowerCase().includes(q) ||
+            o.quoteNo.toLowerCase().includes(q)),
       )
-      .map((o) => {
-        const panel = panelById.get(o.panelId);
-        return { ...o, panel, shortages: shortagesFor(o, panel, stock) };
-      });
-  }, [orders, query, statusFilter, panelById, stock]);
+      .map((o) => ({
+        ...o,
+        panel: panelById.get(o.lines[0]?.panelId ?? ""),
+        shortages: requirementsFor(o.lines, panelById, stock, { allocation: o.allocation, booked }).filter((r) => r.toCut > 0),
+        readiness: readiness(o.checkpoints, o.status),
+      }));
+  }, [orders, query, statusFilter, panelById, stock, booked]);
 
-  const onAdjust = async (design: string, cutSize: string, qty: number) => {
-    const res = await setCutPieceStock(design, cutSize, qty);
-    if (!res.ok) {
-      toast.error(res.error || "Stock update failed");
-      return;
-    }
-    setShowStock(false);
-    toast.success(`Cut-piece stock updated — now ${fmt(res.data?.qty ?? 0)} pcs`);
-    await load();
-  };
 
   const sort = useSortRows(
     shown,
     (o, k) =>
-      k === "qty" ? o.qty
+      k === "qty" ? o.totalQty
+      : k === "panels" ? o.panelCount
       : k === "customer" ? o.customerName
       : k === "date" ? o.orderDate
       : k === "sales" ? o.salesperson
       : k === "status" ? PANEL_ORDER_STATUSES.indexOf(o.status)
       : k === "stock" ? o.shortages.length
+      : k === "mdf" ? checkpointStatus(o.checkpoints, "mdf")
+      : k === "vinyl" ? checkpointStatus(o.checkpoints, "vinyl")
+      : k === "cutPieces" ? checkpointStatus(o.checkpoints, "cut")
+      : k === "readiness" ? READINESS_ORDER.indexOf(o.readiness)
       : k === "source" ? o.salesOrderNo || o.quoteNo
       : k === "created" ? o.createdTime
       : k === "modified" ? o.modifiedTime
-      : o.panelCode,
+      : o.orderNumber,
     "created",
     -1, // newest first
   );
@@ -194,24 +233,30 @@ export function PanelOrders() {
     const { style, ...rest } = openProps(o.id);
     return (
       <div key={o.id} className="pc-job-card" style={{ display: "flex", gap: 10, ...style }} {...rest} title="Open panel order">
-        <ImageThumb images={o.panel?.images ?? []} size={44} alt={o.panelCode} />
+        <ImageThumb images={o.panel?.images ?? []} size={44} alt={o.orderNumber} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {!done && (
               <span
-                title={o.shortages.length ? shortageText(o.shortages) : "Cut-piece stock covers this order"}
+                title={o.shortages.length ? shortageText(o.shortages) : "Cut-piece stock available for this order"}
                 style={{ width: 8, height: 8, borderRadius: "50%", background: o.shortages.length ? "var(--danger)" : "var(--ok)", flexShrink: 0 }}
               />
             )}
-            <Link className="linkish mono" style={{ fontWeight: 600 }} to={`/panels/${encodeURIComponent(o.panelId)}`} onClick={stop} title="Open panel">
-              {o.panelCode}
-            </Link>
-            <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{fmt(o.qty)} panel{o.qty === 1 ? "" : "s"}</span>
+            <span className="mono" style={{ fontWeight: 600 }}>{o.orderNumber || "Panel Order"}</span>
+            <span className="chip" style={{ marginLeft: "auto", fontSize: 13 }}>{fmt(o.totalQty)} pcs · {o.panelCount} panel{o.panelCount === 1 ? "" : "s"}</span>
           </div>
           <div style={{ marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{o.customerName}</div>
+          <div className="mono dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={panelCodes(o)}>
+            {panelCodes(o) || "—"}
+          </div>
           <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
             {[o.orderDate, o.salesperson].filter(Boolean).join(" · ") || "—"}
           </div>
+          {!done && (
+            <div style={{ marginTop: 4 }} title="MDF · Vinyl Printing · Cut Pieces">
+              <Chip tone={READINESS_TONE[o.readiness]} label={o.readiness} />
+            </div>
+          )}
           {(o.salesOrderId || o.quoteId) && (
             <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
               From <SourceLink o={o} />
@@ -289,8 +334,6 @@ export function PanelOrders() {
 
   return (
     <div>
-      {showStock && <CutStockForm onSave={(d, c, qty) => void onAdjust(d, c, qty)} onClose={() => setShowStock(false)} />}
-
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar">
@@ -310,11 +353,11 @@ export function PanelOrders() {
         />
         <span className="gsearch">
           <Icon name="search" size={13} />
-          <input type="text" placeholder="Search panel, customer or source…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input type="text" placeholder="Search order, panel, customer or source…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
         {can("panel_craft", "edit") && (
-          <button className="btn" onClick={() => setShowStock(true)}>
+          <button className="btn" onClick={() => navigate("/cut-stock/record")} title="Bulk Add Stock sheet (CR-307)">
             Add Stock
           </button>
         )}

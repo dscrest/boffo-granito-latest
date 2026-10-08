@@ -1,6 +1,6 @@
 /* Self-check for containerOptions — run with:  npx tsx client/src/features/quotes/containerOptions.test.ts */
 import assert from "node:assert";
-import { containerOptions, resolveFormatBySize } from "./containerOptions";
+import { containerOptions, formatsForPallet, resolveFormatBySize } from "./containerOptions";
 
 const designs = [
   { uniqueName: "A - 600x1200", designName: "A", sizeId: "s1", sizeLabel: "600x1200" },
@@ -46,5 +46,23 @@ const two = [...formats, { id: "f2", name: "600x1200 · 20 pallets = 640 boxes",
   assert.strictEqual(resolveFormatBySize(two, { s1: "gone" }).get("s1")?.id, "f1");
   assert.strictEqual(resolveFormatBySize(two, { s2: "f2" }).get("s1")?.id, "f1");
   assert.strictEqual(resolveFormatBySize(two, { s2: "f2" }).has("s2"), false);
+}
+// CR-300: a row's containers narrow to those built from its pallet; none use it → all of the size;
+// a pick outside the narrowed list is ignored (largest narrowed wins).
+{
+  const withLines = [
+    { id: "f1", sizeId: "s1", totalBoxes: 896, lines: [{ palletId: "p1" }] },
+    { id: "f2", sizeId: "s1", totalBoxes: 640, lines: [{ palletId: "p2" }] },
+    { id: "f3", sizeId: "s1", totalBoxes: 320, lines: [{ palletId: "p2" }, { palletId: "p1" }] },
+    { id: "f4", sizeId: "s2", totalBoxes: 100, lines: [{ palletId: "p1" }] },
+  ];
+  assert.deepStrictEqual(formatsForPallet(withLines, "s1", "p2").map((x) => x.id), ["f2", "f3"]);
+  assert.deepStrictEqual(formatsForPallet(withLines, "s1", "p9").map((x) => x.id), ["f1", "f2", "f3"]);
+  assert.deepStrictEqual(formatsForPallet(withLines, "s1", "").map((x) => x.id), ["f1", "f2", "f3"]);
+  assert.deepStrictEqual(formatsForPallet(withLines, "s3", "p1"), []);
+  const narrowed = formatsForPallet(withLines, "s1", "p2");
+  assert.strictEqual(resolveFormatBySize(narrowed, {}).get("s1")?.id, "f2");
+  assert.strictEqual(resolveFormatBySize(narrowed, { s1: "f3" }).get("s1")?.id, "f3");
+  assert.strictEqual(resolveFormatBySize(narrowed, { s1: "f1" }).get("s1")?.id, "f2");
 }
 console.log("containerOptions: ok");

@@ -68,7 +68,7 @@ export function ContainerFormatForm({
   return (
     <FormPage
       title={isEdit ? "Edit Container" : "New Container"}
-      sub={isEdit ? nameOf(sizeLabel, totalPallets, totalBoxes) : ""}
+      sub={isEdit ? nameOf(sizeLabel, validLines) : ""}
       busy={form.busy}
       saveDisabled={!canSave}
       onCancel={() => void form.cancel()}
@@ -100,7 +100,7 @@ export function ContainerFormatForm({
           </label>
           <label className="form-field">
             <span className="lbl">Name</span>
-            <input value={size ? nameOf(sizeLabel, totalPallets, totalBoxes) : ""} readOnly tabIndex={-1} className="calc" placeholder="Auto-generated from Size and pallets" title="Formula field: Size · pallets = boxes" />
+            <input value={size ? nameOf(sizeLabel, validLines) : ""} readOnly tabIndex={-1} className="calc" placeholder="Auto-generated from Size and pallets" title="Formula field: Size · [(boxes/pallet*pallets) + …] = boxes" />
           </label>
         </div>
       </div>

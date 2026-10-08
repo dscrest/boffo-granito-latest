@@ -20,9 +20,8 @@ export type PanelsScope =
   | { kind: "design"; designId: string }
   | { kind: "customer"; customerId: string };
 
-/** CR-279: whole row opens the panel (no row icons anywhere). */
-function rowProps(navigate: ReturnType<typeof useNavigate>, panelId: string) {
-  const to = `/panels/${encodeURIComponent(panelId)}`;
+/** CR-279: whole row opens the record (no row icons anywhere). */
+function rowProps(navigate: ReturnType<typeof useNavigate>, to: string) {
   return {
     tabIndex: 0,
     style: { cursor: "pointer" as const },
@@ -93,7 +92,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
               {myPanels.map((p) => {
                 const line = p.lines.find((l) => l.designId === scope.designId)!;
                 return (
-                  <tr key={p.id} {...rowProps(navigate, p.id)}>
+                  <tr key={p.id} {...rowProps(navigate, `/panels/${encodeURIComponent(p.id)}`)}>
                     <td><ImageThumb images={p.images} alt={p.panelCode} /></td>
                     <td className="mono">
                       <Link className="linkish" to={`/panels/${encodeURIComponent(p.id)}`} title="Open panel" onClick={(e) => e.stopPropagation()}>{p.panelCode}</Link>
@@ -124,8 +123,8 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 44 }}>Image</th>
-              <th>Panel Code</th>
+              <th>Order No</th>
+              <th>Panels</th>
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
               <th>Sales Person</th>
@@ -133,13 +132,24 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
             </tr>
           </thead>
           <tbody>
+            {/* CR-302: one row per order; the row opens the order, each panel code opens its panel. */}
             {myOrders.map((o) => (
-              <tr key={o.id} {...rowProps(navigate, o.panelId)}>
-                <td><ImageThumb images={panels.find((p) => p.id === o.panelId)?.images ?? []} alt={o.panelCode} /></td>
-                <td className="mono">
-                  <Link className="linkish" to={`/panels/${encodeURIComponent(o.panelId)}`} title="Open panel" onClick={(e) => e.stopPropagation()}>{o.panelCode}</Link>
+              <tr key={o.id} {...rowProps(navigate, `/panel-orders/${encodeURIComponent(o.id)}`)}>
+                <td className="mono">{o.orderNumber || "—"}</td>
+                <td>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <ImageThumb images={panels.find((p) => p.id === o.lines[0]?.panelId)?.images ?? []} alt={o.orderNumber} />
+                    <span className="mono">
+                      {o.lines.map((l, i) => (
+                        <span key={l.id}>
+                          {i > 0 && ", "}
+                          <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} title="Open panel" onClick={(e) => e.stopPropagation()}>{l.panelCode}</Link>
+                        </span>
+                      ))}
+                    </span>
+                  </span>
                 </td>
-                <td className="num mono">{fmt(o.qty)}</td>
+                <td className="num mono">{fmt(o.totalQty)}</td>
                 <td className="mono muted">{o.orderDate || "—"}</td>
                 <td>{o.salesperson || "—"}</td>
                 <td><span title={PANEL_ORDER_STATUS_LABEL[o.status]}>{codeOf(PANEL_ORDER_STATUS_LABEL[o.status])}</span></td>

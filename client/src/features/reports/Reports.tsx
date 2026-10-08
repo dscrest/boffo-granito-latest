@@ -27,7 +27,7 @@ import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { designStock, openingStockFor, type InProductionOrder } from "@/lib/stock";
-import { cachedBatchStock, cachedOpeningByDesign, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
+import { cachedAdjustedByDesign, cachedBatchStock, cachedOpeningByDesign, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import { batchLedger, type BatchMoveRow } from "@/features/stages/batchLedger";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
@@ -519,15 +519,16 @@ function StockReport() {
   // as the Item detail) — fetch once.
   const [prodLogs, setProdLogs] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
   const [openingByDesign, setOpeningByDesign] = useState<Map<string, number>>(() => cachedOpeningByDesign());
+  const [adjustedByDesign, setAdjustedByDesign] = useState<Map<string, number>>(() => cachedAdjustedByDesign());
   useEffect(() => {
     void listProductionLogs().then((r) => r.ok && setProdLogs(r.entries));
-    void listBatchStock().then((r) => r.ok && setOpeningByDesign(r.openingByDesign));
+    void listBatchStock().then((r) => { if (r.ok) { setOpeningByDesign(r.openingByDesign); setAdjustedByDesign(r.adjustedByDesign); } });
   }, []);
 
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
       const opening = openingStockFor(d, openingByDesign);
-      const s = designStock(d.designName, { openingStock: opening, allocated: cachedAllocByDesign().get(d.designName), orders, prodLogs });
+      const s = designStock(d.designName, { openingStock: opening, adjusted: adjustedByDesign.get(d.designName), allocated: cachedAllocByDesign().get(d.designName), orders, prodLogs });
       return {
         key: d.id,
         label: d.designName || "—",
@@ -1197,11 +1198,12 @@ function BatchStockReport() {
         (a, r) => ({
           opening: a.opening + r.opening,
           produced: a.produced + r.produced,
+          adjusted: a.adjusted + r.adjusted,
           palletised: a.palletised + r.palletised,
           dispatched: a.dispatched + r.dispatched,
           current: a.current + r.current,
         }),
-        { opening: 0, produced: 0, palletised: 0, dispatched: 0, current: 0 },
+        { opening: 0, produced: 0, adjusted: 0, palletised: 0, dispatched: 0, current: 0 },
       ),
     [rows],
   );
@@ -1222,6 +1224,7 @@ function BatchStockReport() {
     { label: "Batches", value: fmt(rows.length) },
     { label: "Items", value: fmt(distinct(rows.map((r) => r.designLabel)).length) },
     { label: "Produced", value: fmt(tot.produced + tot.opening), unit: "boxes", color: "var(--c-blue)" },
+    { label: "Adjusted", value: fmt(tot.adjusted), unit: "boxes", color: "var(--c-amber)" },
     { label: "Dispatched", value: fmt(tot.dispatched), unit: "boxes", color: "var(--c-violet)" },
     { label: "On hand", value: fmt(tot.current), unit: "boxes", color: "var(--c-green)" },
   ];
@@ -1243,6 +1246,7 @@ function BatchStockReport() {
           { header: "Mfg date", value: (r) => r.mfgDate },
           { header: "Opening", value: (r) => r.opening },
           { header: "Produced", value: (r) => r.produced },
+          { header: "Adjusted", value: (r) => r.adjusted },
           { header: "Palletized", value: (r) => r.palletised },
           { header: "Dispatched", value: (r) => r.dispatched },
           { header: "On hand", value: (r) => r.current },
@@ -1265,6 +1269,7 @@ function BatchStockReport() {
                   <SortTh id="mfg" label="Mfg date" sort={sort} />
                   <SortTh id="opening" label="Opening" sort={sort} className="num" style={numTh} />
                   <SortTh id="produced" label="Produced" sort={sort} className="num" style={numTh} />
+                  <SortTh id="adjusted" label="Adjusted" sort={sort} className="num" style={numTh} />
                   <SortTh id="palletised" label="Palletized" sort={sort} className="num" style={numTh} />
                   <SortTh id="dispatched" label="Dispatched" sort={sort} className="num" style={numTh} />
                   <SortTh id="current" label="On hand" sort={sort} className="num" style={numTh} />
@@ -1281,6 +1286,7 @@ function BatchStockReport() {
                     <td className="mono muted">{r.mfgDate || "—"}</td>
                     <td className="num mono">{fmt(r.opening)}</td>
                     <td className="num mono">{fmt(r.produced)}</td>
+                    <td className="num mono" style={r.adjusted < 0 ? { color: "var(--c-red)" } : undefined}>{r.adjusted ? fmt(r.adjusted) : <span className="dim">—</span>}</td>
                     <td className="num mono">{fmt(r.palletised)}</td>
                     <td className="num mono">{fmt(r.dispatched)}</td>
                     <td
@@ -1294,7 +1300,7 @@ function BatchStockReport() {
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={9} style={{ padding: 0 }}>
+                    <td colSpan={10} style={{ padding: 0 }}>
                       <EmptyState icon="package" title="No batch stock" hint="Record production output or opening stock to see batches here." />
                     </td>
                   </tr>

@@ -11,6 +11,7 @@
      record rows            → produced, on the row's batch ("" when legacy)
      plan-row qty_boxes     → produced, on "" (pre-split-model recorded output)
      opening rows           → opening, on the row's batch
+     adjust rows            → adjusted (SIGNED), on the row's batch — CR-308
      accounting_stock       → opening, on "" (singular items only)
 
    CONSUMPTION — the same ground truth recountOrderItems uses:
@@ -43,10 +44,11 @@ export interface BatchStockRow {
   mfgDate: string; // earliest production_date of the batch ("" = unknown)
   opening: number;
   produced: number;
+  adjusted: number; // Σ signed stock adjustments (CR-308)
   palletised: number; // committed to a pallet (incl. loaded)
   loaded: number; // in a load box / legacy container
   dispatched: number;
-  current: number; // max(0, opening + produced − loaded)
+  current: number; // max(0, opening + produced + adjusted − loaded)
   over: number; // consumption this row's supply could not cover — anomaly
   reserved: number; // claimed by order items (order-linked output + allocations), not yet loaded
   free: number; // max(0, current − reserved) — what Allocate Stock may still hand out (CR-199)
@@ -68,6 +70,12 @@ export function cachedBatchStock(): BatchStockRow[] | null {
 export function cachedOpeningByDesign(): Map<string, number> {
   return cache.cached()?.openingByDesign ?? new Map();
 }
+/** Σ signed adjustment boxes per design_name (CR-308) — designStock's `adjusted`
+    term. Kept SEPARATE from openingByDesign: singular items read opening from
+    accounting_stock and would lose adjustments folded in there. */
+export function cachedAdjustedByDesign(): Map<string, number> {
+  return cache.cached()?.adjustedByDesign ?? new Map();
+}
 export function invalidateBatchStock(): void {
   cache.invalidate();
 }
@@ -76,6 +84,7 @@ export interface BatchStockResult {
   ok: boolean;
   rows: BatchStockRow[];
   openingByDesign: Map<string, number>;
+  adjustedByDesign: Map<string, number>;
   error?: string;
 }
 
@@ -95,7 +104,7 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     listAll("ContainerLoading", { columns: ["batch"] }),
     listAll("OrderItem", { columns: ["design"] }),
   ]);
-  const fail = (error: string): BatchStockResult => ({ ok: false, rows: [], openingByDesign: new Map(), error });
+  const fail = (error: string): BatchStockResult => ({ ok: false, rows: [], openingByDesign: new Map(), adjustedByDesign: new Map(), error });
   if (!logs.ok || !designs.ok) return fail(logs.error || designs.error || "Failed to load stock sources");
   const truncated = [logs, designs, sizes, pbatches, plines, loadings, items].some((r: OpResult) => r.truncated);
   if (truncated) return fail("Too many rows to load — batch stock would be incomplete. Contact support.");
@@ -122,12 +131,22 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
   // never supply, so allocating does not inflate on-hand).
   const claims: ClaimIn[] = [];
   const openingByDesign = new Map<string, number>();
+  const adjustedByDesign = new Map<string, number>();
   for (const r of logs.rows || []) {
     const type = str(r.entry_type);
     const designId = str(r.design);
     const qty = num(r.qty_boxes);
-    if (qty <= 0 || !designId) continue;
+    if (!designId) continue;
     const date = str(r.production_date).slice(0, 10);
+    // CR-308: adjustments are SIGNED — handled before the qty guard below.
+    if (type === "adjust") {
+      if (qty === 0) continue;
+      supply.push({ designId, batch: str(r.batch_number), qty, kind: "adjust", date });
+      const name = dName.get(designId) || designId;
+      adjustedByDesign.set(name, (adjustedByDesign.get(name) || 0) + qty);
+      continue;
+    }
+    if (qty <= 0) continue;
     const oi = str(r.order_item);
     if (oi && (type === "record" || type === "alloc" || type === "plan"))
       claims.push({ designId, batch: type === "plan" ? "" : str(r.batch_number), orderItemId: oi, qty });
@@ -209,6 +228,7 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     mfgDate: r.mfgDate,
     opening: r.opening,
     produced: r.produced,
+    adjusted: r.adjusted,
     palletised: r.palletised,
     loaded: r.loaded,
     dispatched: r.dispatched,
@@ -217,5 +237,5 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     reserved: r.current - freeOf(r, reserved),
     free: freeOf(r, reserved),
   }));
-  return { ok: true, rows, openingByDesign };
+  return { ok: true, rows, openingByDesign, adjustedByDesign };
 }

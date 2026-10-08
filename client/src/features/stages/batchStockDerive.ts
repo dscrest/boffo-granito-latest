@@ -27,7 +27,7 @@ export interface SupplyIn {
   designId: string;
   batch: string; // "" = unattributed bucket
   qty: number;
-  kind: "opening" | "produced";
+  kind: "opening" | "produced" | "adjust"; // adjust = signed stock adjustment (CR-308)
   date: string; // YYYY-MM-DD or ""
 }
 
@@ -45,11 +45,12 @@ export interface DerivedRow {
   mfgDate: string; // earliest supply date; "" for the unattributed bucket
   opening: number;
   produced: number;
+  adjusted: number; // Σ signed adjustments (breakage, count correction…) — CR-308
   palletised: number;
   loaded: number;
   dispatched: number;
-  current: number; // max(0, opening + produced − loaded)
-  over: number; // max(0, loaded − (opening + produced)) — anomaly marker
+  current: number; // max(0, opening + produced + adjusted − loaded)
+  over: number; // max(0, loaded − (opening + produced + adjusted)) — anomaly marker
 }
 
 interface Cell {
@@ -58,10 +59,14 @@ interface Cell {
   mfgDate: string;
   opening: number;
   produced: number;
+  adjusted: number;
   palletised: number;
   loaded: number;
   dispatched: number;
 }
+
+/** Boxes a cell can still give out: its whole supply (incl. adjustments) minus what left. */
+const onHand = (c: Cell) => c.opening + c.produced + c.adjusted - c.loaded;
 
 export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): DerivedRow[] {
   const byDesign = new Map<string, Map<string, Cell>>();
@@ -69,7 +74,7 @@ export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): 
     const design = byDesign.get(designId) ?? byDesign.set(designId, new Map()).get(designId)!;
     let c = design.get(batch);
     if (!c) {
-      c = { designId, batch, mfgDate: "", opening: 0, produced: 0, palletised: 0, loaded: 0, dispatched: 0 };
+      c = { designId, batch, mfgDate: "", opening: 0, produced: 0, adjusted: 0, palletised: 0, loaded: 0, dispatched: 0 };
       design.set(batch, c);
     }
     return c;
@@ -78,6 +83,7 @@ export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): 
   for (const s of supply) {
     const c = cell(s.designId, s.batch);
     if (s.kind === "opening") c.opening += s.qty;
+    else if (s.kind === "adjust") c.adjusted += s.qty;
     else c.produced += s.qty;
     if (s.batch && s.date && (!c.mfgDate || s.date < c.mfgDate)) c.mfgDate = s.date;
   }
@@ -108,7 +114,7 @@ export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): 
     let left = e.boxes;
     for (const c of buckets) {
       if (left <= 0) break;
-      const take = Math.min(left, Math.max(0, c.opening + c.produced - c.loaded));
+      const take = Math.min(left, Math.max(0, onHand(c)));
       if (take <= 0) continue;
       c.palletised += take;
       c.loaded += take;
@@ -126,11 +132,12 @@ export function deriveBatchStock(supply: SupplyIn[], consumption: ConsumeIn[]): 
   const rows: DerivedRow[] = [];
   for (const design of byDesign.values()) {
     for (const c of design.values()) {
-      if (c.opening + c.produced + c.palletised + c.loaded + c.dispatched <= 0) continue;
+      // `adjusted !== 0`: a positive adjustment onto a brand-new batch is its only supply.
+      if (c.opening + c.produced + c.palletised + c.loaded + c.dispatched <= 0 && c.adjusted === 0) continue;
       rows.push({
         ...c,
-        current: Math.max(0, c.opening + c.produced - c.loaded),
-        over: Math.max(0, c.loaded - (c.opening + c.produced)),
+        current: Math.max(0, onHand(c)),
+        over: Math.max(0, -onHand(c)),
       });
     }
   }

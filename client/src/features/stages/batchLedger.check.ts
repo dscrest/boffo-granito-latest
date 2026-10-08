@@ -11,7 +11,7 @@ const stockRow = (over: Record<string, unknown> = {}) =>
   ({
     designId: "D1", designName: "TILE-A", designLabel: "TILE-A 600x600", sizeCode: "60X60",
     batchNumber: "B/26-27/001", mfgDate: "2026-08-01",
-    produced: 100, opening: 0, palletised: 0, loaded: 0, dispatched: 0, current: 100, over: 0,
+    produced: 100, opening: 0, adjusted: 0, palletised: 0, loaded: 0, dispatched: 0, current: 100, over: 0,
     ...over,
   }) as never;
 
@@ -100,6 +100,14 @@ const sum = (rows: { boxes: number }[]) => rows.reduce((s, r) => s + r.boxes, 0)
   // A boxed sibling counts as done — the remaining slice may load.
   const boxed = loadableLineIds([line({ id: "L1", boxes: 40 }), line({ id: "L2", boxes: 60, status: "Planning", loadBoxId: "BX1" })] as never);
   assert.deepStrictEqual([...boxed], ["L1"], "boxed sibling counts as palletized");
+}
+
+// CR-308: a −20 adjustment lowers the batch total and what is left on hand.
+{
+  const rows = batchLedger([stockRow({ adjusted: -20, current: 80 })], [], []);
+  const onhand = rows.find((r) => r.stage === "On hand")!;
+  assert.strictEqual(onhand.boxes, 80);
+  assert.strictEqual(onhand.batchTotal, 80);
 }
 
 console.log("batch ledger check: OK");

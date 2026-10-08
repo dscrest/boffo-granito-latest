@@ -71,7 +71,21 @@ const PanelFormPage = lazy(() => import("@/features/panels/PanelFormPage").then(
 const PanelOrders = lazy(() => import("@/features/panels/PanelOrders").then((m) => ({ default: m.PanelOrders })));
 const PanelOrderDetail = lazy(() => import("@/features/panels/PanelOrderDetail").then((m) => ({ default: m.PanelOrderDetail })));
 const PanelOrderFormPage = lazy(() => import("@/features/panels/PanelOrderFormPage").then((m) => ({ default: m.PanelOrderFormPage })));
+// CR-315…317: Sample Orders — customer sample requests, a separate order type beside Panel Orders.
+const SampleOrders = lazy(() => import("@/features/panels/SampleOrders").then((m) => ({ default: m.SampleOrders })));
+const SampleOrderDetail = lazy(() => import("@/features/panels/SampleOrderDetail").then((m) => ({ default: m.SampleOrderDetail })));
+const SampleOrderFormPage = lazy(() => import("@/features/panels/SampleOrderFormPage").then((m) => ({ default: m.SampleOrderFormPage })));
 const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
+// CR-306…311: Panel Items (designs + cut pieces), the bulk cut-stock sheets, the Panel Craft dashboard.
+const PanelItems = lazy(() => import("@/features/panels/PanelItems").then((m) => ({ default: m.PanelItems })));
+const PanelItemDetail = lazy(() => import("@/features/panels/PanelItemDetail").then((m) => ({ default: m.PanelItemDetail })));
+const CutStockSheetPage = lazy(() => import("@/features/panels/CutStockSheetPage").then((m) => ({ default: m.CutStockSheetPage })));
+const PanelDashboard = lazy(() => import("@/features/panels/PanelDashboard").then((m) => ({ default: m.PanelDashboard })));
+// CR-314: the cut-piece shortage view (required vs on hand vs booked per cut piece).
+const PendingCutStock = lazy(() => import("@/features/panels/PendingCutStock").then((m) => ({ default: m.PendingCutStock })));
+// CR-308: box-stock inventory adjustments (list + bulk sheet).
+const StockAdjustments = lazy(() => import("@/features/masters/StockAdjustments").then((m) => ({ default: m.StockAdjustments })));
+const StockAdjustmentSheet = lazy(() => import("@/features/masters/StockAdjustmentSheet").then((m) => ({ default: m.StockAdjustmentSheet })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
 const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
@@ -115,6 +129,8 @@ function navTree(): NavNode[] {
         // Stock Details — batch-wise on-hand (produced − loaded), derived
         // in batchStockApi; also surfaced as the item detail Stock tab.
         { id: "stock", label: "Stock Details", icon: "tile" },
+        // CR-308: Zoho-Books-style inventory adjustments (breakage, theft, count correction).
+        { id: "stock-adjustments", label: "Stock Adjustments", icon: "edit" },
         // Size Master lives under Settings ▸ Product Masters (admin-only).
         // Pallet Master = the master of pallet formats (an Items master).
         // Palletization (Sales, id "packing") is the process that consumes it.
@@ -153,11 +169,15 @@ function navTree(): NavNode[] {
       label: "Panel Craft",
       icon: "tile",
       children: [
-        // Workflow order: stock entered first, panels assembled from it,
-        // then orders dispatch against it.
+        // Workflow order (CR-306): items picked from the master → their cut
+        // pieces + stock → panels assembled from them → orders dispatch against it.
+        { id: "panel-dashboard", label: "Dashboard", icon: "dashboard" },
+        { id: "panel-items", label: "Panel Items", icon: "tile" },
         { id: "cut-stock", label: "Cut Stock", icon: "tile" },
+        { id: "pending-cut-stock", label: "Pending Cut Stock", icon: "tile" },
         { id: "panels", label: "Panels", icon: "tile" },
         { id: "panel-orders", label: "Panel Orders", icon: "orders" },
+        { id: "sample-orders", label: "Sample Orders", icon: "orders" }, // CR-315
       ],
     },
     // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
@@ -424,7 +444,7 @@ export default function App() {
             <Route path="/fit" element={<FitSuggest />} />
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
-            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" pageLabel="Ready for Palletization" />} />
+            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" pageLabel="Ready for Palletization" allOption={false} />} />
             {/* CR-278: recorded (Ready for Loading) rows list here again beside In Palletization; /loading keeps them too. */}
             <Route path="/palletizing" element={<PalPlans stages={["Palletizing", "Ready"]} pageLabel="In Palletization" />} />
             <Route path="/packing/new" element={<PalPlanFormPage />} />
@@ -443,6 +463,8 @@ export default function App() {
             <Route path="/reports/:id" element={<ReportView />} />
             <Route path="/design" element={<DesignMaster />} />
             <Route path="/stock" element={<StockDetails />} />
+            <Route path="/stock-adjustments" element={<StockAdjustments />} />
+            <Route path="/stock-adjustments/new" element={<StockAdjustmentSheet />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/pallets/new" element={<PalletFormPage />} />
             <Route path="/pallets/:id/edit" element={<PalletFormPage />} />
@@ -455,8 +477,21 @@ export default function App() {
             <Route path="/panels/:id" element={<PanelDetail />} />
             <Route path="/panel-orders" element={<PanelOrders />} />
             <Route path="/panel-orders/new" element={<PanelOrderFormPage />} />
+            <Route path="/panel-orders/:id/edit" element={<PanelOrderFormPage />} />
+            <Route path="/panel-orders/:id/clone" element={<PanelOrderFormPage />} />
             <Route path="/panel-orders/:id" element={<PanelOrderDetail />} />
+            <Route path="/sample-orders" element={<SampleOrders />} />
+            <Route path="/sample-orders/new" element={<SampleOrderFormPage />} />
+            <Route path="/sample-orders/:id/edit" element={<SampleOrderFormPage />} />
+            <Route path="/sample-orders/:id/clone" element={<SampleOrderFormPage />} />
+            <Route path="/sample-orders/:id" element={<SampleOrderDetail />} />
             <Route path="/cut-stock" element={<CutStock />} />
+            <Route path="/cut-stock/record" element={<CutStockSheetPage kind="receipt" />} />
+            <Route path="/cut-stock/adjust" element={<CutStockSheetPage kind="adjustment" />} />
+            <Route path="/pending-cut-stock" element={<PendingCutStock />} />
+            <Route path="/panel-dashboard" element={<PanelDashboard />} />
+            <Route path="/panel-items" element={<PanelItems />} />
+            <Route path="/panel-items/:id" element={<PanelItemDetail />} />
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />

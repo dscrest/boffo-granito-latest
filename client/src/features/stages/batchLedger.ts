@@ -5,7 +5,7 @@
    pallet, in a load box, or on a truck, named by customer / SO / plan / box.
    Every batch also gets one "On hand" row for whatever is left, so
 
-       Σ rows of a batch  ==  its produced + opening
+       Σ rows of a batch  ==  its produced + opening + adjusted (signed, CR-308)
 
    which is the report's own self-check.
 
@@ -73,7 +73,7 @@ export function batchLedger(stock: BatchStockRow[], plans: PalPlan[], boxes: Loa
         itemLabel: s?.designLabel || l.designLabel,
         sizeCode: s?.sizeCode || l.sizeCode,
         mfgDate: s?.mfgDate || "",
-        batchTotal: s ? s.produced + s.opening : 0,
+        batchTotal: s ? s.produced + s.opening + s.adjusted : 0,
         stage,
         boxes: l.boxes,
         customerId: l.customerId,
@@ -91,7 +91,7 @@ export function batchLedger(stock: BatchStockRow[], plans: PalPlan[], boxes: Loa
 
   // Whatever a batch produced but nothing has consumed is still on hand.
   for (const [k, s] of byBatch) {
-    const left = s.produced + s.opening - (consumed.get(k) || 0);
+    const left = s.produced + s.opening + s.adjusted - (consumed.get(k) || 0);
     if (left <= 0) continue;
     rows.push({
       key: `onhand-${k}`,
@@ -100,7 +100,7 @@ export function batchLedger(stock: BatchStockRow[], plans: PalPlan[], boxes: Loa
       itemLabel: s.designLabel,
       sizeCode: s.sizeCode,
       mfgDate: s.mfgDate,
-      batchTotal: s.produced + s.opening,
+      batchTotal: s.produced + s.opening + s.adjusted,
       stage: "On hand",
       boxes: left,
       customerId: "",

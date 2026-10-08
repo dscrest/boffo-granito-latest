@@ -56,7 +56,8 @@ export function PanelDetail() {
   if (panels === null) return <SkeletonRows rows={6} />;
 
   const panel = panels.find((p) => p.id === id) ?? null;
-  const panelOrders = orders.filter((o) => o.panelId === id);
+  // CR-302: an order lists this panel on one of its lines.
+  const panelOrders = orders.filter((o) => o.lines.some((l) => l.panelId === id));
   const needle = q.trim().toLowerCase();
   const railRows = newestFirst(panels);
   const listed = needle
@@ -260,6 +261,7 @@ export function PanelDetail() {
                 <table className="tbl">
                   <thead>
                     <tr>
+                      <th>Order No</th>
                       <th>Customer</th>
                       <th className="num" style={{ textAlign: "right" }}>Qty</th>
                       <th>Order Date</th>
@@ -268,9 +270,19 @@ export function PanelDetail() {
                   </thead>
                   <tbody>
                     {panelOrders.map((o) => (
-                      <tr key={o.id}>
+                      <tr
+                        key={o.id}
+                        tabIndex={0}
+                        style={{ cursor: "pointer" }}
+                        title="Open panel order"
+                        onClick={() => navigate(`/panel-orders/${encodeURIComponent(o.id)}`)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/panel-orders/${encodeURIComponent(o.id)}`);
+                        }}
+                      >
+                        <td className="mono">{o.orderNumber || "—"}</td>
                         <td>{o.customerName}</td>
-                        <td className="num mono">{fmt(o.qty)}</td>
+                        <td className="num mono">{fmt(o.lines.find((l) => l.panelId === id)?.qty ?? 0)}</td>
                         <td className="mono muted">{o.orderDate || "—"}</td>
                         <td>
                           <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />
@@ -279,7 +291,7 @@ export function PanelDetail() {
                     ))}
                     {panelOrders.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>No orders for this panel.</td>
+                        <td colSpan={5} className="muted" style={{ textAlign: "center", padding: 18 }}>No orders for this panel.</td>
                       </tr>
                     )}
                   </tbody>

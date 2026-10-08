@@ -68,8 +68,9 @@ export function totalsOf(lines: { count: number; boxesPerPallet: number }[]) {
   };
 }
 
-export const nameOf = (sizeLabel: string, totalPallets: number, totalBoxes: number) =>
-  `${sizeLabel || "Container"} · ${totalPallets} pallets = ${totalBoxes} boxes`;
+/** CR-292: name spells the pallet lines out — `<size> · [(48*10) + (10*6)] = 540 boxes`. */
+export const nameOf = (sizeLabel: string, lines: { boxesPerPallet: number; count: number }[]) =>
+  `${sizeLabel || "Container"} · [${lines.map((l) => `(${l.boxesPerPallet}*${l.count})`).join(" + ")}] = ${totalsOf(lines).totalBoxes} boxes`;
 
 /** Fallback when nothing picked a container: Size ROWID → the size's LARGEST container
     (most boxes; ties → the first met, i.e. newest since rows come ROWID desc). */
@@ -134,7 +135,7 @@ function toPayload(input: ContainerFormatInput, pallets: PalletRow[], sizes: Siz
     .map((l) => ({ ...l, boxesPerPallet: pallets.find((p) => p.id === l.palletId)?.boxesPerPallet ?? 0 }));
   const { totalPallets, totalBoxes } = totalsOf(lines);
   return {
-    name: nameOf(sizes.find((s) => s.id === input.size)?.label || "", totalPallets, totalBoxes),
+    name: nameOf(sizes.find((s) => s.id === input.size)?.label || "", lines),
     size: input.size,
     pallets_json: JSON.stringify(lines.map((l) => ({ pallet: l.palletId, count: l.count }))),
     total_pallets: totalPallets,

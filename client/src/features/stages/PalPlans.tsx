@@ -38,6 +38,7 @@ export function PalPlans({
   stages = ["Planning"],
   sectionsKey = "palplans.stages",
   pageLabel,
+  allOption = true,
 }: {
   /** Stage sections this page shows (in order). One stage = no Sections picker. */
   stages?: StageKey[];
@@ -45,6 +46,8 @@ export function PalPlans({
   sectionsKey?: string;
   /** Status-dropdown label for this page's own rows (CR-278); defaults to the stage labels joined. */
   pageLabel?: string;
+  /** false = no "All" overview on this page (CR-299: /packing is the queue only — palletized rows never show there). */
+  allOption?: boolean;
 }) {
   const navigate = useNavigate();
   // Sections picker defs — this page's stage columns.
@@ -57,7 +60,7 @@ export function PalPlans({
   // the opt-in overview of every stage (boxed + dispatched included), read-only.
   const TABS = [
     { id: "page", label: pageLabel || STAGE_DEFS.map((c) => c.label).join(" + ") },
-    { id: "all", label: "All" },
+    ...(allOption ? [{ id: "all", label: "All" }] : []),
   ];
   const [tab, setTab] = usePersistedState(`${sectionsKey}.show.v3`, "page");
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
@@ -124,7 +127,7 @@ export function PalPlans({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetOrderId]);
 
-  const showAll = tab === "all";
+  const showAll = allOption && tab === "all";
   // Counts = the rows the board will show for that option.
   const loadable = loadableLineIds(plans.flatMap((p) => p.lines));
   const tabCount = (id: string) =>

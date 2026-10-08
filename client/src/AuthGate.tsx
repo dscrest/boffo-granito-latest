@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { checkSession, signIn, type SessionUser } from "./lib/auth";
 import boffoLogo from "./assets/boffo-logo.png";
+import { BoffoLoader } from "./ui/BoffoLoader";
 import "./styles/login.css";
 
 type Status = "checking" | "anon" | "authed";
@@ -62,9 +63,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (status === "checking") {
     return (
       <div className="boffo-auth boffo-auth--center">
-        <span className="mono" style={{ color: "var(--dim)" }}>
-          Loading BOFFO…
-        </span>
+        <BoffoLoader label="Loading…" />
       </div>
     );
   }

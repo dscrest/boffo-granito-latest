@@ -157,7 +157,7 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/palletizing",
       title: "On to loading",
-      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows Recorded here and waits. Edit lets you type quantities across rows and save each with ✓.",
+      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows a Palletized chip here and waits. Edit lets you type quantities across rows and save each with ✓.",
     },
   ],
 

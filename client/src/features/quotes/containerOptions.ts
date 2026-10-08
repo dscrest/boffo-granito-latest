@@ -21,6 +21,19 @@ export function resolveFormatBySize<T extends { id: string; sizeId: string; tota
   return m;
 }
 
+/** The containers a planner row may pick: those of its size built from its pallet (a pallet line
+    with that palletId); none use it ⇒ every container of the size. Feed the result to
+    resolveFormatBySize for "the pick when it is in this list, else the largest of it". CR-300. */
+export function formatsForPallet<T extends { sizeId: string; lines?: { palletId: string }[] }>(
+  rows: T[],
+  sizeId: string,
+  palletId: string,
+): T[] {
+  const ofSize = rows.filter((r) => r.sizeId && r.sizeId === sizeId);
+  const byPallet = palletId ? ofSize.filter((r) => r.lines?.some((l) => l.palletId === palletId)) : [];
+  return byPallet.length ? byPallet : ofSize;
+}
+
 export interface ContainerOption {
   sizeId: string;
   sizeLabel: string;

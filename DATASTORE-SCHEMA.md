@@ -21,7 +21,7 @@
 - Reserved keywords avoided: `order` → `sales_order`, `priority` → `priority_level`.
 - **Soft delete (added 2026-06-12):** every table except OperationLog has `deleted_at` (datetime, nullable; null = active). data-ops generic `DELETE /:table/:rowid` sets `deleted_at` instead of removing the row (`?hard=1` forces real delete; OperationLog always hard-deletes). `POST /:table/:rowid/restore` clears it. Generic list excludes soft-deleted rows unless `?include_deleted=1`. FK CASCADE/SET-NULL no longer fires on user deletes. Internal hard deletes remain: quote line replacement, saga compensation.
 
-## Table Index (45 tables)
+## Table Index (46 tables)
 
 | Table | table_id | Purpose |
 |---|---|---|
@@ -68,7 +68,8 @@
 | AppSetting | (live) | Key/value app settings store — added 2026-08-11 |
 | Panel | 69851000000189422 (live) | Panel Craft — showcase-panel master header — added 2026-08-26 |
 | PanelLine | 69851000000194524 (live) | Panel Craft — design lines on a panel — added 2026-08-26 |
-| PanelOrder | 69851000000193408 (live) | Panel Craft — customer panel orders (cutting-job lifecycle) — added 2026-08-26 |
+| PanelOrder | 69851000000193408 (live) | Panel Craft — customer panel orders, HEADER since CR-302 (cutting-job lifecycle) — added 2026-08-26 |
+| PanelOrderLine | 69851000000315921 (live) | Panel Craft — one panel × qty per panel order (CR-302) — added 2026-10-07 |
 | CutPieceSize | 69851000000182460 (live) | Lookup — cut-piece sizes (Panel Craft) — added 2026-08-26 |
 | CutPieceStock | 69851000000183280 (live) | Panel Craft — cut-piece on-hand per design + cut size — added 2026-08-26 |
 
@@ -534,8 +535,9 @@ Legacy pre-lifecycle rows backfilled to `status=Produced`, `qty_requested=qty_bo
 | shade | varchar(60) | RETIRED 2026-08-29 (batch is the only tracked dimension; never populated in live data). Column kept, nothing reads or writes it — added 2026-08-07 |
 | box_brand | bigint | **CR-197 — created on live 2026-09-18 (column id 69851000000293004, search-indexed).** Logical FK → Brand (the "Box Brand" master): the carton the boxes were packed in. Set on `record` rows by `/production-record` + `/production-record-lines` (one brand per item section of Record Output), copied onto `alloc` rows, and inherited by the `PalletizationPlanLine.box_brand` that `autoEnqueuePalletization` inserts. Nullable; every reader/writer tolerates its absence. |
 | second_stage | boolean | **RETIRED 2026-08-25** — no longer read or written. Was: output is in the 2nd stage of palletization → auto-enqueue births its queue line `Palletizing` instead of `Planning`. Removed because it silently kept production output out of "Ready for Palletization" (the flag was sticky per batch). Column left in place; old rows keep their value. |
+| reason | varchar(100) | **CR-308 — created on live 2026-10-07 (col 69851000000319671).** AdjustmentReason name on `entry_type="adjust"` rows; null elsewhere. |
 
-Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`|`alloc`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **`alloc` rows (CR-199, 2026-09-18):** a stock allocation — `design`, `batch_number`, `order_item`, `sales_order`, `qty_boxes`, `status="Allocated"`, `stage="Completed"`, `qty_requested=0`, no `parent_log`. A **claim, never supply**: written by `POST /allocate-stock` (bumps `OrderItem.produced_qty_boxes`, then `autoEnqueuePalletization`), soft-deleted by `POST /deallocate-stock/:rowid`. Any reader summing supply must skip it; any reader listing production jobs must skip it (`productionApi` does both). **Auto-enqueue RETIRED by CR-198:** confirming a SalesOrder used to insert one `plan` row per order item (`request_group="so-{soId}"`); `enqueueSoProduction` now early-returns. Rows created before 2026-09-18 remain and still record order-linked.
+Not in the column table but used throughout the sagas: `entry_type` (`plan`|`record`|`opening`|`alloc`|`adjust`), `parent_log` (bigint → the plan row), `stage` (`New`/`InProduction`/`QC`/`Completed`), `deleted_at`, `mfg_date` (per-batch manufacture date on multi-batch record rows). **`alloc` rows (CR-199, 2026-09-18):** a stock allocation — `design`, `batch_number`, `order_item`, `sales_order`, `qty_boxes`, `status="Allocated"`, `stage="Completed"`, `qty_requested=0`, no `parent_log`. A **claim, never supply**: written by `POST /allocate-stock` (bumps `OrderItem.produced_qty_boxes`, then `autoEnqueuePalletization`), soft-deleted by `POST /deallocate-stock/:rowid`. Any reader summing supply must skip it; any reader listing production jobs must skip it (`productionApi` does both). **`adjust` rows (CR-308, 2026-10-07):** an inventory adjustment — `design`, `batch_number` (`""` for singular items), **SIGNED `qty_boxes`**, `reason`, `note`, `production_date` = adjustment date, `performed_by`, `request_group="adj-<stamp>"` (one per submission), `status="Adjusted"`, `stage="Completed"`, `qty_requested=0`, no `parent_log`. Written only by `POST /stock-adjust` (removal ≤ physical on-hand, verify-all-then-insert). Supply with a sign: every reader adds it (`deriveBatchStock.adjusted`, `designStock.adjusted`, `serverFreeStock`); never a plan line. **Auto-enqueue RETIRED by CR-198:** confirming a SalesOrder used to insert one `plan` row per order item (`request_group="so-{soId}"`); `enqueueSoProduction` now early-returns. Rows created before 2026-09-18 remain and still record order-linked.
 
 **Batch-wise routes (added 2026-08-11):**
 - `POST /production-record-lines/:rowid` — record several batches at once against a plan line (batch-tracked items): one `record` child row per batch (blank batch auto-minted), OrderItem bumped once for the sum, inserts compensated on failure.
@@ -709,9 +711,13 @@ FK columns are plain bigint holding ROWID strings (live-project convention).
 A Panel is pure master data — a spec of the cut pieces it needs (2026-08-27,
 reversing the 08-26 assembly model): `/panel-save` and `/panel-delete` never
 touch CutPieceStock. Stock moves only via the PanelOrder status machine
-(Ready +, Dispatched −) and manual `/cut-stock-adjust`. Generic writes to
-PanelLine and soft Panel deletes are still rejected (`?hard=1` stays open
-for admin/e2e cleanup).
+(Ready +, Dispatched −) and the `/cut-stock-entry` ledger (receipt / adjustment,
+CR-307/308 — the absolute-set `/cut-stock-adjust` is gone). Generic writes to
+PanelLine, CutPieceStock, CutStockEntry and soft Panel deletes are rejected
+(`?hard=1` stays open for admin/e2e cleanup). Since CR-306 a `CutPieceStock` row
+is also the cut-piece ITEM (weight) and a design with one is "in Panel Craft"
+(Panel Items page) — no flag on Design. CR-309 adds the `Mdf` master and
+`PanelOrderLine.mdf`; CR-308 adds `AdjustmentReason` and `ProductionLog.reason`.
 
 ### Panel (live id 69851000000189422)
 Natural key = `panel_code`.
@@ -736,27 +742,80 @@ movement.
 | deleted_at | datetime | soft delete |
 
 ### PanelOrder (live id 69851000000193408)
+**CR-302 (2026-10-07): the HEADER of a customer panel order; its panels live in
+`PanelOrderLine`.** Created / updated only via `/panel-order-save` (one call, header +
+lines; create mints `order_number` and is born `NewRequest`; update only while
+`NewRequest` / `Received`, lines replaced wholesale); deleted only via
+`/panel-order-delete/:rowid` (same stage rule, lines soft-deleted too). Generic POST /
+DELETE refused; generic PATCH stays for `checklist` only — `status`, `checkpoints` and `allocation` are `STATE_COLUMNS` (CR-312/313).
 Status machine (server `/panel-order-status/:rowid`, forward-only; generic PATCH
 rejects `status`): NewRequest → Received → InCutting → Ready → Dispatched, plus direct
-Received → Dispatched when stock covers. **Ready adds** each line's
-`cut_piece_qty × qty` to CutPieceStock; **Dispatched deducts** it (409 when short).
+Received → Dispatched when stock covers. **Ready adds** Σ over every line of
+`PanelLine.cut_piece_qty × PanelOrderLine.qty` per (design, cut size) to CutPieceStock;
+**Dispatched deducts** it (409 when short, verified for all before any deduction).
 Flips log StatusTransition (`entity_type: PanelOrder`) and, when `sales_order` /
 `quote` is set, an OperationLog row on that source record (`logRelated`, CR-286).
-Insert may carry `status` Received (direct) or NewRequest (raised from a Quote / SO
-via "Request Panels", CR-286) — `INSERT_INITIAL`. Status changes only from
-`/panel-orders/:id` (CR-287).
+Status changes only from `/panel-orders/:id` (CR-287).
 | Column | Type | Notes |
 |---|---|---|
-| panel | bigint | logical FK → Panel |
+| order_number | varchar(30) | `PNL/FY/NNN`, server-minted by `nextOrderNumber(catalyst, "PanelOrder", "PNL")`, unique (CR-302, col 69851000000320070, added 2026-10-07) |
+| panel | bigint | **legacy** — the single panel of pre-CR-302 orders; never read or written since CR-302 (kept for history) |
 | customer | bigint | logical FK → Customer |
-| qty | int | panels ordered |
+| qty | int | **legacy** — see `panel`; the live quantity is Σ `PanelOrderLine.qty` |
 | salesperson | varchar(160) | defaulted from the signed-in user |
 | order_date | date | omit when blank |
 | status | varchar(20) | NewRequest / Received / InCutting / Ready / Dispatched |
 | sales_order | bigint | logical FK → SalesOrder; source of a "Request Panels" order (CR-286, col 69851000000316427, added 2026-10-06) |
 | quote | bigint | logical FK → Quote; source of a "Request Panels" order (CR-286, col 69851000000316429, added 2026-10-06) |
-| checklist | text | JSON `{"<design>|<cut_piece_size>": true}` — manual Available ticks on the requirements checklist, plain column via generic PATCH (CR-288, col 69851000000322244, added 2026-10-06) |
+| checklist | text | JSON `{"<design>|<cut_piece_size>": true}` — manual Available ticks on the requirements checklist (keys are summed across lines since CR-302), plain column via generic PATCH (CR-288, col 69851000000322244, added 2026-10-06) |
+| allocation | text | JSON `{"<design>|<cut_piece_size>": pcs}` — cut pieces BOOKED to this order, a claim on `CutPieceStock.qty` (never a movement); written only by `/panel-order-allocate` (absolute set), `/panel-order-status` Ready (= need) and `/panel-order-save` (clamp); Σ over open orders ≤ on hand; Dispatch requires `allocation ≥ need` (CR-312, col 69851000000314863, added 2026-10-07) |
+| checkpoints | text | JSON `{"mdf"\|"vinyl"\|"cut": {"status","by","at"}}` — MDF (Pending/Ordered/Received/Ready), Vinyl Printing (Pending/Printing/Ready), Cut Pieces (Pending/Ready) marks; written only by `/panel-order-checkpoint`; overall readiness is derived, never stored (CR-313, col 69851000000314862, added 2026-10-07) |
 | deleted_at | datetime | soft delete |
+
+### PanelOrderLine (live id 69851000000315921)
+One showcase panel × qty on a panel order (CR-302, added 2026-10-07). Written only by
+`/panel-order-save` (replace-wholesale) and `/migrate-panel-orders` (legacy backfill);
+soft-deleted with the order by `/panel-order-delete`. No rate / amount (user's choice).
+`/panel-delete` refuses a Panel that a live line references (409).
+| Column | Type | Notes |
+|---|---|---|
+| panel_order | bigint | logical FK → PanelOrder (col 69851000000316450) |
+| panel | bigint | logical FK → Panel (col 69851000000316451) |
+| qty | int | panels of this type, positive integer; one line per panel per order (col 69851000000316452) |
+| mdf | bigint | logical FK → Mdf — the board this panel is mounted on (CR-309, col 69851000000325548, added 2026-10-07); optional, validated by `/panel-order-save`; its `weight_kg` joins the line weight |
+| deleted_at | datetime | soft delete (col 69851000000316453) |
+
+### SampleOrder (live id 69851000000322323) — added 2026-10-08 (CR-315)
+A customer's request for item SAMPLES — a separate order type beside PanelOrder, same
+Customer link. Written only by `/sample-order-save` (create / update while `New`),
+`/sample-order-delete` (soft delete, `New` only) and `/sample-order-supply` (status);
+generic POST / PATCH / DELETE refused.
+| Column | Type | Notes |
+|---|---|---|
+| order_number | varchar(60) | `SMP/FY/NNN`, server-assigned via `nextOrderNumber(…, "SampleOrder", "SMP")`, `assertUnique` (col 69851000000317875) |
+| customer | bigint | logical FK → Customer (col 69851000000320533) |
+| salesperson | varchar(120) | logged-in user's name at creation (col 69851000000322684) |
+| order_date | date | defaults to today in the form (col 69851000000322685) |
+| status | varchar(40) | `New` · `PartiallySupplied` · `Supplied` — DERIVED from the lines by `/sample-order-supply`; `STATE_COLUMNS` (col 69851000000322686) |
+| sales_order | bigint | source SalesOrder when raised via Request Samples (col 69851000000322687) |
+| quote | bigint | source Quote when raised via Request Samples (col 69851000000322688) |
+| note | text | header note (col 69851000000326150) |
+| deleted_at | datetime | soft delete (col 69851000000322689) |
+
+### SampleOrderLine (live id 69851000000320174) — added 2026-10-08 (CR-315)
+One item × piece × qty on a sample order. Written by `/sample-order-save` (replace-wholesale)
+and `/sample-order-supply` (`supplied_qty`, `supplied_on`); soft-deleted with the order.
+| Column | Type | Notes |
+|---|---|---|
+| sample_order | bigint | logical FK → SampleOrder (col 69851000000318658) |
+| design | bigint | logical FK → Design — ANY Item-master item (col 69851000000318659) |
+| piece_kind | varchar(10) | `Full` (whole tile, record-only stock) · `Cut` (cut piece, deducts CutPieceStock on supply) (col 69851000000318660) |
+| cut_piece_size | bigint | logical FK → CutPieceSize, Cut lines only (col 69851000000318661) |
+| qty | int | pieces requested, positive integer (col 69851000000318662) |
+| supplied_qty | int | pieces supplied so far, 0…qty; `STATE_COLUMNS` (col 69851000000318663) |
+| supplied_on | date | date of the LAST supply; `STATE_COLUMNS` (col 69851000000318664) |
+| note | text | line remark (col 69851000000318665) |
+| deleted_at | datetime | soft delete (col 69851000000318666) |
 
 ### CutPieceSize (live id 69851000000182460)
 Lookup; natural key = `name`. Editable in Settings ▸ Masters; the Panel form's
@@ -768,18 +827,63 @@ picker creates missing sizes write-through.
 | deleted_at | datetime | soft delete |
 
 ### CutPieceStock (live id 69851000000183280)
-On-hand cut pieces per (design, cut_piece_size) — written only server-side:
-`/cut-stock-adjust` sets the absolute qty (manual entry, Item-opening-stock
-style), while the `adjustCutStock` delta helper serves the PanelOrder status
-machine (Ready +, Dispatched −). Panel save/delete no longer moves stock
-(2026-08-27). The composite key's uniqueness lives there, not in NATURAL_KEY. Audit trail =
-OperationLog + StatusTransition (no ledger table). Browsable at /cut-stock.
+**The cut-piece ITEM + its cached on-hand (CR-306/307, 2026-10-07).** One row per
+(design, cut_piece_size): `weight_kg` is the item attribute, `qty` the on-hand that
+`adjustCutStock` keeps in step with the `CutStockEntry` ledger. qty 0 = defined, nothing
+on hand; a design with at least one live row is "in Panel Craft" (`/panel-items`).
+Written only server-side: `/cut-piece-save` (upsert weight; blank size → full size),
+`/cut-piece-delete` (soft, qty 0 + unused by PanelLine), `ensureCutPiece` (from
+`/panel-save`), and `adjustCutStock` for every movement (`/cut-stock-entry`, status
+machine). Generic POST / PATCH / DELETE are refused (DF-02 closed). The composite
+key's uniqueness lives in `ensureCutPiece` / `adjustCutStock`, not in NATURAL_KEY.
 | Column | Type | Notes |
 |---|---|---|
 | design | bigint | logical FK → Design |
 | cut_piece_size | bigint | logical FK → CutPieceSize |
 | qty | int | current on-hand (never negative) |
+| weight_kg | double(3) | kg per piece (CR-306, col 69851000000326127, added 2026-10-07); null = not set; default on create = Design box weight ÷ pcs per box × the cut's face share (`cutPieceWeight`) |
 | deleted_at | datetime | soft delete |
+
+### CutStockEntry (live id 69851000000317365) — added 2026-10-07 (CR-307)
+The dated ledger behind `CutPieceStock.qty`: one row per movement, written only by
+`adjustCutStock` (via `/cut-stock-entry` and `/panel-order-status`). Never edited or
+deleted by a route (reverse = opposite entry); generic writes refused. Browsable as Stock
+History on `/panel-items/:designId`.
+| Column | Type | Notes |
+|---|---|---|
+| design | bigint | logical FK → Design (col 69851000000320133) |
+| cut_piece_size | bigint | logical FK → CutPieceSize (col 69851000000320134) |
+| qty | int | SIGNED pieces (col 69851000000320135) |
+| entry_date | date | the sheet's Entry / Adjustment date; today for order movements (col 69851000000320136) |
+| kind | varchar(20) | `receipt` (Add Stock sheet) · `adjustment` (Adjust Stock sheet, reason mandatory) · `order_ready` · `order_dispatch` · `sample` (sample supply, CR-316) (col 69851000000320137) |
+| reason | varchar(100) | AdjustmentReason name, adjustments only (col 69851000000320138) |
+| note | text | line remark or the sheet's note (col 69851000000320139) |
+| ref_table | varchar(40) | `PanelOrder` on order movements, `SampleOrder` on sample supplies (col 69851000000320140) |
+| ref_rowid | bigint | the PanelOrder / SampleOrder ROWID (col 69851000000320141) |
+| performed_by | varchar(100) | actor email (col 69851000000320142) |
+| deleted_at | datetime | soft delete, never set by a route (col 69851000000320143) |
+
+### Mdf (live id 69851000000314493) — added 2026-10-07 (CR-309)
+Settings ▸ Masters ▸ MDF — the board a showcase panel is mounted on; picked per
+`PanelOrderLine.mdf`. Generic CRUD via `mastersApi` (module `panel_craft`).
+| Column | Type | Notes |
+|---|---|---|
+| size | varchar(60) | lead column, e.g. "1200x2100"; a panel-order line defaults to the MDF whose size equals the panel size (col 69851000000316960) |
+| thickness | varchar(30) | e.g. "12mm" (col 69851000000316961) |
+| weight_kg | double(3) | board weight; joins the line weight (col 69851000000316962) |
+| seq_code | varchar(10) | auto-assigned by the Masters editor (col 69851000000316963) |
+| deleted_at | datetime | soft delete (col 69851000000316964) |
+
+### AdjustmentReason (live id 69851000000316601) — added 2026-10-07 (CR-308)
+Settings ▸ Masters ▸ Adjustment Reason — why stock was adjusted; read by both
+adjustment sheets (`GET_SHARED`), stored by NAME on `ProductionLog.reason` /
+`CutStockEntry.reason`. Seeded: Breakage · Damaged in transit · Theft · Count correction ·
+Sample / Display · Other. Natural key = `name`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(100) | unique (col 69851000000314852) |
+| seq_code | varchar(10) | auto-assigned by the Masters editor (col 69851000000314853) |
+| deleted_at | datetime | soft delete (col 69851000000314854) |
 
 ### Activity (76673000000054380)
 | Column | Type | Notes |
