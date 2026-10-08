@@ -5,7 +5,7 @@
 
 ## 2026-10-08 — Sample Orders: a separate order type for customer samples (CR-315…317)
 
-**BUILT 2026-10-08 (tsc + build + self-check; LIVE schema: `SampleOrder`, `SampleOrderLine`); deploy + API drive + commit pending.**
+**LIVE 2026-10-08 (functions + client; LIVE schema: `SampleOrder`, `SampleOrderLine`); committed `27473ee`; API drive passed (32 checks, ZZT data removed).**
 
 - **Sample Orders** (CR-315). Panel Craft gains a second order type: a customer's request for item
   samples — a full tile or a cut piece of any item in the Item master — numbered SMP/FY/NNN, kept apart
