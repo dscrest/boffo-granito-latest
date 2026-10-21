@@ -23,6 +23,8 @@ catalyst-debug.log
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example
+# function env vars (Zoho client secret, FX cron key) — copy catalyst-config.example.json
+functions/*/catalyst-config.json
 catalyst-migration/
 .impeccable/hook.cache.json
 

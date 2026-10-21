@@ -11,6 +11,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
+import { Chip } from "@/ui/Chip";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmtDateTime, pct } from "@/lib/format";
@@ -19,6 +20,8 @@ import {
   listCustomers,
   type CustomerRow,
 } from "./customersApi";
+import { ZohoSearchModal } from "./ZohoSearchModal";
+import { ZOHO, ZOHO_LINK, type ZohoLink } from "./zohoApi";
 
 type Row = {
   key: string;
@@ -29,6 +32,7 @@ type Row = {
   paymentTerm: string;
   handlingPerson: string;
   active: boolean;
+  zoho: ZohoLink; // CR-362: CRM & Books / CRM only / Books only / none
   orders: number;
   qty: number;
   loaded: number;
@@ -36,12 +40,29 @@ type Row = {
   modifiedTime: string;
 };
 
-// Toggleable + reorderable columns (Name pinned outside the map).
+// Toggleable + reorderable columns. Name leads; the auto CUS-NNNNN code sits LAST, default-hidden (CR-355).
 const PARTY_COLUMNS: ColumnDef<Row>[] = [
-  { key: "code", label: "Code", className: "mono muted", render: (r) => r.code },
+  {
+    key: "name",
+    label: "Name",
+    render: (r) => (
+      <>
+        <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
+          {r.name}
+        </Link>
+        {!r.active && (
+          <span className="chip" style={{ marginLeft: 6 }}>
+            inactive
+          </span>
+        )}
+      </>
+    ),
+  },
   { key: "country", label: "Country", render: (r) => r.country },
   { key: "currency", label: "Currency", className: "muted", render: (r) => r.currency },
   { key: "paymentTerm", label: "Payment Term", className: "muted", render: (r) => r.paymentTerm },
+  // CR-356/359/362: at a glance, which Zoho systems hold the customer (detail page carries the ids).
+  { key: "zoho", label: "Zoho", render: (r) => (r.zoho === "none" ? "—" : <Chip tone={ZOHO_LINK[r.zoho].tone} label={ZOHO_LINK[r.zoho].chip} title={ZOHO_LINK[r.zoho].text} />) },
   { key: "openOrders", label: "Open Orders", className: "num mono", style: { textAlign: "right" }, render: (r) => r.orders },
   {
     key: "loaded",
@@ -59,6 +80,7 @@ const PARTY_COLUMNS: ColumnDef<Row>[] = [
   },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
+  { key: "code", label: "Code", className: "mono muted", render: (r) => r.code },
 ];
 
 /* Generic filter: pick a field, then a value (values derived from live rows). */
@@ -70,6 +92,7 @@ const FILTER_FIELDS: { key: keyof Row; label: string }[] = [
 
 export function PartiesView() {
   const navigate = useNavigate();
+  const [zohoOpen, setZohoOpen] = useState(false); // CR-325/359 "From Zoho CRM"
   const { orders } = useOrders();
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +101,7 @@ export function PartiesView() {
   const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
   const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("parties.criteria", {});
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("partiesTableColumns", PARTY_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("partiesTableColumns.v2", PARTY_COLUMNS, ["created", "modified", "code"]) // .v2 (CR-355);
 
   const load = () => {
     setLoading(true);
@@ -107,6 +130,7 @@ export function PartiesView() {
           paymentTerm: c.paymentTermLabel || "—",
           handlingPerson: c.handlingPersonLabel,
           active: c.active,
+          zoho: c.zohoLink,
           orders: open.length,
           qty: open.reduce((s, o) => s + o.orderQty, 0),
           loaded: open.reduce((s, o) => s + o.loadedQty, 0),
@@ -121,6 +145,7 @@ export function PartiesView() {
   const filterFields = useMemo<FilterField<Row>[]>(() => {
     const opts = (get: (r: Row) => string) => [...new Set(base.map(get).filter(Boolean))].sort();
     const status = (r: Row) => (r.active ? "Active" : "Inactive");
+    const zoho = (r: Row) => ZOHO_LINK[r.zoho].text;
     return [
       { key: "name", label: "Name", type: "text", get: (r) => r.name },
       { key: "code", label: "Code", type: "text", get: (r) => r.code },
@@ -128,6 +153,7 @@ export function PartiesView() {
       { key: "status", label: "Working Status", type: "multiselect", options: opts(status), get: status },
       { key: "handlingPerson", label: "Sales Person", type: "multiselect", options: opts((r) => r.handlingPerson), get: (r) => r.handlingPerson },
       { key: "currency", label: "Currency", type: "multiselect", options: opts((r) => r.currency), get: (r) => r.currency },
+      { key: "zoho", label: "Zoho", type: "multiselect", options: Object.values(ZOHO_LINK).map((l) => l.text), get: zoho },
       { key: "created", label: "Created Between", type: "daterange", get: (r) => r.createdTime },
     ];
   }, [base]);
@@ -162,6 +188,12 @@ export function PartiesView() {
        grows and its footer sits on the window edge — no dead band below. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
       {error && <ErrorCard message={error} onRetry={load} />}
+      {zohoOpen && (
+        <ZohoSearchModal
+          onPick={(p) => navigate("/parties/new", { state: { zoho: p } })}
+          onClose={() => setZohoOpen(false)}
+        />
+      )}
 
       <div className="fbar">
         <Icon name="filter" size={12} />
@@ -203,11 +235,18 @@ export function PartiesView() {
         <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {can("customers", "create") && (
-          /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>
-            <Icon name="plus" size={13} />
-            New customer
-          </button>
+          <>
+            {/* CR-325/359: pick a Zoho customer → New customer form prefilled from it. */}
+            <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setZohoOpen(true)} title={`Create a customer from a ${ZOHO.label} ${ZOHO.noun}`}>
+              <Icon name="refresh" size={13} />
+              From {ZOHO.label}
+            </button>
+            {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
+            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>
+              <Icon name="plus" size={13} />
+              New customer
+            </button>
+          </>
         )}
       </div>
 
@@ -219,7 +258,6 @@ export function PartiesView() {
           <table className="tbl">
             <thead>
               <tr>
-                <SortTh id="name" label="Name" sort={sort} />
                 {visible.map((c) => (
                   <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                 ))}
@@ -234,16 +272,6 @@ export function PartiesView() {
                   onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/parties/${encodeURIComponent(r.code)}`); }}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>
-                    <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
-                      {r.name}
-                    </Link>
-                    {!r.active && (
-                      <span className="chip" style={{ marginLeft: 6 }}>
-                        inactive
-                      </span>
-                    )}
-                  </td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
                       {c.render!(r)}
@@ -253,7 +281,7 @@ export function PartiesView() {
               ))}
               {rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={visible.length + 1} style={{ padding: 0 }}>
+                  <td colSpan={visible.length} style={{ padding: 0 }}>
                     {customers.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter or search" />
                     ) : (

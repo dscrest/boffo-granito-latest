@@ -8,7 +8,7 @@
    optional source SO / Quote) + SampleOrderLine rows (item × Full|Cut ×
    cut size × qty) save in ONE call (/sample-order-save); edit / delete
    only while New. Supply is recorded per line, partial allowed
-   (/sample-order-supply: qty + date); the header status is DERIVED:
+   (CR-347: a supply is a LOAD, /panel-load-save: qty + date + vehicle); the header status is DERIVED:
    New → PartiallySupplied → Supplied (sampleOrderStatus.ts).
    Stock: a Cut line deducts cut-piece stock (ledger kind "sample");
    a Full tile is record-only (box stock has no per-piece path — the
@@ -18,7 +18,7 @@ import { listAll, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
 import { listPanels } from "./panelsApi";
-import { invalidateCutStock } from "./panelOrdersApi";
+import { invalidateCutStock, parseLoads, type LoadRow } from "./panelOrdersApi";
 import { deriveSampleStatus, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 export { deriveSampleStatus, remaining, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
@@ -69,6 +69,8 @@ export interface SampleOrderRow {
   quoteNo: string;
   note: string;
   lines: SampleOrderLineRow[];
+  /** CR-347: vehicle trips (= supplies) recorded against this order, oldest first. */
+  loads: LoadRow[];
   totalQty: number;
   suppliedQty: number;
   createdTime: string;
@@ -94,7 +96,7 @@ export function listSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
 }
 
 async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRow[]; error?: string }> {
-  const [orders, lines, customers, designsRes, panelsRes, sos, quotes] = await Promise.all([
+  const [orders, lines, customers, designsRes, panelsRes, sos, quotes, loads, loadLines] = await Promise.all([
     listAll("SampleOrder", { order: "ROWID desc" }),
     listAll("SampleOrderLine"),
     listAll("Customer", { columns: ["name", "code"] }),
@@ -102,6 +104,8 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
     listPanels(), // cached — cut-size names
     listAll("SalesOrder", { columns: ["order_number"] }),
     listAll("Quote", { columns: ["quote_number"] }),
+    listAll("PanelLoad"), // CR-347
+    listAll("PanelLoadLine"),
   ]);
   if (!orders.ok) return { ok: false, orders: [], error: orders.error };
   if (!lines.ok) return { ok: false, orders: [], error: lines.error };
@@ -110,6 +114,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
   const quoteNo = new Map((quotes.rows || []).map((r) => [String(r.ROWID), str(r.quote_number)]));
   const design = new Map((designsRes.ok ? designsRes.designs : []).map((d) => [d.id, d]));
   const cutName = new Map((panelsRes.ok ? panelsRes.cutSizes : []).map((c) => [c.id, c.label]));
+  const loadsByOrder = parseLoads(loads.rows || [], loadLines.rows || [], "sample_order");
   const linesByOrder = new Map<string, SampleOrderLineRow[]>();
   for (const l of lines.rows || []) {
     const key = str(l.sample_order);
@@ -148,6 +153,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       quoteNo: quoteNo.get(str(o.quote)) || "",
       note: str(o.note),
       lines: ls,
+      loads: loadsByOrder.get(id) ?? [],
       totalQty: ls.reduce((s, l) => s + l.qty, 0),
       suppliedQty: ls.reduce((s, l) => s + l.suppliedQty, 0),
       createdTime: str(o.CREATEDTIME),
@@ -208,7 +214,4 @@ export function deleteSampleOrder(rowid: string, reason?: string): Promise<OpRes
   return bust(op(`sample-order-delete/${rowid}`, { reason }));
 }
 
-/** CR-316: record a supply — qty per line (0 = skip) on one date; Cut lines deduct cut stock. */
-export function recordSampleSupply(rowid: string, input: { date: string; note?: string; lines: { line: string; qty: number }[] }) {
-  return bust(op<{ ROWID: string; status: SampleOrderStatus }>(`sample-order-supply/${rowid}`, input));
-}
+// CR-347: a supply IS a load — see panelLoadsApi.saveLoad (the old /sample-order-supply is gone).

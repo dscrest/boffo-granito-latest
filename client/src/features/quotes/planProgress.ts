@@ -10,7 +10,7 @@
    the crew to set. If a match is ever disputed, the upgrade path is an
    explicit LoadBox.plan_container_no + an override picker on the loading.
    ============================================================ */
-import type { ContainerPlan } from "@/data";
+import { parseLoadPlan, type ContainerPlan } from "@/data";
 
 export type ContainerProgressStatus = "Sent" | "Partial" | "Planned";
 
@@ -70,4 +70,18 @@ export function progressChip(r: ContainerProgress): { label: string; cls: string
   if (r.status === "Sent") return { label: "Sent", cls: "palstatus p-completed" };
   if (r.status === "Partial") return { label: `Partially sent · ${r.sent} of ${r.boxes}`, cls: "palstatus p-loading" };
   return { label: "Planned", cls: "palstatus p-planning" };
+}
+
+/** CR-338: the plan containers an OPEN loading already claims for this SO (its
+    `load_plan.plan[soId]`), 0-based index → that loading. A Dispatched loading's
+    claim is not special-cased: `planProgress`'s drain already counts its boxes.
+    First writer wins when two Open loadings claim the same container. */
+export function planClaims<B extends { id: string; status: string; loadPlan: string }>(boxes: B[], soId: string): Map<number, B> {
+  const m = new Map<number, B>();
+  for (const b of boxes) {
+    if (b.status !== "Open") continue;
+    const ci = parseLoadPlan(b.loadPlan)?.plan?.[soId];
+    if (typeof ci === "number" && ci >= 0 && !m.has(ci)) m.set(ci, b);
+  }
+  return m;
 }

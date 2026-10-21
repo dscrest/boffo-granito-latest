@@ -2,14 +2,17 @@
    Customer (Party) master — typed Data Store wrapper over lib/dataOps.
 
    The Customer table (Catalyst) holds the buyer list. `payment_term`
-   is a real ForeignKey → PaymentTerm (stores the ROWID). The table is
-   populated in-app for now and will be synced FROM Zoho Books later
-   (books_contact_id is the sync key). Every write is recorded
-   server-side in OperationLog.
+   is a real ForeignKey → PaymentTerm (stores the ROWID). Since CR-356
+   it syncs with a Zoho customer source both ways — Zoho CRM Accounts
+   since CR-359 (`crm_account_id`), Zoho Books before (`books_contact_id`,
+   kept): Zoho → add-on on the server (lib/customerSync.js), add-on → Zoho
+   by hand (Push). ZOHO in zohoApi.ts names the active one. Every write
+   is recorded in OperationLog.
    ============================================================ */
 import { list, listAll, insert, update, remove, type DSRow } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import type { Party } from "@/data";
+import { ZOHO, zohoLinkOf, type ZohoLink } from "./zohoApi";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 
@@ -72,9 +75,29 @@ export const CUSTOMER_EXTRA_FIELDS = [
   "shipping_pincode",
   "shipping_phone",
   "additional_addresses", // JSON array of ExtraAddress (extra ship-to/bill-to addresses)
+  "books_contact_id", // Zoho Books contact this customer is mapped to (CR-325; "" = not mapped)
+  // CR-356 Books-parity fields (same names as the Books contact object)
+  "gst_no", // GSTIN
+  "gst_treatment", // business_gst | business_none | consumer | overseas (GST_TREATMENTS)
+  "place_of_contact", // Place of Supply — GST state code ("GJ")
+  "pan_no",
+  "website",
+  "credit_limit", // text column; nothing sorts/sums it (ponytail: decimal if it ever does)
+  "notes",
+  "opening_balance", // pulled from Books, display-only here (never pushed)
+  "crm_account_id", // CR-359: Zoho CRM Account this customer is linked to ("" = not linked)
 ] as const;
 export type CustomerExtraField = (typeof CUSTOMER_EXTRA_FIELDS)[number];
 export type CustomerExtras = Record<CustomerExtraField, string>;
+
+/** Books GST treatment codes → labels (form select + detail page). */
+export const GST_TREATMENTS: { value: string; label: string }[] = [
+  { value: "business_gst", label: "Registered Business – Regular" },
+  { value: "business_none", label: "Unregistered Business" },
+  { value: "consumer", label: "Consumer" },
+  { value: "overseas", label: "Overseas" },
+];
+export const gstTreatmentLabel = (v: string): string => GST_TREATMENTS.find((t) => t.value === v)?.label ?? v;
 
 export function emptyExtras(): CustomerExtras {
   return Object.fromEntries(CUSTOMER_EXTRA_FIELDS.map((k) => [k, ""])) as CustomerExtras;
@@ -159,7 +182,10 @@ export interface CustomerRow {
   boxBrandId: string; // Brand ROWID ("" if unset) — default carton brand for loadings
   boxBrandLabel: string;
   handlingPersonLabel: string; // SalesPerson name ("" if unset)
-  booksContactId: string;
+  /** Remote id in the active Zoho source (ZOHO.linkField) — "" = not linked. */
+  zohoLinkId: string;
+  /** CR-362: CRM & Books / CRM only / Books only / none — derived from both link ids. */
+  zohoLink: ZohoLink;
   address: string;
   portOfDischarge: string;
   active: boolean;
@@ -255,7 +281,8 @@ async function fetchCustomers(): Promise<{
       boxBrandId: str(c.box_brand),
       boxBrandLabel: brandLabel.get(str(c.box_brand)) || "",
       handlingPersonLabel: repLabel.get(str(c.handling_person)) || "",
-      booksContactId: str(c.books_contact_id),
+      zohoLinkId: str(c[ZOHO.linkField]),
+      zohoLink: zohoLinkOf({ crm_account_id: str(c.crm_account_id), books_contact_id: str(c.books_contact_id) }),
       address: str(c.address),
       portOfDischarge: str(c.port_of_discharge),
       active: str(c.active) !== "false", // unset → active
@@ -330,6 +357,11 @@ export function deleteCustomer(rowid: string, reason?: string) {
 /** Partial patch for the More-menu Active/Inactive toggle. */
 export function setCustomerActive(rowid: string, active: boolean) {
   return bust(update("Customer", rowid, { active }));
+}
+
+/** Unmap from the active Zoho source (CR-325/359): clears the link only — the details stay. */
+export function clearZohoLink(rowid: string) {
+  return bust(update("Customer", rowid, { [ZOHO.linkField]: "" }));
 }
 
 /** Replace the customer's extra addresses (detail-screen Add/Remove). */

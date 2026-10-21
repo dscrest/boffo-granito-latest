@@ -156,6 +156,12 @@ export function CutStock() {
         </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {canEdit && (
+          <button className="hbtn" onClick={() => navigate("/cut-stock/transfer")} title="Move pieces between warehouses (CR-330)">
+            <Icon name="truck" size={13} />
+            Transfer
+          </button>
+        )}
+        {canEdit && (
           <button className="hbtn" onClick={() => navigate("/cut-stock/adjust")} title="Breakage, theft, count correction…">
             <Icon name="edit" size={13} />
             Adjust Stock

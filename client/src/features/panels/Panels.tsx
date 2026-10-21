@@ -31,15 +31,6 @@ const detailPath = (r: PanelRow) => `/panels/${encodeURIComponent(r.id)}`;
 const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
   { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.images} alt={r.panelCode} /> },
   {
-    key: "code",
-    label: "Panel Code",
-    render: (r) => (
-      <Link className="linkish mono" to={detailPath(r)} title="View panel" onClick={(e) => e.stopPropagation()}>
-        {r.panelCode}
-      </Link>
-    ),
-  },
-  {
     key: "designs",
     label: "Designs",
     render: (r) =>
@@ -55,6 +46,16 @@ const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
   },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
+  // CR-355: the auto panel code sits last and hidden; Designs lead.
+  {
+    key: "code",
+    label: "Panel Code",
+    render: (r) => (
+      <Link className="linkish mono" to={detailPath(r)} title="View panel" onClick={(e) => e.stopPropagation()}>
+        {r.panelCode}
+      </Link>
+    ),
+  },
 ];
 
 export function Panels() {
@@ -67,7 +68,7 @@ export function Panels() {
   const [designFilter, setDesignFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns", PANEL_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns.v2", PANEL_COLUMNS, ["created", "modified", "code"]) // .v2 (CR-355);
 
   const load = async () => {
     setLoading(true);
@@ -242,7 +243,7 @@ export function Panels() {
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
         <span className="muted">{loading ? "Loading…" : ids.length > 0 ? `${ids.length} selected` : null}</span>
         <div style={{ flex: 1 }} />
-        <span role="group" aria-label="Panels view" title="Switch view" style={{ display: "inline-flex", gap: 4 }}>
+        <span role="group" aria-label="Panel Master view" title="Switch view" style={{ display: "inline-flex", gap: 4 }}>
           <IconBtn icon="tile" title="Photo view" active={view === "photo"} onClick={() => setView("photo")} />
           <IconBtn icon="orders" title="Grid view" active={view === "grid"} onClick={() => setView("grid")} />
         </span>

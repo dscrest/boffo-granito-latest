@@ -133,7 +133,7 @@ const MASTERS: MasterDef[] = [
       { key: "seq_code", label: "Seq", auto: true },
     ],
   },
-  // CR-309: the board a showcase panel is mounted on — picked per panel-order line; its weight joins the panel weight.
+  // CR-309 (CR-344 restored, size-keyed): the board a showcase panel is mounted on — picked per panel-order line; its weight joins the panel weight.
   {
     key: "mdf",
     label: "MDF",

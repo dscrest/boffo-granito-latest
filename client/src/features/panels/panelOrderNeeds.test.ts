@@ -1,7 +1,22 @@
 /* Self-check for panelOrderNeeds — run with:  npx tsx client/src/features/panels/panelOrderNeeds.test.ts
    Plain asserts, no framework (same style as newLoadingRows.test.ts). */
 import assert from "node:assert";
-import { allocatedByKey, demandByKey, panelWeight, readiness, requirementsFor, shortagesFor, stockKey } from "./panelOrderNeeds";
+import {
+  allocatedByKey,
+  demandByKey,
+  lineWeightSplit,
+  loadingStatus,
+  loadProgress,
+  mdfLabel,
+  panelWeight,
+  panelWeightSplit,
+  pendingNeedLines,
+  pendingText,
+  readiness,
+  requirementsFor,
+  shortagesFor,
+  stockKey,
+} from "./panelOrderNeeds";
 import type { PanelRow } from "./panelsApi";
 
 const panel = (id: string, lines: { d: string; c: string; q: number }[]): PanelRow =>
@@ -10,6 +25,7 @@ const panel = (id: string, lines: { d: string; c: string; q: number }[]): PanelR
     panelCode: id,
     panelSize: "",
     vinylSize: "",
+    mdfSize: "",
     images: [],
     createdTime: "",
     modifiedTime: "",
@@ -52,6 +68,16 @@ assert.deepStrictEqual(requirementsFor([], panels, stock), []);
   assert.strictEqual(panelWeight(panels.get("A")!, new Map([[stockKey("grey", "300x300"), 1.5]]), 6), null, "an unweighed piece makes the panel unknown");
 }
 
+// CR-344: the MDF label comes from the size-keyed master row the line picked.
+{
+  const p: PanelRow = { ...panels.get("A")!, mdfSize: "1200x2400" };
+  const m8 = { id: "m8", size: "1200x2400", thickness: "8 mm", weightKg: 5.5, label: "1200x2400 · 8 mm" };
+  assert.strictEqual(mdfLabel(m8), "1200x2400 · 8 mm");
+  assert.strictEqual(mdfLabel(undefined), "");
+  const w = new Map<string, number | null>([[stockKey("grey", "300x300"), 1.5], [stockKey("ivory", "600x300"), 4]]);
+  assert.strictEqual(panelWeight(p, w, m8.weightKg), 2 * 1.5 + 1 * 4 + 5.5, "order weight = pieces + the picked thickness's board");
+}
+
 console.log("panelOrderNeeds: all checks passed");
 
 // CR-312: booking — free = on hand − every open order's booking; toCut = need − allocated − free.
@@ -92,14 +118,70 @@ console.log("panelOrderNeeds: all checks passed");
   assert.strictEqual(beige.onHand, 0);
 }
 
-// CR-313: readiness is derived from the three marks; dispatched orders read "—".
+// CR-313: readiness is derived from the marks (four since CR-323); dispatched orders read "—".
 {
   assert.strictEqual(readiness({}, "Received"), "Pending");
   assert.strictEqual(readiness({ mdf: { status: "Ordered", by: "x", at: "" } }, "Received"), "In Progress");
-  const all = { mdf: { status: "Ready", by: "", at: "" }, vinyl: { status: "Ready", by: "", at: "" }, cut: { status: "Ready", by: "", at: "" } };
+  const three = { mdf: { status: "Ready", by: "", at: "" }, vinyl: { status: "Ready", by: "", at: "" }, cut: { status: "Ready", by: "", at: "" } };
+  assert.strictEqual(readiness(three, "InCutting"), "In Progress", "CR-323: three Ready without pasted is not ready");
+  const all = { ...three, pasted: { status: "Ready", by: "", at: "" } };
   assert.strictEqual(readiness(all, "InCutting"), "Ready for Production");
   assert.strictEqual(readiness({ ...all, cut: { status: "Pending", by: "", at: "" } }, "InCutting"), "In Progress");
   assert.strictEqual(readiness(all, "Dispatched"), "—");
 }
 
 console.log("panelOrderNeeds: booking + readiness checks passed");
+
+// CR-346: a loose cut-piece line needs its own pieces — one per unit — beside the panels.
+{
+  const r = requirementsFor([{ panelId: "B", qty: 1 }, { panelId: "", qty: 20, designId: "grey", cutSizeId: "300x300", designName: "Grey", cutSizeName: "300x300" }], panels, stock);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].need, 3 + 20);
+  assert.deepStrictEqual(r[0].panels, [{ panelId: "B", panelCode: "B", qty: 3 }, { panelId: "", panelCode: "Cut piece", qty: 20 }]);
+  assert.strictEqual(requirementsFor([{ panelId: "", qty: 5 }], panels, stock).length, 0, "a cut line without design/cut size needs nothing");
+}
+
+// CR-347: loads → progress per line × material, derived Loading Status, pending text, pending needs.
+{
+  const lines = [
+    { id: "L1", qty: 3, panelId: "A", mdfId: "m8" },
+    { id: "L2", qty: 2, panelId: "B" }, // no board picked → no MDF material
+    { id: "L3", qty: 20, panelId: "", designId: "grey", cutSizeId: "300x300" },
+  ];
+  const none = loadProgress(lines, []);
+  assert.deepStrictEqual(none.map((r) => `${r.lineId}|${r.material}`), ["L1|Panel", "L1|Mdf", "L2|Panel", "L3|Item"]);
+  assert.strictEqual(loadingStatus(none), "Not loaded");
+  assert.strictEqual(pendingText(none), "5 panels · 3 MDF · 20 pcs");
+  const partial = loadProgress(lines, [{ id: "ld1", lines: [{ lineId: "L1", material: "Mdf", qty: 3, weightKg: 16.5 }, { lineId: "L3", material: "Item", qty: 8, weightKg: 12 }] }]);
+  assert.strictEqual(loadingStatus(partial), "Partially loaded");
+  assert.strictEqual(pendingText(partial), "5 panels · 12 pcs", "MDF fully loaded drops out; 12 pcs remain");
+  const full = loadProgress(lines, [
+    { id: "ld1", lines: [{ lineId: "L1", material: "Mdf", qty: 3, weightKg: 16.5 }, { lineId: "L3", material: "Item", qty: 20, weightKg: 30 }] },
+    { id: "ld2", lines: [{ lineId: "L1", material: "Panel", qty: 3, weightKg: null }, { lineId: "L2", material: "Panel", qty: 2, weightKg: 9 }] },
+  ]);
+  assert.strictEqual(loadingStatus(full), "Loaded");
+  assert.strictEqual(pendingText(full), "");
+  assert.strictEqual(loadingStatus([], "Dispatched"), "Loaded", "a legacy Dispatched order with no loads reads Loaded");
+  // Pending need lines shrink with the Panel / Item material only (MDF never touches cut stock).
+  const pend = pendingNeedLines(lines, [{ id: "ld1", lines: [{ lineId: "L1", material: "Mdf", qty: 3, weightKg: null }, { lineId: "L3", material: "Item", qty: 8, weightKg: null }, { lineId: "L2", material: "Panel", qty: 2, weightKg: null }] }]);
+  assert.deepStrictEqual(pend.map((l) => l.qty), [3, 0, 12]);
+  const r = requirementsFor(pend, panels, stock);
+  assert.strictEqual(r.find((x) => x.key === stockKey("grey", "300x300"))!.need, 3 * 2 + 0 + 12, "a partial load shrinks the need instead of raising toCut");
+}
+
+// CR-349: weight split — pieces vs board; shipped kg are frozen on the load, pending kg follow the master.
+{
+  const w = new Map<string, number | null>([[stockKey("grey", "300x300"), 1.5], [stockKey("ivory", "600x300"), 4]]);
+  assert.deepStrictEqual(panelWeightSplit(panels.get("A")!, w, 5.5), { pieces: 7, mdf: 5.5 });
+  assert.deepStrictEqual(panelWeightSplit(panels.get("A")!, w, null), { pieces: 7, mdf: null });
+  const line = { id: "L1", qty: 3, panelId: "A", mdfId: "m8" };
+  const live = { pieces: 7, mdf: 5.5 };
+  assert.deepStrictEqual(lineWeightSplit(line, [], live), { pieces: 21, mdf: 16.5 }, "nothing loaded = live × qty");
+  const loads = [{ id: "ld1", lines: [{ lineId: "L1", material: "Mdf" as const, qty: 2, weightKg: 11 }, { lineId: "L1", material: "Panel" as const, qty: 1, weightKg: 7 }] }];
+  assert.deepStrictEqual(lineWeightSplit(line, loads, live), { pieces: 7 + 2 * 7, mdf: 11 + 1 * 5.5 });
+  // The master changes (board now 6 kg): the loaded 2 boards stay 11 kg, only the pending one moves.
+  assert.deepStrictEqual(lineWeightSplit(line, loads, { pieces: 7, mdf: 6 }), { pieces: 21, mdf: 11 + 6 });
+  assert.strictEqual(lineWeightSplit(line, [{ id: "x", lines: [{ lineId: "L1", material: "Mdf", qty: 1, weightKg: null }] }], live).mdf, null, "an unweighed shipped line = unknown");
+  assert.deepStrictEqual(lineWeightSplit({ id: "L3", qty: 4, panelId: "" }, [], { pieces: 1.5, mdf: null }), { pieces: 6, mdf: null }, "a cut-piece line has no board");
+}
+console.log("panelOrderNeeds: loads + weight split checks passed");

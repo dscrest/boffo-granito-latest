@@ -111,11 +111,11 @@ export function cachedProductionLogs(): ProductionEntry[] | null {
 export function cachedAllocEntries(): AllocEntry[] {
   return cache.cached()?.allocEntries ?? [];
 }
-/** Σ allocated boxes per design NAME — designStock's `allocated` term. Read it
-    during render: it is fresh whenever the production-log cache is. */
+/** Σ allocated boxes per Design ROWID (CR-341; was design NAME) — designStock's `allocated` term.
+    Read it during render: it is fresh whenever the production-log cache is. */
 export function cachedAllocByDesign(): Map<string, number> {
   const m = new Map<string, number>();
-  for (const a of cachedAllocEntries()) m.set(a.design, (m.get(a.design) || 0) + a.qtyBoxes);
+  for (const a of cachedAllocEntries()) m.set(a.designId, (m.get(a.designId) || 0) + a.qtyBoxes);
   return m;
 }
 export function cachedOpeningEntries(): ProductionRecordRow[] {
@@ -124,6 +124,10 @@ export function cachedOpeningEntries(): ProductionRecordRow[] {
 /** Stock adjustment rows (entry_type="adjust", CR-308) — signed boxes, never plan lines. */
 export function cachedAdjustEntries(): AdjustEntry[] {
   return cache.cached()?.adjustEntries ?? [];
+}
+/** Transfer-order legs (entry_type="transfer", CR-330) — a pair per line, never plan lines. */
+export function cachedTransferEntries(): TransferEntry[] {
+  return cache.cached()?.transferEntries ?? [];
 }
 export function invalidateProductionLogs(): void {
   cache.invalidate();
@@ -182,6 +186,11 @@ export interface AdjustEntry {
   createdTime: string;
 }
 
+/** One leg of a transfer order (CR-330): −qty in the from-warehouse, +qty in the to-warehouse, same `requestGroup` = TRF code. */
+export interface TransferEntry extends AdjustEntry {
+  warehouseId: string;
+}
+
 export interface ProductionLogResult {
   ok: boolean;
   entries: ProductionEntry[];
@@ -190,6 +199,8 @@ export interface ProductionLogResult {
   allocEntries: AllocEntry[];
   /** Stock adjustments (entry_type "adjust") — signed on-hand corrections (CR-308). */
   adjustEntries: AdjustEntry[];
+  /** Transfer legs (entry_type "transfer", CR-330) — net zero per batch; per-warehouse only. */
+  transferEntries: TransferEntry[];
   error?: string;
 }
 
@@ -208,7 +219,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     listAll("Customer", { columns: ["name"] }),
     listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
   ]);
-  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], adjustEntries: [], error: logs.error };
+  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], adjustEntries: [], transferEntries: [], error: logs.error };
 
   const designName = mapBy(designs.rows, "design_name");
   const sizeName = mapBy(sizes.rows, "code");
@@ -314,11 +325,33 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
         createdTime: str(r.CREATEDTIME),
       };
     });
+  const transferEntries: TransferEntry[] = rows
+    .filter((r) => str(r.entry_type) === "transfer")
+    .map((r) => {
+      const designId = str(r.design);
+      const { size, finish } = hydrateSizeFinish(designId);
+      return {
+        id: String(r.ROWID),
+        designId,
+        design: designName.get(designId) || designId || "—",
+        size,
+        finish,
+        batchNumber: str(r.batch_number),
+        qtyBoxes: num(r.qty_boxes),
+        reason: str(r.reason),
+        note: str(r.note),
+        adjDate: str(r.production_date).slice(0, 10),
+        requestGroup: str(r.request_group),
+        performedBy: str(r.performed_by),
+        createdTime: str(r.CREATEDTIME),
+        warehouseId: str(r.warehouse),
+      };
+    });
 
   // Plan lines carry qty_requested; produced-so-far is derived from their
-  // records. Record, opening, alloc and adjust rows are excluded (none is a plan line).
+  // records. Record, opening, alloc, adjust and transfer rows are excluded (none is a plan line).
   const entries: ProductionEntry[] = rows
-    .filter((r) => !["record", "opening", "alloc", "adjust"].includes(str(r.entry_type)))
+    .filter((r) => !["record", "opening", "alloc", "adjust", "transfer"].includes(str(r.entry_type)))
     .map((r) => {
       const designId = str(r.design);
       const { size, finish } = hydrateSizeFinish(designId);
@@ -362,7 +395,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       };
     });
 
-  return { ok: true, entries, openingEntries, allocEntries, adjustEntries };
+  return { ok: true, entries, openingEntries, allocEntries, adjustEntries, transferEntries };
 }
 
 /** One line of a production request. */
@@ -393,6 +426,8 @@ export interface ProductionRecordInput {
   batch_number?: string;
   /** Pallet spec for the queue line this record creates; blank → the SO line's own. */
   pallet?: string;
+  /** Warehouse ROWID the boxes went into (CR-329); blank → the primary. */
+  warehouse?: string;
   /** Box Brand (Brand ROWID) the boxes were packed in — captured at production (CR-197). */
   box_brand?: string;
 }
@@ -406,11 +441,15 @@ export interface ProductionRecordLine {
   note?: string;
   /** Box Brand (Brand ROWID) this batch is packed in — per row (CR-257). */
   box_brand?: string;
+  /** Warehouse ROWID the boxes went into (CR-329); blank → the primary. */
+  warehouse?: string;
 }
 export interface ProductionRecordLinesInput {
   rows: ProductionRecordLine[];
   shift?: string;
   performed_by?: string;
+  /** Warehouse for every row without its own (CR-329). */
+  warehouse?: string;
   /** Pallet spec for the queue lines these records create; blank → the SO line's own. */
   pallet?: string;
   /** Fallback Box Brand for rows without their own (CR-197; rows carry it since CR-257). */
@@ -489,13 +528,25 @@ export interface StockAdjustLine {
 }
 /** Inventory adjustment (CR-308): signed box corrections, dated, with a reason —
     both modules' "Zoho Books" adjustment. All-or-nothing on the server. */
-export function adjustStock(input: { date: string; reason: string; note?: string; lines: StockAdjustLine[] }) {
+export function adjustStock(input: { date: string; reason: string; note?: string; warehouse?: string; lines: StockAdjustLine[] }) {
   return bustStock(op<{ request_group: string; lines: number }>("stock-adjust", input));
+}
+
+/** One line for POST /stock-transfer (CR-330): positive boxes, batch for batch-tracked items. */
+export interface StockTransferLine {
+  design: string;
+  batch_number?: string;
+  qty_boxes: number;
+  note?: string;
+}
+/** Transfer Order (CR-330): move boxes between warehouses — a dated TRF document with a reason. */
+export function transferStock(input: { date: string; from_warehouse: string; to_warehouse: string; reason: string; note?: string; lines: StockTransferLine[] }) {
+  return bustStock(op<{ code: string; lines: number }>("stock-transfer", input));
 }
 
 /** Set/append a batch-tracked item's opening stock as batch rows. First save is
     open; later changes need admin + reason (enforced server-side). */
-export function saveOpeningBatches(designId: string, input: { rows: OpeningStockLine[]; _reason?: string }) {
+export function saveOpeningBatches(designId: string, input: { rows: OpeningStockLine[]; warehouse?: string; _reason?: string }) {
   return bustStock(op<{ inserted: number }>(`opening-stock/${encodeURIComponent(designId)}`, input));
 }
 

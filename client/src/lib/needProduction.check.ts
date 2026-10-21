@@ -12,7 +12,7 @@ assert.strictEqual(lineSupply({ orderQty: 100, producedQty: 0 }, 0, 99).status, 
 
 // Two orders of ONE item share its 150 free boxes first-come (oldest SO first).
 const line = (id: string, so: string, qty: number, over: object = {}) =>
-  ({ id, salesOrderId: so, status: "Confirmed", designName: "TILE-A", orderQty: qty, producedQty: 0, ...over });
+  ({ id, salesOrderId: so, status: "Confirmed", designId: "d1", designName: "TILE-A", orderQty: qty, producedQty: 0, ...over });
 const orders = [line("b", "20", 120, { boxBrandId: "BR2", boxBrandLabel: "Boffo" }), line("a", "10", 80, { boxBrandId: "BR1" }), line("c", "30", 50, { status: "Draft" })];
 const stockOf = () => ({ free: 150, inProduction: 0 });
 const s = lineSupplies(orders, stockOf);
@@ -22,7 +22,7 @@ assert.strictEqual(s.has("c"), false, "draft orders are not demand");
 
 // To Produce: demand 200 − free 150 → produce 50, across 2 sales orders.
 assert.deepStrictEqual(demandByDesign(orders, stockOf), [
-  { designName: "TILE-A", openDemand: 200, free: 150, inProduction: 0, shortfall: 50, orders: 2,
+  { designId: "d1", designName: "TILE-A", openDemand: 200, free: 150, inProduction: 0, shortfall: 50, orders: 2,
     // the waiting orders' Box Brand travels with the demand, biggest first
     brands: [{ boxBrandId: "BR2", label: "Boffo", need: 120 }, { boxBrandId: "BR1", label: "", need: 80 }] },
 ]);

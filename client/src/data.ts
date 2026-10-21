@@ -12,6 +12,7 @@ export interface Party {
 }
 
 export interface Design {
+  id: string; // Design ROWID — the stock key (CR-341)
   name: string; // designName — the stored/matched key
   uniqueName: string; // the human-facing unique item name (shown in pickers)
   size: string;
@@ -42,6 +43,9 @@ export interface Order {
   country: string;
   flag: string;
   design: string;
+  /** Design ROWID — the stock key (CR-341): designStock / needProduction group on it, never on the
+      plain name, which several items (sizes · finishes) can share. */
+  designId: string;
   /** Plain design_name (matches the picker's option value); `design` above is
       the full unique label for display. Used to re-hydrate the edit/clone form. */
   designName: string;
@@ -297,6 +301,12 @@ export interface LoadPlan {
       ponytail: a JSON key instead of a LoadBox column — the server never reads
       load_plan, and siblings are found client-side from the cached box list. */
   group?: { id: string; no: number; of: number };
+  /** CR-338: which containerisation-plan container this loading fills, per SO —
+      { [SalesOrder ROWID]: 0-based index into ContainerPlan.containers }. Written
+      by the Loading Workspace (pick / Fill from plan); read client-side so an
+      Open loading's container is not offered again. Absent on older loadings.
+      ponytail: a JSON key like `group` — the server never reads load_plan. */
+  plan?: Record<string, number>;
 }
 /** Parse a LoadBox.loadPlan JSON string; null when absent/invalid. */
 export function parseLoadPlan(raw: string | undefined | null): LoadPlan | null {

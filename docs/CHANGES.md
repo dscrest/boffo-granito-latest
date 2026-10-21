@@ -3,6 +3,320 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-21 — Palletization pages no longer carry a status filter (CR-364)
+
+- **The status dropdown is gone from Ready for Palletization, In Palletization and Palletization
+  Completed** (CR-364). Each page is one stage since the split, so the dropdown only ever showed rows
+  that belong to another page. Every page now lists its own rows, nothing else.
+
+## 2026-10-21 — The CRM & Books status now fills in for every synced customer (CR-363)
+
+- **Most customers showed "CRM only" although they are synced with Books** (CR-363). The cause was on
+  our side: the server asked Zoho for a fresh sign-in token every time it switched between CRM and Books,
+  and Zoho allows only ten such requests per ten minutes. Once the quota was gone the Books check failed
+  quietly and the customer was recorded as CRM only. The server now keeps one token per system (one
+  request an hour each), a throttled request says "wait 10 minutes" instead of asking to reconnect, and
+  any Books problem during an import is listed under the sync card. Run **Import all customers** once
+  more: customers already imported are not re-fetched, only their Zoho Books link is checked and filled.
+
+## 2026-10-21 — Customers show whether they are in Zoho CRM, Zoho Books, or both (CR-362)
+
+- **Zoho link status on every customer** (CR-362). The Customers grid column now reads **Zoho** with a
+  chip: **CRM & Books** (green — the account is linked to a Books contact by Zoho's own CRM ⇄ Books
+  integration), **CRM only** (amber — in CRM, not synced with Books), **Books only** (the old Books mapping
+  with no CRM account), or a dash. The customer page spells it out ("Synced in Zoho CRM & Zoho Books",
+  "In Zoho CRM, not synced with Zoho Books", …) with both ids, and the advanced filter takes the same four
+  states. Behind it the CRM pull asks Zoho Books once per account whether a linked contact exists; that is
+  what fills the Books id, so run **Import all customers** once after this ships. Books stays hidden.
+- **Import all is safe to re-run** (CR-362, same day). The first live import stopped with a browser "fetch error"
+  after about 560 accounts: each page of 25 took close to the server's 30-second limit. Pages are now 10
+  accounts, and a re-run skips every account already imported and unchanged, so finishing an interrupted
+  import costs seconds. If it stops, the message names the page; just run Import all again.
+
+## 2026-10-21 — Palletization is three pages; palletized boxes can be released (CR-360, CR-361)
+
+- **Three palletization pages, one stage each** (CR-360). The sidebar now reads **Ready for
+  Palletization** (the queue), **In Palletization** (work in progress only) and the new **Palletization
+  Completed** (`/palletized`: palletized stock waiting to be loaded). In Palletization no longer lists the
+  completed rows. The Loading and Dispatch sheet keeps its own Ready for Loading section. The page guide
+  covers the third page.
+- **Release** (CR-361). Every row's **+** menu on Palletization Completed and on Loading and Dispatch has
+  **Release…**: type how many boxes and a reason (Admin may leave it blank). Boxes sitting in an **open
+  container** return to **Ready for Loading** (the rest of the line stays loaded). Boxes that are
+  palletized but not loaded return to **free stock** — the line shrinks or disappears and the order's
+  allocation is returned, so Available stock rises and the order must allocate again to reuse them. A
+  dispatched container, a queue line and a line still in palletization cannot be released this way. On the
+  loading sheet this replaces the old "Unload item", which took the whole line and asked for no reason.
+
+## 2026-10-21 — Customers now sync with Zoho CRM Accounts; Zoho Books switched off, nothing lost (CR-359)
+
+- **Zoho CRM is the customer source** (CR-359). The client changed direction the same day: customers come
+  from **Zoho CRM → Accounts**, not Zoho Books. Same approach as before — changes in CRM reach the add-on
+  through the webhook / scheduled pull (CRM tells us only what changed, so a quiet pull costs one call),
+  **Import all customers** once from Settings ▸ Zoho CRM, **Create in / Push to Zoho CRM** from a customer's
+  More menu, **From Zoho CRM** on the Customers page, Map / Re-pull / Unmap by hand. Contact persons come
+  from the account's CRM Contacts and are pushed back too. GSTIN, PAN, GST treatment, Place of Supply,
+  Credit Limit and Payment Term are picked up automatically from whatever custom fields the CRM org has
+  (matched by label). **Zoho Books is hidden, not removed:** its connection, its code and every existing
+  `books_contact_id` stay; CRM links live in a new `crm_account_id` column, so no customer record changed.
+  The Customers grid column now reads **Zoho CRM**. Nothing to change in the Zoho API console — an Admin
+  connects CRM once from Settings ▸ Zoho CRM (the old Settings ▸ Zoho Books link redirects there).
+
+## 2026-10-21 — Zoho Books customers arrive the moment they change (CR-358)
+
+- **Books → add-on sync is event-driven** (CR-358). Catalyst Signals listens to the Zoho Books organisation
+  (customer created / updated) and calls the server's existing incremental pull at once, so a customer
+  edited in Books is here within moments instead of up to 30 minutes later. The 30-minute cron becomes a
+  once-a-day safety net. Overlapping runs (webhook, cron, Refresh now) now queue one behind the other so
+  a brand-new Books customer can never be created twice. Settings ▸ Zoho Books wording updated.
+
+## 2026-10-21 — Panel order cut-piece line defaults to the full size (CR-357)
+
+- **Blank Cut Piece Size on a panel-order cut line = the design's full size** (CR-357). Same CR-289 rule the
+  Panel form already follows: the picker reads "Full size — 600x1200" and the server resolves a blank size to
+  the `CutPieceSize` row named after the design's Size code (minted on first use), so stock, booking and
+  loading key on one row per size. Only the Item is required on a loose cut-piece line now. First item of the
+  2026-10-21 Panel Craft list.
+
+## 2026-10-21 — Zoho Books customer sync, both ways, with the Books fields (CR-356)
+
+- **Customers sync with Zoho Books** (CR-356). Every 30 minutes the server pulls the customers changed in
+  Zoho Books since the last run (newest-first page, stops at the saved watermark — never a full pull on the
+  schedule); **Refresh now** on Settings ▸ Zoho Books runs the same pull. A Books customer already here is
+  updated (Books wins where Books has a value; add-on-only fields such as Box Brand or Sales Person are
+  untouched); one with the same name is linked; a new one is created with the next CUS number. **Import all
+  customers** (Admin, once) brings in every Books customer, 25 per request. From the customer page, More ▸
+  **Create in Zoho Books** / **Push to Zoho Books** sends the customer to Books. Reverses the CR-325 rule
+  "never a sync"; Map / Re-pull / Unmap stay. Eight Books fields now have columns — GST Treatment, GSTIN,
+  Place of Supply, PAN, Website, Credit Limit, Notes (a **Tax & Other** block on the form) and Opening
+  Balance (shown only). The Customers grid gets a **Zoho Books** column (Synced) and filter. The connection needs the write scope: Settings shows **Reconnect** until an Admin
+  connects once more; nothing changes in the Zoho API console. Also: non-Admins can no longer write the
+  `zoho_books_*` settings through the generic routes, and a column projection can no longer leak the token row.
+
+## 2026-10-19 — Every grid: Customer → Design first, system numbers hidden, whole-row click (CR-355)
+
+- **Every grid leads with Customer → Design; the auto-generated number is a hidden column; the whole
+  row opens the record** (CR-355). The CR-161 stage-grid rule is now global: Sales Orders (Customer,
+  Design, PO Number … SO Number hidden last), Quotes (Quote No hidden last), Invoices, Purchase Orders,
+  Customers (Name in the picker, CUS- code hidden), Items (SKU hidden), Panel Orders / Panel Loading
+  (PNL / SMP number hidden), Panels (panel code hidden), Stock Transfers (TRF # hidden), the SO-detail
+  Palletizations tab and the Production **sheet** view. "Design" on an order-level grid is the record's
+  design names in one clipped cell (`ui/DesignNames.tsx`). No column is pinned outside the picker any
+  more; every changed grid bumps its column-prefs key to `.v2`. Row click added on Invoices (opens the
+  PDF), Purchase Orders, Approvals, Stock Transfers / Adjustments (item stock tab) and Production sheet
+  rows outside edit mode. Hand-coded order tables (Source Panel Orders, Customer Samples, PanelsPanel,
+  Panel dashboard, Approvals) move Order No to the last column. Customer-supplied numbers (PO, Container
+  No.) stay visible. Display only.
+
+## 2026-10-19 — Loading Workspace: two steps per container, C1/C2 naming (CR-354)
+
+- **Loading Workspace: two steps per container, C1/C2 naming** (CR-354). Each container reads **C1, C2 …**
+  and is laid out as **1 · Designs & pallets** (the sheet) then **2 · Container & vehicle** (Container pick,
+  name, container no., vehicle, driver, seals, More fields, Dispatch) under its rows — step 2 stays a single
+  line until the first design is picked, so nothing greyed-out competes with where to start. Tabs view
+  mirrors it (rail = step 2). Reverses the "container first" half of CR-350.
+
+---
+
+## 2026-10-19 — Sales Orders: Customer PO first, SO number small (CR-353)
+
+From the user's look at `SO/2026-27/002`: the team works by the customer's PO number, so the Sales Order page
+title and the Orders grid's first column now show the **PO Number**; the server-minted `SO/FY/NNN` rides small
+under the title (and in the Details card, the left order list, the drawer and the By-Order cards) and remains
+the record identity in the database and the URL. In the grid, **SO Number is the last column** (existing column
+preferences get it appended automatically). Orders module only, by the user's decision: Production,
+Palletization, Loading, Approvals, pipeline cards and the printed SO sheet still say the SO number. This reverses
+the 2026-07-20 "SO number on the details card" mandate. Display only — no server, schema or write-path change.
+BUILT 2026-10-19 (tsc + build); deploy and commit pending.
+
+## 2026-10-19 — Record Load: vehicle + driver details, Load Copy print, panel name with (i) cards, notes at the bottom (CR-351…352)
+
+From the user's review of the Record Load modal on LIVE (PNL/2026-27/007). BUILT 2026-10-19 (tsc + build +
+self-checks); the two `PanelLoad` columns, deploy, drive and commit follow the CR-343…350 batch.
+
+- **Vehicle details on the load + Load Copy** (CR-351). Record Load takes **Vehicle Number** (auto-formatted,
+  required) · **Driver Name** · **Driver Mobile**; the trip stores them (`PanelLoad.driver_name` / `driver_mobile`)
+  and the Vehicle master is kept silently (CR-185 rule). The Loads table shows driver · mobile under the vehicle;
+  its kebab offers **Load Copy** — a branded PDF (vehicle block with number / driver / mobile, LD no. · date ·
+  order · customer, line × material × qty × stamped kg, signatures), printed on demand only.
+- **Panel name only, details behind (i); notes at the bottom** (CR-352). The Line column on the Record Load and
+  Dispatch-tab tables shows just `PANEL-005` (or design · cut size) with an (i) toggle; the card under the line's
+  rows lists panel size · vinyl size · MDF · ordered qty and the panel's design rows. Every helper note now sits
+  UNDER the content it explains (the booking warning moved below the table), and the bottom note answers "how do I
+  load only the MDF": Load Now is what goes on this vehicle — leave 0 on the row that stays back.
+  Sweep 2026-10-21: the Loading detail "Fill the load details before dispatch" note moved under the lines table and
+  the Item stock-breakdown modal's explainer moved under its table; every other note already sat below its content.
+
+## 2026-10-15 — Panel Craft orders ship in parts: loading entries, merged Orders, size-keyed MDF, Loading Workspace reorder (CR-343…350)
+
+From the user's walkthrough of Panel Craft and the main Loading Workspace. BUILT 2026-10-15 (tsc + build +
+self-checks + appauth 16/16; LIVE schema created via MCP); deploy, API drive (`scripts/drive-cr347.mjs`) and commit pending.
+
+- **"Cut Stock" is "Cut Piece"** (CR-343) in the sidebar, the dashboard and the bulk-sheet titles.
+- **MDF is a size-keyed master again** (CR-344, reverses CR-342's per-panel link, user decision). Settings ▸
+  Masters ▸ MDF = editable rows Size · Thickness · Weight; the Panel master states its MDF Size only; the order
+  line offers the thicknesses of that size (auto when one, mandatory once the size has rows). `/migrate-mdf-sizes`
+  merges duplicate rows and repoints order lines.
+- **One Orders register** (CR-345). Panel and Sample orders in one grid with a Type column and filter; New Order
+  asks the type first; `/sample-orders` redirects into it. Detail pages unchanged.
+- **Loose cut-piece lines on a panel order** (CR-346). "10 panels + 20 cut pieces" on one order; the pieces
+  join the requirements, booking and Pending Cut Piece maths.
+- **Loading entries + derived Dispatched** (CR-347). A panel order ships in parts — the cut-piece "panel"
+  first, the MDF board later, on different vehicles. Each trip is recorded on the order's new **Dispatch** tab
+  (Record Load: date, vehicle, note, photos, qty per line × material; several orders may share one trip =
+  one LD/FY/NNN); a load moves the stock it carries (booking-gated), and the last load flips the order to
+  Dispatched by itself — the Dispatch button is gone. A sample supply is a load too (`/sample-order-supply`
+  retired). Loading Status (Not loaded · Partially loaded · Loaded) + Pending show on the order, the grid and
+  the cards; a load can be removed while the order is open.
+- **Panel Craft ▸ Loading** (CR-348). Every order with something pending, the house "+" menu per row,
+  multi-select → one vehicle trip. Dashboard KPI "Pending to Load".
+- **Weight split and frozen** (CR-349). Pieces kg · MDF kg · Total kg per line; what has shipped keeps the
+  kg stamped at load time, what is pending follows the master. **Item master box weight needs no change** —
+  Sales Orders store no weight copy; every reader is live and the container plan's tonnes are already frozen
+  when sent.
+- **Loading Workspace: design + container first** (CR-350). The Container pick sits above the items; vehicle
+  and seal fields unlock with the first item (a Note says so); Party · PO lead the header with the SO numbers
+  small.
+## 2026-10-15 — MDF moves into the Panel master (CR-342) — ⚠ superseded by CR-344 the same day
+
+From the client's Panel-module review: MDF is not an item a salesperson picks; it is part of the panel's
+technical definition. LIVE 2026-10-15 (functions + client); API drive 8/8; commit pending.
+
+- **Panel master owns its MDF** (CR-342). Each panel has one MDF Size and a list of thickness options,
+  each with its board weight (Panel form ▸ MDF section; detail shows the table; clone copies it). The
+  `Mdf` table is reused as that variant table (`Mdf.panel`, `Panel.mdf_size`), written only by
+  `/panel-save`; a thickness an order line uses cannot be removed (409).
+- **Order line picks only the thickness** (CR-342). The MDF cell lists the panel's own thicknesses, picks
+  itself when there is one, and is mandatory once the panel has any (client + server). Size and weight
+  follow; the MDF checkpoint reads "size · thickness × qty".
+- **Settings ▸ MDF is a read-only list** (CR-342). The generic editor is gone; `/mdf` lists every
+  panel's thicknesses side by side.
+
+## 2026-10-13 — Flow review: plan-container picker at loading + three latent bugs (CR-338…341)
+
+Built from an end-to-end review of Item → Production → Customer → SO → Container plan → Palletization →
+Loading. Built, tsc + build + self-checks pass; deploy, drive and commit pending.
+
+- **Pick the planned container at loading** (CR-338). The plan-hint row on the Loading Workspace is a
+  **Plan container** Combobox per order — `C1 · 800x600 format · 24 pallets = 640 boxes`, per-design
+  `20P 800x600 · 640 Grey`, badge Planned / Partially sent / Sent / Claimed by … — Fill from plan fills the
+  chosen one. The claim is saved on the loading (`load_plan.plan`), so a loaded-but-not-dispatched
+  container is no longer offered to the next loading (it was: only dispatched boxes counted). Detail and
+  grid show a plan-only loading's own container; the SO's Container Planning card reads one line per
+  container with the format and the pallet type per design.
+- **Name lookups page past 300 rows** (CR-339). SO/Quote creation resolved designs and customers through
+  one unpaged ZCQL query (300-row cap) cached per instance; now paged, and rebuilt once when a needed
+  name is missing.
+- **Plan edit keeps Box Brand and batches** (CR-340). `/update-pal-plan` carries `box_brand` /
+  `pallet_group` from the replaced Planning lines, attributes batch-less lines like create, refuses a
+  Completed plan.
+- **Stock keyed by item, not name** (CR-341). `designStock`, the opening / adjusted / allocated maps,
+  `useStockLookup` and `needProduction` key on the Design ROWID; items that share a design name across
+  sizes no longer pool their stock, and Item detail agrees with Allocate Stock.
+
+## 2026-10-13 — Staff default role, guard hardening, Zoho-linked accounts (CR-336…337)
+
+- **Staff** (CR-336). New default role for every new account: view + create + export everywhere, never
+  edit, delete or approve. Self-seeds on first use. The Users page's New user form preselects it and
+  describes each role from its matrix (full / no delete / view + create / read-only).
+- **The guard keeps its promise** (CR-336). Thirteen routes that a create-only role could still call
+  (production delete/update/record/stage/complete/status, order-line delete, SO edit, allocate /
+  deallocate, send to loading, combine leftovers) are mapped to edit or delete; the save upserts for
+  panel orders, sample orders and panels count as edit when they carry a rowid; maintenance routes are
+  Admin-only. `routeAction()` + `appauth.test.js`. `/delete-order-item` asks the CR-270 reason.
+- **Sign-in status** (CR-337). `AppUser.zoho_zuid` / `zoho_linked_at` stamped on the first Zoho sign-in;
+  Users grid column **Sign-in** = Zoho / Password / Both / None. Password optional on New user.
+- **Self-provisioning** (CR-337). Users page card **Zoho sign-in domains** (AppSetting
+  `zoho_login_domains`, Admin-only write). A first Zoho sign-in from a listed domain creates a Staff
+  account; other emails, disabled or removed accounts are refused with a specific message.
+
+## 2026-10-12 — Warehouses, Transfer Orders, Warehouse Stock report, Locations on items (CR-329…332)
+
+**LIVE 2026-10-12 (functions + client deployed; tsc + build; `warehouseStock.check.ts`, `warehouseReduce.check.js` and the four stock checks pass; live API drive `scripts/drive-cr329.mjs` 11/11 with ZZT rows removed). Browser walk and commit pending.**
+
+- **Warehouses** (CR-329). Settings ▸ Warehouses: name, Primary ★, purposes (Production · Palletization ·
+  Loading Bay · Raw Material · Sample Cut Panels, any number), note. Until the first warehouse exists nothing
+  changes anywhere. The first one saved is the primary; stock recorded without a warehouse counts there.
+  Record Output, Opening Stock, Stock Adjustments and the cut-stock sheets pick a warehouse (default primary).
+  Marking another warehouse primary first pins the unassigned history to the old one, so nothing moves.
+- **Transfer Orders** (CR-330). Inventory ▸ Transfer Orders: New Transfer is the bulk sheet with From / To
+  and a reason; each line is refused beyond what the From warehouse holds. Cut pieces transfer from
+  Cut Stock ▸ Transfer. Every transfer gets a `TRF/2026-27/NNN` number and appears in the list with
+  From → To, the reason and who did it. Global stock never changes — only where it sits.
+- **Loaded boxes leave the right place.** Loading screens are untouched: boxes a container takes are
+  netted from the warehouse holding that batch, Loading Bay purpose first, then the fullest.
+- **Warehouse Stock report** (CR-331). Boxes or cut pieces, list or Item × Warehouse matrix, a tile per
+  warehouse, CSV. Batch-wise Stock's totals row now carries the Adjusted total it was missing.
+- **Locations on items** (CR-332). Item detail ▸ Locations tab (warehouse → batches, on hand · committed ·
+  available); Panel Item detail ▸ Locations card (warehouse × cut size).
+
+## 2026-10-12 — Loading Workspace Sheet mode (CR-335)
+
+**LIVE 2026-10-12 (client-only deploy; tsc + build + self-checks); drive and commit pending.** Design: artboard 4 on https://claude.ai/artifact/YP9GKRqMBNybyrzR3XVdt9
+
+- **Tabs | Sheet** on the Loading Workspace. Sheet shows every container of the loading on one grid: a band row per
+  container with its name, container no., vehicle, driver, e-seal and line seal typed inline (More fields for the
+  rest), its status, Dispatch and Documents, then the design rows under it. Add designs under any container
+  without switching tabs; stock, reasons and the ✕ rules are the same as the tabs.
+- Opens on the org's default view (Settings ▸ Preferences ▸ Default view), and remembers your last choice.
+
+## 2026-10-12 — Loading Workspace follow-ups (CR-334) + container renaming (CR-333)
+
+**LIVE 2026-10-12 (client, then functions deployed by the user; tsc + build); drive and commit pending.**
+
+CR-333 **Container renaming** is live: a Container name typed on the tab's rail becomes the tab title (LOAD code underneath) and is searchable on the Loadings grid. The ✕ that removes or deletes a container sits on its tab.
+
+- **Add Items in Bulk** is the bulk button's name again (same picker). Every sheet row has a ✕; a blank row just clears.
+- **Removing a loaded item or a saved container asks for a reason** (Admin: Yes / No), exactly like Delete. The item
+  returns to Ready for Loading; a saved container's ✕ deletes that loading. Unsaved rows and tabs clear without a prompt.
+- The sheet no longer scrolls sideways on a wide screen; the vehicle rail stacks below it under 1280 px.
+
+## 2026-10-12 — Loading Workspace: a tab per container, every customer listed, reasons everywhere (CR-326…328)
+
+**LIVE 2026-10-12 (client-only deploy; tsc + build + `nextStep` / `newLoadingRows` / `loadSheetEdit` / `sealChecks` self-checks); live drive and commit pending.** Design canvas: https://claude.ai/artifact/YP9GKRqMBNybyrzR3XVdt9
+
+- **Loading Workspace** (CR-326). New Loading and a loading's Edit are one page: **one tab per container**.
+  Each tab is a plain sheet (Design · Order · Batch · Pallets · Boxes · Pallet No. · Pallet type · Box Brand;
+  a blank row appears as you type) beside that container's own **vehicle & seals rail** (driver, mobile,
+  container no., e-seal, line seal, transporter, LR, destination, supervisor). Status follows the data
+  (items → In Loading, container no. or seal → Ready for Dispatch) and each open tab has its own
+  **Dispatch** button; a dispatched tab locks and shows its documents (Loading Sheet · Dispatch Copy ·
+  Pallet QR labels · Packing Report). Edit opens every container of a multi-container loading as tabs.
+- **Every customer in the Customer box** (CR-327) on New Loading and New Palletization, with the 🔍 search
+  modal from the Quote / SO forms. Customers with ready stock sort first with their count.
+- **"What to do first"** (CR-328). When a customer has nothing to load or palletize, an amber note lists
+  each order and its next step (approve · allocate stock · send to palletization · complete palletization).
+  The same rule writes the **Next:** line on the Sales Order's Items card, the empty-list reasons in Send to
+  Loading and the Load dialog, and replaces "No match" in pickers with the actual reason.
+
+## 2026-10-12 — Sign in with Zoho + Zoho Books customer mapping (CR-324…325)
+
+**BUILT 2026-10-12 (functions + client; tsc + build, offline route smoke test, `booksMap.check.ts`); deploy and the browser drive wait on the Zoho API-console client; commit pending.**
+
+- **Sign in with Zoho** (CR-324). The login page leads with a Zoho button; the password form stays
+  below. A Zoho account signs in only when its email is an existing, active app user — roles stay
+  Admin-controlled, nothing is auto-created. Consent starts on `accounts.zoho.in`; accounts in other
+  Zoho data centres still work. Same 7-day session, same cookie, same sign-out as before.
+- **Map a customer to Zoho Books** (CR-325). An Admin connects the Zoho Books organisation once
+  (Settings ▸ Zoho Books). Then Customers ▸ **From Zoho Books** creates a customer from a Books contact,
+  and a customer's More menu offers **Map to Zoho Books** / **Re-pull** / **Unmap**. Picking a contact
+  opens the normal customer form prefilled from it; nothing is written until Save. This is a manual
+  mapping, never a sync. GSTIN and the other Books tax fields have no column yet and are not mapped.
+- **Secrets out of git.** `functions/data-ops/catalyst-config.json` (function env vars) is gitignored;
+  `catalyst-config.example.json` documents the keys. The committed `FX_CRON_KEY` should be rotated.
+
+## 2026-10-09 — Fourth checkpoint + Pending Cut Stock names its orders (CR-322…323)
+
+**LIVE 2026-10-09 (functions + client, together with CR-318…321); API drive 3/3; commit pending.**
+
+- **Vinyl Pasted on MDF** (CR-323). A fourth checkpoint on the Production Readiness card, Pending or
+  Ready, marked once the printed vinyl is fixed onto the MDF board. Readiness reads "Ready for
+  Production" only when all four are Ready; the Panel Orders sheet gains a Vinyl Pasted column.
+
+- **Orders column lists the orders** (CR-322). Each order that needs the cut piece shows as a link with
+  its own quantity — `PNL/2026-27/003 ×4` — so a row answers "which order wants these pieces, how many".
+  Click the code to open the order; clicking anywhere else on the row still opens the item.
+
 ## 2026-10-08 — Sample Orders: a separate order type for customer samples (CR-315…317)
 
 **LIVE 2026-10-08 (functions + client; LIVE schema: `SampleOrder`, `SampleOrderLine`); committed `27473ee`; API drive passed (32 checks, ZZT data removed).**
@@ -20,6 +334,12 @@
   Sales Order pre-fills the customer and items; the Customer page gains a Samples section listing every
   sample line with order, quantities, supplied date, status and source — the answer to "what did we send
   this customer, how much, against which request?".
+- **Panel Orders grid: Panels column is a count** (CR-318). "N panels" instead of every code; click it for
+  the panels as cards (thumb, code, designs, qty, MDF).
+- **Panels → Panel Master** (CR-319). Sidebar, page title and dashboard link renamed.
+- **MDF on Settings home** (CR-320). Settings ▸ Product Masters ▸ MDF opens the MDF master.
+- **Panel picker filters** (CR-321). Design · Panel Size · Cut Piece Size sit on one row again; an applied
+  filter shows a × that clears it — on every Panel Craft filter bar.
 
 ---
 

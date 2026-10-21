@@ -3,7 +3,7 @@
    retry, and skeleton placeholders shown while a list hydrates.
    Used by every data-backed table/list page for a consistent feel.
    ============================================================ */
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
 
 /** Friendly empty-list placeholder. `action` is an optional CTA button. */
@@ -26,6 +26,17 @@ export function EmptyState({
       <div className="es-title">{title}</div>
       {hint && <div className="es-hint">{hint}</div>}
       {action && <div className="es-action">{action}</div>}
+    </div>
+  );
+}
+
+/** Inline explanatory note (CR-328): the ONE way to tell the user why something can't proceed
+    and what to do first. `warn` = blocked, `info` = next step, `ok` = done. Never a bare styled div. */
+export function Note({ tone = "info", children, style }: { tone?: "info" | "warn" | "ok"; children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div className={`note ${tone}`} role="status" style={style}>
+      <Icon name={tone === "ok" ? "check" : "alert"} size={14} />
+      <div className="note-body">{children}</div>
     </div>
   );
 }

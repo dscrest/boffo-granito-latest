@@ -28,6 +28,7 @@ export interface SoBand {
   salesOrderId: string;
   soNumber: string;
   customerName: string;
+  poNumber: string; // CR-350: the customer's PO — shown with the party on top of a loading
   designs: DesignRow[];
 }
 
@@ -41,7 +42,7 @@ export function groupReady(allLines: PalPlanLine[], scope: (l: PalPlanLine) => b
     .filter((l) => l.status === "ReadyToLoad" && !l.loadBoxId && scope(l))
     .sort((a, b) => Number(b.salesOrderId) - Number(a.salesOrderId) || a.createdTime.localeCompare(b.createdTime));
   for (const l of pool) {
-    const band = bands.get(l.salesOrderId) ?? bands.set(l.salesOrderId, { salesOrderId: l.salesOrderId, soNumber: l.soNumber || l.salesOrderId, customerName: l.customerName || "", designs: [] }).get(l.salesOrderId)!;
+    const band = bands.get(l.salesOrderId) ?? bands.set(l.salesOrderId, { salesOrderId: l.salesOrderId, soNumber: l.soNumber || l.salesOrderId, customerName: l.customerName || "", poNumber: l.poNumber || "", designs: [] }).get(l.salesOrderId)!;
     const key = `${l.salesOrderId}|${l.designId}`;
     let row = rows.get(key);
     if (!row) {
@@ -75,6 +76,13 @@ interface Opt { value: string; label: string; hint?: string; badge?: string }
 
 /** "SO/…/006 · Customer" — whose stock a row is, now that a loading lists every customer (CR-252). */
 export const bandLabel = (b: SoBand) => [b.soNumber, b.customerName].filter(Boolean).join(" · ");
+
+/** CR-350: who a loading is for — the distinct parties, customer POs and SO numbers behind a set of lines
+    (party + PO lead the header; the SO number rides small). */
+export function loadIdentity(ls: { customerName?: string; poNumber?: string; soNumber?: string }[]): { customers: string[]; pos: string[]; sos: string[] } {
+  const u = (k: "customerName" | "poNumber" | "soNumber") => [...new Set(ls.map((l) => l[k] || "").filter(Boolean))];
+  return { customers: u("customerName"), pos: u("poNumber"), sos: u("soNumber") };
+}
 
 /** Item pick list: one option per design row (value = row.key), loadable designs first;
     `takenRows` = items another table row already holds (one row per item). */
@@ -216,12 +224,14 @@ export const pickEntries = (bands: SoBand[], qty: Map<string, number>): { lineId
   pickedLines(bands, qty).map((l) => ({ lineId: l.id, boxes: qty.get(l.id)! }));
 
 /** LoadBox.load_plan snapshot of the picks (keeps Planned rows rendering if the line assignment fails);
-    `group` = this container's place in a multi-container save (primary's ROWID, 1-based no, of). */
-export const loadPlanJson = (bands: SoBand[], qty: Map<string, number>, group?: { id: string; no: number; of: number }) =>
+    `group` = this container's place in a multi-container save (primary's ROWID, 1-based no, of);
+    `plan` = the SO-plan container claimed per SO (CR-338), omitted when nothing was claimed. */
+export const loadPlanJson = (bands: SoBand[], qty: Map<string, number>, group?: { id: string; no: number; of: number }, plan?: Record<string, number>) =>
   JSON.stringify({
     v: 1,
     lines: pickedLines(bands, qty).map((l) => ({ so: l.salesOrderId, design: l.designLabel, batch: l.batchNumber, boxes: qty.get(l.id)!, palletId: l.palletId })),
     ...(group ? { group } : {}),
+    ...(plan && Object.keys(plan).length ? { plan } : {}),
   }).slice(0, 10000);
 
 /** A planned container laid over a band: planned boxes per design, FIFO over that design's lines

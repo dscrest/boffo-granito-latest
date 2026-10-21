@@ -105,6 +105,7 @@ export interface LoadBox {
   id: string; // LoadBox ROWID
   boxNumber: number; // display "Box N" (server-minted)
   loadNumber: string; // LOAD/FY/NNN (server-minted; "" on boxes predating the column)
+  name: string; // free container name typed on the Loading Workspace rail ("" = none) — CR-333
   vehicleId: string; // Vehicle ROWID ("" until allocated)
   vehicleNumber: string;
   driverName: string;
@@ -130,6 +131,20 @@ export interface LoadBox {
 export const boxLabel = (b: LoadBox) => b.loadNumber || b.vehicleNumber || `Container ${b.boxNumber}`;
 /** Sealed = container no or line seal captured → derives Ready for Dispatch. */
 export const sealed = (b: LoadBox) => !!(b.containerNumber || b.lineSeal);
+
+/** THE derived status of a loading (nothing stores it): Dispatched / Ready for Dispatch (container
+    no. or seal captured) / In Loading (items in it) / Planned (load_plan only) / Empty. One rule for
+    the detail header, the workspace tabs, the rail and the Loadings grid (CR-326). */
+export function boxStatusOf(b: LoadBox, lineCount: number): { key: "Dispatched" | "ReadyDispatch" | "InLoading" | "Planned" | "Empty"; label: string; cls: string } {
+  if (b.status !== "Open") return { key: "Dispatched", label: "Dispatched", cls: "palstatus p-completed" };
+  if (sealed(b)) return { key: "ReadyDispatch", label: "Ready for Dispatch", cls: "palstatus p-palletized" };
+  if (lineCount > 0) return { key: "InLoading", label: "In Loading", cls: "palstatus p-loading" };
+  let planned = false;
+  try {
+    planned = !!(b.loadPlan && JSON.parse(b.loadPlan)?.lines?.length);
+  } catch { /* unparseable plan = none */ }
+  return planned ? { key: "Planned", label: "Planned", cls: "palstatus p-planning" } : { key: "Empty", label: "Empty", cls: "palstatus p-planning" };
+}
 
 /** Why Dispatch is blocked for this loading (null = allowed). Mirrors the
     server's /load-box-dispatch rule exactly: Open + a vehicle + ≥1 line.
@@ -353,6 +368,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
         id: String(b.ROWID),
         boxNumber: num(b.box_number),
         loadNumber: str(b.load_number),
+        name: str(b.name),
         vehicleId: str(b.vehicle),
         vehicleNumber: veh?.number || "",
         driverName: veh?.driver || "",
@@ -556,6 +572,7 @@ export async function shareLoadBox(rowid: string): Promise<string> {
 
 /** Loading-capture fields entered on the load form, at the box, or at dispatch. */
 export interface LoadingCapture {
+  name?: string; // CR-333 container name
   container_number?: string;
   line_seal?: string;
   electronic_seal?: string;
@@ -585,8 +602,16 @@ export function dispatchLoadBox(rowid: string, capture?: LoadingCapture) {
 
 /** Put a Ready line into an Open box (box="" pulls it back out). A `boxes`
     count below the line's total loads that many and splits off a Ready remainder. */
-export function setLineBox(lineId: string, box: string, boxes?: number) {
-  return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, boxes ? { box, boxes } : { box }));
+export function setLineBox(lineId: string, box: string, boxes?: number, reason?: string) {
+  // CR-334: an unload (box = "") carries the removal reason into the op log.
+  return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, { box, ...(boxes ? { boxes } : {}), ...(reason ? { reason } : {}) }));
+}
+
+/** CR-361 Release: a loaded line's boxes go back to Ready for Loading; an
+    un-boxed palletized line's boxes go back to free stock (allocation returned).
+    `boxes` below the line's total releases that many. Reason per CR-270. */
+export function releasePalLine(lineId: string, boxes: number, reason: string) {
+  return bust(op<{ to: "ReadyToLoad" | "stock"; boxes: number }>(`pal-line-release/${lineId}`, { boxes, ...(reason ? { reason } : {}) }));
 }
 
 /** Put several Ready lines into one Open container in a single all-or-nothing

@@ -1,6 +1,7 @@
 /* Sales Orders grid — one row per SalesOrder, styled like the quotes
    master grid (checkbox selection + bulk bar, ColumnPicker, advanced
-   filter, footer pager). Row click / SO-number link opens the detail. */
+   filter, footer pager). Row click / PO-number link opens the detail. Columns lead
+   Customer, Design, PO Number (CR-353/355); the SO Number is last and hidden by default. */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
@@ -8,6 +9,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { DesignNames } from "@/ui/DesignNames";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { can } from "@/lib/auth";
@@ -26,6 +28,7 @@ import {
   setOrderStatus,
   loadStatus,
   palStatus,
+  orderLabel,
   soLiveStatus,
   soStatusLabel,
   SO_STATUSES,
@@ -83,15 +86,22 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
   };
 }
 
-// Toggleable + reorderable columns (SO Number pinned outside the map).
+// Toggleable + reorderable columns. Customer → Design lead, the customer's PO rides third
+// (CR-353 kept), the server-minted SO Number sits LAST and default-hidden (CR-355).
 function soColumns(): ColumnDef<SORow>[] {
   return [
+    { key: "party", label: "Customer", render: (r) => r.head.party },
+    { key: "design", label: "Design", className: "nw", render: (r) => <DesignNames names={r.items.map((o) => o.design)} /> },
     {
-      key: "party",
-      label: "Customer",
-      render: (r) => r.head.party,
+      key: "po",
+      label: "PO Number",
+      className: "mono",
+      render: (r) => (
+        <Link className="linkish" to={`/orders/${r.id}`} onClick={(e) => e.stopPropagation()} title={`View order${r.head.orderNumber ? ` ${r.head.orderNumber}` : ""}`}>
+          {r.head.poNumber || soLabel(r)}
+        </Link>
+      ),
     },
-    { key: "po", label: "PO Number", className: "mono", render: (r) => r.head.poNumber || "—" },
     { key: "date", label: "Order Date", className: "mono muted", render: (r) => r.head.orderDate || "—" },
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (r) => r.items.length },
     {
@@ -123,15 +133,17 @@ function soColumns(): ColumnDef<SORow>[] {
     { key: "salesperson", label: "Salesperson", className: "muted", render: (r) => r.head.salesperson || "—" },
     { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.head.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.head.modifiedTime) },
+    { key: "soNo", label: "SO Number", className: "mono", render: soLabel },
   ];
 }
 
 // Sortable value per column key (header-click sorting — grid standard).
 function soSortVal(r: SORow, k: string): string | number {
   switch (k) {
-    case "so": return soLabel(r);
+    case "po": return r.head.poNumber || soLabel(r);
     case "party": return r.head.party;
-    case "po": return r.head.poNumber || "";
+    case "design": return r.items.map((o) => o.design).join(", ");
+    case "soNo": return soLabel(r);
     case "date": return r.head.orderDate || "";
     case "items": return r.items.length;
     case "qty": return r.items.reduce((s, o) => s + o.orderQty, 0);
@@ -154,8 +166,8 @@ export function OrdersTable() {
   const [query, setQuery] = usePersistedState("orders.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("orders.criteria", {});
   const COLS = useMemo(() => soColumns(), []);
-  // Fresh storage key (old ordersTableColumns prefs were per-line-item columns).
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("soGridColumns", COLS, ["created", "modified"]);
+  // .v2 (CR-355): Customer → Design → PO lead, SO Number hidden by default.
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("soGridColumns.v2", COLS, ["created", "modified", "soNo"]);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [loading, setLoading] = useState(() => cachedOrders() == null);
@@ -342,7 +354,7 @@ export function OrdersTable() {
             <Icon name="search" size={13} />
             <input
               type="text"
-              placeholder="Search SO no, PO, customer…"
+              placeholder="Search PO, SO no, customer…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -370,7 +382,6 @@ export function OrdersTable() {
                 <th style={{ width: 34, textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
                 </th>
-                <SortTh id="so" label="SO Number" sort={sort} />
                 {visible.map((c) => (
                   <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                 ))}
@@ -388,11 +399,6 @@ export function OrdersTable() {
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} />
                   </td>
-                  <td className="mono">
-                    <Link className="linkish" to={`/orders/${r.id}`} onClick={(e) => e.stopPropagation()} title="View order">
-                      {soLabel(r)}
-                    </Link>
-                  </td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
                       {c.render!(r)}
@@ -402,7 +408,7 @@ export function OrdersTable() {
               ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 2}>
+                  <td colSpan={visible.length + 1}>
                     {rows.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

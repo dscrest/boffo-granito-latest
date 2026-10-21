@@ -69,23 +69,18 @@ export function ContainerPlanCard({ containerPlan, docNo, plannerPath, dispatche
               opacity: p?.status === "Sent" ? 0.8 : 1,
             }}
           >
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+            {/* CR-338: one line = what the floor reads at loading — C1 · format · pallets · boxes · verdict. */}
+            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
               <span className="mono" style={{ fontWeight: 600 }}>{docNo} · C{c.no}</span>
-              <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>{c.pallets} pallets · {fmt(c.boxes)} boxes · <span style={c.fillPct > 100 ? { color: "var(--c-red)", fontWeight: 600 } : undefined}>{c.fillPct}%{c.fillPct > 100 ? " · Override" : ""}</span></span>
+              {c.containerFormatName && <span className="dim" style={{ fontSize: "var(--t-sm)" }}>· {c.containerFormatName}</span>}
+              <span className="mono dim" style={{ fontSize: "var(--t-sm)" }}>· {c.pallets} pallets · {fmt(c.boxes)} boxes · <span style={c.fillPct > 100 ? { color: "var(--c-red)", fontWeight: 600 } : undefined}>{c.fillPct}%{c.fillPct > 100 ? " · Override" : ""}</span></span>
+              {chip && <span className={`chip ${chip.cls}`} style={{ whiteSpace: "nowrap", marginLeft: "auto" }}>{chip.label}</span>}
             </div>
-            {c.containerFormatName && (
-              <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: -4, marginBottom: 6 }}>{c.containerFormatName}</div>
-            )}
-            {chip && (
-              <div style={{ marginBottom: 6 }}>
-                <span className={`chip ${chip.cls}`} style={{ whiteSpace: "nowrap" }}>{chip.label}</span>
-              </div>
-            )}
             {c.lines.map((l, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--t-sm)", padding: "2px 0" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: colorOf.get(l.design), flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{l.design}</span>
-                <span className="mono dim">{l.pallets}P · {fmt(l.boxes)}B</span>
+                <span className="mono dim">{l.pallets}P{l.palletName ? ` ${l.palletName}` : ""} · {fmt(l.boxes)}B</span>
               </div>
             ))}
           </div>

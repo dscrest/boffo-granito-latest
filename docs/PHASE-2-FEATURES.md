@@ -12,19 +12,19 @@ history is `CHANGE-REQUESTS.md` (Phase 2 heading). Phase 1 figures are frozen an
 
 | # | Module | Phase 2 so far | Effort recorded (h) | Conventional build (h) |
 |---|---|---|---|---|
-| 1 | Foundation & workspace | Discard prompt is a Yes / No question; delete asks for a reason (Admin exempt); Zoho-style label-left layout on every form page, tightened (label gap, one-control-wide rows, notes boxes) | 9 | 28 |
-| 2 | Masters (Inventory) | Container Master; Pallet Master boxes only | 8 | 25 |
-| 3 | Customers | — | 0 | 0 |
+| 1 | Foundation & workspace | Staff default role (view + create, never edit / delete) + guard hardening; Zoho-linked account status, Zoho-only accounts, self-provisioning for company domains; discard prompt is a Yes / No question; delete asks for a reason (Admin exempt); Zoho-style label-left layout on every form page, tightened (label gap, one-control-wide rows, notes boxes); every grid leads Customer → Design, system numbers hidden, whole-row click | 12 | 37 |
+| 2 | Masters (Inventory) | Container Master; Pallet Master boxes only; Warehouse master (primary, purposes) | 10 | 31 |
+| 3 | Customers | Sign in with Zoho on the login page; Zoho Books connection + hand-mapping of customers to Books contacts (From Zoho Books, Map / Re-pull / Unmap); two-way Books sync (event-driven pull via Catalyst Signals, Import all, Push) + the Books tax / credit / notes fields; Zoho CRM Accounts as the customer source (Books hidden); Zoho link status per customer (CRM & Books / CRM only / Books only) | 12 | 43 |
 | 4 | Quotes & Approvals | Suitable Containers panel; planner picks the container per item row, narrowed by pallet; Customer search modal | 8 | 27 |
-| 5 | Sales Orders | Remaining + totals, per-item Deallocate, partial deallocate with always-visible stock buttons, worked order not deletable | 5 | 16 |
+| 5 | Sales Orders | Remaining + totals, per-item Deallocate, partial deallocate with always-visible stock buttons, worked order not deletable; name lookups page past 300 rows; Customer PO leads the order page and the grid, SO number small | 6 | 19 |
 | 6 | Production | Bulk sheet reorder, Date-first grid and detail | 4 | 12 |
-| 7 | Palletization | Date column, PAL code hidden | 1 | 2 |
-| 8 | Loading & Dispatch | Date column, LOAD code hidden; several containers per New Loading, each with its own vehicle | 5 | 14 |
-| 9 | Stock & batch ledger | Inventory adjustments (Stock Adjustments page + sheet, reasons master, every stock reader adjustment-aware) | 2 | 6 |
-| 10 | Reports & audit | — | 0 | 0 |
-| 11 | Panel Craft | Add Stock wording; row-click grid + Photo \| Grid view; PANEL-001 numbering; New / Edit Panel as a page; Request Panels from Quote / SO (New Request stage); Panel Order page with status steps + requirements checklist; full-size cut piece default; one image per panel; BOFFO loader on image upload; Panel Items with weighed cut pieces; Cut Stock as cut-piece items + bulk Add / Adjust sheets + ledger; MDF master + per-line MDF and auto weight; picker filters; Panel Craft dashboard; cut-piece booking per order (Dispatch = fully booked); MDF / Vinyl / Cut Pieces checkpoints + readiness; Pending Cut Stock page; Sample Orders (separate order type, per-line supply, cut-stock deduction, Request Samples, Customer Samples section) | 18.5 | 56 |
+| 7 | Palletization | Date column, PAL code hidden; plan edit keeps Box Brand + batches, Completed refused; three pages (Palletization Completed); Release — loaded → Ready for Loading, palletized → free stock | 4.5 | 12.5 |
+| 8 | Loading & Dispatch | Date column, LOAD code hidden; several containers per New Loading, each with its own vehicle; Loading Workspace with a tab per container, sheet-first entry, Dispatch and documents per tab; every customer listed with search; "what to do first" reasons on every stage gate; Sheet mode (every container on one grid); plan-container picker (format · pallets · boxes, claim saved) | 15 | 45 |
+| 9 | Stock & batch ledger | Inventory adjustments (Stock Adjustments page + sheet, reasons master, every stock reader adjustment-aware); stock per warehouse (one reducer, server twin), Transfer Orders in both modules, warehouse on every stock entry, Locations on items; stock keyed by item (Design ROWID) | 8.5 | 25.5 |
+| 10 | Reports & audit | Warehouse Stock report (boxes / cut pieces, matrix) | 1 | 3 |
+| 11 | Panel Craft | Add Stock wording; row-click grid + Photo \| Grid view; PANEL-001 numbering; New / Edit Panel as a page; Request Panels from Quote / SO (New Request stage); Panel Order page with status steps + requirements checklist; full-size cut piece default; one image per panel; BOFFO loader on image upload; Panel Items with weighed cut pieces; Cut Stock as cut-piece items + bulk Add / Adjust sheets + ledger; MDF master + per-line MDF and auto weight; picker filters; Panel Craft dashboard; cut-piece booking per order (Dispatch = fully booked); MDF / Vinyl / Cut Pieces checkpoints + readiness; Pending Cut Stock page; Sample Orders (separate order type, per-line supply, cut-stock deduction, Request Samples, Customer Samples section); vehicle + driver on the load, Load Copy print, line (i) cards | 20.5 | 62 |
 | 12 | Documentation & process | Phase 2 inventory, register, schema, Data Flow reference | 3 | 9 |
-| | **Total** | | **≈ 61.5** | **≈ 188** |
+| | **Total** | | **≈ 100.5** | **≈ 314** |
 
 Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 3×, rounded).
 
@@ -32,6 +32,22 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 ## 1 · Foundation & workspace
 
+- **Every grid: Customer and Design first, system numbers hidden, click the row** (CR-355, 2026-10-19).
+  Every list — Sales Orders, Quotes, Invoices, Purchase Orders, Customers, Items, Panel Orders, Panel
+  Loading, Panels, Stock Transfers / Adjustments, the Production sheet — now opens with the Customer and
+  the Design (or the item / name) in the first columns. The system's own numbers (SO, Quote, PNL, PRD,
+  TRF, CUS, SKU, panel code) are still there for reference but hidden until ticked in the column picker;
+  a customer's PO number stays visible. Clicking anywhere on a row opens that record, on every page.
+  ≈ 1 h.
+- **New accounts start as Staff** (CR-336, 2026-10-13). A new role, Staff, can see and create everything
+  (quotes, orders, customers, items, production, panel craft, invoices, reports, exports) but can never
+  edit, delete or approve. It is the default for every new user; Admin picks another role when needed.
+  The server now enforces "no edit / delete" on every route — a dozen production, allocation and
+  order-line routes used to slip past for any role that could create. Maintenance routes are Admin-only.
+- **Zoho-linked accounts** (CR-337, 2026-10-13). Settings ▸ Users shows how each account signs in —
+  Zoho, Password, Both or None. A user can be created without a password (Zoho sign-in only). Admin lists
+  the company email domains on the Users page; someone from those domains who signs in with Zoho for the
+  first time gets a Staff account on the spot. Other emails are still refused.
 - **Discard changes?** (CR-268, 2026-10-03). Leaving a form or an edit mode with unsaved changes asks a
   plain Yes / No question ("Yes, discard" / "No, keep editing") on every screen; it no longer says Delete.
 - **Delete asks why** (CR-270, 2026-10-03). Deleting anything first asks for a reason, and the delete only
@@ -70,6 +86,44 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Capacity everywhere comes from the Container Master** (CR-261): the fill % on loading and
   palletization and the container planner's box fitting use the size's container. A size with no container
   yet shows no fill % and the planner says so.
+- **Warehouse master** (CR-329, 2026-10-12). Settings ▸ Warehouses: name, Primary ★, purposes (Production ·
+  Palletization · Loading Bay · Raw Material · Sample Cut Panels, pick any), note. The first warehouse saved is
+  the primary; marking another one primary keeps the old history where it was. The primary and any warehouse
+  with stock history can't be deleted. Nothing changes anywhere until the first warehouse exists.
+
+## 3 · Customers
+
+- **Sign in with Zoho** (CR-324, 2026-10-12). The login page leads with a Zoho button; the password
+  form stays as the fallback. A Zoho account gets in only when its email is an existing, active app
+  user — roles stay Admin-controlled. Consent starts on accounts.zoho.in; other data centres work too.
+- **Zoho Books customer mapping** (CR-325, 2026-10-12). Settings ▸ Zoho Books connects the organisation
+  once (Admin). Customers ▸ From Zoho Books creates a customer from a Books contact; a customer's More
+  menu maps, re-pulls or unmaps. The contact fills the normal customer form for review — nothing is
+  written until Save. (The "nothing ever syncs" part was reversed by CR-356 below.)
+- **Zoho CRM Accounts are the customer source; Zoho Books switched off, nothing lost** (CR-359,
+  2026-10-21). Same approach as the Books sync below, pointed at CRM Accounts: changes arrive via the
+  webhook / scheduled pull (CRM reports only what changed), Import all once, Create in / Push to Zoho CRM
+  from the customer, From Zoho CRM on the Customers page, Map / Re-pull / Unmap by hand. Contact persons
+  come from the account's CRM Contacts; GSTIN, PAN, GST treatment, Place of Supply, Credit Limit and
+  Payment Term are picked up from the org's custom fields automatically. Books stays installed and hidden
+  (one flag each side); every existing customer record is untouched.
+- **Each customer shows which Zoho systems hold it** (CR-362, 2026-10-21). Customers grid column **Zoho**:
+  **CRM & Books** when Zoho's own CRM ⇄ Books integration links the account to a Books contact, **CRM only**
+  when it is in CRM but not synced with Books, **Books only** for the old Books mapping; the customer page
+  spells the sentence out with both ids and the advanced filter takes the four states. The CRM pull asks
+  Books once per account, so Import all / Refresh fill it. ≈ 1 h.
+- **CRM & Books status fills in for every synced customer** (CR-363, 2026-10-21). The first import had
+  left most customers at "CRM only" because the server re-requested its Zoho sign-in token on every
+  CRM ⇄ Books switch and ran into Zoho's ten-per-ten-minutes limit. One token per system now, a throttle
+  says "wait 10 minutes", Books problems are listed under the sync card, and Import all re-checks the
+  Books link of customers it already has. ≈ 1 h.
+- **Zoho Books customer sync, both ways** (CR-356, 2026-10-21; event-driven since CR-358 the same day; ⚠ hidden since CR-359).
+  The moment a customer is created or edited in Zoho Books, Catalyst Signals pokes the server and the
+  customers changed since the last run come across (a daily refresh is the safety net) (Books wins; add-on-only fields untouched; same-name
+  customers are linked, new ones created) — never a full pull on the schedule. Settings ▸ Zoho Books has
+  **Refresh now** and a one-time **Import all customers**. A customer's More menu offers **Create in /
+  Push to Zoho Books**. The Books fields now live on the customer: GST Treatment, GSTIN, Place of Supply,
+  PAN, Website, Credit Limit, Notes (Tax & Other block) and Opening Balance (shown only).
 
 ## 4 · Quotes & Approvals
 
@@ -114,6 +168,14 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   palletised, loaded or dispatched, or sits on a palletization plan, Delete is greyed out on the order
   page and refused by the server with "Cancel it instead" — the same rule the order form already applied
   to removing a line.
+- **Name lookups page past 300 rows** (CR-339, 2026-10-13). Creating a Sales Order or Quote resolved item
+  and customer names through one 300-row query cached per server instance; paged now, and refreshed when a
+  needed name is missing. ≈ 0.5 h.
+- **Customer PO first, SO number small** (CR-353, 2026-10-19). The Sales Order page is titled by the
+  customer's PO number with `SO/FY/NNN` small beneath it; the Orders grid's first column is PO Number and SO
+  Number is the last column; the drawer and By-Order cards follow. The SO number stays the record identity.
+  Orders module only — the production, palletization and loading screens and the printed SO keep the SO
+  number. ≈ 0.5 h.
 
 ## 6 · Production
 
@@ -138,6 +200,18 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   pallets (boxes) already palletized and the boxes still remaining.
 - **Partial Complete re-queues the rest** (CR-281, 2026-10-06). Completing part of an In-Palletization line
   sends the leftover boxes back to Ready for Palletization, where Start Palletization applies to them again.
+- **Plan edit keeps Box Brand and batches** (CR-340, 2026-10-13). Editing a palletization plan carries the
+  carton brand and batch of each replaced line, attributes new items to their real batches, refuses a
+  Completed plan. ≈ 1 h.
+- **Three pages, one stage each** (CR-360, 2026-10-21). A third sidebar page, **Palletization Completed**,
+  lists the palletized stock waiting to be loaded; In Palletization shows work in progress only. The page
+  guide covers all three. ≈ 0.5 h.
+- **Release** (CR-361, 2026-10-21). From the row's "+" menu on Palletization Completed and on Loading and
+  Dispatch: type the boxes and a reason. Loaded boxes return to Ready for Loading; palletized boxes return
+  to free stock and the order's allocation is returned. Partial or whole; dispatched containers refused.
+  Replaces the loading sheet's whole-line, reason-less "Unload item". ≈ 2 h.
+- **No status filter on the palletization pages** (CR-364, 2026-10-21). Each page is one stage, so the
+  page | All dropdown is gone; every page lists its own rows only. ≈ 0.25 h.
 
 ## 8 · Loading & Dispatch
 
@@ -147,6 +221,30 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   own Container Master pick, item rows and vehicle details; stock shared across sections so an item can be
   split between containers; Fill from plan fills one container at a time; one Save creates the linked
   loadings. ≈ 4 h.
+- **Loading Workspace — a tab per container** (CR-326, 2026-10-12). New Loading and Edit are one page:
+  each container is a tab with a plain sheet (design, pallets, pallet no., pallet type) and its own vehicle
+  & seals rail; status follows the data; Dispatch per tab; documents per container; Edit opens every
+  container of a group. ≈ 3 h.
+- **Workspace follow-ups** (CR-334, 2026-10-12). "Add Items in Bulk" label back; ✕ on every row; removing a loaded
+  item or a saved container asks for a reason like Delete. ≈ 0.5 h.
+- **Sheet mode** (CR-335, 2026-10-12). Tabs | Sheet toggle; Sheet lists every container of the loading on one grid
+  with a band row per container (vehicle, seals, Dispatch, Documents) and the design rows under it. ≈ 2 h.
+- **Every customer in the Customer box, with search** (CR-327, 2026-10-12). Loading and Palletization list
+  all active customers (stock-bearing first) and carry the 🔍 search modal. ≈ 0.5 h.
+- **"What to do first" reasons** (CR-328, 2026-10-12). A customer or order that cannot be loaded or
+  palletized shows why and the next step; Sales Order detail shows a Next: line; empty pickers name their
+  reason. ≈ 1 h.
+- **Pick the planned container at loading** (CR-338, 2026-10-13). Each container tab's plan row is a picker
+  over the order's planned containers — format, pallets, boxes, per-design pallet type, Planned / Sent /
+  Claimed by … — Fill from plan fills the chosen one; the claim is saved so a loaded container is not
+  offered again. ≈ 3 h.
+- **Design + container first, then vehicle & seals; party · PO on top** (CR-350, 2026-10-15). The Container
+  pick moves above the items; vehicle / seal fields unlock once the container has an item (a note says so);
+  the header leads with the party and customer PO, SO numbers small. ≈ 1.5 h.
+- **Two visible steps per container; C1/C2 naming** (CR-354, 2026-10-19). Designs & pallets first (step 1),
+  then Container & vehicle (step 2: Container pick, name, container no., vehicle, driver, seals) under the
+  rows, hidden behind one line until step 1 has an item; both Sheet and Tabs views. Containers read C1, C2 ….
+  Reverses the container-first half of CR-350 at the user's request. ≈ 1.5 h.
 
 ## 9 · Stock & batch ledger
 
@@ -156,6 +254,23 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   A removal never goes below what is physically on hand and warns when it eats into boxes a sales order
   reserved. Stock Details, the Item STOCK card, the stock reports, batch pickers and allocation all
   include adjustments; the Item detail Production tab lists them with an Adjust chip.
+- **Stock per warehouse** (CR-329, 2026-10-12). Every stock entry (production output, opening stock,
+  adjustments, cut-stock receipts and adjustments) records the warehouse it was counted in (default the
+  primary). Boxes a container loads are taken from the warehouse holding that batch — Loading Bay first.
+  Global stock figures are unchanged; the warehouse is a second view of the same rows.
+- **Transfer Orders** (CR-330, 2026-10-12). Inventory ▸ Transfer Orders: a dated `TRF/FY/NNN` document
+  moving items from one warehouse to another with a reason — boxes on the bulk sheet, cut pieces from
+  Cut Stock ▸ Transfer. A line can't exceed what the From warehouse holds. Reverse with the opposite transfer.
+- **Locations on items** (CR-332, 2026-10-12). Item detail ▸ Locations tab (warehouse → batches, on hand ·
+  committed · available); Panel Item detail ▸ Locations card (warehouse × cut size).
+- **Stock keyed by item** (CR-341, 2026-10-13). Live stock, opening / adjustment / allocation sums and the
+  To Produce demand key on the item, not its shared design name; Item detail now agrees with Allocate
+  Stock. ≈ 1.5 h.
+
+## 10 · Reports & audit
+
+- **Warehouse Stock report** (CR-331, 2026-10-12). Boxes or cut pieces, list or Item × Warehouse matrix, a tile
+  per warehouse, filters, CSV. Batch-wise Stock's totals row gained the Adjusted total it was missing.
 
 ## 11 · Panel Craft
 
@@ -221,9 +336,34 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   modal is gone); every movement is kept in a dated ledger shown as Stock History on the item.
 - **Adjust Stock for cut pieces** (CR-308, 2026-10-07). The same adjustment sheet, reason mandatory,
   never below on hand.
-- **MDF master + per-line MDF + auto weight** (CR-309, 2026-10-07). MDF (Size · Thickness · Weight) in
-  Settings ▸ Masters; each panel-order line picks its MDF and shows Weight = cut pieces × weight + MDF,
-  × qty; order total on the form and the detail.
+- **MDF per line + auto weight** (CR-309, 2026-10-07). Each panel-order line carries an MDF and shows
+  Weight = cut pieces × weight + MDF, × qty; order total on the form and the detail.
+- **MDF under the Panel master, thickness-only pick** (CR-342, 2026-10-15 — ⚠ superseded by CR-344 the
+  same day). A panel had its own thickness rows; the order line picked one of them.
+- **MDF is a size-keyed master again** (CR-344, 2026-10-15). Settings ▸ Masters ▸ MDF = editable Size ·
+  Thickness · Weight rows; the Panel master states its MDF Size only; the order line offers the thicknesses
+  of that size (auto when one, mandatory once the size has rows). Migration merges duplicates. ≈ 2 h.
+- **"Cut Stock" → "Cut Piece"** (CR-343, 2026-10-15). Sidebar, dashboard and sheet titles. ≈ 0.25 h.
+- **One Orders register** (CR-345, 2026-10-15). Panel + Sample orders in one grid with a Type column and
+  filter; New Order asks the type first. ≈ 2 h.
+- **Cut-piece line defaults to the full size** (CR-357, 2026-10-21). A loose cut-piece line with no Cut
+  Piece Size means the design's full size (CR-289 rule, server-resolved); only the Item is required. ≈ 0.5 h.
+- **Loose cut-piece lines on a panel order** (CR-346, 2026-10-15). "10 panels + 20 cut pieces" on one
+  order; pieces join requirements, booking and Pending Cut Piece. ≈ 2 h.
+- **Loading entries, derived Dispatched** (CR-347, 2026-10-15). Dispatch tab per order: Record Load with
+  date, vehicle, photos and qty per line × material (Panel / MDF / cut piece); several orders per trip;
+  a load moves the stock it carries; the last load dispatches the order; Loading Status + Pending on the
+  order, grid and cards; a sample supply is a load. ≈ 8 h.
+- **Panel Craft ▸ Loading page** (CR-348, 2026-10-15). Everything pending to load, "+" per row,
+  multi-select → one trip; dashboard KPI Pending to Load. ≈ 1.5 h.
+- **Weight split and frozen** (CR-349, 2026-10-15). Pieces kg · MDF kg · Total kg; shipped kg stamped at
+  load time, pending kg follow the master. ≈ 1 h.
+- **Vehicle details on the load + Load Copy print** (CR-351, 2026-10-19). Record Load takes Vehicle Number
+  (auto-formatted) · Driver Name · Driver Mobile, kept on the trip and on the Vehicle master; a branded Load Copy
+  PDF per trip (vehicle block, lines, kg, signatures) from the Loads table. ≈ 1.5 h.
+- **Panel name only, details behind (i); notes at the bottom** (CR-352, 2026-10-19). Load tables show the short
+  line label with an (i) card (panel size · vinyl · MDF · design rows); every helper note sits under the content it
+  explains; the bottom note says how to send one material only. ≈ 0.5 h.
 - **Pick from showcase filters** (CR-310, 2026-10-07). Design · Panel Size · Cut Piece Size · In stock only.
 - **Panel Craft dashboard** (CR-311, 2026-10-07). First leaf of the group: open / in-cutting / ready /
   short counts, cut stock pcs + kg, pipeline strip, panels by status, orders per week, shortages,
@@ -234,6 +374,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Production checkpoints** (CR-313, 2026-10-07). MDF · Vinyl Printing · Cut Pieces marked independently
   with who / when; Overall Readiness Pending / In Progress / Ready for Production on the order page, the
   sheet, the cards and the dashboard.
+- **Fourth checkpoint — Vinyl Pasted on MDF** (CR-323, 2026-10-09). Pending · Ready, marked once the
+  printed vinyl is fixed on the board; Readiness needs all four Ready; Vinyl Pasted column on the sheet.
 - **Pending Cut Stock** (CR-314, 2026-10-07). Per cut piece Required · On Hand · Booked · Free · Shortage ·
   Orders, zero-stock items included; Booked · Free on Cut Stock.
 - **Sample Orders** (CR-315, 2026-10-08). A separate order type for customer samples — full tile or cut
@@ -242,6 +384,14 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   cut pieces come off cut stock (ledger kind "sample"), full tiles are record-only.
 - **Request Samples + Customer Samples** (CR-317, 2026-10-08). Request Samples from a Quote / SO; the
   Customer page lists every sample line with quantities, date, status and source.
+- **Panels column = count → card list** (CR-318, 2026-10-08). Panel Orders sheet shows "N panels"; click
+  opens the panels as cards.
+- **Panels → Panel Master** (CR-319, 2026-10-08). Rename only.
+- **MDF tile on Settings home** (CR-320, 2026-10-08). Settings ▸ Product Masters ▸ MDF.
+- **Filter selects clear with ×** (CR-321, 2026-10-08). Picker filters back on one row; applied filter
+  shows a clear × (shared `FilterSelect`, all Panel Craft bars).
+- **Pending Cut Stock names its orders** (CR-322, 2026-10-09). The Orders column lists each order as a
+  link with its own quantity (`PNL/2026-27/003 ×4`) instead of a count.
 
 ## 12 · Documentation & process
 

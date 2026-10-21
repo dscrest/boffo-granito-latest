@@ -26,6 +26,7 @@ export function blankDetails(
       mobile_number: initialVehicle?.mobileNumber || "",
     },
     capture: {
+      name: initialCapture?.name || "",
       container_number: initialCapture?.container_number || "",
       line_seal: initialCapture?.line_seal || "",
       electronic_seal: initialCapture?.electronic_seal || "",
@@ -56,6 +57,7 @@ export function useLoadDetails(
 
 /** A LoadBox's current captures in LoadingCapture shape (prefill). */
 export const captureOf = (b: LoadBox): LoadingCapture => ({
+  name: b.name,
   container_number: b.containerNumber,
   line_seal: b.lineSeal,
   electronic_seal: b.electronicSeal,
@@ -72,9 +74,12 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
   sheetOwned?: boolean;
   /** Loading page (CR-247) renders the ONE field set in two places per container: "details"
       (Size, Destination, Transporter, Supervisor — Container is picked in the section header, CR-301),
-      "vehicle" (vehicle + container/seals/LR).
-      Omitted = everything, as in VehicleLoadModal. Returns bare fields for the caller's .form-grid. */
-  part?: "details" | "vehicle";
+      "vehicle" (vehicle + container/seals/LR), "rail" (CR-326, vehicle & seals then shipping),
+      "more" (CR-335 Sheet mode), "format" (CR-350: ONLY the Container Master format pick; since CR-354 it
+      leads step 2 beside/under the items). Omitted = everything, as in VehicleLoadModal. Returns bare
+      fields for the caller's .form-grid. The page HIDES the set until the container has an item (CR-354) —
+      no disabled state here. */
+  part?: "details" | "vehicle" | "rail" | "more" | "format";
 }) {
   const text = (label: string, k: keyof LoadingCapture, placeholder: string) => (
     <label className="form-field">
@@ -125,9 +130,47 @@ export function LoadDetailsFields({ vehicle, capture, setVeh, setCap, sheetOwned
         onChange={(v) => setCap("container_size", v)}
         placeholder="Container size…"
         ariaLabel="Container size"
+       
       />
     </label>
   );
+  // "format" (CR-350/351): the container pick alone — the first field of step 2 (rail / Sheet step row).
+  if (part === "format") return container;
+  // "more" (CR-335): Sheet mode's "More fields" under a band row — the rail minus the six inline cells
+  // (and minus the format pick, which leads the step 2 row since CR-354).
+  if (part === "more")
+    return (
+      <>
+        <label className="form-field">
+          <span className="lbl">Mobile</span>
+          <input value={vehicle.mobile_number} placeholder="Mobile number" onChange={(e) => setVeh("mobile_number", e.target.value)} />
+        </label>
+        {size}
+        {text("Transporter", "transporter", "Carrier company")}
+        {text("LR / Docket No.", "lr_number", "LR number")}
+        {text("Destination / Port", "destination", "Port / city")}
+        {text("Loading Supervisor", "loading_supervisor", "Name")}
+      </>
+    );
+  // "rail" (CR-326): the ONE column beside a container's sheet — vehicle & seals, then shipping.
+  // CR-354: the caller renders part="format" right before this (container pick first).
+  if (part === "rail")
+    return (
+      <>
+        {text("Container name", "name", "e.g. Reya 20ft A")}
+        {text("Container No.", "container_number", "e.g. MSCU1234567")}
+        {vehicleNo}
+        {driver}
+        {text("Electronic Seal", "electronic_seal", "E-seal no.")}
+        {text("Line Seal", "line_seal", "Line seal no.")}
+        <div className="form-divider" />
+        {size}
+        {text("Transporter", "transporter", "Carrier company")}
+        {text("LR / Docket No.", "lr_number", "LR number")}
+        {text("Destination / Port", "destination", "Port / city")}
+        {text("Loading Supervisor", "loading_supervisor", "Name")}
+      </>
+    );
   // "details" has no Container: the loading page's section header owns that pick (CR-301).
   if (part === "details")
     return (

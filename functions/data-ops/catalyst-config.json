@@ -4,7 +4,11 @@
     "stack": "node18",
     "type": "advancedio",
     "env_variables": {
-      "FX_CRON_KEY": "ea2738ee1c2432374a9dc40e86a0e2b15ecc336dec0912c7"
+      "FX_CRON_KEY": "ea2738ee1c2432374a9dc40e86a0e2b15ecc336dec0912c7",
+      "ZOHO_CLIENT_ID": "1000.7D08D7QDE3PN96P0K80TBKD0R5OX2C",
+      "ZOHO_CLIENT_SECRET": "9bf14dc54f2384f6957798d024ffcea3821eda5f53",
+      "ZOHO_DC": "in",
+      "ZOHO_REDIRECT_URI": "https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/"
     }
   },
   "execution": {

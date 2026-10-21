@@ -27,6 +27,7 @@ import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from ".
 import {
   cachedCutStockRows,
   CUT_ENTRY_KIND_LABEL,
+  cutWarehouseCells,
   deleteCutPiece,
   listCutStock,
   listCutStockEntries,
@@ -35,6 +36,7 @@ import {
   type CutStockRow,
 } from "./panelOrdersApi";
 import { cutPieceWeight, weightPerPc } from "./cutPieceWeight";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { panelItemRows } from "./PanelItems";
 
 const kg3 = (n: number | null | undefined) => (n == null ? "" : String(Math.round(n * 1000) / 1000));
@@ -69,6 +71,12 @@ export function PanelItemDetail() {
   const cutName = useMemo(() => new Map(cutSizes.map((c) => [c.id, c.label])), [cutSizes]);
   const pieces = useMemo(() => stock.filter((r) => r.designId === designId).sort((a, b) => (cutName.get(a.cutSizeId) || "").localeCompare(cutName.get(b.cutSizeId) || "")), [stock, designId, cutName]);
   const history = useMemo(() => entries.filter((e) => e.designId === designId).slice(0, 30), [entries, designId]);
+  // CR-332 Locations: pieces per (cut size · warehouse) — the ledger split by warehouse.
+  const { warehouses, nameOf: whName, enabled: whEnabled } = useWarehouses();
+  const locations = useMemo(
+    () => (whEnabled ? cutWarehouseCells(warehouses, entries, stock).filter((c) => c.key.startsWith(`${designId}|`)) : []),
+    [whEnabled, warehouses, entries, stock, designId],
+  );
   const railItems = useMemo(
     () =>
       panelItemRows(designs ?? [], stock).map((r) => ({
@@ -294,6 +302,48 @@ export function PanelItemDetail() {
               <PanelsPanel scope={{ kind: "design", designId: design.id }} />
             </div>
 
+            {/* CR-332: where the pieces sit — every warehouse, per cut size. */}
+            {whEnabled && (
+              <div className="card" style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ fontWeight: 600 }}>Locations</span>
+                  <span className="muted" style={{ fontSize: 14 }}>pieces per warehouse</span>
+                  <Link className="linkish" style={{ marginLeft: "auto", fontSize: "var(--t-sm)" }} to="/cut-stock/transfer">Transfer pieces</Link>
+                </div>
+                <div style={{ overflow: "auto" }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Warehouse</th>
+                        <th>Cut Piece Size</th>
+                        <th className="num" style={{ textAlign: "right" }}>Pcs on hand</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {warehouses.map((w) => {
+                        const mine = locations.filter((c) => c.warehouseId === w.id);
+                        return mine.length ? (
+                          mine.map((c, i) => (
+                            <tr key={`${c.key} ${c.warehouseId}`}>
+                              <td style={{ fontWeight: i === 0 ? 600 : 400 }}>{i === 0 ? <>{w.name}{w.isPrimary ? <span className="dim" title="Pieces recorded without a warehouse count here"> ★</span> : null}</> : ""}</td>
+                              <td className="mono">{cutName.get(c.key.slice(c.key.indexOf("|") + 1)) || "—"}</td>
+                              <td className="num mono" style={{ fontWeight: 600, color: c.over > 0 ? "var(--c-amber)" : undefined }} title={c.over > 0 ? `${fmt(c.over)} more left than this warehouse ever held` : undefined}>{fmt(c.onHand)}{c.over > 0 ? " ⚠" : ""}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr key={w.id}>
+                            <td style={{ fontWeight: 600 }}>{w.name}{w.isPrimary ? <span className="dim"> ★</span> : null}</td>
+                            <td className="dim">—</td>
+                            <td className="num mono dim">0</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Stock history — the dated ledger behind the on-hand figures. */}
             <div className="card">
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
@@ -325,7 +375,7 @@ export function PanelItemDetail() {
                           )}
                         </td>
                         <td className="num mono" style={{ color: e.qty < 0 ? "var(--c-red)" : "var(--c-green)", fontWeight: 600 }}>{e.qty > 0 ? "+" : ""}{fmt(e.qty)}</td>
-                        <td className="muted">{[e.reason, e.note].filter(Boolean).join(" — ") || "—"}</td>
+                        <td className="muted">{[e.kind === "transfer" ? `${e.docNumber}${whEnabled && e.warehouseId ? ` · ${whName(e.warehouseId)}` : ""}` : "", e.reason, e.note].filter(Boolean).join(" — ") || "—"}</td>
                         <td className="muted">{e.performedBy || "—"}</td>
                       </tr>
                     ))}

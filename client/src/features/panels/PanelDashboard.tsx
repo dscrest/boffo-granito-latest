@@ -21,6 +21,9 @@ import {
   cachedCutStockRows,
   cachedPanelOrders,
   demandByKey,
+  pendingNeedLines,
+  pendingText,
+  loadProgress,
   listCutStock,
   listPanelOrders,
   PANEL_ORDER_STATUS_LABEL,
@@ -76,9 +79,9 @@ export function PanelDashboard() {
   const open = useMemo(() => all.filter((o) => OPEN.includes(o.status)), [all]);
   // CR-312: short = pieces that must still be cut after this order's booking + what nobody has booked.
   const booked = useMemo(() => allocatedByKey(all), [all]);
-  const shortagesOf = (o: PanelOrderRow) => requirementsFor(o.lines, panelById, stock, { allocation: o.allocation, booked }).filter((r) => r.toCut > 0);
+  const shortagesOf = (o: PanelOrderRow) => requirementsFor(pendingNeedLines(o.lines, o.loads), panelById, stock, { allocation: o.allocation, booked }).filter((r) => r.toCut > 0); // CR-347: pending pieces only
   const shortOrders = useMemo(() => open.filter((o) => shortagesOf(o).length > 0), [open, panelById, stock, booked]); // eslint-disable-line react-hooks/exhaustive-deps
-  // CR-313: orders whose three checkpoints are all Ready.
+  // CR-313: orders whose checkpoints (four since CR-323) are all Ready.
   const readyForProduction = useMemo(() => all.filter((o) => readiness(o.checkpoints, o.status) === "Ready for Production"), [all]);
   const monthStart = isoDay(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const dispatchedThisMonth = all.filter((o) => o.status === "Dispatched" && o.modifiedTime.slice(0, 10) >= monthStart);
@@ -86,7 +89,10 @@ export function PanelDashboard() {
   const stockKg = Math.round(stockRows.reduce((s, r) => s + (r.weightKg ?? 0) * r.qty, 0) * 10) / 10;
 
   // Shortfall across every open order: what the godown must cut, by design × cut size (the Pending Cut Stock page's top rows).
-  const shortages = useMemo(() => demandByKey(all, panelById, stock).filter((r) => r.shortage > 0).sort((a, b) => b.shortage - a.shortage).slice(0, 8), [all, panelById, stock]);
+  const pendingOrders = useMemo(() => all.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads) })), [all]); // CR-347
+  const shortages = useMemo(() => demandByKey(pendingOrders, panelById, stock).filter((r) => r.shortage > 0).sort((a, b) => b.shortage - a.shortage).slice(0, 8), [pendingOrders, panelById, stock]);
+  // CR-347/348: open orders with something still to load.
+  const pendingToLoad = useMemo(() => open.map((o) => pendingText(loadProgress(o.lines, o.loads))).filter(Boolean), [open]);
   const topPanels = useMemo(() => {
     const m = new Map<string, { code: string; qty: number; orders: number }>();
     for (const o of all) for (const l of o.lines) {
@@ -126,7 +132,7 @@ export function PanelDashboard() {
         <div className="right">
           {can("panel_craft", "create") && (
             <button className="hbtn primary" onClick={() => navigate("/panel-orders/new")}>
-              <Icon name="plus" size={13} /> New Panel Order
+              <Icon name="plus" size={13} /> New Order
             </button>
           )}
         </div>
@@ -143,7 +149,8 @@ export function PanelDashboard() {
           <KPI label="Ready to Dispatch" value={fmt(byStatus.Ready.count)} unit="orders" delta={`${fmt(byStatus.Ready.qty)} panels`} color="var(--c-cyan)" />
           <KPI label="Short on Pieces" value={fmt(shortOrders.length)} unit="orders" delta={shortOrders.length ? "need a cutting job" : "stock covers every open order"} color={shortOrders.length ? "var(--c-red)" : "var(--c-green)"} />
           <KPI label="Ready for Production" value={fmt(readyForProduction.length)} unit="orders" delta="MDF · vinyl · cut pieces all ready" color="var(--c-green)" />
-          <KPI label="Cut Stock" value={fmt(stockPcs)} unit="pcs" delta={`${stockKg} kg · ${fmt(dispatchedThisMonth.length)} dispatched this month`} color="var(--c-green)" />
+          <KPI label="Pending to Load" value={fmt(pendingToLoad.length)} unit="orders" delta={pendingToLoad.length ? "panels · MDF · pieces still to leave" : "everything open has left"} color="var(--c-amber)" />
+          <KPI label="Cut Piece" value={fmt(stockPcs)} unit="pcs" delta={`${stockKg} kg · ${fmt(dispatchedThisMonth.length)} dispatched this month`} color="var(--c-green)" />
         </div>
       )}
 
@@ -186,7 +193,7 @@ export function PanelDashboard() {
           <div className="split" style={{ marginTop: 16, alignItems: "stretch" }}>
             <div className="card">
               <div className="card-head"><Icon name="tile" size={13} /><span className="title">Short on Cut Pieces</span><span className="muted">· open orders</span>
-                <span className="right"><Link className="linkish" to="/pending-cut-stock">Pending Cut Stock</Link></span>
+                <span className="right"><Link className="linkish" to="/pending-cut-stock">Pending Cut Piece</Link></span>
               </div>
               <table className="tbl">
                 <thead><tr><th>Design</th><th>Cut Piece Size</th><th className="num" style={{ textAlign: "right" }}>Required</th><th className="num" style={{ textAlign: "right" }}>On Hand</th><th className="num" style={{ textAlign: "right" }}>Short</th></tr></thead>
@@ -206,7 +213,7 @@ export function PanelDashboard() {
             </div>
             <div className="card">
               <div className="card-head"><Icon name="tile" size={13} /><span className="title">Most Ordered Panels</span>
-                <span className="right"><Link className="linkish" to="/panels">Panels</Link></span>
+                <span className="right"><Link className="linkish" to="/panels">Panel Master</Link></span>
               </div>
               <table className="tbl">
                 <thead><tr><th>Panel</th><th>Designs</th><th className="num" style={{ textAlign: "right" }}>Orders</th><th className="num" style={{ textAlign: "right" }}>Panels</th></tr></thead>
@@ -230,20 +237,26 @@ export function PanelDashboard() {
               <span className="right"><Link className="linkish" to="/panel-orders">All panel orders</Link></span>
             </div>
             <table className="tbl">
-              <thead><tr><th>Order</th><th>Customer</th><th>Date</th><th>Status</th><th>Readiness</th><th className="num" style={{ textAlign: "right" }}>Panels</th><th>Stock</th></tr></thead>
+              <thead><tr><th>Customer</th><th>Date</th><th>Status</th><th>Readiness</th><th className="num" style={{ textAlign: "right" }}>Panels</th><th>Stock</th><th>Order</th></tr></thead>
               <tbody>
                 {recent.map((o) => {
                   const short = shortagesOf(o);
                   const ready = readiness(o.checkpoints, o.status);
                   return (
-                    <tr key={o.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/panel-orders/${encodeURIComponent(o.id)}`)}>
-                      <td className="mono">{o.orderNumber || "—"}</td>
+                    <tr
+                      key={o.id}
+                      tabIndex={0}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => navigate(`/panel-orders/${encodeURIComponent(o.id)}`)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/panel-orders/${encodeURIComponent(o.id)}`); }}
+                    >
                       <td>{o.customerName}</td>
                       <td className="mono muted">{o.orderDate || "—"}</td>
                       <td><Chip tone={ORDER_STATUS_TONE[o.status]} label={PANEL_ORDER_STATUS_LABEL[o.status]} /></td>
                       <td>{ready === "—" ? <span className="dim">—</span> : <Chip tone={READINESS_TONE[ready]} label={ready} />}</td>
                       <td className="num mono">{fmt(o.totalQty)}</td>
                       <td>{o.status === "Dispatched" ? <span className="dim">—</span> : short.length ? <Chip tone="red" label={`Unavailable · ${short.length}`} /> : <Chip tone="green" label="Available" />}</td>
+                      <td className="mono dim">{o.orderNumber || "—"}</td>
                     </tr>
                   );
                 })}

@@ -10,7 +10,7 @@
    (Admin always qualifies); the route is gated the same way in App.tsx.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { ErrorCard } from "@/ui/States";
@@ -56,6 +56,7 @@ interface Row {
 type SortKey = "module" | "number" | "customer" | "salesperson" | "date";
 
 export function Approvals() {
+  const navigate = useNavigate();
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [orders, setOrders] = useState<Order[]>(() => cachedOrders() ?? []);
   const [prod, setProd] = useState<ProductionEntry[]>(() => cachedProductionLogs() ?? []);
@@ -216,29 +217,35 @@ export function Approvals() {
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ cursor: "pointer" }} onClick={() => onSort("module")}>Module{arrow("module")}</th>
-                <th style={{ cursor: "pointer" }} onClick={() => onSort("number")}>Number{arrow("number")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => onSort("customer")}>Customer{arrow("customer")}</th>
+                <th style={{ cursor: "pointer" }} onClick={() => onSort("module")}>Module{arrow("module")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => onSort("salesperson")}>Salesperson{arrow("salesperson")}</th>
                 <th style={{ cursor: "pointer" }} onClick={() => onSort("date")}>Date{arrow("date")}</th>
                 <th className="num" style={{ textAlign: "right" }}>Total</th>
+                <th style={{ cursor: "pointer" }} onClick={() => onSort("number")}>Number{arrow("number")}</th>
                 <th style={{ width: 200 }}></th>
               </tr>
             </thead>
             <tbody>
               {visible.map((r) => (
-                <tr key={`${r.module}-${r.id}`}>
-                  <td><span className="chip">{r.module}</span></td>
-                  <td>
-                    <Link className="linkish" to={r.link} title={`Open ${r.module.toLowerCase()}`}>
-                      {r.number || "—"}
-                    </Link>
-                  </td>
+                <tr
+                  key={`${r.module}-${r.id}`}
+                  tabIndex={0}
+                  onClick={() => navigate(r.link)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(r.link); }}
+                  style={{ cursor: "pointer" }}
+                >
                   <td>{r.customer}</td>
+                  <td><span className="chip">{r.module}</span></td>
                   <td className="muted">{r.salesperson || "—"}</td>
                   <td className="mono muted">{r.date || "—"}</td>
                   <td className="num mono">{r.total}</td>
-                  <td>
+                  <td className="mono">
+                    <Link className="linkish" to={r.link} title={`Open ${r.module.toLowerCase()}`} onClick={(e) => e.stopPropagation()}>
+                      {r.number || "—"}
+                    </Link>
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <div className="row" style={{ gap: 6, justifyContent: "flex-end" }}>
                       <button className="hbtn primary" disabled={busy === r.id} onClick={() => void act(r, true)} title="Approve">
                         <Icon name="check" size={13} /> Approve

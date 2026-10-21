@@ -20,6 +20,7 @@ import { currencyCodes } from "./currenciesApi";
 import {
   composeAddress,
   emptyExtras,
+  GST_TREATMENTS,
   isoInfo,
   type CustomerExtras,
   type CustomerInput,
@@ -610,6 +611,50 @@ export function PartyForm({
               </label>
               {/* Main Customer Name + Port of Discharge removed 2026-07-13 (UI only;
                   columns kept — port differs per shipment, it lives on transactions). */}
+            </div>
+          </div>
+          )}
+
+          {tab === "other" && (
+          <div className="form-section">
+            {/* CR-356 Books-parity tax block — same codes/labels as Zoho Books, so a
+                push lands cleanly. Opening balance is display-only (detail page). */}
+            <div className="form-section-title">Tax &amp; Other</div>
+            <div className="form-rows">
+              <label className="form-field">
+                <span className="lbl">GST Treatment</span>
+                <select value={x.gst_treatment} onChange={(e) => setExtra("gst_treatment", e.target.value)}>
+                  <option value="">—</option>
+                  {GST_TREATMENTS.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span className="lbl">GSTIN</span>
+                <input value={x.gst_no} onChange={(e) => setExtra("gst_no", e.target.value.toUpperCase())} placeholder="24AAAAA0000A1Z5" maxLength={15} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Place of Supply</span>
+                {/* ponytail: GST state code typed as text; a state pick list if anyone mistypes it. */}
+                <input value={x.place_of_contact} onChange={(e) => setExtra("place_of_contact", e.target.value.toUpperCase())} placeholder="GJ" maxLength={4} style={{ maxWidth: 120 }} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">PAN</span>
+                <input value={x.pan_no} onChange={(e) => setExtra("pan_no", e.target.value.toUpperCase())} placeholder="AAAAA0000A" maxLength={10} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Website</span>
+                <input value={x.website} onChange={(e) => setExtra("website", e.target.value)} placeholder="https://" />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Credit Limit</span>
+                <input type="number" min={0} value={x.credit_limit} onChange={(e) => setExtra("credit_limit", e.target.value)} style={{ maxWidth: 180 }} />
+              </label>
+              <label className="form-field">
+                <span className="lbl">Notes</span>
+                <textarea rows={3} value={x.notes} onChange={(e) => setExtra("notes", e.target.value)} />
+              </label>
             </div>
           </div>
           )}

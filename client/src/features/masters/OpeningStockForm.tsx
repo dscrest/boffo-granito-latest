@@ -12,6 +12,8 @@ import { toast } from "@/ui/Toast";
 import { DateInput } from "@/ui/DateInput";
 import { NumberInput } from "@/ui/NumberInput";
 import { useModalA11y } from "@/ui/useModalA11y";
+import { Combobox } from "@/ui/Combobox";
+import { useWarehouses } from "./useWarehouses";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { saveOpeningBatches, batchNumberExists, type OpeningStockLine } from "@/features/stages/productionApi";
@@ -41,6 +43,12 @@ export function OpeningStockForm({
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const panelRef = useModalA11y(onClose);
+  // CR-329: where the opening batches sit — default primary.
+  const { options: whOptions, primary, enabled: whEnabled } = useWarehouses();
+  const [warehouse, setWarehouse] = useState("");
+  useEffect(() => {
+    if (primary) setWarehouse((v) => v || primary.id);
+  }, [primary]);
 
   // Duplicate-batch pre-check (server 409 is the source of truth): same batch
   // twice in this form, same item + same batch always blocked; cross-item reuse
@@ -73,7 +81,7 @@ export function OpeningStockForm({
       mfg_date: r.date || undefined,
       note: r.note.trim() || undefined,
     }));
-    const res = await saveOpeningBatches(designId, { rows: lines, _reason: reason.trim() || undefined });
+    const res = await saveOpeningBatches(designId, { rows: lines, warehouse: (whEnabled && warehouse) || undefined, _reason: reason.trim() || undefined });
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error || "Could not save opening stock");
@@ -96,6 +104,14 @@ export function OpeningStockForm({
         </div>
 
         <div className="df-body">
+          {whEnabled && (
+            <div className="form-grid" style={{ gridTemplateColumns: "minmax(200px, 320px)", marginBottom: 12 }}>
+              <label className="form-field">
+                <span className="lbl">Warehouse</span>
+                <Combobox value={warehouse} options={whOptions} clearable={false} ariaLabel="Warehouse the batches are in" onChange={setWarehouse} />
+              </label>
+            </div>
+          )}
           <div className="form-section">
             <div className="form-section-title">Opening batches</div>
             {rows.map((r, i) => {

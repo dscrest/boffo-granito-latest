@@ -33,6 +33,16 @@ const TABS = [
 
 function columns(): ColumnDef<PalletisationRow>[] {
   return [
+    {
+      key: "design",
+      label: "Design",
+      render: (r) => (
+        <>
+          <span className="design-name">{r.design}</span>
+          {r.isMixed && <span className="pill" style={{ marginLeft: 6, background: "var(--c-violet, var(--c-blue))", color: "#fff" }}>Mixed</span>}
+        </>
+      ),
+    },
     { key: "so", label: "Sales Order", className: "mono", render: (r) => r.soLabel || "—" },
     { key: "pallet", label: "Pallet", render: (r) => r.pallet },
     { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.boxes) },
@@ -75,7 +85,7 @@ export function Palletizations() {
   const presetOrderId = params.get("fromOrder") || "";
 
   const COLS = useMemo(() => columns(), []);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletisationsColumns", COLS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("palletisationsColumns.v2", COLS, ["created", "modified"]) // .v2 (CR-355): Design inside the picker;
 
   const [rows, setRows] = useState<PalletisationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -213,7 +223,6 @@ export function Palletizations() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortTh id="design" label="Design" sort={sort} />
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
@@ -228,10 +237,6 @@ export function Palletizations() {
                     onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget && r.salesOrderId) navigate(`/orders/${encodeURIComponent(r.salesOrderId)}`); }}
                     style={{ cursor: r.salesOrderId ? "pointer" : "default" }}
                   >
-                    <td>
-                      <span className="design-name">{r.design}</span>
-                      {r.isMixed && <span className="pill" style={{ marginLeft: 6, background: "var(--c-violet, var(--c-blue))", color: "#fff" }}>Mixed</span>}
-                    </td>
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
@@ -241,7 +246,7 @@ export function Palletizations() {
                 ))}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length + 1}>
+                    <td colSpan={visible.length}>
                       {rows.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different filter" />
                       ) : (

@@ -184,7 +184,7 @@ export function PanelDetail() {
                 </button>
               </div>
               <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                {[panel.panelSize && `Panel: ${panel.panelSize}`, panel.vinylSize && `Vinyl: ${panel.vinylSize}`]
+                {[panel.panelSize && `Panel: ${panel.panelSize}`, panel.vinylSize && `Vinyl: ${panel.vinylSize}`, panel.mdfSize && `MDF: ${panel.mdfSize}`]
                   .filter(Boolean)
                   .join("  ·  ") || "No sizes set"}
               </div>
@@ -204,11 +204,13 @@ export function PanelDetail() {
                     text("Panel Code", panel.panelCode),
                     text("Panel Size", panel.panelSize),
                     text("Vinyl Size", panel.vinylSize),
+                    text("MDF Size", panel.mdfSize),
                     ["Created", fmtLocalDateTime(panel.createdTime), false] as Detail,
                     ["Modified", fmtLocalDateTime(panel.modifiedTime), false] as Detail,
                   ].map(([label, value, unset]) => (
                     <DetailRow key={label} label={label} value={value} dim={unset} />
                   ))}
+
                 </div>
 
                 {/* Image upload — same manager as the Item master (#12), ONE slot for a panel. */}

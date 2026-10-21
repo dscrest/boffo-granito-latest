@@ -10,6 +10,7 @@ import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
+import { DesignNames } from "@/ui/DesignNames";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { can } from "@/lib/auth";
@@ -48,12 +49,13 @@ const TABS: Array<{ id: string; label: string }> = [
   { id: "Converted", label: "Converted" },
 ];
 
-// Toggleable + reorderable columns (Quote No pinned outside the map).
+// Toggleable + reorderable columns. Customer → Design lead; the Quote No sits LAST, default-hidden (CR-355).
 // Data-driven grid pattern (see DesignMaster): each ColumnDef carries its
 // own cell renderer; thead/tbody map over useColumns().visible.
 function quoteColumns(): ColumnDef<Quote>[] {
   return [
     { key: "customer", label: "Customer", render: (q) => q.customer },
+    { key: "design", label: "Design", className: "nw", render: (q) => <DesignNames names={q.lines.map((l) => l.item)} /> },
     { key: "date", label: "Date", className: "mono muted", render: (q) => q.quoteDate || "—" },
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (q) => q.lines.length },
     {
@@ -93,6 +95,16 @@ function quoteColumns(): ColumnDef<Quote>[] {
     },
     { key: "created", label: "Created", className: "muted mono", render: (q) => fmtDateTime(q.createdTime) },
     { key: "modified", label: "Modified", className: "muted mono", render: (q) => fmtDateTime(q.modifiedTime) },
+    {
+      key: "quoteNo",
+      label: "Quote No",
+      className: "mono",
+      render: (q) => (
+        <Link className="linkish" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()} title="View quote">
+          {q.quoteNo}
+        </Link>
+      ),
+    },
   ];
 }
 
@@ -101,6 +113,7 @@ function quoteSortVal(q: Quote, k: string): string | number {
   switch (k) {
     case "quoteNo": return q.quoteNo;
     case "customer": return q.customer;
+    case "design": return q.lines.map((l) => l.item).join(", ");
     case "date": return q.quoteDate || "";
     case "items": return q.lines.length;
     case "total": return quoteTotals(q).final;
@@ -152,7 +165,7 @@ export function QuotesTable() {
   const [query, setQuery] = usePersistedState("quotes.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("quotes.criteria", {});
   const COLS = useMemo(() => quoteColumns(), []);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("quotesTableColumns", COLS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("quotesTableColumns.v2", COLS, ["created", "modified", "quoteNo"]) // .v2 (CR-355);
   // Paint the last cached snapshot instantly (stale-while-revalidate).
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   const [loading, setLoading] = useState(() => cachedQuotes() == null);
@@ -354,7 +367,6 @@ export function QuotesTable() {
                 <th style={{ width: 34, textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title="Select all on this page" />
                 </th>
-                <SortTh id="quoteNo" label="Quote No" sort={sort} />
                 {visible.map((c) => (
                   <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                 ))}
@@ -372,11 +384,6 @@ export function QuotesTable() {
                   <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(q.id)} onChange={() => toggleOne(q.id)} />
                   </td>
-                  <td className="mono">
-                    <Link className="linkish" to={`/quotes/${q.id}`} onClick={(e) => e.stopPropagation()} title="View quote">
-                      {q.quoteNo}
-                    </Link>
-                  </td>
                   {visible.map((c) => (
                     <td key={c.key} className={c.className} style={c.style}>
                       {c.render!(q)}
@@ -386,7 +393,7 @@ export function QuotesTable() {
               ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={visible.length + 2}>
+                  <td colSpan={visible.length + 1}>
                     {quotes.length > 0 ? (
                       <EmptyState title="No matching results" hint="Try a different filter" />
                     ) : (

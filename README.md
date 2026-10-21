@@ -57,6 +57,7 @@ Read in this order.
 | [`DATASTORE-SCHEMA.md`](DATASTORE-SCHEMA.md) | Every table, column and FK. The source of truth for schema. |
 | [`docs/CHANGE-REQUESTS.md`](docs/CHANGE-REQUESTS.md) | What was requested, whether it shipped, and the proof. How to file a new request. |
 | [`docs/CHANGES.md`](docs/CHANGES.md) | Dated narrative of what shipped, newest first. |
+| [`docs/AUTH.md`](docs/AUTH.md) | Sign-in (password + Sign in with Zoho), the Zoho API-console setup steps, the Zoho Books connection behind customer mapping, troubleshooting. |
 | [`PRODUCT.md`](PRODUCT.md) | Users, purpose, design principles. |
 | [`ARCHITECT-BLUEPRINT.md`](ARCHITECT-BLUEPRINT.md) | House conventions — design tokens, page archetypes, DO/DON'T. |
 | [`BOFFO_Architecture.md`](BOFFO_Architecture.md) | The locked architecture decisions and why. |

@@ -171,6 +171,9 @@ select:focus, textarea:focus {
 }
 /* A filter is applied — same indigo as .btn.active (Search / Columns / Group, CR-245/246). */
 .fbar select.on { background-color: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+/* CR-321: a filter bar inside a modal (Panel picker) keeps the 30px bar skin —
+   .modal-panel select's 100% width made every select a full row. */
+.modal-panel .fbar select { width: auto; max-width: 260px; }
 .fbar select:focus, .page-head .right select:focus { border-color: var(--accent); }
 .lp-search input[type="text"] {
   height: 30px;

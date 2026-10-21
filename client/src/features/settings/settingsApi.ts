@@ -20,6 +20,8 @@ export const DEFAULT_VIEW = "default_view";
 export const BATCH_PREFIX = "batch_series_prefix";
 export const BATCH_SEPARATOR = "batch_series_separator";
 export const BATCH_START = "batch_series_start";
+// CR-337: comma-separated email domains whose Zoho users self-provision as Staff. Admin-only write (server).
+export const LOGIN_DOMAINS = "zoho_login_domains";
 
 export type DefaultView = "sheet" | "kanban";
 /** Mirror of default_view, so a board can seed its view synchronously at mount. */
@@ -153,4 +155,16 @@ export async function setBatchSeries(v: BatchSeries): Promise<{ ok: boolean; err
     if (!res.ok) return res;
   }
   return { ok: true };
+}
+
+/* ---------- zoho_login_domains (default "" = nobody self-provisions) ---------- */
+
+export async function loadLoginDomains(): Promise<string> {
+  const res = await cache.load();
+  const row = res.ok ? rowFor(res.rows, LOGIN_DOMAINS) : undefined;
+  return row ? String(row.setting_value ?? "") : "";
+}
+
+export function setLoginDomains(v: string): Promise<{ ok: boolean; error?: string }> {
+  return putSetting(LOGIN_DOMAINS, v.trim().toLowerCase());
 }

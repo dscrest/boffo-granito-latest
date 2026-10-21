@@ -1,6 +1,6 @@
 /* Sample Orders (CR-315/316) — the pure maths behind a sample order:
    what remains to supply per line and the header status DERIVED from the
-   lines. Mirrors the server `sampleStatus` in /sample-order-supply — keep
+   lines. Mirrors the server `sampleStatus` (applied by /panel-load-save since CR-347) — keep
    the two together. */
 export const SAMPLE_STATUSES = ["New", "PartiallySupplied", "Supplied"] as const;
 export type SampleOrderStatus = (typeof SAMPLE_STATUSES)[number];

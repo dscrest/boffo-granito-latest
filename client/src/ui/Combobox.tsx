@@ -39,6 +39,7 @@ export function Combobox({
   maxVisible = MAX_VISIBLE,
   clearable = true,
   disabled = false,
+  emptyText,
 }: {
   value: string;
   options: ComboOption[];
@@ -59,6 +60,8 @@ export function Combobox({
   clearable?: boolean;
   /** Read-only + out of the tab order (e.g. shipping country while "same as billing"). */
   disabled?: boolean;
+  /** Shown when nothing matches (default "No match") — a reason when the list is empty by design. */
+  emptyText?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -256,7 +259,7 @@ export function Combobox({
           ref={popRef}
           style={{ position: "fixed", left: rect.left, top: rect.top, width: rect.width }}
         >
-          {filtered.length === 0 && !canCreate && <div className="combo-empty">No match</div>}
+          {filtered.length === 0 && !canCreate && <div className="combo-empty">{emptyText || "No match"}</div>}
           {filtered.map((o, i) => (
             <div
               // value alone can repeat (e.g. dial codes +1 USA / +1 Canada)

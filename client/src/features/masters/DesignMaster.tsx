@@ -197,7 +197,7 @@ export function DesignMaster() {
   const [query, setQuery] = usePersistedState("design.query", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("design.criteria", {});
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("designTableColumns", DESIGN_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("designTableColumns.v2", DESIGN_COLUMNS, ["created", "modified", "sku"]) // .v2 (CR-355): auto SKU hidden by default;
   const [showBulk, setShowBulk] = useState(false);
   const [busy, setBusy] = useState(false);
 

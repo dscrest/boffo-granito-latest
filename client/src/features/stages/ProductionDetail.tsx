@@ -426,7 +426,7 @@ export function ProductionDetail() {
                           <td>
                             <span className="design-name">{e.design}</span>
                             <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                              On hand {fmt(stockFor(e.design).available)} boxes
+                              On hand {fmt(stockFor(e.designId).available)} boxes
                             </div>
                           </td>
                           <td className="nw">

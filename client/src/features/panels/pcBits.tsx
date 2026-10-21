@@ -5,7 +5,7 @@
 import { Icon } from "@/ui/Icon";
 import type { ChipTone } from "@/ui/Chip";
 import { designImageUrl } from "@/lib/api";
-import type { PanelOrderStatus, Readiness } from "./panelOrdersApi";
+import type { LoadingStatus, PanelOrderStatus, Readiness } from "./panelOrdersApi";
 import type { SampleOrderStatus } from "./sampleOrderStatus";
 import type { PanelRow } from "./panelsApi";
 
@@ -66,20 +66,28 @@ export function FilterSelect({
   onChange: (v: string) => void;
   options: string[];
 }) {
+  // CR-321: an applied filter shows a clear × (house .combo-clear skin) beside the chevron.
   return (
-    <select
-      className={value ? "on" : undefined}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      title={`Filter by ${label.toLowerCase()}`}
-    >
-      <option value="">All {label}s</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
+    <span className="fsel">
+      <select
+        className={value ? "on" : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title={`Filter by ${label.toLowerCase()}`}
+      >
+        <option value="">All {label}s</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+      {value && (
+        <button type="button" className="combo-clear" title={`Clear ${label.toLowerCase()} filter`} aria-label={`Clear ${label.toLowerCase()} filter`} onClick={() => onChange("")}>
+          ×
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -133,6 +141,9 @@ export function PanelTile({
 }
 
 /* CR-313: production-readiness chip tones (derived readiness + per-checkpoint status). */
+/** CR-347: derived Loading Status (loadingStatus) — Not loaded · Partially loaded · Loaded. */
+export const LOADING_TONE: Record<LoadingStatus, ChipTone> = { "Not loaded": "slate", "Partially loaded": "amber", Loaded: "green" };
+
 export const READINESS_TONE: Record<Readiness, ChipTone> = {
   Pending: "slate",
   "In Progress": "amber",

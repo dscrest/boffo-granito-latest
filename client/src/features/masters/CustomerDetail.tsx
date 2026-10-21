@@ -26,14 +26,18 @@ import { PanelsPanel } from "@/features/panels/PanelsPanel";
 import { CustomerSamples } from "@/features/panels/CustomerSamples";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS } from "./PartyForm";
+import { ZohoSearchModal, type ZohoPick } from "./ZohoSearchModal";
+import { getZohoRecord, isReauth, pushCustomerToZoho, REAUTH_HINT, ZOHO, ZOHO_LINK, zohoStatus } from "./zohoApi";
 import {
   ADDRESS_FIELD_KEYS,
   cachedCustomers,
+  clearZohoLink,
   composeAddress,
   composeExtraAddress,
   contactName,
   deleteCustomer,
   emptyAddress,
+  gstTreatmentLabel,
   listCustomers,
   parseAddresses,
   setAdditionalAddresses,
@@ -72,12 +76,29 @@ const rows = (c: CustomerRow): Detail[] => [
   text("Currency", c.currency),
   text("Payment Term", c.paymentTermLabel),
   text("Default Box Brand", c.boxBrandLabel),
+  // CR-356 Books-parity fields
+  text("GST Treatment", gstTreatmentLabel(c.extras.gst_treatment)),
+  text("GSTIN", c.extras.gst_no),
+  text("Place of Supply", c.extras.place_of_contact),
+  text("PAN", c.extras.pan_no),
+  text("Website", c.extras.website),
+  text("Credit Limit", c.extras.credit_limit),
+  text("Opening Balance", c.extras.opening_balance),
+  text("Notes", c.extras.notes),
   text("Contact Person", contactName(c.extras)),
   text("Email", c.extras.contact_email),
   text("Phone", [c.extras.contact_work_phone, c.extras.contact_mobile].filter(Boolean).join(" / ")),
   text("Other Contacts", otherContacts(c.extras.contact_persons)),
   text("Billing Address", composeAddress(c.extras, "billing") || c.address),
   text("Shipping Address", composeAddress(c.extras, "shipping")),
+  // CR-362: both systems in one row — sentence + whichever ids are set.
+  [
+    "Zoho",
+    [ZOHO_LINK[c.zohoLink].text, c.extras.crm_account_id && `CRM ${c.extras.crm_account_id}`, c.extras.books_contact_id && `Books ${c.extras.books_contact_id}`]
+      .filter(Boolean)
+      .join(" · "),
+    c.zohoLink === "none",
+  ] as Detail,
   ["Active", c.active ? "Yes" : "No", false],
   ["Created", fmtLocalDateTime(c.createdTime), false],
   ["Modified", fmtLocalDateTime(c.modifiedTime), false],
@@ -218,6 +239,12 @@ export function CustomerDetail() {
   const [busy, setBusy] = useState(false);
   const [addingAddr, setAddingAddr] = useState(false);
   const [editingAddr, setEditingAddr] = useState<number | null>(null);
+  const [zohoOpen, setZohoOpen] = useState(false); // CR-325/359 Map to Zoho
+  // CR-356: can this connection write to Zoho? (null = not loaded yet)
+  const [zohoWrite, setZohoWrite] = useState<boolean | null>(null);
+  useEffect(() => {
+    zohoStatus().then((st) => setZohoWrite(st.connected && st.canWrite)).catch(() => setZohoWrite(false));
+  }, []);
 
   const refresh = () =>
     listCustomers().then((res) => {
@@ -325,10 +352,78 @@ export function CustomerDetail() {
     await refresh();
   };
 
+  /* CR-325/359: Zoho mapping. The edit form, prefilled from the server-mapped record,
+     is the review step — nothing is written until the user saves it. */
+  const openPrefilled = (p: ZohoPick) =>
+    party && navigate(`/parties/${encodeURIComponent(party.code)}/edit`, { state: { zoho: p } });
+  const onRepull = async () => {
+    if (!party) return;
+    setBusy(true);
+    try {
+      const r = await getZohoRecord(party.zohoLinkId);
+      if (!r) throw new Error(`This ${ZOHO.noun} no longer exists in ${ZOHO.label} — unmap and map again`);
+      openPrefilled({ id: party.zohoLinkId, name: String(r.mapped.name ?? party.name), mapped: r.mapped });
+    } catch (e) {
+      toast.error(isReauth(e) ? REAUTH_HINT : e instanceof Error ? e.message : `Could not load the ${ZOHO.label} ${ZOHO.noun}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const onUnmap = async () => {
+    if (!party) return;
+    const ok = await confirmDialog({
+      title: `Unmap from ${ZOHO.label}?`,
+      message: `Only the link to the ${ZOHO.label} ${ZOHO.noun} is removed. The customer's details stay as they are.`,
+      confirmLabel: "Yes, unmap",
+      cancelLabel: "No, keep it",
+    });
+    if (!ok) return;
+    const res = await clearZohoLink(party.id);
+    if (!res.ok) {
+      toast.error(res.error || "Unmap failed");
+      return;
+    }
+    toast.success(`Unmapped from ${ZOHO.label}`);
+    await refresh();
+  };
+  /* CR-356: push this customer to Zoho (create when unlinked, update when linked). */
+  const onPush = async () => {
+    if (!party) return;
+    setBusy(true);
+    try {
+      const r = await pushCustomerToZoho(party.id);
+      toast.success(r.created ? `Created in ${ZOHO.label}` : `${ZOHO.label} ${ZOHO.noun} updated`);
+      await refresh();
+    } catch (e) {
+      const msg = isReauth(e) ? REAUTH_HINT : e instanceof Error ? e.message : "Push failed";
+      // Zoho refuses a duplicate name — the right move is to map the existing one.
+      toast.error(/already exists|duplicate/i.test(msg) ? `${msg} — use Map to ${ZOHO.label} instead` : msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pushItem = (label: string) => ({
+    label,
+    onClick: () => void onPush(),
+    disabled: zohoWrite === false,
+    // Never a silent disable — say why and what to do first.
+    title: zohoWrite === false ? `Reconnect ${ZOHO.label} in Settings to allow writes` : undefined,
+  });
+  const zohoItems = !party || !can("customers", "edit")
+    ? []
+    : party.zohoLinkId
+      ? [
+          pushItem(`Push to ${ZOHO.label}`),
+          { label: `Re-pull from ${ZOHO.label}`, onClick: () => void onRepull() },
+          { label: `Unmap from ${ZOHO.label}`, onClick: () => void onUnmap() },
+        ]
+      : [pushItem(`Create in ${ZOHO.label}`), { label: `Map to ${ZOHO.label}`, onClick: () => setZohoOpen(true) }];
+
   const moreItems = [
     ...(party
       ? [{ label: "Create Quotation", onClick: () => navigate(`/quotes/new?customer=${encodeURIComponent(party.name)}`) }]
       : []),
+    ...zohoItems,
     ...(can("customers", "create") && party ? [{ label: "Clone", onClick: () => navigate(`/parties/${encodeURIComponent(party.code)}/clone`) }] : []),
     ...(can("customers", "edit") && party
       ? [{ label: party.active ? "Mark as Inactive" : "Mark as Active", onClick: () => void onToggleActive() }]
@@ -338,6 +433,9 @@ export function CustomerDetail() {
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {zohoOpen && party && (
+        <ZohoSearchModal initialQuery={party.name} onPick={openPrefilled} onClose={() => setZohoOpen(false)} />
+      )}
       {addingAddr && party && (
         <AddressModal onSave={(a) => void onAddAddress(a)} onClose={() => setAddingAddr(false)} />
       )}

@@ -28,11 +28,13 @@ import { nextPlanContainer, useContainerPlanBySo } from "./containerPlanPrefill"
 import { DESIGN_PALETTE } from "./VehicleFillBar";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
+import { Note } from "@/ui/States";
 import { MxChip } from "./BulkLoadItemsModal";
-import { palletsOfLine } from "./newLoadingRows";
+import { palletsOfLine, loadIdentity } from "./newLoadingRows";
 import {
   boxFill,
   boxLabel,
+  boxStatusOf,
   cachedLoadBoxes,
   cachedPalPlans,
   deleteLoadBox,
@@ -116,7 +118,7 @@ export function LoadingDetail() {
   const planLines = useMemo(() => {
     const snap = box && lines.length === 0 ? (parseLoadPlan(box.loadPlan)?.lines ?? []) : [];
     const soId = snap[0]?.so || "";
-    const slice = soId && snap.every((l) => l.so === soId) ? nextPlanContainer(soId, planBySo, plans, boxes, designIdOf) : null;
+    const slice = soId && snap.every((l) => l.so === soId) ? nextPlanContainer(soId, planBySo, plans, boxes, designIdOf, box?.id) : null;
     return slice
       ? slice.lines.map((ln) => ({ so: soId, design: ln.design, batch: "", boxes: ln.boxes, palletId: ln.palletId }))
       : snap;
@@ -135,6 +137,8 @@ export function LoadingDetail() {
 
   // Left rail — every loading, newest first, customer under the LOAD code.
   // ponytail: customers/status re-derived here (~12 lines) instead of sharing
+  // CR-350: who the loading is for — from the loaded lines, else the planned SOs.
+  const ident = loadIdentity(lines.length ? lines : soHeads.map(({ head }) => ({ customerName: head.party, poNumber: head.poNumber, soNumber: head.orderNumber || "" })));
   // LoadingBay's boxRows — their row shapes differ.
   const railItems: DetailRailItem[] = useMemo(
     () =>
@@ -171,15 +175,7 @@ export function LoadingDetail() {
 
   const open = box.status === "Open";
   const plan = parseLoadPlan(box.loadPlan);
-  const stage = !open
-    ? { label: "Dispatched", cls: "palstatus p-completed" }
-    : sealed(box)
-      ? { label: "Ready for Dispatch", cls: "palstatus p-palletized" }
-      : entries.length > 0
-        ? { label: "In Loading", cls: "palstatus p-loading" }
-        : plan
-          ? { label: "Planned", cls: "palstatus p-planning" }
-          : { label: "Empty", cls: "palstatus p-planning" };
+  const stage = boxStatusOf(box, entries.length);
   // Sibling containers of a multi-container plan (LoadPlan.group). The
   // primary's own slice can lack the group key (it's patched in after the
   // mint), so also match boxes whose group points at this one.
@@ -235,6 +231,7 @@ export function LoadingDetail() {
     soHeadOf(soId, sheetRows.map((r) => r.l), orders),
   );
   const fields: RecordField[] = [
+    { key: "name", label: "Container Name", value: box.name || "—" }, // CR-333
     { key: "orders", label: "Order(s)", value: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", ") || "—" },
     { key: "customer", label: "Customer", value: [...new Set(heads.map((h) => h.customer).filter(Boolean))].join(", ") || "—" },
     { key: "plannedBoxes", label: "Planned Boxes", value: planLines.length ? fmt(plannedBoxes) : totalBoxes ? fmt(totalBoxes) : "—" },
@@ -263,9 +260,19 @@ export function LoadingDetail() {
         title={boxLabel(box)}
         statusChip={{ label: stage.label, cls: stage.cls }}
         subtitle={
-          planLines.length > 0
-            ? `${planLines.length} item${planLines.length === 1 ? "" : "s"} planned · ${fmt(plannedBoxes)} boxes — nothing loaded yet`
-            : `${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`
+          <>
+            {/* CR-350: party + customer PO lead; SO numbers ride small. */}
+            {ident.customers.length > 0 && (
+              <span style={{ marginRight: 8 }}>
+                <strong>{ident.customers.join(", ")}{ident.pos.length > 0 && ` · PO ${ident.pos.join(", ")}`}</strong>
+                {ident.sos.length > 0 && <span className="mono dim" style={{ fontSize: "var(--t-xs)", marginLeft: 6 }}>{ident.sos.join(" · ")}</span>}
+                {" · "}
+              </span>
+            )}
+            {planLines.length > 0
+              ? `${planLines.length} item${planLines.length === 1 ? "" : "s"} planned · ${fmt(plannedBoxes)} boxes — nothing loaded yet`
+              : `${entries.length} item${entries.length === 1 ? "" : "s"} · ${fmt(totalBoxes)} boxes · ${pct}% full`}
+          </>
         }
         actions={
           <>
@@ -358,15 +365,6 @@ export function LoadingDetail() {
           },
         ]}
       >
-        {open && missingLoadDetails(box).length > 0 && (
-          <div className="card" style={{ padding: "10px 14px", marginBottom: 12, fontSize: "var(--t-sm)", color: "var(--c-amber)", display: "flex", gap: 8, alignItems: "flex-start" }}>
-            <Icon name="alert" size={14} />
-            <span>
-              Fill the load details before dispatch — still blank: {missingLoadDetails(box).join(", ")}.
-              {canEdit && " Use Edit to capture them."}
-            </span>
-          </div>
-        )}
         {siblings.length > 0 && (
           <div className="card" style={{ padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span className="dim" style={{ fontSize: "var(--t-sm)" }}>Part of a {siblings.length + 1}-container plan · {plan?.group?.no ? `container ${plan.group.no} of ${plan.group.of}` : ""}</span>
@@ -480,6 +478,15 @@ export function LoadingDetail() {
             </div>
           )}
         </div>
+        {/* CR-352: notes sit UNDER the content they explain. */}
+        {open && missingLoadDetails(box).length > 0 && (
+          <Note tone="warn" style={{ marginTop: 12 }}>
+            <span>
+              Fill the load details before dispatch. Still blank: {missingLoadDetails(box).join(", ")}.
+              {canEdit && " Use Edit to capture them."}
+            </span>
+          </Note>
+        )}
       </RecordDetail>
 
       {entryOverlay && (

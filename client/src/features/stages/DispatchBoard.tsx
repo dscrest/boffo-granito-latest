@@ -47,6 +47,7 @@ import { hasOps, resolvePalSheetEdit, type PalSheetDraft, type PalSheetOps } fro
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { PalletiseModal, type PalletiseEntry } from "./PalletiseModal";
 import { TopUpModal } from "./TopUpModal";
+import { ReleaseModal } from "./ReleaseModal";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { useLoadFlow } from "./useLoadFlow";
 
@@ -56,8 +57,6 @@ export const COLUMNS = [
   { key: "Planning", label: "Ready for Palletization", chip: "p-planning" },
   { key: "Palletizing", label: "In Palletization", chip: "p-palletized" },
   { key: "Ready", label: "Ready for Loading", chip: "p-ready" },
-  // Read-only: in a container or dispatched. Only ever filled by showAll.
-  { key: "Done", label: "Loaded / Completed", chip: "p-completed" },
 ] as const;
 type ColKey = (typeof COLUMNS)[number]["key"];
 
@@ -89,7 +88,6 @@ export function DispatchBoard({
   canEdit,
   groupBy,
   visibleStages,
-  showAll = false,
   onChanged,
 }: {
   plans: PalPlan[];
@@ -99,7 +97,6 @@ export function DispatchBoard({
   canEdit: boolean;
   groupBy: DispatchGroupBy[];
   visibleStages?: string[]; // ordered stage keys from the Sections picker; empty/undefined = all
-  showAll?: boolean; // "All" status filter: every stage + boxed/dispatched lines, read-only
   onChanged: () => void;
 }) {
   // Stage sections the board renders (kanban lanes + sheet rows + footer chips).
@@ -107,7 +104,7 @@ export function DispatchBoard({
   const picked = (visibleStages ?? [])
     .map((k) => COLUMNS.find((c) => c.key === k))
     .filter((c): c is (typeof COLUMNS)[number] => !!c);
-  const cols = showAll ? [...COLUMNS] : picked.length ? picked : COLUMNS.filter((c) => c.key !== "Done");
+  const cols = picked.length ? picked : [...COLUMNS];
   const navigate = useNavigate();
   // Board filters (session-scoped is overkill — the outer PalPlans search persists already).
   const [q, setQ] = useState("");
@@ -125,6 +122,7 @@ export function DispatchBoard({
   const [palletise, setPalletise] = useState<{ lines: PalPlanLine[]; to: "Palletizing" | "ReadyToLoad" } | null>(null);
   // In-Palletization line whose open pallet is being topped up (Mix Batch).
   const [topUp, setTopUp] = useState<PalPlanLine | null>(null);
+  const [release, setRelease] = useState<PalPlanLine | null>(null); // CR-361
   // Sheet edit mode: staged qty/donor per line, committed on Save (mirrors
   // the Production sheet edit — nothing is written until Save).
   const [editMode, setEditMode] = useState(false);
@@ -142,10 +140,10 @@ export function DispatchBoard({
       .join("\n");
 
   // ---- derived ------------------------------------------------
-  // Boxed lines + legacy Completed plans live on /loading, not this board.
-  // showAll lists them too, as read-only "Done" rows.
+  // Boxed lines + legacy Completed plans live on /loading, not this board
+  // (CR-364 dropped the read-only "All" overview that used to list them here).
   const isDone = (p: PalPlan, l: PalPlanLine) => !!l.loadBoxId || p.status === "Completed";
-  const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l }))).filter(({ p, l }) => showAll || !isDone(p, l));
+  const allLines: Entry[] = plans.flatMap((p) => p.lines.map((l) => ({ p, l }))).filter(({ p, l }) => !isDone(p, l));
   const boxStatusById = new Map(boxes.map((b) => [b.id, b.status]));
   // Partial-palletise progress across ALL lines (boxed + Completed included,
   // or split siblings would deflate the totals).
@@ -161,7 +159,7 @@ export function DispatchBoard({
     const t = Date.parse((l.createdTime || p.createdTime || "").slice(0, 19).replace(" ", "T"));
     return Number.isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : 0;
   };
-  const stageOf = (p: PalPlan, l: PalPlanLine): ColKey => (isDone(p, l) ? "Done" : lineStage(l, loadable));
+  const stageOf = (_p: PalPlan, l: PalPlanLine): ColKey => lineStage(l, loadable);
 
   // Sheet columns (grid standard, CR-161): data-driven, show/hide + reorder
   // via the ColumnPicker. Customer then Item lead; the PAL line code sits
@@ -203,7 +201,7 @@ export function DispatchBoard({
                 </span>
               )}
               {partialItem && done && (
-                <span className="chip palstatus p-ready" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Palletized — waiting for the rest of this batch before loading">
+                <span className="chip palstatus p-ready" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Already palletized. Load it from Loading">
                   Palletized
                 </span>
               )}
@@ -428,7 +426,7 @@ export function DispatchBoard({
   const onDropColumn = (colKey: ColKey) => {
     const d = drag;
     clearDnd();
-    if (!d || colKey === "Done") return;
+    if (!d) return;
     const lines = d.lineIds
       .map((id) => allLines.find(({ l }) => l.id === id)?.l)
       .filter((l): l is PalPlanLine => !!l && !l.loadBoxId);
@@ -549,6 +547,8 @@ export function DispatchBoard({
       title: loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container",
       onClick: () => flow.setPicker({ lineIds: loadTargets(l) }),
     },
+    // CR-361: undo palletization — boxes return to free stock, allocation returned.
+    { label: "Release…", disabled: flow.busy, title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease(l) },
   ] : [
     {
       label: `Start Palletization${stage === "Planning" && palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}`,
@@ -572,7 +572,7 @@ export function DispatchBoard({
       // it moves on when the rest of its batch is palletised.
       disabled: l.status === "ReadyToLoad",
       title: l.status === "ReadyToLoad"
-        ? "Palletized — waiting for the rest of this batch before loading"
+        ? "Already palletized. Load it from Loading"
         : "Record palletized boxes — they move to Ready for Loading",
       onClick: () => openPalletise(stage === "Palletizing" ? recordTargets(l) : palletiseTargets(l), "ReadyToLoad"),
     },
@@ -581,7 +581,7 @@ export function DispatchBoard({
   // ---- item card ----------------------------------------------
   const itemCard = (p: PalPlan, l: PalPlanLine, stage: ColKey) => {
     const isSel = selected.has(l.id);
-    const canDrag = canEdit && stage !== "Done";
+    const canDrag = canEdit;
     const age = ageDays(p, l);
     return (
       <div
@@ -677,7 +677,7 @@ export function DispatchBoard({
             </div>
           ) : null;
         })()}
-        {canEdit && stage !== "Done" && (
+        {canEdit && (
           // MoreMenu doesn't stop propagation and the card is draggable +
           // click-navigates, so the wrapper span eats the events.
           <span
@@ -958,7 +958,7 @@ export function DispatchBoard({
                             <>
                               <td className="num" style={{ textAlign: "right" }} onClick={(ev) => ev.stopPropagation()}>
                                 {l.status === "ReadyToLoad" ? (
-                                  <span className="dim" title="Palletized — waiting for the rest of this batch before loading">—</span>
+                                  <span className="dim" title="Already palletized. Load it from Loading">—</span>
                                 ) : (
                                   <NumberInput
                                     value={d?.qty ?? ""}
@@ -1019,7 +1019,7 @@ export function DispatchBoard({
                           );
                         })()}
                         <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                          {canEdit && stage !== "Done" && (
+                          {canEdit && (
                             <MoreMenu kebab icon="plus" title={stage === "Ready" ? "Loading actions" : "Palletization actions"} items={plusMenuItems(l, stage)} />
                           )}
                         </td>
@@ -1158,6 +1158,10 @@ export function DispatchBoard({
           onConfirm={(donorLineId, boxes) => void confirmTopUp(donorLineId, boxes)}
           onClose={() => setTopUp(null)}
         />
+      )}
+
+      {release && (
+        <ReleaseModal line={release} onDone={() => { invalidatePalPlans(); onChanged(); }} onClose={() => setRelease(null)} />
       )}
 
       {flow.picker && (() => {

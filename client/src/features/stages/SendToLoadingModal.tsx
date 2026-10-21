@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox } from "@/ui/Combobox";
+import { Note } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { type Order } from "@/data";
@@ -189,8 +190,12 @@ export function SendToLoadingModal({
                 onChange={(v) => { setSoId(v); setChecked(new Set()); setQty(new Map()); }}
                 placeholder="Pick a sales order…"
                 ariaLabel="Sales Order"
+                emptyText="No order has allocated boxes left to send"
               />
             </label>
+          )}
+          {!presetSalesOrderId && orders.length > 0 && soOptions.length === 0 && (
+            <Note tone="warn">No order has allocated boxes left to send. Allocate Stock on the order first.</Note>
           )}
 
           <ContainerPicker
@@ -253,7 +258,7 @@ export function SendToLoadingModal({
           <span style={{ flex: 1, fontSize: "var(--t-sm)", color: invalidContainer ? "var(--c-amber)" : "var(--dim)" }} className={invalidContainer ? undefined : "mono"}>
             {invalidContainer
               ? "Fill container no., vehicle no., driver, e-seal"
-              : totalSend > 0 ? `${fmt(totalSend)} boxes` : ""}
+              : totalSend > 0 ? `${fmt(totalSend)} boxes` : !soId ? "Pick a sales order" : items.length > 0 ? "Tick at least one item" : ""}
           </span>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="hbtn primary" disabled={busy || !soId || totalSend === 0 || invalidContainer} onClick={() => void onConfirm()}>

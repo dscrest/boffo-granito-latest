@@ -12,6 +12,7 @@ const M = 40;
 const N = 100; // opening boxes carried in as batches
 const prodLogs = [
   {
+    designId: "TILE-A",
     design: "TILE-A",
     independent: true,
     producedSoFar: M,
@@ -26,8 +27,8 @@ const prodLogs = [
 ] as any;
 
 const openingByDesign = new Map([["TILE-A", N]]);
-const batched = { isBatched: true, designName: "TILE-A", accountingStock: 999 }; // 999 must be ignored
-const singular = { isBatched: false, designName: "TILE-A", accountingStock: 7 };
+const batched = { isBatched: true, id: "TILE-A", accountingStock: 999 }; // 999 must be ignored
+const singular = { isBatched: false, id: "TILE-A", accountingStock: 7 };
 
 // openingStockFor picks exactly ONE source.
 assert.strictEqual(openingStockFor(batched, openingByDesign), N, "batched → opening rows only (accounting_stock ignored)");
@@ -42,7 +43,7 @@ assert.strictEqual(s.inProduction, 0, "opening/completed output must not count a
 // SO-confirm auto-queued jobs (request_group "so-…") count only once TOUCHED —
 // an untouched New/0-produced auto row is demand, not production (bug 7.2).
 const line = (over: Record<string, unknown>) => ({
-  design: "TILE-A", independent: false, producedSoFar: 0, qtyRequested: 500,
+  designId: "TILE-A", design: "TILE-A", independent: false, producedSoFar: 0, qtyRequested: 500,
   stage: "New", status: "Approved", requestGroup: "so-123", salesOrderId: "123",
   orderNumber: "", poNumber: "", customer: "", ...over,
 });
@@ -56,7 +57,7 @@ assert.strictEqual(ip([line({ requestGroup: "PR-1-x" })]), 500, "manual PR- requ
 // line's producedQty and the independent output — `allocated` nets the double
 // count, so on-hand is unchanged while free drops by the allocation.
 {
-  const so = [{ designName: "TILE-A", design: "TILE-A", orderQty: 50, producedQty: 30, loadedQty: 0, palletizedQty: 0 }] as any;
+  const so = [{ designId: "TILE-A", designName: "TILE-A", design: "TILE-A", orderQty: 50, producedQty: 30, loadedQty: 0, palletizedQty: 0 }] as any;
   const a = designStock("TILE-A", { openingStock: N, allocated: 30, orders: so, prodLogs });
   assert.strictEqual(a.available, N + M, "allocating must not change on-hand");
   assert.strictEqual(a.free, N + M - 30, "free drops by the allocated boxes");

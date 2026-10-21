@@ -37,8 +37,6 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Order No</th>
-              <th>Order Date</th>
               <th style={{ width: 44 }}>Image</th>
               <th>Item</th>
               <th>Piece</th>
@@ -46,8 +44,10 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
               <th className="num" style={{ textAlign: "right" }}>Requested</th>
               <th className="num" style={{ textAlign: "right" }}>Supplied</th>
               <th>Supplied On</th>
+              <th>Order Date</th>
               <th>Status</th>
               <th>Source</th>
+              <th>Order No</th>
             </tr>
           </thead>
           <tbody>
@@ -64,8 +64,6 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
                     if (e.key === "Enter" && e.target === e.currentTarget) navigate(to);
                   }}
                 >
-                  <td className="mono">{o.orderNumber || "—"}</td>
-                  <td className="mono muted">{o.orderDate || "—"}</td>
                   <td><ImageThumb images={l.images} alt={l.designName} /></td>
                   <td>
                     <Link className="linkish" to={`/design/${encodeURIComponent(l.designId)}`} onClick={stop} title="Open item">{l.designName}</Link>
@@ -75,6 +73,7 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
                   <td className="num mono">{fmt(l.qty)}</td>
                   <td className="num mono">{fmt(l.suppliedQty)}</td>
                   <td className="mono muted">{l.suppliedOn || <span className="dim">—</span>}</td>
+                  <td className="mono muted">{o.orderDate || "—"}</td>
                   <td>
                     <Chip tone={SAMPLE_STATUS_TONE[o.status]} label={codeOf(SAMPLE_STATUS_LABEL[o.status])} title={SAMPLE_STATUS_LABEL[o.status]} />
                   </td>
@@ -87,6 +86,7 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
                       <span className="dim">—</span>
                     )}
                   </td>
+                  <td className="mono dim">{o.orderNumber || "—"}</td>
                 </tr>
               );
             })}

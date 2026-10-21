@@ -503,7 +503,12 @@ export function LoadContainerModal({
       : setRemoved((prev) => new Set(prev).add(id));
 
   const target = selBox ? (selBox.containerNumber || boxLabel(selBox)) : draft.container_number.trim() || "the new container";
-  const hint = invalid ? "Fill container no., vehicle no., driver, e-seal" : `Loading into ${target}`;
+  // CR-328: a greyed Confirm always says why.
+  const hint = invalid
+    ? "Fill container no., vehicle no., driver, e-seal"
+    : entries.length === 0 && prodEntries.length === 0
+      ? effLines.length > 0 && !override ? "Container is full. Tick Override to load past 100%" : "Pick at least one item"
+      : `Loading into ${target}`;
 
   return (
     <div className="modal-backdrop">

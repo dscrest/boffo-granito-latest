@@ -9,7 +9,7 @@
    Renders instantly from the designs cache — no skeleton flash when
    navigating between items or returning to the tab.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { fmt } from "@/lib/format";
@@ -22,7 +22,9 @@ import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
 import { cachedAdjustEntries, cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type AdjustEntry, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
-import { cachedAdjustedByDesign, cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
+import { cachedAdjustedByDesign, cachedOpeningByDesign, cachedWarehouseStock, listBatchStock, warehouseStockKey } from "@/features/stages/batchStockApi";
+import type { WhCell } from "@/lib/warehouseStock";
+import { useWarehouses } from "./useWarehouses";
 import { designStock, openingStockFor } from "@/lib/stock";
 import { OpeningStockForm } from "./OpeningStockForm";
 import { InProductionModal } from "@/features/stages/InProductionModal";
@@ -91,7 +93,6 @@ function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown<any>; onClose
           <span className="muted" style={{ fontSize: 14 }}>{total} order{total === 1 ? "" : "s"}</span>
           <button className="btn x" onClick={onClose} title="Close" style={{ marginLeft: "auto" }} tabIndex={-1}><Icon name="x" size={13} /></button>
         </div>
-        <div className="dim" style={{ fontSize: "var(--t-sm)", marginBottom: 12 }}>{bd.note}</div>
         <div className="modal-body" style={{ overflow: "auto" }}>
           <table className="tbl">
             <thead>
@@ -111,6 +112,8 @@ function StockBreakdownModal({ bd, onClose }: { bd: StockBreakdown<any>; onClose
             </tbody>
           </table>
         </div>
+        {/* CR-352: notes sit UNDER the content they explain. */}
+        <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 12 }}>{bd.note}</div>
       </div>
     </div>
   );
@@ -137,12 +140,14 @@ export function ItemDetail() {
   const [adjustedByDesign, setAdjustedByDesign] = useState<Map<string, number>>(() => cachedAdjustedByDesign());
   const [openingEntries, setOpeningEntries] = useState<ProductionRecordRow[]>(() => cachedOpeningEntries());
   const [adjustEntries, setAdjustEntries] = useState<AdjustEntry[]>(() => cachedAdjustEntries()); // CR-308
+  const [whCells, setWhCells] = useState<WhCell[]>(() => cachedWarehouseStock()); // CR-332: per-warehouse split
+  const { warehouses, nameOf: whName, enabled: whEnabled } = useWarehouses();
   const [openingOpen, setOpeningOpen] = useState(false); // batch-wise opening-stock editor
-  // Overview (default) | Stock — deep-linkable via ?tab= (from Stock Details grid). Panels tab hidden (CR-296).
+  // Overview (default) | Production | Locations (CR-332) — deep-linkable via ?tab=. Panels tab hidden (CR-296).
   const [sp, setSp] = useSearchParams();
   const spTab = sp.get("tab");
-  const tab = spTab === "stock" ? "stock" : "overview";
-  const setTab = (t: "overview" | "stock") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
+  const tab = spTab === "stock" ? "stock" : spTab === "locations" ? "locations" : "overview";
+  const setTab = (t: "overview" | "stock" | "locations") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
 
   const refresh = () => listDesigns().then((res) => setDesigns(res.ok ? res.designs : (cachedDesigns() ?? [])));
   const reloadStock = () => {
@@ -150,7 +155,7 @@ export function ItemDetail() {
       if (res.ok) { setProdLogs(res.entries); setOpeningEntries(res.openingEntries); setAdjustEntries(res.adjustEntries); }
     });
     void listBatchStock().then((res) => {
-      if (res.ok) { setOpeningByDesign(res.openingByDesign); setAdjustedByDesign(res.adjustedByDesign); }
+      if (res.ok) { setOpeningByDesign(res.openingByDesign); setAdjustedByDesign(res.adjustedByDesign); setWhCells(res.byWarehouse); }
     });
   };
   useEffect(() => {
@@ -200,13 +205,23 @@ export function ItemDetail() {
   // transaction line-item rows and Reports. Batch-tracked items read opening from
   // their opening rows (openingByDesign); singular items from accounting_stock.
   const openingStock = openingStockFor(design, openingByDesign);
-  const stock = designStock(design?.designName ?? "", { openingStock, adjusted: adjustedByDesign.get(design?.designName ?? ""), allocated: cachedAllocByDesign().get(design?.designName ?? ""), orders: allOrders, prodLogs });
+  const stock = designStock(design?.id ?? "", { openingStock, adjusted: adjustedByDesign.get(design?.id ?? ""), allocated: cachedAllocByDesign().get(design?.id ?? ""), orders: allOrders, prodLogs });
   const inProduction = stock.inProduction;
   const inLoading = stock.inLoading;
   const awaitingPal = stock.awaitingPalletization;
   const availableStock = stock.available;
 
   const productionTotal = myProductionRows.reduce((s, r) => s + r.qtyBoxes, 0);
+  // CR-332 Locations: every warehouse (0 when empty), its batches beneath. Committed = reserved by orders, spread like loading.
+  const locationRows = (() => {
+    if (!design) return [] as { warehouseId: string; warehouse: string; batches: WhCell[]; onHand: number; committed: number }[];
+    const mine = whCells.filter((c) => c.key.startsWith(`${design.id}|`));
+    return warehouses.map((w) => {
+      const batches = mine.filter((c) => c.warehouseId === w.id).sort((a, b) => a.key.localeCompare(b.key));
+      return { warehouseId: w.id, warehouse: w.name, batches, onHand: batches.reduce((s, c) => s + c.onHand, 0), committed: batches.reduce((s, c) => s + c.committed, 0) };
+    });
+  })();
+  const locationTotals = locationRows.reduce((a, r) => ({ onHand: a.onHand + r.onHand, committed: a.committed + r.committed }), { onHand: 0, committed: 0 });
   const myOpeningCount = design ? openingEntries.filter((e) => e.design === design.designName).length : 0;
 
   // Drill-downs: what adds up to each stock number (this item, all SOs).
@@ -444,7 +459,58 @@ export function ItemDetail() {
               <div className="row" style={{ gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
                 <button onClick={() => setTab("overview")} style={tabStyle(tab === "overview")}>Overview</button>
                 <button onClick={() => setTab("stock")} style={tabStyle(tab === "stock")}>Production</button>
+                {whEnabled && <button onClick={() => setTab("locations")} style={tabStyle(tab === "locations")}>Locations</button>}
               </div>
+
+              {tab === "locations" && (
+                <div style={{ marginTop: 14, overflow: "auto" }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Warehouse</th>
+                        <th>Batch</th>
+                        <th className="num" style={{ textAlign: "right" }}>Stock on hand</th>
+                        <th className="num" style={{ textAlign: "right" }}>Committed</th>
+                        <th className="num" style={{ textAlign: "right" }}>Available</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {locationRows.map((w) => (
+                        <Fragment key={w.warehouseId}>
+                          <tr>
+                            <td style={{ fontWeight: 600 }}>{w.warehouse}{warehouses.find((x) => x.id === w.warehouseId)?.isPrimary ? <span className="dim" title="Stock recorded without a warehouse counts here"> ★</span> : null}</td>
+                            <td className="dim">{w.batches.length ? `${w.batches.length} batch${w.batches.length === 1 ? "" : "es"}` : "—"}</td>
+                            <td className="num mono" style={{ fontWeight: 600 }}>{fmt(w.onHand)}</td>
+                            <td className="num mono">{w.committed ? fmt(w.committed) : <span className="dim">—</span>}</td>
+                            <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(Math.max(0, w.onHand - w.committed))}</td>
+                          </tr>
+                          {w.batches.map((c) => (
+                            <tr key={`${c.key} ${c.warehouseId}`}>
+                              <td />
+                              <td className="mono" style={{ paddingLeft: 24 }}>{c.key.slice(c.key.indexOf("|") + 1) || <span className="dim" title="Unbatched stock">—</span>}{c.over > 0 ? <span title={`${fmt(c.over)} more left than this warehouse ever held — check the transfers`} style={{ color: "var(--c-amber)" }}> ⚠</span> : null}</td>
+                              <td className="num mono">{fmt(c.onHand)}</td>
+                              <td className="num mono">{c.committed ? fmt(c.committed) : <span className="dim">—</span>}</td>
+                              <td className="num mono">{fmt(Math.max(0, c.onHand - c.committed))}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      ))}
+                    </tbody>
+                    {locationRows.length > 0 && (
+                      <tfoot>
+                        <tr>
+                          <td style={{ fontWeight: 600 }}>Total</td>
+                          <td />
+                          <td className="num mono" style={{ fontWeight: 700 }}>{fmt(locationTotals.onHand)}</td>
+                          <td className="num mono" style={{ fontWeight: 700 }}>{fmt(locationTotals.committed)}</td>
+                          <td className="num mono" style={{ fontWeight: 700, color: "var(--c-green)" }}>{fmt(Math.max(0, locationTotals.onHand - locationTotals.committed))}</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 8 }}>Move stock between warehouses with a Transfer Order (Inventory ▸ Transfer Orders).</div>
+                </div>
+              )}
 
               {tab === "stock" && (
                 <div style={{ marginTop: 14 }}>

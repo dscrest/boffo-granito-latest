@@ -1,11 +1,14 @@
 /* Login gate. State machine: checking → (authed | anon).
    - authed: render the app.
-   - anon: a two-column BOFFO sign-in screen (email+password form left,
-     illustration right). Auth is app-level: data-ops /auth/login verifies
-     against the AppUser table and returns a session token + role permissions
-     (see lib/auth.ts). Themed via login.css. */
+   - anon: a two-column BOFFO sign-in screen (Sign in with Zoho on top, the
+     email+password form below, illustration right). Auth is app-level:
+     data-ops /auth/login verifies against the AppUser table and returns a
+     session token + role permissions (see lib/auth.ts). Themed via login.css.
+   CR-324: Zoho's consent screen sends the browser back to /app/?code=…;
+   this gate (mounted outside the HashRouter, so location.search is intact)
+   exchanges the code before the usual session check. */
 import { useEffect, useState } from "react";
-import { checkSession, signIn, type SessionUser } from "./lib/auth";
+import { checkSession, exchangeZohoCode, signIn, startZohoSignIn, type SessionUser } from "./lib/auth";
 import boffoLogo from "./assets/boffo-logo.png";
 import { BoffoLoader } from "./ui/BoffoLoader";
 import "./styles/login.css";
@@ -21,14 +24,47 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let alive = true;
-    checkSession().then((user: SessionUser | null) => {
+    const qs = new URLSearchParams(window.location.search);
+    const code = qs.get("code");
+    const oauthError = qs.get("error");
+    // Drop ?code=… from the address bar (a code is single-use and expires in 2 min).
+    const scrub = () => window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+    const run = async () => {
+      if (code) {
+        try {
+          const r = await exchangeZohoCode(code, qs.get("state") ?? "", qs.get("location") ?? "");
+          scrub();
+          // An Admin's "Connect Zoho …" round trip: already signed in — land on the pane.
+          if (r.zoho) window.location.hash = "#/settings/zoho";
+        } catch (err) {
+          scrub();
+          setError(err instanceof Error ? err.message : "Zoho sign-in failed");
+        }
+      } else if (oauthError) {
+        scrub();
+        setError(oauthError === "access_denied" ? "Zoho sign-in was cancelled" : `Zoho sign-in failed (${oauthError})`);
+      }
+      const user: SessionUser | null = await checkSession();
       if (!alive) return;
       setStatus(user ? "authed" : "anon");
-    });
+    };
+    void run();
     return () => {
       alive = false;
     };
   }, []);
+
+  const onZoho = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await startZohoSignIn(); // navigates away on success
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Zoho sign-in failed");
+      setBusy(false);
+    }
+  };
 
   // The app is laid out for a fixed 1440px desktop viewport (set in index.html),
   // but the login screen should be responsive so it never forces horizontal scroll /
@@ -87,6 +123,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 Sign in to manage quotes, orders, production and dispatch.
               </p>
 
+              <button type="button" className="boffo-zoho-btn" onClick={() => void onZoho()} disabled={busy}>
+                <ZohoMark />
+                {busy ? "Opening Zoho…" : "Sign in with Zoho"}
+              </button>
+              <div className="boffo-auth-or"><span>or use your password</span></div>
+
               <label className="boffo-auth-field">
                 <span>Email</span>
                 <input
@@ -113,12 +155,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
               {error && <p className="boffo-auth-error">{error}</p>}
 
-              <button type="submit" className="boffo-zoho-btn" disabled={busy}>
+              <button type="submit" className="boffo-zoho-btn boffo-auth-submit" disabled={busy}>
                 {busy ? "Signing in…" : "Sign in"}
               </button>
 
               <p className="boffo-auth-hint">
-                Use the account your administrator created for you.
+                Use your Zoho account, or the password your administrator created for you.
               </p>
 
               <div className="boffo-auth-foot">
@@ -138,6 +180,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+/* Zoho "Z" glyph for the sign-in button (inline so login.css owns the colour). */
+function ZohoMark() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="currentColor" opacity="0.15" />
+      <path d="M7 7.5h10L7 16.5h10" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 /* Decorative line-art for the right panel: an Order-OS motif — stacked dispatch

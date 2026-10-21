@@ -39,6 +39,7 @@ import { captureOf } from "./LoadDetailsFields";
 import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { LoadingWorkspace } from "./LoadingWorkspace";
 import { LoadContainerModal } from "./LoadContainerModal";
+import { ReleaseModal } from "./ReleaseModal";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { useLoadFlow } from "./useLoadFlow";
 import { nextPlanContainer } from "./containerPlanPrefill";
@@ -262,6 +263,7 @@ function boxColumns(formatName: Map<string, string>): ColumnDef<BoxRow>[] {
       label: "Status",
       render: (r) => <span className={`chip palstatus ${BOX_STATUS_CHIP[r.status]}`} style={{ whiteSpace: "nowrap" }} title={r.status}>{codeOf(r.status)}</span>,
     },
+    { key: "name", label: "Name", className: "nw", render: (r) => r.box.name || "—" }, // CR-333
     { key: "containerNo", label: "Container No.", className: "mono nw", render: (r) => r.box.containerNumber || "—" },
     {
       key: "seal",
@@ -377,6 +379,7 @@ export function LoadingBay() {
   const view = ["board", "kanban", "workspace"].includes(rawView as string) ? "sheet" : rawView;
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
+  const [release, setRelease] = useState<{ line: PalPlanLine; box?: LoadBox } | null>(null); // CR-361
   // Shared load flow — picker state + confirm live in the hook (Ready rows' "+ → Load").
   const flow = useLoadFlow({ plans, boxes, onChanged: () => void load() });
   // Live order heads — the plan-JSON fallback for customers/SOs (CR-174).
@@ -435,7 +438,7 @@ export function LoadingBay() {
     const pls = parseLoadPlan(b.loadPlan)?.lines ?? [];
     if (pls.length === 0) return null;
     const soIds = [...new Set(pls.map((x) => x.so).filter(Boolean))];
-    const slice = soIds.length === 1 ? nextPlanContainer(soIds[0], flow.planBySo, plans, boxes, flow.designIdOf) : null;
+    const slice = soIds.length === 1 ? nextPlanContainer(soIds[0], flow.planBySo, plans, boxes, flow.designIdOf, b.id) : null;
     const heads = soIds.map((id) => soHeadOf(id, allLines.map(({ l }) => l), orders));
     return {
       sos: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", "),
@@ -498,7 +501,7 @@ export function LoadingBay() {
   const stubBoxes = openBoxes.filter(isEmptyBox).filter((b) => {
     if (!qLower) return true;
     const plan = planSummary(b);
-    return `${boxLabel(b)} ${plan?.sos ?? ""} ${plan?.customers ?? ""}`.toLowerCase().includes(qLower);
+    return `${boxLabel(b)} ${b.name} ${plan?.sos ?? ""} ${plan?.customers ?? ""}`.toLowerCase().includes(qLower);
   });
   const searched = rows.filter(
     (r) =>
@@ -559,14 +562,6 @@ export function LoadingBay() {
     toast.success(msg);
     invalidatePalPlans();
     void load();
-  };
-
-  const unload = async (line: PalPlanLine, box: LoadBox) => {
-    if (busy) return;
-    setBusy(true);
-    const res = await setLineBox(line.id, "");
-    setBusy(false);
-    after(res.ok, res.error || "Could not unload the item", `${line.itemCode} back to Ready for Loading (${boxLabel(box)})`);
   };
 
   // "Assign Vehicle": capture vehicle + container/seal details on the Open box.
@@ -701,9 +696,12 @@ export function LoadingBay() {
   // Per-row container actions (Edit option) by stage.
   const menuFor = (r: Row): MenuItem[] => {
     const box = r.box;
-    // Ready for Loading (CR-170): the one action is Load → LoadContainerModal.
+    // Ready for Loading (CR-170): Load → LoadContainerModal; Release (CR-361) → free stock.
     if (!box) return r.stage === "Ready"
-      ? [{ label: "Load", disabled: flow.busy, title: "Load into a container", onClick: () => flow.setPicker({ lineIds: [r.l.id] }) }]
+      ? [
+          { label: "Load", disabled: flow.busy, title: "Load into a container", onClick: () => flow.setPicker({ lineIds: [r.l.id] }) },
+          ...(canEdit ? [{ label: "Release…", title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease({ line: r.l }) }] : []),
+        ]
       : [];
     const items: MenuItem[] = [];
     if (canEdit) {
@@ -714,7 +712,8 @@ export function LoadingBay() {
       items.push({ label: "Dispatch", disabled: !!gate, title: gate || undefined, onClick: () => void dispatchBox(box) });
     }
     if (canEdit && box.status === "Open") {
-      items.push({ label: "Unload item", onClick: () => void unload(r.l, box) });
+      // CR-361: Release (qty + reason) replaces the whole-line, reason-less "Unload item".
+      items.push({ label: "Release…", title: "Return boxes to Ready for Loading", onClick: () => setRelease({ line: r.l, box }) });
       items.push({ label: "Empty container", danger: true, onClick: () => void emptyBox(box) });
     }
     items.push({ label: "Loading details", onClick: () => navigate(`/loading/${encodeURIComponent(box.id)}`) });
@@ -1271,6 +1270,10 @@ export function LoadingBay() {
           />
         );
       })()}
+
+      {release && (
+        <ReleaseModal line={release.line} box={release.box} onDone={() => { invalidatePalPlans(); void load(); }} onClose={() => setRelease(null)} />
+      )}
 
       {vehModal && (
         <VehicleLoadModal

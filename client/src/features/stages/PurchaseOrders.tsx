@@ -1,6 +1,6 @@
 /* Purchase Orders — ported verbatim from prototype/views2.jsx. */
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ProgressBar, StageBadge } from "@/ui/primitives";
 import { fmt, fmtDateTime, pct } from "@/lib/format";
@@ -29,7 +29,7 @@ interface PORow {
   modifiedTime?: string;
 }
 
-// #21b: toggleable + reorderable columns (# and PO Number pinned outside the map).
+// Toggleable + reorderable columns — Customer leads, the customer's PO Number second (CR-355).
 const PO_COLUMNS: ColumnDef<PORow>[] = [
   {
     key: "party",
@@ -41,6 +41,16 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
           ({p.country})
         </span>
       </>
+    ),
+  },
+  {
+    key: "po",
+    label: "PO Number",
+    className: "mono",
+    render: (p) => (
+      <Link className="linkish" to={`/po/${encodeURIComponent(p.po)}`} onClick={(e) => e.stopPropagation()} title="Open details">
+        {p.po}
+      </Link>
     ),
   },
   { key: "date", label: "Date", className: "mono muted", render: (p) => p.date },
@@ -95,8 +105,9 @@ const PO_COLUMNS: ColumnDef<PORow>[] = [
 ];
 
 export function PurchaseOrders() {
+  const navigate = useNavigate();
   const { orders, loading, error, reload } = useOrders();
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("poTableColumns", PO_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("poTableColumns.v2", PO_COLUMNS, ["created", "modified"]) // .v2 (CR-355);
   const [query, setQuery] = usePersistedState("po.query", "");
   // Group + sort only when the live orders snapshot changes.
   const pos = useMemo<PORow[]>(() => {
@@ -164,7 +175,6 @@ export function PurchaseOrders() {
         <table className="tbl">
           <thead>
             <tr>
-              <th>PO Number</th>
               {visible.map((c) => (
                 <th key={c.key} style={c.style}>{c.label}</th>
               ))}
@@ -172,12 +182,13 @@ export function PurchaseOrders() {
           </thead>
           <tbody>
             {pager.slice(filtered).map((p, i) => (
-              <tr key={p.po + i}>
-                <td className="mono">
-                  <Link className="linkish" to={`/po/${encodeURIComponent(p.po)}`} onClick={(e) => e.stopPropagation()} title="Open details">
-                    {p.po}
-                  </Link>
-                </td>
+              <tr
+                key={p.po + i}
+                tabIndex={0}
+                onClick={() => navigate(`/po/${encodeURIComponent(p.po)}`)}
+                onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/po/${encodeURIComponent(p.po)}`); }}
+                style={{ cursor: "pointer" }}
+              >
                 {visible.map((c) => (
                   <td key={c.key} className={c.className} style={c.style}>
                     {c.render!(p)}

@@ -20,7 +20,9 @@ import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { RecordSupplyModal } from "./RecordSupplyModal";
+import { Chip } from "@/ui/Chip";
+import { LOADING_TONE } from "./pcBits";
+import { loadStatusOf, PanelLoadsTab, RecordLoadModal } from "./PanelLoads";
 import {
   cachedSampleOrders,
   deleteSampleOrder,
@@ -71,13 +73,15 @@ export function SampleOrderDetail() {
       return;
     }
     toast.success("Sample order deleted");
-    navigate("/sample-orders");
+    navigate("/panel-orders?type=Sample");
   };
 
   const canEdit = can("panel_craft", "edit");
   const editable = !!order && SAMPLE_ORDER_EDITABLE.has(order.status);
   const lockReason = editable ? undefined : SAMPLE_ORDER_LOCK_REASON;
   const open = !!order && order.status !== "Supplied";
+  const loadable = order ? ({ ...order, type: "Sample" } as const) : null; // CR-347
+  const loadStatus = loadable ? loadStatusOf(loadable) : "Not loaded";
 
   const railItems = newestFirst(orders).map((o) => ({
     id: o.id,
@@ -110,17 +114,22 @@ export function SampleOrderDetail() {
           </div>
         ) : (
           <RecordDetail
-            backTo="/sample-orders"
+            backTo="/panel-orders?type=Sample"
             title={order.orderNumber || "Sample Order"}
             statusChip={{ label: SAMPLE_STATUS_LABEL[order.status], cls: STATUS_CLS[order.status] }}
             subtitle={
-              order.customerCode ? (
-                <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">
-                  {order.customerName}
-                </Link>
-              ) : (
-                order.customerName
-              )
+              <>
+                {order.customerCode ? (
+                  <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">
+                    {order.customerName}
+                  </Link>
+                ) : (
+                  order.customerName
+                )}
+                <span style={{ marginLeft: 8 }}>
+                  <Chip tone={LOADING_TONE[loadStatus]} label={loadStatus} />
+                </span>
+              </>
             }
             actions={
               <>
@@ -131,8 +140,8 @@ export function SampleOrderDetail() {
                   </button>
                 )}
                 {canEdit && open && (
-                  <button className="hbtn primary" disabled={busy} onClick={() => setSupplying(true)} title="Record what went out to the customer">
-                    <Icon name="check" size={13} /> Record Supply
+                  <button className="hbtn primary" disabled={busy} onClick={() => setSupplying(true)} title="Record what went out to the customer — vehicle, photos, qty per line (CR-347)">
+                    <Icon name="truck" size={13} /> Record Load
                   </button>
                 )}
                 <MoreMenu
@@ -153,6 +162,7 @@ export function SampleOrderDetail() {
             entityId={order.id}
             created={order.createdTime}
             modified={order.modifiedTime}
+            extraTabs={loadable ? [{ id: "dispatch", label: "Dispatch", content: <PanelLoadsTab order={loadable} onChanged={() => void load()} /> }] : []}
           >
             {/* Items card — one row per sample line, the SO Items card shape. */}
             <div className="card" style={{ marginBottom: 12 }}>
@@ -224,7 +234,7 @@ export function SampleOrderDetail() {
                 </table>
               </div>
             </div>
-            {supplying && <RecordSupplyModal order={order} onDone={() => void load()} onClose={() => setSupplying(false)} />}
+            {supplying && loadable && <RecordLoadModal orders={[loadable]} onDone={() => void load()} onClose={() => setSupplying(false)} />}
           </RecordDetail>
         )}
       </div>

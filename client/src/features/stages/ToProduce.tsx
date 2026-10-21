@@ -36,7 +36,7 @@ export function ToProduce({
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- stockFor is a fresh closure over the same loaded lists each render
   const all = useMemo(() => demandByDesign(orders, stockFor), [orders, stockFor]);
-  const designOf = (name: string) => designRows.find((d) => d.designName === name);
+  const designOf = (id: string) => designRows.find((d) => d.id === id);
   // Name from the orders join first — this view's own Brand fetch can fail
   // (it has no retry), which used to read a branded order as "No brand".
   const brandsLabel = (r: DemandRow) =>
@@ -50,8 +50,8 @@ export function ToProduce({
   const pager = usePagination(sort.sorted.length, "production.demand.pageSize", `${q}|${shortOnly}`);
   const sum = (k: "openDemand" | "free" | "inProduction" | "shortfall") => rows.reduce((s, r) => s + r[k], 0);
 
-  const selectable = rows.filter((r) => r.shortfall > 0 && designOf(r.designName));
-  const chosen = selectable.filter((r) => picked.has(r.designName));
+  const selectable = rows.filter((r) => r.shortfall > 0 && designOf(r.designId));
+  const chosen = selectable.filter((r) => picked.has(r.designId));
   const toggle = (name: string) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -71,7 +71,7 @@ export function ToProduce({
           <button
             className="hbtn primary"
             disabled={chosen.length === 0}
-            onClick={() => onProduce(chosen.map((r) => ({ design: designOf(r.designName)!.id, qty: r.shortfall })))}
+            onClick={() => onProduce(chosen.map((r) => ({ design: designOf(r.designId)!.id, qty: r.shortfall })))}
           >
             <Icon name="plus" size={13} /> Start New Production{chosen.length ? ` · ${chosen.length}` : ""}
           </button>
@@ -86,7 +86,7 @@ export function ToProduce({
                   type="checkbox"
                   aria-label="Select all"
                   checked={selectable.length > 0 && chosen.length === selectable.length}
-                  onChange={(e) => setPicked(e.target.checked ? new Set(selectable.map((r) => r.designName)) : new Set())}
+                  onChange={(e) => setPicked(e.target.checked ? new Set(selectable.map((r) => r.designId)) : new Set())}
                   style={{ margin: 0 }}
                 />
               </th>
@@ -102,16 +102,16 @@ export function ToProduce({
           </thead>
           <tbody>
             {pager.slice(sort.sorted).map((r) => {
-              const d = designOf(r.designName);
+              const d = designOf(r.designId);
               return (
-                <tr key={r.designName} onClick={() => r.shortfall > 0 && d && toggle(r.designName)} style={{ cursor: r.shortfall > 0 && d ? "pointer" : undefined }}>
+                <tr key={r.designId} onClick={() => r.shortfall > 0 && d && toggle(r.designId)} style={{ cursor: r.shortfall > 0 && d ? "pointer" : undefined }}>
                   <td>
                     <input
                       type="checkbox"
                       aria-label={`Select ${r.designName}`}
-                      checked={picked.has(r.designName)}
+                      checked={picked.has(r.designId)}
                       disabled={!(r.shortfall > 0 && d)}
-                      onChange={() => toggle(r.designName)}
+                      onChange={() => toggle(r.designId)}
                       onClick={(e) => e.stopPropagation()}
                       style={{ margin: 0 }}
                     />

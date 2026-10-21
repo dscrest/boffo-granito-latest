@@ -1,14 +1,14 @@
 /* Self-check for newLoadingRows — run with:  npx tsx client/src/features/stages/newLoadingRows.test.ts
    Plain asserts, no framework (same style as allocateFifo.test.ts). */
 import assert from "node:assert";
-import { batchSummary, groupReady, itemOptions, loadPlanJson, openLines, palletBoxesLabel, palletSplit, palletsOfLine, pickEntries, pickTotals, pickerEntries, planFill, readyLabel, scopeBands, spreadPallets, spreadQty } from "./newLoadingRows";
+import { batchSummary, groupReady, itemOptions, loadIdentity, loadPlanJson, openLines, palletBoxesLabel, palletSplit, palletsOfLine, pickEntries, pickTotals, pickerEntries, planFill, readyLabel, scopeBands, spreadPallets, spreadQty } from "./newLoadingRows";
 import type { PalPlanLine } from "./palPlansApi";
 
 const line = (p: Partial<PalPlanLine>): PalPlanLine =>
   ({ status: "ReadyToLoad", loadBoxId: "", boxBrandId: "", soBoxBrandId: "", customerBoxBrandId: "", createdTime: "", soNumber: "", ...p }) as PalPlanLine;
 
 const all = [
-  line({ id: "a", salesOrderId: "10", orderItemId: "o1", designId: "grey", batchNumber: "B1", boxes: 150, createdTime: "1", soBoxBrandId: "so-brand" }),
+  line({ id: "a", salesOrderId: "10", orderItemId: "o1", designId: "grey", batchNumber: "B1", boxes: 150, createdTime: "1", soBoxBrandId: "so-brand", poNumber: "PO-7", customerName: "Reya", soNumber: "SO/10" }),
   line({ id: "b", salesOrderId: "10", orderItemId: "o1", designId: "grey", batchNumber: "B2", boxes: 50, createdTime: "2", boxBrandId: "own" }),
   // B3 is half palletized: 300 ready, 200 still Planning → loadable, flagged partial (CR-248).
   line({ id: "c", salesOrderId: "10", orderItemId: "o2", designId: "nero", batchNumber: "B3", boxes: 300, createdTime: "3" }),
@@ -31,6 +31,10 @@ assert.strictEqual(grey.lines[0].partial, undefined);
 assert.strictEqual(nero.ready, 300);
 assert.deepStrictEqual(openLines(nero).map((l) => l.id), ["c"]);
 assert.strictEqual(bands[0].designs[0].ready, 80);
+// CR-350: the band carries the customer PO; loadIdentity dedupes party · PO · SO over any lines.
+assert.strictEqual(bands[1].poNumber, "PO-7");
+assert.deepStrictEqual(loadIdentity(all.slice(0, 3)), { customers: ["Reya"], pos: ["PO-7"], sos: ["SO/10"] });
+assert.deepStrictEqual(loadIdentity([]), { customers: [], pos: [], sos: [] });
 
 // Design qty spreads FIFO; a retype rewrites every line (stale picks cleared); sum-back holds.
 const s = spreadQty(openLines(grey), 170);
@@ -104,6 +108,9 @@ assert.deepStrictEqual(pickEntries(bands, q), [{ lineId: "a", boxes: 150 }, { li
 const lp = JSON.parse(loadPlanJson(bands, q, { id: "p", no: 2, of: 3 }));
 assert.deepStrictEqual([lp.lines.length, lp.lines[0].boxes, lp.group], [2, 150, { id: "p", no: 2, of: 3 }]);
 assert.strictEqual("group" in JSON.parse(loadPlanJson(bands, q)), false);
+// CR-338: the claimed SO-plan container rides along; omitted when nothing was claimed.
+assert.deepStrictEqual(JSON.parse(loadPlanJson(bands, q, undefined, { "10": 2 })).plan, { "10": 2 });
+assert.strictEqual("plan" in JSON.parse(loadPlanJson(bands, q, undefined, {})), false);
 // Fill from plan: planned boxes per design FIFO over the band's lines, capped by what they hold.
 const pf = planFill([{ design: "GREY", boxes: 170 }, { design: "GREY", boxes: 10 }, { design: "nope", boxes: 9 }], bands[1], (n) => n.toLowerCase());
 assert.deepStrictEqual([...pf], [["a", 150], ["b", 30]]);

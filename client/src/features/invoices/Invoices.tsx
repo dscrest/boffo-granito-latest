@@ -24,12 +24,13 @@ import {
   type InvoiceRow,
 } from "./invoicesApi";
 
-// Toggleable + reorderable columns (Invoice # + actions pinned outside the map).
+// Toggleable + reorderable columns (actions pinned outside the map). Customer leads;
+// the Invoice # sits LAST, default-hidden (CR-355).
 const INVOICE_COLUMNS: ColumnDef<InvoiceRow>[] = [
+  { key: "customer", label: "Customer", render: (r) => r.customerName || "—" },
   { key: "date", label: "Date", className: "mono muted", render: (r) => r.invoiceDate || "—" },
   { key: "container", label: "Container", className: "mono", render: (r) => r.containerNumber || "—" },
   { key: "masterOrder", label: "Sales Order", className: "mono muted", render: (r) => r.orderNumber || "multi" },
-  { key: "customer", label: "Customer", render: (r) => r.customerName || "—" },
   {
     key: "amount",
     label: "Amount",
@@ -44,6 +45,7 @@ const INVOICE_COLUMNS: ColumnDef<InvoiceRow>[] = [
   { key: "status", label: "Status", render: (r) => <span className="chip" title={r.status}>{codeOf(r.status)}</span> },
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
+  { key: "invoiceNumber", label: "Invoice #", className: "mono", render: (r) => r.invoiceNumber },
 ];
 
 export function Invoices() {
@@ -54,7 +56,7 @@ export function Invoices() {
   const [query, setQuery] = usePersistedState("invoices.query", "");
   const [statusF, setStatusF] = usePersistedState("invoices.statusF", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("invoices.criteria", {});
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("invoicesTableColumns", INVOICE_COLUMNS, ["created", "modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("invoicesTableColumns.v2", INVOICE_COLUMNS, ["created", "modified", "invoiceNumber"]) // .v2 (CR-355);
 
   const load = () => {
     setLoading(true);
@@ -184,7 +186,6 @@ export function Invoices() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Invoice #</th>
                   {visible.map((c) => (
                     <th key={c.key} style={c.style}>{c.label}</th>
                   ))}
@@ -193,14 +194,20 @@ export function Invoices() {
               </thead>
               <tbody>
                 {pager.slice(newestFirst(rows)).map((r) => (
-                  <tr key={r.id}>
-                    <td className="mono" style={{ color: "var(--fg)" }}>{r.invoiceNumber}</td>
+                  <tr
+                    key={r.id}
+                    tabIndex={0}
+                    onClick={() => void onPdf(r)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) void onPdf(r); }}
+                    style={{ cursor: "pointer" }}
+                    title="Open invoice PDF"
+                  >
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}
                       </td>
                     ))}
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <button className="btn" onClick={() => void onPdf(r)} title="Download PDF">
                         <Icon name="download" size={12} />
                       </button>
@@ -212,7 +219,7 @@ export function Invoices() {
                 ))}
                 {rows.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={visible.length + 2} style={{ padding: 0 }}>
+                    <td colSpan={visible.length + 1} style={{ padding: 0 }}>
                       <EmptyState
                         icon="invoice"
                         title={query ? "No invoices match the search" : "No invoices yet"}

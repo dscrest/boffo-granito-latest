@@ -38,6 +38,7 @@ export interface TourStep {
 export const AUTO_TOURS: Record<string, string> = {
   "/packing": "packing",
   "/palletizing": "packing",
+  "/palletized": "packing",
   "/loading": "loading",
 };
 
@@ -133,7 +134,7 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/packing",
       waitMs: 5000,
       title: "Views and stages",
-      body: "Palletization is two pages: Ready for Palletization (this queue) and In Palletization (work in progress — fully palletized batches move on to Ready for Loading on the Loading and Dispatch page). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
+      body: "Palletization is three pages: Ready for Palletization (this queue), In Palletization (work in progress) and Palletization Completed (palletized stock waiting to be loaded). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",
@@ -157,7 +158,12 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/palletizing",
       title: "On to loading",
-      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes; once a whole batch is recorded it leaves this page for Ready for Loading on Loading and Dispatch. A recorded slice whose batch is still open shows a Palletized chip here and waits. Edit lets you type quantities across rows and save each with ✓.",
+      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes and moves them to Palletization Completed. Edit lets you type quantities across rows and save each with ✓.",
+    },
+    {
+      route: "/palletized",
+      title: "Palletized stock",
+      body: "Recorded pallets wait here. The row's + menu holds Load (into a container) and Release (return boxes to free stock with a reason — the order's allocation is returned). Loaded rows move on to Loading and Dispatch, where Release sends boxes back here.",
     },
   ],
 

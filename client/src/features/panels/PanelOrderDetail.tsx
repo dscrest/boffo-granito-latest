@@ -33,11 +33,12 @@ import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
+import { cachedPanels, listPanels, mdfLabel, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
-import { panelWeight } from "./panelOrderNeeds";
-import { checkpointTone, READINESS_TONE } from "./pcBits";
+import { lineWeightSplit, loadingStatus, loadProgress, panelWeightSplit, pendingNeedLines, pendingText, stockKey } from "./panelOrderNeeds";
+import { checkpointTone, LOADING_TONE, READINESS_TONE } from "./pcBits";
 import { AllocateCutStockModal } from "./AllocateCutStockModal";
+import { PanelLoadsTab } from "./PanelLoads";
 import {
   allocatedByKey,
   CHECKPOINT_KEYS,
@@ -81,9 +82,9 @@ export function PanelOrderDetail() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<PanelOrderRow[] | null>(() => cachedPanelOrders());
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
+  const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs()); // CR-344
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [weights, setWeights] = useState<Map<string, number | null>>(() => cachedCutWeights() ?? new Map());
-  const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs());
   const [busy, setBusy] = useState(false);
   const [allocating, setAllocating] = useState(false); // CR-312 modal
   // Local checklist so a tick shows at once; the save lands in the background.
@@ -93,11 +94,11 @@ export function PanelOrderDetail() {
     const [o, p, s, m] = await Promise.all([listPanelOrders(), listPanels(), listCutStock(), listMdfs()]);
     setOrders(o.ok ? o.orders : (cachedPanelOrders() ?? []));
     if (p.ok) setPanels(p.panels);
+    if (m.ok) setMdfs(m.rows);
     if (s.ok) {
       setStock(s.stock);
       setWeights(s.weights);
     }
-    if (m.ok) setMdfs(m.rows);
   };
   useEffect(() => {
     void load();
@@ -106,20 +107,38 @@ export function PanelOrderDetail() {
 
   const order = orders?.find((o) => o.id === id) ?? null;
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
-  const mdfById = useMemo(() => new Map(mdfs.map((m) => [m.id, m])), [mdfs]);
-  // CR-309: line weight = (Σ cut-piece weight × pieces + MDF) × qty; null until every piece is weighed.
-  const lineWeight = (l: { panelId: string; qty: number; mdfId: string }): number | null => {
+  const mdfById = useMemo(() => new Map(mdfs.map((m) => [m.id, m])), [mdfs]); // CR-344
+  type LineRow = PanelOrderRow["lines"][number];
+  // CR-349: LIVE per-unit kg of a line — pieces (the panel's cut pieces, or the loose cut piece) and the board.
+  const liveUnit = (l: LineRow | undefined): { pieces: number | null; mdf: number | null } => {
+    if (!l) return { pieces: null, mdf: null };
+    if (!l.panelId) return { pieces: weights.get(stockKey(l.designId, l.cutSizeId)) ?? null, mdf: null };
     const p = panelById.get(l.panelId);
-    if (!p) return null;
-    const w = panelWeight(p, weights, mdfById.get(l.mdfId)?.weightKg ?? null);
-    return w == null ? null : w * l.qty;
+    return p ? panelWeightSplit(p, weights, mdfById.get(l.mdfId)?.weightKg ?? null) : { pieces: null, mdf: null };
+  };
+  // Per line: shipped kg are STAMPED on the loads (frozen); pending kg follow the master.
+  const lineSplit = (l: LineRow) => lineWeightSplit(l, order?.loads ?? [], liveUnit(l));
+  const lineWeight = (l: LineRow): number | null => {
+    const s = lineSplit(l);
+    if (s.pieces == null) return null;
+    if (l.mdfId && s.mdf == null) return null;
+    return s.pieces + (s.mdf ?? 0);
   };
   const kg = (n: number) => `${Math.round(n * 100) / 100} kg`;
+  const kgOr = (n: number | null) => (n == null ? "—" : kg(n));
   const lineWeights = (order?.lines ?? []).map(lineWeight);
   const totalWeight = lineWeights.length && lineWeights.every((w) => w != null) ? lineWeights.reduce((s, w) => s + (w ?? 0), 0) : null;
+  const sumPart = (k: "pieces" | "mdf") => {
+    const parts = (order?.lines ?? []).map((l) => lineSplit(l)[k]).filter((v): v is number => v != null);
+    return parts.length ? parts.reduce((s, v) => s + v, 0) : null;
+  };
+  // CR-347: what is still pending to load — the need, booking and checklist all work on it.
+  const progress = order ? loadProgress(order.lines, order.loads) : [];
+  const loadStatus = order ? loadingStatus(progress, order.status) : "Not loaded";
+  const pending = pendingText(progress);
   // CR-312: free = on hand − every open order's booking; this order's own booking rides on each row.
   const booked = useMemo(() => allocatedByKey(orders ?? []), [orders]);
-  const reqs = order ? requirementsFor(order.lines, panelById, stock, { allocation: order.allocation, booked }) : [];
+  const reqs = order ? requirementsFor(pendingNeedLines(order.lines, order.loads), panelById, stock, { allocation: order.allocation, booked }) : [];
   const short = reqs.filter((r) => r.short);
   const unbooked = reqs.filter((r) => r.allocated < r.need);
   const unbookedPcs = unbooked.reduce((s, r) => s + r.need - r.allocated, 0);
@@ -129,15 +148,16 @@ export function PanelOrderDetail() {
   // CR-313: what each checkpoint has to cover, derived from the lines.
   const sumBy = (label: (l: PanelOrderRow["lines"][number]) => string) => {
     const m = new Map<string, number>();
-    for (const l of order?.lines ?? []) m.set(label(l), (m.get(label(l)) ?? 0) + l.qty);
+    for (const l of order?.lines ?? []) if (l.panelId) m.set(label(l), (m.get(label(l)) ?? 0) + l.qty); // CR-346: loose cut pieces need no board / vinyl
     return [...m.entries()].map(([k, q]) => `${k} ×${fmt(q)}`).join(" · ") || "—";
   };
   const cpText: Record<CheckpointKey, string> = {
-    mdf: sumBy((l) => mdfById.get(l.mdfId)?.label || "No MDF picked"),
+    mdf: sumBy((l) => mdfLabel(mdfById.get(l.mdfId)) || "No MDF picked"), // CR-344: "size · thickness ×qty" = the procurement need
     vinyl: sumBy((l) => panelById.get(l.panelId)?.vinylSize || "No vinyl size"),
     cut: reqs.length
       ? `Booked ${fmt(reqs.reduce((s, r) => s + r.allocated, 0))} of ${fmt(reqs.reduce((s, r) => s + r.need, 0))} pcs${reqs.some((r) => r.toCut > 0) ? ` · cut ${fmt(reqs.reduce((s, r) => s + r.toCut, 0))} more` : ""}`
       : "—",
+    pasted: sumBy((l) => panelById.get(l.panelId)?.vinylSize || "No vinyl size"), // CR-323: one printed sheet per panel onto its MDF
   };
   const overall = order ? readiness(order.checkpoints, order.status) : "Pending";
 
@@ -197,8 +217,9 @@ export function PanelOrderDetail() {
   };
 
   const canEdit = can("panel_craft", "edit");
-  const editable = !!order && PANEL_ORDER_EDITABLE.has(order.status);
-  const lockReason = editable ? undefined : PANEL_ORDER_LOCK_REASON;
+  // CR-347: once a load is recorded the lines are frozen too (a load line would dangle).
+  const editable = !!order && PANEL_ORDER_EDITABLE.has(order.status) && order.loads.length === 0;
+  const lockReason = editable ? undefined : order?.loads.length ? "Pieces have been loaded — remove the loads to change the order" : PANEL_ORDER_LOCK_REASON;
 
   const railItems = newestFirst(orders).map((o) => ({
     id: o.id,
@@ -215,7 +236,12 @@ export function PanelOrderDetail() {
         { key: "source", label: "Source", value: order.salesOrderNo || order.quoteNo || "Direct order" },
         { key: "panels", label: "Panels", value: `${order.panelCount} panel${order.panelCount === 1 ? "" : "s"}` },
         { key: "qty", label: "Total Qty", value: `${fmt(order.totalQty)} pcs` },
-        { key: "weight", label: "Total Weight", value: totalWeight == null ? "Not available — weigh every cut piece on Panel Items" : kg(totalWeight) },
+        {
+          key: "weight",
+          label: "Total Weight",
+          value: totalWeight == null ? "Not available — weigh every cut piece on Panel Items" : `${kg(totalWeight)} (pieces ${kgOr(sumPart("pieces"))} · MDF ${kgOr(sumPart("mdf"))})`,
+        },
+        { key: "loading", label: "Loading", value: pending ? `${loadStatus} — pending ${pending}` : loadStatus },
       ]
     : [];
 
@@ -234,13 +260,19 @@ export function PanelOrderDetail() {
             title={order.orderNumber || "Panel Order"}
             statusChip={{ label: PANEL_ORDER_STATUS_LABEL[order.status], cls: STATUS_CLS[order.status], title: short.length && order.status !== "Dispatched" ? shortageText(short) : undefined }}
             subtitle={
-              order.customerCode ? (
-                <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">
-                  {order.customerName}
-                </Link>
-              ) : (
-                order.customerName
-              )
+              <>
+                {order.customerCode ? (
+                  <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">
+                    {order.customerName}
+                  </Link>
+                ) : (
+                  order.customerName
+                )}
+                {/* CR-347: Loading Status beside the lifecycle — separate columns, like the SO roll-up. */}
+                <span style={{ marginLeft: 8 }}>
+                  <Chip tone={LOADING_TONE[loadStatus]} label={loadStatus} title={pending ? `Pending: ${pending}` : "Everything loaded"} />
+                </span>
+              </>
             }
             actions={
               <>
@@ -250,23 +282,14 @@ export function PanelOrderDetail() {
                     <Icon name="edit" size={13} /> Edit
                   </button>
                 )}
-                {/* Forward steps only — stock moves on Ready (+) and Dispatched (−). CR-312: Dispatch needs every piece booked. */}
+                {/* Forward steps only — stock moves on Ready (+). CR-347: Dispatched is derived from the loads (Dispatch tab). */}
                 {canEdit &&
-                  PANEL_ORDER_TRANSITIONS[order.status].map((to) => {
-                    const blocked = to === "Dispatched" && unbooked.length > 0;
-                    return (
-                      <button
-                        key={to}
-                        className="hbtn primary"
-                        disabled={busy || blocked}
-                        title={blocked ? `Book ${fmt(unbookedPcs)} more pcs first — Allocate Stock on the Requirements card` : `Move to ${PANEL_ORDER_STATUS_LABEL[to]}`}
-                        onClick={() => void move(to)}
-                      >
-                        <Icon name="check" size={13} />
-                        {PANEL_ORDER_ACTION_LABEL[to]}
-                      </button>
-                    );
-                  })}
+                  PANEL_ORDER_TRANSITIONS[order.status].map((to) => (
+                    <button key={to} className="hbtn primary" disabled={busy} title={`Move to ${PANEL_ORDER_STATUS_LABEL[to]}`} onClick={() => void move(to)}>
+                      <Icon name="check" size={13} />
+                      {PANEL_ORDER_ACTION_LABEL[to]}
+                    </button>
+                  ))}
                 <MoreMenu
                   items={[
                     ...(can("panel_craft", "create") ? [{ label: "Clone", onClick: () => navigate(`/panel-orders/${encodeURIComponent(order.id)}/clone`) }] : []),
@@ -285,8 +308,15 @@ export function PanelOrderDetail() {
             entityId={order.id}
             created={order.createdTime}
             modified={order.modifiedTime}
+            extraTabs={[
+              {
+                id: "dispatch",
+                label: "Dispatch",
+                content: <PanelLoadsTab order={{ ...order, type: "Panel" }} panelsById={panelById} stock={stock} liveUnit={(lineId) => liveUnit(order.lines.find((l) => l.id === lineId))} onChanged={() => void load()} />,
+              },
+            ]}
           >
-            {/* Items card — one row per panel line, the SO Items card shape. */}
+            {/* Items card — one row per panel / cut-piece line, the SO Items card shape. */}
             <div className="card" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
                 <span style={{ fontWeight: 600 }}>Items</span>
@@ -313,41 +343,52 @@ export function PanelOrderDetail() {
                       <th>Panel Size</th>
                       <th>Designs</th>
                       <th>MDF</th>
-                      <th className="num" style={{ textAlign: "right" }}>Weight</th>
+                      <th className="num" style={{ textAlign: "right" }}>Pieces kg</th>
+                      <th className="num" style={{ textAlign: "right" }}>MDF kg</th>
+                      <th className="num" style={{ textAlign: "right" }}>Total kg</th>
                       <th className="num" style={{ textAlign: "right" }}>Qty</th>
                     </tr>
                   </thead>
                   <tbody>
                     {order.lines.map((l) => {
                       const p = panelById.get(l.panelId);
+                      const sp = lineSplit(l);
+                      const w = lineWeight(l);
+                      const shipped = order.loads.some((ld) => ld.lines.some((x) => x.lineId === l.id));
+                      const kgTitle = shipped ? "Shipped kg are frozen on the load; pending kg follow the master" : "Follows the master until loaded";
                       return (
                         <tr key={l.id}>
                           <td><ImageThumb images={p?.images ?? []} alt={l.panelCode} /></td>
                           <td className="mono">
-                            <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} title="Open panel">{l.panelCode}</Link>
+                            {l.panelId ? (
+                              <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} title="Open panel">{l.panelCode}</Link>
+                            ) : (
+                              <span className="muted" title="A loose cut piece (CR-346)">Cut piece</span>
+                            )}
                           </td>
                           <td className="mono muted">{p?.panelSize || "—"}</td>
-                          <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p?.lines.map((x) => x.designName).join(", ")}>
-                            {p?.lines.map((x) => x.designName).join(", ") || "—"}
+                          <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={l.panelId ? p?.lines.map((x) => x.designName).join(", ") : `${l.designName} · ${l.cutSizeName}`}>
+                            {l.panelId ? p?.lines.map((x) => x.designName).join(", ") || "—" : [l.designName, l.cutSizeName].filter(Boolean).join(" · ") || "—"}
                           </td>
-                          <td className="mono muted">{mdfById.get(l.mdfId)?.label || <span className="dim">—</span>}</td>
-                          {(() => {
-                            const w = lineWeight(l);
-                            return <td className="num mono" title={w == null ? "Weigh every cut piece on Panel Items" : "Σ cut-piece weight × pieces + MDF, × qty"}>{w == null ? <span className="dim">—</span> : kg(w)}</td>;
-                          })()}
+                          <td className="mono muted">{l.panelId ? mdfLabel(mdfById.get(l.mdfId)) || <span className="dim">—</span> : <span className="dim">—</span>}</td>
+                          <td className="num mono" title={kgTitle}>{sp.pieces == null ? <span className="dim">—</span> : kg(sp.pieces)}</td>
+                          <td className="num mono" title={kgTitle}>{!l.mdfId ? <span className="dim">—</span> : sp.mdf == null ? <span className="dim">—</span> : kg(sp.mdf)}</td>
+                          <td className="num mono" title={w == null ? "Weigh every cut piece on Panel Items" : kgTitle}>{w == null ? <span className="dim">—</span> : kg(w)}</td>
                           <td className="num mono">{fmt(l.qty)}</td>
                         </tr>
                       );
                     })}
                     {order.lines.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="muted" style={{ textAlign: "center", padding: 18 }}>No panels on this order.</td>
+                        <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>No panels on this order.</td>
                       </tr>
                     )}
                   </tbody>
                   <tfoot>
                     <tr>
                       <td colSpan={5} style={{ fontWeight: 600 }}>Total</td>
+                      <td className="num mono" style={{ fontWeight: 600 }}>{kgOr(sumPart("pieces"))}</td>
+                      <td className="num mono" style={{ fontWeight: 600 }}>{kgOr(sumPart("mdf"))}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{totalWeight == null ? <span className="dim">—</span> : kg(totalWeight)}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.totalQty)}</td>
                     </tr>
@@ -356,11 +397,11 @@ export function PanelOrderDetail() {
               </div>
             </div>
 
-            {/* CR-313: Production Readiness — three independent checkpoints + the derived overall mark. */}
+            {/* CR-313: Production Readiness — independent checkpoints (four since CR-323) + the derived overall mark. */}
             <div className="card" style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
                 <span style={{ fontWeight: 600 }}>Production Readiness</span>
-                <span style={{ marginLeft: "auto" }} title="All three Ready → Ready for Production; any mark → In Progress">
+                <span style={{ marginLeft: "auto" }} title="All four Ready → Ready for Production; any mark → In Progress">
                   <Chip tone={READINESS_TONE[overall]} label={overall} />
                 </span>
               </div>

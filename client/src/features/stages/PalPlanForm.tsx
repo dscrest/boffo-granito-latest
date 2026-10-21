@@ -22,6 +22,10 @@ import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/
 import { listSalesPersons, currentSalespersonName, salesPersonOptions, type SalesPersonRow } from "@/features/masters/salespersonApi";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
+import { useMasters } from "@/features/masters/useMasters";
+import { useOrders } from "@/features/orders/useOrders";
+import { Note } from "@/ui/States";
+import { blockers } from "./nextStep";
 import { useContainerPlanBySo } from "./containerPlanPrefill";
 import { listPalletizable, type PalletizableItem, type PalletizableOrder } from "./palletisationApi";
 import { cachedPalPlans, listPalPlans, type PalPlan, type PalPlanInput } from "./palPlansApi";
@@ -207,7 +211,10 @@ export function PalPlanForm({
     () => (pickSo ? mergedOrders.filter((o) => o.customerId === selectedCustomer) : mergedOrders),
     [pickSo, mergedOrders, selectedCustomer],
   );
-  // Customer pick list: customers with palletizable stock.
+  // CR-327: every active customer is offered; the ones with palletizable stock carry a hint.
+  const { customers: masterCustomers } = useMasters();
+  const { orders: allOrders } = useOrders();
+  // Customers with palletizable stock (hint + the "nothing to palletize" checks).
   const customers = useMemo(() => {
     const m = new Map<string, { id: string; name: string; available: number }>();
     for (const o of orders) {
@@ -336,6 +343,14 @@ export function PalPlanForm({
     );
   };
 
+  // CR-327: every active customer, stock-bearing ones first with their hint.
+  const availOf = new Map(customers.map((c) => [c.id, c.available]));
+  const customerOptions = masterCustomers
+    .filter((c) => c.active)
+    .map((c) => ({ value: c.id, label: c.name, hint: availOf.get(c.id) ? `${fmt(availOf.get(c.id)!)} boxes to palletize` : undefined }))
+    .sort((a, b) => Number(!!b.hint) - Number(!!a.hint) || a.label.localeCompare(b.label));
+  // Why the picked customer has nothing to plan (CR-328).
+  const why = pickSo && selectedCustomer && shownOrders.length === 0 && !dq ? blockers("palletize", selectedCustomer, allOrders, existingPlans.flatMap((p) => p.lines)) : [];
   const planFields = (
               <div className="form-section">
                 <div className="form-section-title">Plan</div>
@@ -348,7 +363,7 @@ export function PalPlanForm({
                         <Combobox
                           className="grow"
                           value={selectedCustomer}
-                          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+                          options={customerOptions}
                           onChange={pickCustomer}
                           placeholder="Search customers…"
                           invalid={showErrors && !selectedCustomer}
@@ -385,8 +400,6 @@ export function PalPlanForm({
                 </div>
               </div>
   );
-  // Only customers with palletizable stock are offered — same list as the Combobox.
-  const customerIds = new Set(customers.map((c) => c.id));
   const sections = (
     <>
               {shownOrders.map((o) => (
@@ -431,7 +444,7 @@ export function PalPlanForm({
                           <tr key={it.orderItemId} style={noStock || allPlanned ? { opacity: 0.55 } : undefined}>
                             <td className="nw">
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                <LineStockChip stock={stockFor(it.designName)} qty={boxes} label={it.designLabel} />
+                                <LineStockChip stock={stockFor(it.designId)} qty={boxes} label={it.designLabel} />
                                 <span className="design-name">{it.designLabel}</span>
                                 {inProgress && (
                                   <span className="chip qstatus q-sent nw" style={{ fontSize: 13 }}>Palletization in progress</span>
@@ -538,13 +551,20 @@ export function PalPlanForm({
                   onChange={(e) => setDesignQuery(e.target.value)}
                 />
               )}
-              {pickSo && customers.length === 0 && !error && <div className="dim" style={{ fontSize: "var(--t-sm)" }}>No order items ready to palletize.</div>}
-              {pickSo && customers.length > 0 && !selectedCustomer && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "8px 0" }}>Pick a customer.</div>}
-              {pickSo && selectedCustomer && shownOrders.length === 0 && <div className="dim" style={{ fontSize: "var(--t-sm)" }}>No designs match.</div>}
+              {pickSo && !selectedCustomer && <div className="dim" style={{ fontSize: "var(--t-sm)", padding: "8px 0" }}>{customers.length === 0 ? "No order items ready to palletize. Pick a customer to see what to do first." : "Pick a customer."}</div>}
+              {pickSo && selectedCustomer && shownOrders.length === 0 && dq && <div className="dim" style={{ fontSize: "var(--t-sm)" }}>No designs match.</div>}
+              {why.length > 0 && (
+                <Note tone="warn">
+                  <strong>Nothing to palletize for this customer.</strong>
+                  {why.map((b, i) => (
+                    <span key={i}>{b.label && <span className="mono">{b.label} · </span>}{b.to && !b.to.startsWith("/packing") ? <a href={b.to}>{b.reason}</a> : b.reason}.</span>
+                  ))}
+                </Note>
+              )}
               {sections}
             </>
           )}
-      {custSearch && <CustomerSearchModal filter={(c) => customerIds.has(c.id)} onPick={(c) => pickCustomer(c.id)} onClose={() => setCustSearch(false)} />}
+      {custSearch && <CustomerSearchModal onPick={(c) => pickCustomer(c.id)} onClose={() => setCustSearch(false)} />}
     </FormPage>
   );
 }

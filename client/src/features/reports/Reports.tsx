@@ -27,7 +27,12 @@ import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { designStock, openingStockFor, type InProductionOrder } from "@/lib/stock";
-import { cachedAdjustedByDesign, cachedBatchStock, cachedOpeningByDesign, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
+import { cachedAdjustedByDesign, cachedBatchStock, cachedOpeningByDesign, cachedWarehouseStock, listBatchStock, warehouseStockKey, type BatchStockRow } from "@/features/stages/batchStockApi";
+import type { WhCell } from "@/lib/warehouseStock";
+import { useWarehouses } from "@/features/masters/useWarehouses";
+import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
+import { cachedCutSizes, listPanels, type CutSizeOption } from "@/features/panels/panelsApi";
+import { cachedCutStockRows, cutWarehouseCells, listCutStock, listCutStockEntries, type CutStockEntryRow, type CutStockRow } from "@/features/panels/panelOrdersApi";
 import { batchLedger, type BatchMoveRow } from "@/features/stages/batchLedger";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
@@ -528,7 +533,7 @@ function StockReport() {
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
       const opening = openingStockFor(d, openingByDesign);
-      const s = designStock(d.designName, { openingStock: opening, adjusted: adjustedByDesign.get(d.designName), allocated: cachedAllocByDesign().get(d.designName), orders, prodLogs });
+      const s = designStock(d.id, { openingStock: opening, adjusted: adjustedByDesign.get(d.id), allocated: cachedAllocByDesign().get(d.id), orders, prodLogs });
       return {
         key: d.id,
         label: d.designName || "—",
@@ -1312,9 +1317,222 @@ function BatchStockReport() {
                   <td className="muted" colSpan={3}>{rows.length} batches</td>
                   <td className="num mono">{fmt(tot.opening)}</td>
                   <td className="num mono">{fmt(tot.produced)}</td>
+                  <td className="num mono">{fmt(tot.adjusted)}</td>
                   <td className="num mono">{fmt(tot.palletised)}</td>
                   <td className="num mono">{fmt(tot.dispatched)}</td>
                   <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(tot.current)}</td>
+                </TotalsRow>
+              )}
+            </table>
+          </div>
+          <GridFooter {...pager} />
+        </div>
+      )}
+    </ReportShell>
+  );
+}
+
+
+/* ─────────────────────────── Warehouse stock (CR-331) ─────────────────────────── */
+
+/** One (item · batch-or-cut-size · warehouse) cell, hydrated for the table. */
+interface WarehouseStockRow {
+  key: string;
+  designId: string;
+  designLabel: string;
+  sizeCode: string;
+  second: string; // batch number (boxes) or cut size (pcs)
+  warehouseId: string;
+  warehouse: string;
+  onHand: number;
+  committed: number;
+  available: number;
+  over: number;
+}
+
+function WarehouseStockReport() {
+  const { warehouses, nameOf, enabled } = useWarehouses();
+  const [unit, setUnit] = usePersistedState<"boxes" | "pcs">("reportWarehouse.unit", "boxes");
+  const [view, setView] = usePersistedState<"list" | "matrix">("reportWarehouse.view", "list");
+  const [batchRows, setBatchRows] = useState<BatchStockRow[]>(() => cachedBatchStock() ?? []);
+  const [boxCells, setBoxCells] = useState<WhCell[]>(() => cachedWarehouseStock());
+  const [cutStock, setCutStock] = useState<CutStockRow[]>(() => cachedCutStockRows() ?? []);
+  const [cutEntries, setCutEntries] = useState<CutStockEntryRow[]>([]);
+  const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
+  const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const [criteria, setCriteria] = useState<FilterCriteria>({});
+
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([listBatchStock(), listCutStock(), listCutStockEntries(), listDesigns(), listPanels()]).then(([b, cs, ce, d, p]) => {
+      if (!alive) return;
+      setLoading(false);
+      if (!b.ok) { setError(b.error || "Failed to load stock"); return; }
+      setError(null);
+      setBatchRows(b.rows);
+      setBoxCells(b.byWarehouse);
+      if (cs.ok) setCutStock(cs.rows);
+      if (ce.ok) setCutEntries(ce.rows);
+      if (d.ok) setDesigns(d.designs);
+      if (p.ok) setCutSizes(p.cutSizes);
+    });
+    return () => { alive = false; };
+  }, [nonce]);
+
+  const rowsRaw = useMemo<WarehouseStockRow[]>(() => {
+    const hydrate = (c: WhCell, designId: string, label: string, size: string, second: string): WarehouseStockRow => ({
+      key: `${c.key} ${c.warehouseId}`, designId, designLabel: label, sizeCode: size, second,
+      warehouseId: c.warehouseId, warehouse: nameOf(c.warehouseId) || "—",
+      onHand: c.onHand, committed: c.committed, available: Math.max(0, c.onHand - c.committed), over: c.over,
+    });
+    if (unit === "boxes") {
+      const byKey = new Map(batchRows.map((r) => [warehouseStockKey(r.designId, r.batchNumber), r]));
+      return boxCells.map((c) => {
+        const r = byKey.get(c.key);
+        return hydrate(c, r?.designId ?? c.key.split("|")[0], r?.designLabel ?? c.key.split("|")[0], r?.sizeCode ?? "", r?.batchNumber ?? "");
+      });
+    }
+    const dById = new Map(designs.map((d) => [d.id, d]));
+    const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
+    return cutWarehouseCells(warehouses, cutEntries, cutStock).map((c) => {
+      const [designId, cutSizeId] = c.key.split("|");
+      const d = dById.get(designId);
+      return hydrate(c, designId, d?.uniqueName || d?.designName || designId, d?.sizeLabel || "", cutName.get(cutSizeId) || "—");
+    });
+  }, [unit, batchRows, boxCells, cutStock, cutEntries, designs, cutSizes, warehouses, nameOf]);
+
+  const secondLabel = unit === "boxes" ? "Batch" : "Cut size";
+  const fields = useMemo<FilterField<WarehouseStockRow>[]>(
+    () => [
+      { key: "warehouse", label: "Warehouse", type: "select", options: distinct(rowsRaw.map((r) => r.warehouse)), get: (r) => r.warehouse },
+      { key: "item", label: "Item", type: "select", options: distinct(rowsRaw.map((r) => r.designLabel)), get: (r) => r.designLabel },
+      { key: "size", label: "Size", type: "select", options: distinct(rowsRaw.map((r) => r.sizeCode)), get: (r) => r.sizeCode },
+      { key: "second", label: secondLabel, type: "text", get: (r) => r.second },
+      { key: "onHand", label: "On hand", type: "numrange", get: (r) => r.onHand },
+    ],
+    [rowsRaw, secondLabel],
+  );
+  const rows = useMemo(() => applyFilters(rowsRaw, criteria, fields), [rowsRaw, criteria, fields]);
+  const tot = useMemo(
+    () => rows.reduce((a, r) => ({ onHand: a.onHand + r.onHand, committed: a.committed + r.committed, available: a.available + r.available }), { onHand: 0, committed: 0, available: 0 }),
+    [rows],
+  );
+  const sort = useSortRows(
+    rows,
+    (r, k) => (k === "item" ? r.designLabel : k === "size" ? r.sizeCode : k === "second" ? r.second : k === "warehouse" ? r.warehouse : (r as unknown as Record<string, number>)[k]),
+    "onHand",
+  );
+  const pager = usePagination(rows.length, "reportWarehousePageSize", `${unit}|${JSON.stringify(criteria)}|${sort.sortKey}|${sort.dir}`);
+  const pageRows = pager.slice(sort.sorted);
+
+  // One tile per warehouse (what sits there), then the total.
+  const perWarehouse = new Map<string, number>();
+  for (const r of rows) perWarehouse.set(r.warehouse, (perWarehouse.get(r.warehouse) || 0) + r.onHand);
+  const kpis: KpiSpec[] = [
+    ...warehouses.map((w) => ({ label: w.name, value: fmt(perWarehouse.get(w.name) || 0), unit, color: w.isPrimary ? "var(--c-blue)" : undefined })),
+    { label: "Committed", value: fmt(tot.committed), unit, color: "var(--c-amber)" },
+    { label: "On hand", value: fmt(tot.onHand), unit, color: "var(--c-green)" },
+  ];
+
+  if (!enabled && !loading) {
+    return (
+      <ReportShell title="Warehouse Stock" subtitle="What sits in each warehouse">
+        <EmptyState icon="package" title="No warehouses yet" hint="Add warehouses under Settings ▸ Warehouses — stock then shows per location here." />
+      </ReportShell>
+    );
+  }
+  return (
+    <ReportShell
+      title="Warehouse Stock"
+      subtitle="What sits in each warehouse — boxes or cut pieces"
+      kpis={kpis}
+      filter={{ title: "warehouse stock", fields, criteria, onChange: setCriteria }}
+      bar={
+        <>
+          <Seg value={unit} onChange={setUnit} options={[{ id: "boxes", label: "Boxes" }, { id: "pcs", label: "Cut pieces" }]} label="Stock type" />
+          <Seg value={view} onChange={setView} options={[{ id: "list", label: "List" }, { id: "matrix", label: "Item × Warehouse" }]} label="View" />
+        </>
+      }
+      csv={{
+        name: `report-warehouse-stock-${unit}`,
+        rows,
+        columns: [
+          { header: "Item", value: (r) => r.designLabel },
+          { header: "Size", value: (r) => r.sizeCode },
+          { header: secondLabel, value: (r) => r.second },
+          { header: "Warehouse", value: (r) => r.warehouse },
+          { header: "On hand", value: (r) => r.onHand },
+          { header: "Committed", value: (r) => r.committed },
+          { header: "Available", value: (r) => r.available },
+        ],
+      }}
+    >
+      {error && <ErrorCard message={error} onRetry={() => setNonce((n) => n + 1)} />}
+      {loading && rowsRaw.length === 0 ? (
+        <SkeletonRows rows={8} />
+      ) : view === "matrix" ? (
+        <div className="card">
+          <div style={{ overflow: "auto" }}>
+            <PivotTable
+              rows={rows}
+              rowKey={(r) => r.designLabel}
+              colKey={(r) => r.warehouse}
+              value={(r) => r.onHand}
+              rowHeader="Item"
+              emptyTitle="No stock in any warehouse"
+              emptyHint={unit === "boxes" ? "Record production or opening stock to see boxes here." : "Add cut pieces to see them here."}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <div style={{ overflow: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <SortTh id="item" label="Item" sort={sort} />
+                  <SortTh id="size" label="Size" sort={sort} />
+                  <SortTh id="second" label={secondLabel} sort={sort} />
+                  <SortTh id="warehouse" label="Warehouse" sort={sort} />
+                  <SortTh id="onHand" label="On hand" sort={sort} className="num" style={numTh} />
+                  <SortTh id="committed" label="Committed" sort={sort} className="num" style={numTh} />
+                  <SortTh id="available" label="Available" sort={sort} className="num" style={numTh} />
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((r) => (
+                  <tr key={r.key}>
+                    <td className="nw">
+                      <Link className="linkish clip" to={unit === "boxes" ? `/design/${r.designId}?tab=locations` : `/panel-items/${encodeURIComponent(r.designId)}`} title={r.designLabel}>{r.designLabel}</Link>
+                    </td>
+                    <td>{r.sizeCode ? <span className="chip size">{r.sizeCode}</span> : <span className="dim">—</span>}</td>
+                    <td className="mono" style={{ color: "var(--fg)" }}>{r.second || <span className="dim" title="Unbatched stock">—</span>}</td>
+                    <td>{r.warehouse}</td>
+                    <td className="num mono" style={{ fontWeight: 600, color: r.over > 0 ? "var(--c-amber)" : "var(--c-green)" }} title={r.over > 0 ? `${fmt(r.over)} more left this warehouse than it ever held — check the transfers` : undefined}>
+                      {fmt(r.onHand)}{r.over > 0 ? " ⚠" : ""}
+                    </td>
+                    <td className="num mono">{r.committed ? fmt(r.committed) : <span className="dim">—</span>}</td>
+                    <td className="num mono">{fmt(r.available)}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <EmptyState icon="package" title="No stock in any warehouse" hint={unit === "boxes" ? "Record production or opening stock to see boxes here." : "Add cut pieces to see them here."} />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+              {rows.length > 0 && (
+                <TotalsRow>
+                  <td>Total</td>
+                  <td className="muted" colSpan={3}>{rows.length} rows</td>
+                  <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(tot.onHand)}</td>
+                  <td className="num mono">{fmt(tot.committed)}</td>
+                  <td className="num mono">{fmt(tot.available)}</td>
                 </TotalsRow>
               )}
             </table>
@@ -2066,6 +2284,7 @@ export const REPORTS: ReportDef[] = [
   { id: "production-batches", title: "Production Batches", subtitle: "Boxes produced per batch — list or item × date matrix", icon: "factory", Component: BatchReport },
   { id: "stock", title: "Live Stock", subtitle: "Opening + produced − loaded, per design", icon: "package", Component: StockReport },
   { id: "stock-batch", title: "Batch-wise Stock", subtitle: "On-hand boxes per item and batch", icon: "package", Component: BatchStockReport },
+  { id: "stock-warehouse", title: "Warehouse Stock", subtitle: "What sits in each warehouse — boxes or cut pieces", icon: "package", Component: WarehouseStockReport }, // CR-331
   { id: "batch-movement", title: "Batch Movement", subtitle: "Where each batch went — palletized, loaded, dispatched, on hand", icon: "factory", Component: BatchMovementReport },
   { id: "ready", title: "Ready Pallets", subtitle: "Palletized and waiting, not yet in a loading", icon: "truck", Component: ReadyReport },
   { id: "pal-status", title: "Palletization Status", subtitle: "Every plan and how far its boxes have moved", icon: "truck", Component: PalStatusReport },
@@ -2079,7 +2298,7 @@ export const REPORT_SECTIONS: { section: ReportSection; icon: string; ids: strin
   { section: "Sales", icon: "chart", ids: ["by-po", "salesperson-sales", "size"] },
   { section: "Customer", icon: "users", ids: ["customer-sales", "aging"] },
   { section: "Item", icon: "tile", ids: ["by-item", "size", "production-batches"] },
-  { section: "Inventory", icon: "package", ids: ["stock", "stock-batch", "batch-movement", "ready", "production-batches"] },
+  { section: "Inventory", icon: "package", ids: ["stock", "stock-batch", "stock-warehouse", "batch-movement", "ready", "production-batches"] },
   { section: "Dispatch", icon: "truck", ids: ["pal-status", "loading-status", "dispatch-register", "ready"] },
 ];
 

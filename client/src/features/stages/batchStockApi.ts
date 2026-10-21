@@ -31,6 +31,7 @@ import { listAll, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listPalPlans, subscribePalPlans } from "./palPlansApi";
 import { deriveBatchStock, freeOf, reservedByBatch, type ClaimIn, type ConsumeIn, type LoadedIn, type SupplyIn } from "./batchStockDerive";
+import { deriveWarehouseStock, parsePurposes, type WarehouseIn, type WhCell, type WhMoveIn } from "@/lib/warehouseStock";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -63,19 +64,24 @@ subscribePalPlans(() => cache.invalidate());
 export function cachedBatchStock(): BatchStockRow[] | null {
   return cache.cached()?.rows ?? null;
 }
-/** Σ opening-stock boxes per design_name — feeds designStock via openingStockFor.
+/** Σ opening-stock boxes per Design ROWID (CR-341) — feeds designStock via openingStockFor.
     Sourced ONLY from entry_type='opening' rows: openingStockFor consumes this
     exclusively for batched items and reads accounting_stock itself for singular
     ones, so folding accounting_stock in here would double count. */
 export function cachedOpeningByDesign(): Map<string, number> {
   return cache.cached()?.openingByDesign ?? new Map();
 }
-/** Σ signed adjustment boxes per design_name (CR-308) — designStock's `adjusted`
+/** Σ signed adjustment boxes per Design ROWID (CR-308/339) — designStock's `adjusted`
     term. Kept SEPARATE from openingByDesign: singular items read opening from
     accounting_stock and would lose adjustments folded in there. */
 export function cachedAdjustedByDesign(): Map<string, number> {
   return cache.cached()?.adjustedByDesign ?? new Map();
 }
+/** Per (item · batch · warehouse) on-hand / committed (CR-329) — keys are `designId|batch`. */
+export function cachedWarehouseStock(): WhCell[] {
+  return cache.cached()?.byWarehouse ?? [];
+}
+export const warehouseStockKey = (designId: string, batch: string) => `${designId}|${batch}`;
 export function invalidateBatchStock(): void {
   cache.invalidate();
 }
@@ -85,6 +91,8 @@ export interface BatchStockResult {
   rows: BatchStockRow[];
   openingByDesign: Map<string, number>;
   adjustedByDesign: Map<string, number>;
+  /** CR-329: the same stock split per warehouse (deriveWarehouseStock). */
+  byWarehouse: WhCell[];
   error?: string;
 }
 
@@ -94,8 +102,8 @@ export function listBatchStock(): Promise<BatchStockResult> {
 }
 
 async function fetchBatchStock(): Promise<BatchStockResult> {
-  const [logs, designs, sizes, palPlans, pbatches, plines, loadings, items] = await Promise.all([
-    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item"] }),
+  const [logs, designs, sizes, palPlans, pbatches, plines, loadings, items, warehouses] = await Promise.all([
+    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item", "warehouse"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "is_batched", "accounting_stock"] }),
     listAll("Size", { columns: ["code"] }),
     listPalPlans(),
@@ -103,8 +111,9 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     listAll("PalletisedBatchLine", { columns: ["batch", "order_item", "boxes", "batch_number"] }),
     listAll("ContainerLoading", { columns: ["batch"] }),
     listAll("OrderItem", { columns: ["design"] }),
+    listAll("Warehouse", { columns: ["is_primary", "purposes"] }),
   ]);
-  const fail = (error: string): BatchStockResult => ({ ok: false, rows: [], openingByDesign: new Map(), adjustedByDesign: new Map(), error });
+  const fail = (error: string): BatchStockResult => ({ ok: false, rows: [], openingByDesign: new Map(), adjustedByDesign: new Map(), byWarehouse: [], error });
   if (!logs.ok || !designs.ok) return fail(logs.error || designs.error || "Failed to load stock sources");
   const truncated = [logs, designs, sizes, pbatches, plines, loadings, items].some((r: OpResult) => r.truncated);
   if (truncated) return fail("Too many rows to load — batch stock would be incomplete. Contact support.");
@@ -132,18 +141,26 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
   const claims: ClaimIn[] = [];
   const openingByDesign = new Map<string, number>();
   const adjustedByDesign = new Map<string, number>();
+  // CR-329: the same supply, per warehouse (null = primary); consumption is added below from the derived rows.
+  const whMoves: WhMoveIn[] = [];
+  const whOf = (r: DSRow) => (str(r.warehouse) ? str(r.warehouse) : null);
   for (const r of logs.rows || []) {
     const type = str(r.entry_type);
     const designId = str(r.design);
     const qty = num(r.qty_boxes);
     if (!designId) continue;
     const date = str(r.production_date).slice(0, 10);
+    // CR-330: a transfer leg is net zero per batch — only the warehouse split sees it.
+    if (type === "transfer") {
+      if (qty) whMoves.push({ key: `${designId}|${str(r.batch_number)}`, warehouse: whOf(r), qty });
+      continue;
+    }
     // CR-308: adjustments are SIGNED — handled before the qty guard below.
     if (type === "adjust") {
       if (qty === 0) continue;
       supply.push({ designId, batch: str(r.batch_number), qty, kind: "adjust", date });
-      const name = dName.get(designId) || designId;
-      adjustedByDesign.set(name, (adjustedByDesign.get(name) || 0) + qty);
+      whMoves.push({ key: `${designId}|${str(r.batch_number)}`, warehouse: whOf(r), qty });
+      adjustedByDesign.set(designId, (adjustedByDesign.get(designId) || 0) + qty);
       continue;
     }
     if (qty <= 0) continue;
@@ -152,20 +169,25 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
       claims.push({ designId, batch: type === "plan" ? "" : str(r.batch_number), orderItemId: oi, qty });
     if (type === "record") {
       supply.push({ designId, batch: str(r.batch_number), qty, kind: "produced", date });
+      whMoves.push({ key: `${designId}|${str(r.batch_number)}`, warehouse: whOf(r), qty });
     } else if (type === "opening") {
       supply.push({ designId, batch: str(r.batch_number), qty, kind: "opening", date });
-      const name = dName.get(designId) || designId;
-      openingByDesign.set(name, (openingByDesign.get(name) || 0) + qty);
+      whMoves.push({ key: `${designId}|${str(r.batch_number)}`, warehouse: whOf(r), qty });
+      openingByDesign.set(designId, (openingByDesign.get(designId) || 0) + qty);
     } else if (type === "plan") {
       // Pre-split-model output recorded directly on the plan row — real
       // produced boxes with no batch attribution.
       supply.push({ designId, batch: "", qty, kind: "produced", date: "" });
+      whMoves.push({ key: `${designId}|`, warehouse: null, qty });
     }
   }
   for (const d of designs.rows || []) {
     const batched = d.is_batched === true || str(d.is_batched) === "true";
     const acc = num(d.accounting_stock);
-    if (!batched && acc > 0) supply.push({ designId: String(d.ROWID), batch: "", qty: acc, kind: "opening", date: "" });
+    if (!batched && acc > 0) {
+      supply.push({ designId: String(d.ROWID), batch: "", qty: acc, kind: "opening", date: "" });
+      whMoves.push({ key: `${String(d.ROWID)}|`, warehouse: null, qty: acc });
+    }
   }
 
   // ---- Consumption ---------------------------------------------
@@ -219,7 +241,25 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
   }
 
   const reserved = reservedByBatch(claims, loadedByOi);
-  const rows: BatchStockRow[] = deriveBatchStock(supply, consumption).map((r) => ({
+  const derived = deriveBatchStock(supply, consumption);
+  // CR-329: what each batch LOST (loaded, FIFO-absorbed by the reducer) leaves
+  // from whichever warehouse holds it — Loading Bay first; reserved boxes show
+  // as committed the same way. Σ per batch over warehouses = current.
+  const whClaims: { key: string; warehouse: null; qty: number }[] = [];
+  for (const r of derived) {
+    const key = `${r.designId}|${r.batch}`;
+    const absorbed = r.opening + r.produced + r.adjusted - r.current;
+    if (absorbed > 0) whMoves.push({ key, warehouse: null, qty: -absorbed });
+    const committed = r.current - freeOf(r, reserved);
+    if (committed > 0) whClaims.push({ key, warehouse: null, qty: committed });
+  }
+  const whList: WarehouseIn[] = (warehouses.rows || []).map((w) => ({
+    id: String(w.ROWID),
+    isPrimary: w.is_primary === true || str(w.is_primary) === "true",
+    purposes: parsePurposes(str(w.purposes)),
+  }));
+  const byWarehouse = deriveWarehouseStock(whList, whMoves, whClaims);
+  const rows: BatchStockRow[] = derived.map((r) => ({
     designId: r.designId,
     designName: dName.get(r.designId) || r.designId,
     designLabel: dLabel.get(r.designId) || dName.get(r.designId) || r.designId,
@@ -237,5 +277,5 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     reserved: r.current - freeOf(r, reserved),
     free: freeOf(r, reserved),
   }));
-  return { ok: true, rows, openingByDesign, adjustedByDesign };
+  return { ok: true, rows, openingByDesign, adjustedByDesign, byWarehouse };
 }

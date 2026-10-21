@@ -123,19 +123,18 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th>Order No</th>
               <th>Panels</th>
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
               <th>Sales Person</th>
               <th>Status</th>
+              <th>Order No</th>
             </tr>
           </thead>
           <tbody>
             {/* CR-302: one row per order; the row opens the order, each panel code opens its panel. */}
             {myOrders.map((o) => (
               <tr key={o.id} {...rowProps(navigate, `/panel-orders/${encodeURIComponent(o.id)}`)}>
-                <td className="mono">{o.orderNumber || "—"}</td>
                 <td>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                     <ImageThumb images={panels.find((p) => p.id === o.lines[0]?.panelId)?.images ?? []} alt={o.orderNumber} />
@@ -153,6 +152,7 @@ export function PanelsPanel({ scope }: { scope: PanelsScope }) {
                 <td className="mono muted">{o.orderDate || "—"}</td>
                 <td>{o.salesperson || "—"}</td>
                 <td><span title={PANEL_ORDER_STATUS_LABEL[o.status]}>{codeOf(PANEL_ORDER_STATUS_LABEL[o.status])}</span></td>
+                <td className="mono dim">{o.orderNumber || "—"}</td>
               </tr>
             ))}
           </tbody>

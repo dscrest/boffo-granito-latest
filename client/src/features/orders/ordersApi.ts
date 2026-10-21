@@ -131,6 +131,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       // same as the picker) so the SO reads properly; fall back to the plain
       // name, then "—" for a removed/unresolved FK (bug 16).
       design: designUnique.get(str(it.design)) || designName.get(str(it.design)) || "—",
+      designId: str(it.design),
       designName: designName.get(str(it.design)) || "",
       size: sizeStr,
       finish: d ? finishName.get(str(d.finish)) || "" : "",
@@ -248,6 +249,10 @@ export const SO_STATUSES = [
 ];
 export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
 
+/** CR-353: what a sales order is called on screen — the customer's PO first, the SO number as fallback
+    (the SO number stays the DB / URL identity and rides small beside the label). */
+export const orderLabel = (o: { poNumber?: string; orderNumber?: string }) => o.poNumber || o.orderNumber || "—";
+
 /** Boxes an order line still needs = Ordered − Allocated (CR-263; Allocate Stock's "to allocate"). */
 export const remainingOf = (o: Pick<Order, "orderQty" | "producedQty">) => Math.max(0, o.orderQty - o.producedQty);
 
@@ -325,8 +330,9 @@ export function deleteSalesOrder(rowid: string, reason?: string) {
     and an activity entry is logged), NOT deleted, then the SO total is
     recomputed over the remaining lines. Server refuses to delete the order's
     last line (an SO must keep ≥1 line item). */
-export function deleteOrderItem(orderItemId: string) {
-  return bust(op<{ rowid: string; disassociated: number }>(`delete-order-item/${orderItemId}`, {}));
+export function deleteOrderItem(orderItemId: string, reason?: string) {
+  // CR-270 reason (mandatory server-side for non-Admin since CR-336).
+  return bust(op<{ rowid: string; disassociated: number }>(`delete-order-item/${orderItemId}`, { reason: reason || "" }));
 }
 
 /** Change SO status through the server-side state machine (/so-status —

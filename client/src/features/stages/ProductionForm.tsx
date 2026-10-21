@@ -126,7 +126,7 @@ export function ProductionForm({
                         ariaLabel="Item"
                         invalid={showErrors && !l.design && active.includes(l)}
                       />
-                      {d && <LineStock stock={stockFor(d.designName)} qty={Number(l.qty) || 0} label={d.designName} />}
+                      {d && <LineStock stock={stockFor(d.id)} qty={Number(l.qty) || 0} label={d.designName} />}
                     </div>
                     <NumberInput
                       min={0}

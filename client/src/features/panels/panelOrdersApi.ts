@@ -23,7 +23,9 @@
 import { listAll, op, update, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidatePanels, listPanels } from "./panelsApi";
-import type { Allocation, CheckpointKey, Checkpoints, Shortage } from "./panelOrderNeeds";
+import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
+import type { Allocation, CheckpointKey, Checkpoints, LoadIn, LoadLineIn, Material, Shortage } from "./panelOrderNeeds";
+import { deriveWarehouseStock, type WarehouseIn, type WhCell, type WhMoveIn } from "@/lib/warehouseStock";
 
 export {
   allocatedByKey,
@@ -32,7 +34,16 @@ export {
   CHECKPOINT_STATUSES,
   checkpointStatus,
   demandByKey,
+  lineMaterials,
+  lineWeightSplit,
+  loadingStatus,
+  LOADING_STATUSES,
+  loadProgress,
+  MATERIAL_LABEL,
   PANEL_ORDER_OPEN,
+  panelWeightSplit,
+  pendingNeedLines,
+  pendingText,
   readiness,
   requirementsFor,
   shortagesFor,
@@ -42,8 +53,13 @@ export {
   type CheckpointMark,
   type Checkpoints,
   type DemandRow,
+  type LoadIn,
+  type LoadLineIn,
+  type LoadingStatus,
+  type Material,
   type NeedLine,
   type NeedOpts,
+  type ProgressRow,
   type Readiness,
   type Requirement,
   type Shortage,
@@ -55,12 +71,13 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 export const PANEL_ORDER_STATUSES = ["NewRequest", "Received", "InCutting", "Ready", "Dispatched"] as const;
 export type PanelOrderStatus = (typeof PANEL_ORDER_STATUSES)[number];
 
-/** Mirrors the server PANEL_ORDER_TRANSITIONS (forward-only). */
+/** Mirrors the server PANEL_ORDER_TRANSITIONS (forward-only). CR-347: Dispatched is never a
+    button — the last load (/panel-load-save) flips it. */
 export const PANEL_ORDER_TRANSITIONS: Record<PanelOrderStatus, PanelOrderStatus[]> = {
   NewRequest: ["Received"],
-  Received: ["InCutting", "Dispatched"],
+  Received: ["InCutting"],
   InCutting: ["Ready"],
-  Ready: ["Dispatched"],
+  Ready: [],
   Dispatched: [],
 };
 
@@ -87,10 +104,69 @@ export const PANEL_ORDER_LOCK_REASON = "Cutting has started — panels and quant
 
 export interface PanelOrderLineRow {
   id: string; // PanelOrderLine ROWID
-  panelId: string;
-  panelCode: string;
-  qty: number; // panels of this type
+  panelId: string; // "" = a loose cut-piece line (CR-346)
+  panelCode: string; // "Cut piece" on a cut-piece line
+  qty: number; // panels of this type / pieces
   mdfId: string; // Mdf ROWID the panel is mounted on (CR-309); "" = not picked
+  /** CR-346: loose cut-piece line — design + cut size. */
+  designId: string;
+  cutSizeId: string;
+  designName: string;
+  cutSizeName: string;
+}
+
+/** CR-347: one vehicle trip for this order (PanelLoad + its lines). */
+export interface LoadRow extends LoadIn {
+  loadNumber: string; // LD/FY/NNN — shared by every order on the trip
+  date: string; // yyyy-MM-dd
+  vehicle: string;
+  driverName: string; // CR-351
+  driverMobile: string;
+  note: string;
+  photos: DesignImage[];
+  by: string;
+  createdTime: string;
+}
+
+const MATERIALS: readonly Material[] = ["Panel", "Mdf", "Item"];
+/** Group PanelLoad + PanelLoadLine rows per order (col = panel_order | sample_order). */
+export function parseLoads(loadRows: Record<string, unknown>[], lineRows: Record<string, unknown>[], col: "panel_order" | "sample_order"): Map<string, LoadRow[]> {
+  const linesByLoad = new Map<string, LoadLineIn[]>();
+  for (const l of lineRows) {
+    const key = str(l.panel_load);
+    const material = (MATERIALS as readonly string[]).includes(str(l.material)) ? (str(l.material) as Material) : "Item";
+    const w = l.weight_kg == null || l.weight_kg === "" ? null : Number(l.weight_kg);
+    const row: LoadLineIn = { lineId: str(l.order_line), material, qty: num(l.qty), weightKg: w != null && isFinite(w) ? w : null };
+    linesByLoad.set(key, [...(linesByLoad.get(key) ?? []), row]);
+  }
+  const out = new Map<string, LoadRow[]>();
+  for (const r of loadRows) {
+    const orderId = str(r[col]);
+    if (!orderId) continue;
+    let photos: DesignImage[] = [];
+    try {
+      const v = JSON.parse(str(r.photos) || "[]");
+      if (Array.isArray(v)) photos = v.filter((p) => p && p.id).map((p) => ({ id: String(p.id), name: String(p.name || "") }));
+    } catch {
+      photos = [];
+    }
+    const row: LoadRow = {
+      id: String(r.ROWID),
+      loadNumber: str(r.order_number),
+      date: str(r.load_date).slice(0, 10),
+      vehicle: str(r.vehicle_number),
+      driverName: str(r.driver_name),
+      driverMobile: str(r.driver_mobile),
+      note: str(r.note),
+      photos,
+      by: str(r.performed_by),
+      createdTime: str(r.CREATEDTIME),
+      lines: linesByLoad.get(String(r.ROWID)) ?? [],
+    };
+    out.set(orderId, [...(out.get(orderId) ?? []), row]);
+  }
+  for (const list of out.values()) list.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdTime < b.createdTime ? -1 : 1));
+  return out;
 }
 
 export interface PanelOrderRow {
@@ -114,6 +190,8 @@ export interface PanelOrderRow {
   /** CR-313: MDF · Vinyl Printing · Cut Pieces marks (missing = Pending). */
   checkpoints: Checkpoints;
   lines: PanelOrderLineRow[];
+  /** CR-347: vehicle trips recorded against this order, oldest first. */
+  loads: LoadRow[];
   panelCount: number;
   totalQty: number;
   createdTime: string;
@@ -154,13 +232,16 @@ export function listPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
 }
 
 async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[]; error?: string }> {
-  const [orders, lines, customers, panelsRes, sos, quotes] = await Promise.all([
+  const [orders, lines, customers, panelsRes, sos, quotes, designsRes, loads, loadLines] = await Promise.all([
     listAll("PanelOrder", { order: "ROWID desc" }),
     listAll("PanelOrderLine"),
     listAll("Customer", { columns: ["name", "code"] }),
-    listPanels(), // cached — panel codes
+    listPanels(), // cached — panel codes + cut-size names
     listAll("SalesOrder", { columns: ["order_number"] }), // source numbers (CR-286)
     listAll("Quote", { columns: ["quote_number"] }),
+    listDesigns(), // cached — cut-piece line names (CR-346)
+    listAll("PanelLoad"), // CR-347
+    listAll("PanelLoadLine"),
   ]);
   if (!orders.ok) return { ok: false, orders: [], error: orders.error };
   if (!lines.ok) return { ok: false, orders: [], error: lines.error };
@@ -168,10 +249,24 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
   const soNo = new Map((sos.rows || []).map((r) => [String(r.ROWID), str(r.order_number)]));
   const quoteNo = new Map((quotes.rows || []).map((r) => [String(r.ROWID), str(r.quote_number)]));
   const panelCode = new Map((panelsRes.ok ? panelsRes.panels : []).map((p) => [p.id, p.panelCode]));
+  const cutName = new Map((panelsRes.ok ? panelsRes.cutSizes : []).map((c) => [c.id, c.label]));
+  const design = new Map((designsRes.ok ? designsRes.designs : []).map((d) => [d.id, d]));
+  const loadsByOrder = parseLoads(loads.rows || [], loadLines.rows || [], "panel_order");
   const linesByOrder = new Map<string, PanelOrderLineRow[]>();
   for (const l of lines.rows || []) {
     const key = str(l.panel_order);
-    const row: PanelOrderLineRow = { id: String(l.ROWID), panelId: str(l.panel), panelCode: panelCode.get(str(l.panel)) || "—", qty: num(l.qty), mdfId: str(l.mdf) };
+    const d = design.get(str(l.design));
+    const row: PanelOrderLineRow = {
+      id: String(l.ROWID),
+      panelId: str(l.panel),
+      panelCode: str(l.panel) ? panelCode.get(str(l.panel)) || "—" : "Cut piece",
+      qty: num(l.qty),
+      mdfId: str(l.mdf),
+      designId: str(l.design),
+      cutSizeId: str(l.cut_piece_size),
+      designName: d?.uniqueName || d?.designName || "",
+      cutSizeName: cutName.get(str(l.cut_piece_size)) || "",
+    };
     linesByOrder.set(key, [...(linesByOrder.get(key) ?? []), row]);
   }
   const rows: PanelOrderRow[] = (orders.rows || []).map((o) => {
@@ -195,6 +290,7 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
       allocation: parseAllocation(str(o.allocation)),
       checkpoints: parseJsonCol<Checkpoints>(str(o.checkpoints)),
       lines: ls,
+      loads: loadsByOrder.get(id) ?? [],
       panelCount: ls.length,
       totalQty: ls.reduce((s, l) => s + l.qty, 0),
       createdTime: str(o.CREATEDTIME),
@@ -264,13 +360,15 @@ async function fetchCutStock(): Promise<CutStockResult> {
 }
 
 /* ---- cut-stock ledger (CR-307) — dated movements behind the on-hand figure ---- */
-export type CutEntryKind = "receipt" | "adjustment" | "order_ready" | "order_dispatch" | "sample";
+export type CutEntryKind = "receipt" | "adjustment" | "order_ready" | "order_dispatch" | "order_load" | "sample" | "transfer";
 export const CUT_ENTRY_KIND_LABEL: Record<CutEntryKind, string> = {
   receipt: "Stock added",
   adjustment: "Adjustment",
   order_ready: "Cutting output",
   order_dispatch: "Dispatched",
+  order_load: "Loaded", // CR-347: left with a vehicle trip (ref = PanelLoad)
   sample: "Sample supplied", // CR-316
+  transfer: "Transferred", // CR-330: one leg of a Transfer Order (doc_number = TRF code)
 };
 export interface CutStockEntryRow {
   id: string;
@@ -285,6 +383,8 @@ export interface CutStockEntryRow {
   refRowid: string;
   performedBy: string;
   createdTime: string;
+  warehouseId: string; // CR-329: "" = the primary
+  docNumber: string; // CR-330: TRF code on transfer legs
 }
 /** Every ledger row, newest first. Not cached — read on the pages that show history. */
 export async function listCutStockEntries(): Promise<{ ok: boolean; rows: CutStockEntryRow[]; error?: string }> {
@@ -303,8 +403,31 @@ export async function listCutStockEntries(): Promise<{ ok: boolean; rows: CutSto
     refRowid: str(r.ref_rowid),
     performedBy: str(r.performed_by),
     createdTime: str(r.CREATEDTIME),
+    warehouseId: str(r.warehouse),
+    docNumber: str(r.doc_number),
   }));
   return { ok: true, rows };
+}
+
+/** CR-329: cut-piece stock per (design|cutSize, warehouse). The ledger rows carry
+    the warehouse; whatever on-hand predates the ledger is null supply (→ primary);
+    bookings (allocatedByKey) spread as committed. Pure — callers pass what they loaded. */
+export function cutWarehouseCells(
+  warehouses: WarehouseIn[],
+  entries: CutStockEntryRow[],
+  stockRows: CutStockRow[],
+  booked: Map<string, number> = new Map(),
+): WhCell[] {
+  const moves: WhMoveIn[] = entries.map((e) => ({ key: `${e.designId}|${e.cutSizeId}`, warehouse: e.warehouseId || null, qty: e.qty }));
+  const ledger = new Map<string, number>();
+  for (const m of moves) ledger.set(m.key, (ledger.get(m.key) ?? 0) + m.qty);
+  for (const r of stockRows) {
+    const key = `${r.designId}|${r.cutSizeId}`;
+    const residual = r.qty - (ledger.get(key) ?? 0);
+    if (residual) moves.push({ key, warehouse: null, qty: residual });
+  }
+  const claims = [...booked].map(([key, qty]) => ({ key, warehouse: null, qty }));
+  return deriveWarehouseStock(warehouses, moves, claims);
 }
 
 /** "Short: Design · size — have 2 of 6; …" — the one wording for every missing-items hint (CR-288). */
@@ -322,9 +445,12 @@ function bust<T>(p: Promise<T>): Promise<T> {
 }
 
 export interface PanelOrderLineInput {
-  panel: string; // Panel ROWID
+  panel?: string; // Panel ROWID — blank on a cut-piece line (CR-346)
   qty: number;
   mdf?: string; // Mdf ROWID (CR-309)
+  /** CR-346: loose cut-piece line. */
+  design?: string;
+  cut_piece_size?: string;
 }
 
 export interface PanelOrderInput {
@@ -345,7 +471,9 @@ export function panelOrderToInput(o: PanelOrderRow): PanelOrderInput {
     order_date: o.orderDate,
     sales_order: o.salesOrderId || undefined,
     quote: o.quoteId || undefined,
-    lines: o.lines.map((l) => ({ panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined })),
+    lines: o.lines.map((l) =>
+      l.panelId ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId, qty: l.qty },
+    ),
   };
 }
 
@@ -383,11 +511,22 @@ export function setCheckpoint(rowid: string, key: CheckpointKey, status: string)
 export interface CutStockEntryLine {
   design: string;
   cut_piece_size: string;
-  qty: number; // receipt: > 0; adjustment: signed, ≠ 0
+  qty: number; // receipt / transfer: > 0; adjustment: signed, ≠ 0
   note?: string;
 }
-/** One dated bulk movement: Add Stock (receipt) or Adjust Stock (adjustment, reason required). */
-export function postCutStockEntry(input: { entry_date: string; kind: "receipt" | "adjustment"; reason?: string; note?: string; lines: CutStockEntryLine[] }) {
+/** One dated bulk movement: Add Stock (receipt), Adjust Stock (adjustment, reason required)
+    or a Transfer Order between warehouses (transfer: from/to + reason, CR-330). */
+export function postCutStockEntry(input: {
+  entry_date: string;
+  kind: "receipt" | "adjustment" | "transfer";
+  reason?: string;
+  note?: string;
+  /** CR-329: where the pieces were counted (receipt / adjustment); blank → primary. */
+  warehouse?: string;
+  from_warehouse?: string;
+  to_warehouse?: string;
+  lines: CutStockEntryLine[];
+}) {
   return bust(op<{ lines: number }>("cut-stock-entry", input));
 }
 /** Define / re-weigh a cut-piece item. A blank cut_piece_size = the item's full size. */

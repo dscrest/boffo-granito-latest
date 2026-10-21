@@ -1,0 +1,17 @@
+{
+  "deployment": {
+    "name": "data-ops",
+    "stack": "node18",
+    "type": "advancedio",
+    "env_variables": {
+      "FX_CRON_KEY": "<random secret for /cron/fx-refresh>",
+      "ZOHO_CLIENT_ID": "<Zoho API console → Server-based client → Client ID>",
+      "ZOHO_CLIENT_SECRET": "<its Client Secret — never commit>",
+      "ZOHO_DC": "in",
+      "ZOHO_REDIRECT_URI": "https://boffo-granito-export-tracker-925638796.development.catalystserverless.com/app/"
+    }
+  },
+  "execution": {
+    "main": "index.js"
+  }
+}

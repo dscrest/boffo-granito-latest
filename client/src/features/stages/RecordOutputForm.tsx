@@ -20,6 +20,7 @@ import { DateInput } from "@/ui/DateInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { Combobox } from "@/ui/Combobox";
 import { useBoxBrands } from "@/features/masters/boxBrands";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { useOrders } from "@/features/orders/useOrders";
 import { demandByDesign } from "@/lib/needProduction";
@@ -70,6 +71,12 @@ export function RecordOutputForm({
   };
 
   const [saving, setSaving] = useState(false);
+  // CR-329: the warehouse every batch below goes into — one picker, default primary.
+  const { options: whOptions, primary, enabled: whEnabled } = useWarehouses();
+  const [warehouse, setWarehouse] = useState("");
+  useEffect(() => {
+    if (primary) setWarehouse((v) => v || primary.id);
+  }, [primary]);
   // Box Brand the boxes are packed in — per batch row (CR-257; was per item, CR-197).
   const { options: brandOpts } = useBoxBrands();
   // Default brand per item follows the orders (CR-200): an order-linked line
@@ -86,7 +93,7 @@ export function RecordOutputForm({
       for (const e of entries) {
         if (next[e.id] !== undefined) continue;
         const own = e.orderItemId ? orders.find((o) => o.id === e.orderItemId)?.boxBrandId : "";
-        next[e.id] = own || demand.find((d) => d.designName === e.design)?.brands.find((b) => b.boxBrandId)?.boxBrandId || "";
+        next[e.id] = own || demand.find((d) => d.designId === e.designId)?.brands.find((b) => b.boxBrandId)?.boxBrandId || "";
       }
       return next;
     });
@@ -174,7 +181,7 @@ export function RecordOutputForm({
             note: r.note.trim() || undefined,
             box_brand: brandOf(entry, r) || undefined,
           }));
-          return { entry, total, payload: { batches: { rows: lines, performed_by: loggedBy } } };
+          return { entry, total, payload: { batches: { rows: lines, performed_by: loggedBy, warehouse: (whEnabled && warehouse) || undefined } } };
         }
         const singles: ProductionRecordInput[] = rows.map((r) => ({
           qty_boxes: parseInt(r.qty, 10) || 0,
@@ -182,6 +189,7 @@ export function RecordOutputForm({
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
           box_brand: brandOf(entry, r) || undefined,
+          warehouse: (whEnabled && warehouse) || undefined,
         }));
         return { entry, total, payload: { singles } };
       });
@@ -203,6 +211,14 @@ export function RecordOutputForm({
         </div>
 
         <div className="df-body">
+          {whEnabled && (
+            <div className="form-grid" style={{ gridTemplateColumns: "minmax(200px, 320px)", marginBottom: 12 }}>
+              <label className="form-field">
+                <span className="lbl">Warehouse</span>
+                <Combobox value={warehouse} options={whOptions} clearable={false} ariaLabel="Warehouse the boxes go into" onChange={setWarehouse} />
+              </label>
+            </div>
+          )}
           {entries.map((entry, ei) => {
             const isBatched = isBatchedFor(entry);
             const cap = capFor(entry);

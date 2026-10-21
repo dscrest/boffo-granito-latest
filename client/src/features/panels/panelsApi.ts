@@ -34,11 +34,15 @@ export interface PanelRow {
   panelCode: string;
   panelSize: string;
   vinylSize: string;
+  mdfSize: string; // CR-344: the panel's MDF size — the order line picks a thickness of that size from the Mdf master
   images: DesignImage[]; // File Store images, same shape as Design.image_urls
   lines: PanelLineRow[];
   createdTime: string;
   modifiedTime: string;
 }
+
+// The pure lookups live in panelOrderNeeds (no API import → self-check runnable under tsx).
+export { mdfLabel } from "./panelOrderNeeds";
 
 /* Stale-while-revalidate cache (lib/cache); mutations below invalidate. */
 const cache = createListCache(fetchPanels);
@@ -115,6 +119,7 @@ async function fetchPanels(): Promise<{
     panelCode: str(p.panel_code),
     panelSize: str(p.panel_size),
     vinylSize: str(p.vinyl_size),
+    mdfSize: str(p.mdf_size),
     images: parseImages(str(p.image_urls)),
     lines: linesByPanel.get(String(p.ROWID)) ?? [],
     createdTime: str(p.CREATEDTIME),
@@ -134,6 +139,7 @@ export interface PanelInput {
   panel_code: string;
   panel_size: string;
   vinyl_size: string;
+  mdf_size: string; // CR-344: must match an Mdf master size for the order line to pick a thickness
   lines: PanelLineInput[];
 }
 
@@ -153,6 +159,7 @@ function savePanel(input: PanelInput, rowid?: string): Promise<OpResult> {
       panel_code: input.panel_code.trim(),
       panel_size: input.panel_size.trim(),
       vinyl_size: input.vinyl_size.trim(),
+      mdf_size: input.mdf_size.trim(),
       lines: input.lines,
     }),
   );

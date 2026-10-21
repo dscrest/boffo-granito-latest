@@ -14,7 +14,7 @@ import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
 import { QuotePrint } from "@/features/quotes/QuotePrint";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { deleteSalesOrder, listOrders, loadStatus, palStatus, remainingOf, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
+import { deleteSalesOrder, listOrders, loadStatus, orderLabel, palStatus, remainingOf, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
 import { DeallocateStockModal } from "./DeallocateStockModal";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
 import { listPalPlans, palLineStatusLabel } from "@/features/stages/palPlansApi";
@@ -22,6 +22,8 @@ import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages
 import { SourcePanelOrders } from "@/features/panels/SourcePanelOrders";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
+import { soNextStep } from "@/features/stages/nextStep";
+import type { PalPlanLine } from "@/features/stages/palPlansApi";
 import { listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
 import { AllocateStockModal } from "./AllocateStockModal";
 import { ChangeStatusModal } from "./ChangeStatusModal";
@@ -342,13 +344,16 @@ export function OrderDetail() {
   // Boxes New Loading could take right now (same groupReady the Loading Session
   // uses); null = not known yet, so the button is never greyed on a guess.
   const [readyToLoad, setReadyToLoad] = useState<number | null>(null);
+  const [soLines, setSoLines] = useState<PalPlanLine[]>([]); // CR-328: the Next line reads line statuses
   const soIdForReady = head?.salesOrderId || "";
   useEffect(() => {
     if (!soIdForReady) return;
     let alive = true;
     void listPalPlans().then((r) => {
       if (!alive || !r.ok) return;
-      const bands = groupReady(r.plans.flatMap((p) => p.lines), (l) => l.salesOrderId === soIdForReady);
+      const all = r.plans.flatMap((p) => p.lines);
+      setSoLines(all.filter((l) => l.salesOrderId === soIdForReady));
+      const bands = groupReady(all, (l) => l.salesOrderId === soIdForReady);
       setReadyToLoad(bands.reduce((n, b) => n + b.designs.reduce((m, d) => m + d.ready, 0), 0));
     });
     return () => {
@@ -408,7 +413,7 @@ export function OrderDetail() {
   const onReject = async () => {
     const reason = await promptDialog({
       title: "Reject order",
-      message: `Reason for rejecting ${head.orderNumber || head.poNumber}:`,
+      message: `Reason for rejecting ${orderLabel(head)}:`,
       placeholder: "Rejection reason",
       confirmLabel: "Reject",
       danger: true,
@@ -432,7 +437,7 @@ export function OrderDetail() {
 
   const onDelete = async () => {
     if (!head.salesOrderId) return;
-    const reason = await confirmDelete({ message: `Delete order ${head.orderNumber || head.poNumber}? This cannot be undone.` });
+    const reason = await confirmDelete({ message: `Delete order ${orderLabel(head)}? This cannot be undone.` });
     if (reason == null) return;
     const res = await deleteSalesOrder(head.salesOrderId, reason);
     if (!res.ok) {
@@ -450,8 +455,9 @@ export function OrderDetail() {
   // Trimmed to read like the Quote detail — SO-specific extras (Country, Line
   // Items, Total Qty, Box Branding, Invoice) live in the Items table below.
   const fields: RecordField[] = [
-    // SO Number shown in the details (user mandate 2026-07-20: customer details
-    // carry the SO number, not the PO number). It's also the page title.
+    // CR-353 (reverses the 2026-07-20 mandate): the customer's PO leads — it is the
+    // page title too — and the SO number rides second (still the DB / URL identity).
+    { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
     { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
     // Stage omitted — the order's status is the header chip, not repeated here.
@@ -522,13 +528,13 @@ export function OrderDetail() {
                   color: "inherit",
                   textDecoration: "none",
                 }}
-                title={x.orderNumber || x.poNumber}
+                title={[orderLabel(x), x.orderNumber].filter(Boolean).join("  ·  ")}
               >
                 <div style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {x.orderNumber || x.poNumber || "—"}
+                  {orderLabel(x)}
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[x.party, soStatusLabel(x.status || "Confirmed")].filter(Boolean).join("  ·  ")}
+                  {[x.orderNumber, x.party, soStatusLabel(x.status || "Confirmed")].filter(Boolean).join("  ·  ")}
                 </div>
               </Link>
             );
@@ -540,7 +546,7 @@ export function OrderDetail() {
       <div style={{ flex: 1, minWidth: 0 }}>
     <RecordDetail
       backTo="/orders"
-      title={head.orderNumber || head.poNumber}
+      title={orderLabel(head)}
       statusChip={{
         label: display.label,
         cls: display.cls,
@@ -638,9 +644,14 @@ export function OrderDetail() {
         </>
       }
       subtitle={
-        <Link className="linkish" to={`/parties/${encodeURIComponent(head.partyCode)}`} title="Open customer">
-          {head.party}
-        </Link>
+        // CR-353: SO number small under the PO title, then the customer.
+        <>
+          {head.orderNumber && <span className="mono dim" title="Sales order number">{head.orderNumber}</span>}
+          {head.orderNumber && "  ·  "}
+          <Link className="linkish" to={`/parties/${encodeURIComponent(head.partyCode)}`} title="Open customer">
+            {head.party}
+          </Link>
+        </>
       }
       fields={fields}
       hiddenStorageKey="orderDetailFields"
@@ -687,6 +698,16 @@ export function OrderDetail() {
           <span className="muted" style={{ fontSize: 14 }}>
             {totalAvail} boxes to palletize
           </span>
+          {/* CR-328: the one visible "what to do first" — the greyed buttons' titles say the same. */}
+          {(() => {
+            const n = soNextStep(items, soLines);
+            const link = n.to && !n.to.startsWith("/orders/");
+            return (
+              <span className="dim" style={{ fontSize: "var(--t-sm)" }}>
+                Next: {link ? <Link to={n.to} className="linkish">{n.reason}</Link> : n.reason}
+              </span>
+            );
+          })()}
           <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
             {/* Both send paths (this button and the header More → Palletization)
                open the same PalPlan screen scoped to this order. */}
@@ -850,7 +871,7 @@ export function OrderDetail() {
       )}
       {changingStatus && head.salesOrderId && (
         <ChangeStatusModal
-          title={[head.orderNumber || head.poNumber, head.party].filter(Boolean).join("  ·  ")}
+          title={[orderLabel(head), head.party].filter(Boolean).join("  ·  ")}
           salesOrderId={head.salesOrderId}
           current={status}
           onDone={() => void load()}
@@ -859,7 +880,7 @@ export function OrderDetail() {
       )}
       {allocating && head.salesOrderId && (
         <AllocateStockModal
-          title={[head.orderNumber || head.poNumber, head.party].filter(Boolean).join("  ·  ")}
+          title={[orderLabel(head), head.party].filter(Boolean).join("  ·  ")}
           items={items}
           onDone={() => void load()}
           onClose={() => setAllocating(false)}
@@ -867,7 +888,7 @@ export function OrderDetail() {
       )}
       {deallocating && head.salesOrderId && (
         <DeallocateStockModal
-          title={[head.orderNumber || head.poNumber, head.party, deallocating !== "*" ? items.find((o) => o.id === deallocating)?.design : ""].filter(Boolean).join("  ·  ")}
+          title={[orderLabel(head), head.party, deallocating !== "*" ? items.find((o) => o.id === deallocating)?.design : ""].filter(Boolean).join("  ·  ")}
           salesOrderId={head.salesOrderId}
           orderItemId={deallocating === "*" ? undefined : deallocating}
           items={items}

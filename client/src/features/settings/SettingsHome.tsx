@@ -10,6 +10,7 @@
    Items navigate to their existing routes — this page is layout only,
    it owns no data and makes no API calls of its own.
    ============================================================ */
+import { ZOHO } from "@/features/masters/zohoApi";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePersistedState } from "@/lib/usePersistedState";
@@ -84,7 +85,10 @@ const GROUPS: SettingGroup[] = [
       { label: "Customer Brand", icon: "flag", route: "/masters?m=party_brand", desc: "Private-label brands" },
       { label: "Grade", icon: "check", route: "/masters?m=grade", desc: "Quality grades" },
       { label: "Cut Piece Size", icon: "tile", route: "/masters?m=cut_piece_size", desc: "Panel cut-piece dimensions" },
+      { label: "MDF", icon: "tile", route: "/masters?m=mdf", desc: "Board sizes, thicknesses and weights" }, // CR-344
       { label: "Size Master", icon: "tile", route: "/sizes", desc: "Nominal dimensions and box packing" },
+      { label: "Adjustment Reason", icon: "check", route: "/masters?m=adjustment_reason", desc: "Why stock was adjusted" }, // CR-308 (tile was missing)
+      { label: "Warehouses", icon: "package", route: "/warehouses", desc: "Stock locations — primary, purposes" }, // CR-329
     ],
   },
   {
@@ -94,6 +98,7 @@ const GROUPS: SettingGroup[] = [
     sub: "Move data in and out in bulk.",
     items: [
       { label: "Export", icon: "docs", route: "/data-operations", desc: "Download records as a file" },
+      { label: ZOHO.label, icon: "refresh", route: "/settings/zoho", desc: `Customer sync with the organisation's ${ZOHO.label}` },
     ],
   },
   {

@@ -68,11 +68,13 @@ const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ d
 const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
 const PanelDetail = lazy(() => import("@/features/panels/PanelDetail").then((m) => ({ default: m.PanelDetail })));
 const PanelFormPage = lazy(() => import("@/features/panels/PanelFormPage").then((m) => ({ default: m.PanelFormPage })));
-const PanelOrders = lazy(() => import("@/features/panels/PanelOrders").then((m) => ({ default: m.PanelOrders })));
+// CR-345: ONE Orders register (Panel + Sample) and ONE type-first New Order; CR-348: the Loading page.
+const Orders = lazy(() => import("@/features/panels/Orders").then((m) => ({ default: m.Orders })));
+const PanelCraftOrderFormPage = lazy(() => import("@/features/panels/OrderFormPage").then((m) => ({ default: m.OrderFormPage })));
+const PanelLoading = lazy(() => import("@/features/panels/PanelLoading").then((m) => ({ default: m.PanelLoading })));
 const PanelOrderDetail = lazy(() => import("@/features/panels/PanelOrderDetail").then((m) => ({ default: m.PanelOrderDetail })));
 const PanelOrderFormPage = lazy(() => import("@/features/panels/PanelOrderFormPage").then((m) => ({ default: m.PanelOrderFormPage })));
 // CR-315…317: Sample Orders — customer sample requests, a separate order type beside Panel Orders.
-const SampleOrders = lazy(() => import("@/features/panels/SampleOrders").then((m) => ({ default: m.SampleOrders })));
 const SampleOrderDetail = lazy(() => import("@/features/panels/SampleOrderDetail").then((m) => ({ default: m.SampleOrderDetail })));
 const SampleOrderFormPage = lazy(() => import("@/features/panels/SampleOrderFormPage").then((m) => ({ default: m.SampleOrderFormPage })));
 const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
@@ -86,6 +88,10 @@ const PendingCutStock = lazy(() => import("@/features/panels/PendingCutStock").t
 // CR-308: box-stock inventory adjustments (list + bulk sheet).
 const StockAdjustments = lazy(() => import("@/features/masters/StockAdjustments").then((m) => ({ default: m.StockAdjustments })));
 const StockAdjustmentSheet = lazy(() => import("@/features/masters/StockAdjustmentSheet").then((m) => ({ default: m.StockAdjustmentSheet })));
+// CR-329/330: warehouses master + transfer orders (list + bulk sheet).
+const Warehouses = lazy(() => import("@/features/masters/Warehouses").then((m) => ({ default: m.Warehouses })));
+const StockTransfers = lazy(() => import("@/features/masters/StockTransfers").then((m) => ({ default: m.StockTransfers })));
+const StockTransferSheet = lazy(() => import("@/features/masters/StockTransferSheet").then((m) => ({ default: m.StockTransferSheet })));
 const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
 const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
@@ -101,6 +107,7 @@ const RolesAdmin = lazy(() => import("@/features/admin/Roles").then((m) => ({ de
 const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
 const SettingsHome = lazy(() => import("@/features/settings/SettingsHome").then((m) => ({ default: m.SettingsHome })));
 const DataOperations = lazy(() => import("@/features/settings/DataOperations").then((m) => ({ default: m.DataOperations })));
+const ZohoSyncSettings = lazy(() => import("@/features/settings/ZohoSyncSettings").then((m) => ({ default: m.ZohoSyncSettings })));
 
 /* Sidebar is a nested tree: a node is a leaf (has `id` → route) or a
    collapsible parent (has `children`). Parents accordion open/close on click;
@@ -131,6 +138,8 @@ function navTree(): NavNode[] {
         { id: "stock", label: "Stock Details", icon: "tile" },
         // CR-308: Zoho-Books-style inventory adjustments (breakage, theft, count correction).
         { id: "stock-adjustments", label: "Stock Adjustments", icon: "edit" },
+        // CR-330: Zoho-Books-style transfer orders between warehouses (boxes + cut pieces).
+        { id: "stock-transfers", label: "Transfer Orders", icon: "truck" },
         // Size Master lives under Settings ▸ Product Masters (admin-only).
         // Pallet Master = the master of pallet formats (an Items master).
         // Palletization (Sales, id "packing") is the process that consumes it.
@@ -155,11 +164,12 @@ function navTree(): NavNode[] {
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
-        // Palletization is TWO pages over one board (CR-160): the queue and
-        // the work-in-progress + Ready-for-Loading handoff. Same feature id
-        // ("packing") so one role permission covers both.
+        // Palletization is THREE pages over one board (CR-160, CR-360): the
+        // queue, the work in progress, and the palletized stock waiting for
+        // loading. Same feature id ("packing") so one role permission covers all.
         { id: "packing", label: "Ready for Palletization", icon: "palette", path: "/packing" },
         { id: "packing", label: "In Palletization", icon: "palette", path: "/palletizing" },
+        { id: "packing", label: "Palletization Completed", icon: "palette", path: "/palletized" },
         { id: "loading", label: "Loading and Dispatch", icon: "truck" },
       ],
     },
@@ -173,11 +183,11 @@ function navTree(): NavNode[] {
         // pieces + stock → panels assembled from them → orders dispatch against it.
         { id: "panel-dashboard", label: "Dashboard", icon: "dashboard" },
         { id: "panel-items", label: "Panel Items", icon: "tile" },
-        { id: "cut-stock", label: "Cut Stock", icon: "tile" },
-        { id: "pending-cut-stock", label: "Pending Cut Stock", icon: "tile" },
-        { id: "panels", label: "Panels", icon: "tile" },
-        { id: "panel-orders", label: "Panel Orders", icon: "orders" },
-        { id: "sample-orders", label: "Sample Orders", icon: "orders" }, // CR-315
+        { id: "cut-stock", label: "Cut Piece", icon: "tile" },
+        { id: "pending-cut-stock", label: "Pending Cut Piece", icon: "tile" },
+        { id: "panels", label: "Panel Master", icon: "tile" },
+        { id: "panel-orders", label: "Orders", icon: "orders" }, // CR-345: Panel + Sample orders in one register
+        { id: "panel-loading", label: "Loading", icon: "truck" }, // CR-348: what is pending to load, record vehicle trips
       ],
     },
     // ponytail: Stages menu hidden for now — routes still registered, just no nav entry.
@@ -225,6 +235,28 @@ function ancestorsOf(id: string, nodes: NavNode[] = navTree(), trail: string[] =
     }
   }
   return null;
+}
+
+/* Labels of every parent above the group `label` (groups match by label). */
+function groupAncestorsOf(label: string, nodes: NavNode[] = navTree(), trail: string[] = []): string[] | null {
+  for (const n of nodes) {
+    if (!n.children) continue;
+    if (n.label === label) return trail;
+    const found = groupAncestorsOf(label, n.children, [...trail, n.label]);
+    if (found) return found;
+  }
+  return null;
+}
+
+/* Accordion: the open set is exactly one path — `labels` plus their ancestors.
+   Every sibling group outside that path collapses. */
+function openOnly(labels: string[]): Record<string, boolean> {
+  const keep = new Set<string>();
+  labels.forEach((l) => {
+    (groupAncestorsOf(l) ?? []).forEach((a) => keep.add(a));
+    keep.add(l);
+  });
+  return Object.fromEntries([...keep].map((l) => [l, true]));
 }
 
 interface NavNodeRowProps {
@@ -319,19 +351,17 @@ export default function App() {
     return () => mq.removeEventListener("change", apply);
   }, []);
 
-  // Which parent groups are expanded. Active route's ancestors auto-open.
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    (ancestorsOf(baseId) || []).forEach((l) => (init[l] = true));
-    return init;
-  });
+  // Which parent groups are expanded — accordion: one open path at a time.
+  // The active route's ancestors auto-open (and collapse the rest).
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => openOnly(ancestorsOf(baseId) || []));
   useEffect(() => {
     const anc = ancestorsOf(baseId);
-    if (anc?.length) setOpenGroups((p) => ({ ...p, ...Object.fromEntries(anc.map((l) => [l, true])) }));
+    if (anc?.length) setOpenGroups(openOnly(anc));
   }, [baseId]);
   // Stable ref so memoized NavNodeRow doesn't re-render on unrelated state.
   const toggleGroup = useCallback(
-    (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] })),
+    (label: string) =>
+      setOpenGroups((p) => (p[label] ? { ...p, [label]: false } : openOnly([label]))),
     [],
   );
 
@@ -444,9 +474,11 @@ export default function App() {
             <Route path="/fit" element={<FitSuggest />} />
             <Route path="/loadplan" element={<LoadPlanner />} />
             <Route path="/ops" element={<OperationsLog />} />
-            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" pageLabel="Ready for Palletization" allOption={false} />} />
-            {/* CR-278: recorded (Ready for Loading) rows list here again beside In Palletization; /loading keeps them too. */}
-            <Route path="/palletizing" element={<PalPlans stages={["Palletizing", "Ready"]} pageLabel="In Palletization" />} />
+            <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
+            {/* CR-360: one stage per page — In Palletization alone here, the recorded
+                (Ready for Loading) rows on /palletized; /loading keeps its Ready section too. */}
+            <Route path="/palletizing" element={<PalPlans stages={["Palletizing"]} />} />
+            <Route path="/palletized" element={<PalPlans stages={["Ready"]} sectionsKey="palplans.stages.done" />} />
             <Route path="/packing/new" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/edit" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/clone" element={<PalPlanFormPage />} />
@@ -465,6 +497,8 @@ export default function App() {
             <Route path="/stock" element={<StockDetails />} />
             <Route path="/stock-adjustments" element={<StockAdjustments />} />
             <Route path="/stock-adjustments/new" element={<StockAdjustmentSheet />} />
+            <Route path="/stock-transfers" element={<StockTransfers />} />
+            <Route path="/stock-transfers/new" element={<StockTransferSheet />} />
             <Route path="/pallets" element={<Pallets />} />
             <Route path="/pallets/new" element={<PalletFormPage />} />
             <Route path="/pallets/:id/edit" element={<PalletFormPage />} />
@@ -475,28 +509,33 @@ export default function App() {
             <Route path="/panels/:id/edit" element={<PanelFormPage />} />
             <Route path="/panels/:id/clone" element={<PanelFormPage />} />
             <Route path="/panels/:id" element={<PanelDetail />} />
-            <Route path="/panel-orders" element={<PanelOrders />} />
-            <Route path="/panel-orders/new" element={<PanelOrderFormPage />} />
+            <Route path="/panel-orders" element={<Orders />} />
+            <Route path="/panel-orders/new" element={<PanelCraftOrderFormPage />} />
             <Route path="/panel-orders/:id/edit" element={<PanelOrderFormPage />} />
             <Route path="/panel-orders/:id/clone" element={<PanelOrderFormPage />} />
             <Route path="/panel-orders/:id" element={<PanelOrderDetail />} />
-            <Route path="/sample-orders" element={<SampleOrders />} />
-            <Route path="/sample-orders/new" element={<SampleOrderFormPage />} />
+            <Route path="/sample-orders" element={<Navigate to="/panel-orders?type=Sample" replace />} />
+            <Route path="/sample-orders/new" element={<PanelCraftOrderFormPage />} />
             <Route path="/sample-orders/:id/edit" element={<SampleOrderFormPage />} />
             <Route path="/sample-orders/:id/clone" element={<SampleOrderFormPage />} />
             <Route path="/sample-orders/:id" element={<SampleOrderDetail />} />
             <Route path="/cut-stock" element={<CutStock />} />
             <Route path="/cut-stock/record" element={<CutStockSheetPage kind="receipt" />} />
             <Route path="/cut-stock/adjust" element={<CutStockSheetPage kind="adjustment" />} />
+            <Route path="/cut-stock/transfer" element={<CutStockSheetPage kind="transfer" />} />
             <Route path="/pending-cut-stock" element={<PendingCutStock />} />
             <Route path="/panel-dashboard" element={<PanelDashboard />} />
+            <Route path="/panel-loading" element={<PanelLoading />} />
             <Route path="/panel-items" element={<PanelItems />} />
             <Route path="/panel-items/:id" element={<PanelItemDetail />} />
             <Route path="/sizes" element={<Sizes />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />
             <Route path="/data-operations" element={isAdmin ? <DataOperations /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/settings/zoho" element={isAdmin ? <ZohoSyncSettings /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/settings/zoho-books" element={<Navigate to="/settings/zoho" replace />} />
             <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/warehouses" element={isAdmin ? <Warehouses /> : <Navigate to="/dashboard" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/roles" element={isAdmin ? <RolesAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/currencies" element={isAdmin ? <CurrenciesAdmin /> : <Navigate to="/dashboard" replace />} />
@@ -515,7 +554,7 @@ export default function App() {
       <TourHost
         userReady={user !== null}
         expandSidebar={() => setCollapsed(false)}
-        openGroup={(label) => setOpenGroups((p) => ({ ...p, [label]: true }))}
+        openGroup={(label) => setOpenGroups(openOnly([label]))}
       />
     </div>
   );

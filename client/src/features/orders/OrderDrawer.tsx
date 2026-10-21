@@ -7,6 +7,7 @@ import { SplitBar } from "@/ui/primitives";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { type Order } from "@/data";
 import { useOrders } from "./useOrders";
+import { orderLabel } from "./ordersApi";
 import { AdvanceButton } from "./AdvanceButton";
 import { EmptyState } from "@/ui/States";
 import { StatusTimeline } from "@/features/common/RecordDetail";
@@ -60,7 +61,8 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
         <div className="drawer-head">
           <div className="meta">
             <div className="id">
-              {order.orderNumber || order.poNumber}{" "}
+              {orderLabel(order)}
+              {order.orderNumber && <span className="mono dim" style={{ marginLeft: 8 }} title="Sales order number">{order.orderNumber}</span>}{" "}
               <span style={{ marginLeft: 8 }}>
                 {order.flag} {order.party}
               </span>
@@ -227,8 +229,8 @@ function OverviewTab({ order, lineItems }: { order: Order; lineItems: Order[] })
         </div>
         {/* Real SalesOrder/OrderItem fields only — no invented doc refs or shipping terms. */}
         <div className="spec-grid">
-          <Spec l="SO Number" v={order.orderNumber || "—"} mono />
           <Spec l="PO Number" v={order.poNumber || "—"} mono />
+          <Spec l="SO Number" v={order.orderNumber || "—"} mono />
           <Spec l="Customer" v={`${order.flag} ${order.party}`} />
           <Spec l="Country" v={order.country} />
           <Spec l="Order Date" v={order.orderDate} mono />
@@ -356,7 +358,7 @@ function ActivityTab({ order }: { order: Order }) {
               <span className="action">Order created</span>
             </div>
             <div className="detail">
-              {order.orderNumber || order.poNumber} · {order.party}
+              {orderLabel(order)} · {order.party}
             </div>
           </div>
         </div>

@@ -72,7 +72,7 @@ export function SampleOrderFormPage() {
       return;
     }
     toast.success(editing ? "Sample order updated" : source ? "Sample request raised" : "Sample order saved");
-    navigate(editing ? detailUrl(orderId) : res.rowid ? detailUrl(res.rowid) : "/sample-orders", { replace: true });
+    navigate(editing ? detailUrl(orderId) : res.rowid ? detailUrl(res.rowid) : "/panel-orders?type=Sample", { replace: true });
   };
 
   return (
@@ -85,7 +85,7 @@ export function SampleOrderFormPage() {
       presetDesignIds={source?.designIds}
       source={source ? { label: source.label } : undefined}
       onSave={onSave}
-      onClose={() => navigate(orderId ? detailUrl(orderId) : fromOrder ? `/orders/${encodeURIComponent(fromOrder)}` : fromQuote ? `/quotes/${encodeURIComponent(fromQuote)}` : "/sample-orders")}
+      onClose={() => navigate(orderId ? detailUrl(orderId) : fromOrder ? `/orders/${encodeURIComponent(fromOrder)}` : fromQuote ? `/quotes/${encodeURIComponent(fromQuote)}` : "/panel-orders?type=Sample")}
     />
   );
 }

@@ -14,6 +14,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { fmtDateTime } from "@/lib/format";
+import { loadLoginDomains, setLoginDomains } from "@/features/settings/settingsApi";
 
 interface UserRow {
   rowid: string;
@@ -22,6 +23,8 @@ interface UserRow {
   active: boolean;
   role: string | null;
   roleName: string;
+  hasPassword: boolean; // CR-337
+  zohoLinkedAt: string; // CR-337: "" = never signed in with Zoho
   createdTime: string;
   modifiedTime: string;
 }
@@ -29,8 +32,28 @@ interface UserRow {
 interface RoleOption {
   rowid: string;
   name: string;
-  can_update: boolean;
-  can_delete: boolean;
+  matrix: Record<string, string[]>;
+}
+
+/* CR-336: the default for a new account (server self-seeds it). */
+const DEFAULT_ROLE = "Staff";
+
+/* Option suffix from the matrix (the legacy can_update flag read "no delete"
+   for a role that cannot edit either). */
+function roleSuffix(r: RoleOption): string {
+  const acts = new Set(Object.values(r.matrix ?? {}).flat());
+  if (r.name === "Admin" || acts.has("delete")) return " (full)";
+  if (acts.has("edit")) return " (no delete)";
+  if (acts.has("create")) return " (view + create)";
+  return " (read-only)";
+}
+
+/* CR-337: how the account signs in — derived, never stored. */
+function signIn(u: UserRow): { label: string; dim?: boolean } {
+  if (u.zohoLinkedAt && u.hasPassword) return { label: "Both" };
+  if (u.zohoLinkedAt) return { label: "Zoho" };
+  if (u.hasPassword) return { label: "Password" };
+  return { label: "None", dim: true };
 }
 
 interface Draft {
@@ -56,6 +79,18 @@ const USER_COLUMNS: ColumnDef<UserRow>[] = [
     render: (u) => (u.roleName ? <span className="chip">{u.roleName}</span> : <span className="dim">no role</span>),
   },
   {
+    key: "signin",
+    label: "Sign-in",
+    render: (u) => {
+      const s = signIn(u);
+      return (
+        <span className="chip" style={s.dim ? { color: "var(--dim)" } : undefined} title={u.zohoLinkedAt ? `Zoho linked ${fmtDateTime(u.zohoLinkedAt)}` : "No Zoho sign-in yet"}>
+          {s.label}
+        </span>
+      );
+    },
+  },
+  {
     key: "status",
     label: "Status",
     render: (u) =>
@@ -78,6 +113,8 @@ export function UsersAdmin() {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [roleF, setRoleF] = useState("");
+  const [domains, setDomains] = useState(""); // CR-337: Zoho sign-in allow-list
+  const [savedDomains, setSavedDomains] = useState("");
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("usersTableColumns", USER_COLUMNS, ["created", "modified"]);
 
   const load = async () => {
@@ -89,6 +126,9 @@ export function UsersAdmin() {
       ]);
       setUsers(u.users);
       setRoles(r.roles);
+      const d = await loadLoginDomains();
+      setDomains(d);
+      setSavedDomains(d);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load users");
@@ -131,6 +171,18 @@ export function UsersAdmin() {
     }
   };
 
+  const onSaveDomains = async () => {
+    setBusy(true);
+    const res = await setLoginDomains(domains);
+    setBusy(false);
+    if (!res.ok) return toast.error(res.error || "Save failed");
+    setSavedDomains(domains.trim().toLowerCase());
+    setDomains(domains.trim().toLowerCase());
+    toast.success("Zoho sign-in domains saved");
+  };
+
+  const staffRole = roles.find((r) => r.name === DEFAULT_ROLE)?.rowid ?? "";
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
@@ -143,10 +195,9 @@ export function UsersAdmin() {
 
   const valid =
     draft &&
-    (draft.rowid
-      ? // edit: password optional, but if set must be >= 6 chars
-        draft.password.length === 0 || draft.password.length >= 6
-      : draft.email.includes("@") && draft.password.length >= 6);
+    // Password optional on create too (CR-337: blank = Zoho sign-in only); if set, ≥ 6 chars.
+    (draft.password.length === 0 || draft.password.length >= 6) &&
+    (draft.rowid ? true : draft.email.includes("@"));
 
   return (
     <div>
@@ -163,7 +214,7 @@ export function UsersAdmin() {
             <Icon name="clock" size={13} />
             Refresh
           </button>
-          <button className="hbtn primary" onClick={() => setDraft({ ...EMPTY })}>
+          <button className="hbtn primary" onClick={() => setDraft({ ...EMPTY, role: staffRole })}>
             <Icon name="plus" size={13} />
             New user
           </button>
@@ -197,10 +248,7 @@ export function UsersAdmin() {
               <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </label>
             <label className="form-field">
-              <span className="lbl">
-                {draft.rowid ? "New password (blank = unchanged)" : "Password"}
-                {!draft.rowid && <span className="req"> *</span>}
-              </span>
+              <span className="lbl">{draft.rowid ? "New password (blank = unchanged)" : "Password (blank = Zoho sign-in only)"}</span>
               <input
                 type="password"
                 value={draft.password}
@@ -215,7 +263,7 @@ export function UsersAdmin() {
                 {roles.map((r) => (
                   <option key={r.rowid} value={r.rowid}>
                     {r.name}
-                    {r.can_delete ? " (full)" : r.can_update ? " (no delete)" : " (read-only)"}
+                    {roleSuffix(r)}
                   </option>
                 ))}
               </select>
@@ -243,6 +291,35 @@ export function UsersAdmin() {
           </div>
         </div>
       )}
+
+      {/* CR-337: who may create their own account by signing in with Zoho */}
+      <div className="card form-section" style={{ marginBottom: 12, padding: 16 }}>
+        <div className="form-section-title" style={{ marginBottom: 10 }}>
+          <Icon name="shield-check" size={13} className="ic" />
+          Zoho sign-in domains
+        </div>
+        <div className="form-rows one">
+          <label className="form-field">
+            <span className="lbl">Allowed domains</span>
+            <div className="row" style={{ gap: 8 }}>
+              <input
+                type="text"
+                value={domains}
+                onChange={(e) => setDomains(e.target.value)}
+                placeholder="octfis.com, boffogranito.com"
+                style={{ flex: 1 }}
+              />
+              <button className="hbtn primary" disabled={busy || domains.trim().toLowerCase() === savedDomains} onClick={() => void onSaveDomains()}>
+                <Icon name="check" size={13} />
+                Save
+              </button>
+            </div>
+          </label>
+        </div>
+        <div className="muted" style={{ marginTop: 8 }}>
+          Someone from these domains who signs in with Zoho for the first time gets a {DEFAULT_ROLE} account (view and create, no edit or delete). Blank = only accounts created here can sign in.
+        </div>
+      </div>
 
       <div className="fbar">
         <div style={{ flex: 1 }} />

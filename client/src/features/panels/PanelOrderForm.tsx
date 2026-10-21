@@ -10,8 +10,10 @@
    Sales Person defaults to the logged-in user; Order Date to today. The
    cut-piece requirement across ALL lines is shown vs on-hand. Panels
    enter ONLY via the multi-select tile picker (CR-304); no blank rows.
-   CR-309: each line picks the MDF it is mounted on (default = the MDF whose
-   size matches the panel size); Weight = Σ cut-piece weight × pieces + MDF,
+   CR-309/342: each line picks ONLY the MDF thickness, from the thicknesses
+   configured on that panel (Panel master = MDF size + thickness options,
+   each with its board weight); mandatory once the panel has any, auto when
+   it has exactly one. Weight = Σ cut-piece weight × pieces + that board,
    × qty — read-only ƒx, "—" until every cut piece has a weight.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
@@ -26,14 +28,19 @@ import { cachedCustomers, listCustomers, type CustomerRow } from "@/features/mas
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
-import { cachedCutStock, cachedCutWeights, listCutStock, requirementsFor, type PanelOrderInput } from "./panelOrdersApi";
-import { panelWeight } from "./panelOrderNeeds";
+import { toast } from "@/ui/Toast";
+import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
+import { cachedCutSizes, cachedPanels, createCutSize, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
+import { cachedCutStock, cachedCutStockRows, cachedCutWeights, listCutStock, requirementsFor, stockKey, type NeedLine, type PanelOrderInput } from "./panelOrdersApi";
+import { panelWeightSplit } from "./panelOrderNeeds";
 import { PanelPickerModal } from "./PanelPickerModal";
 
-type Line = { panelId: string; qty: number; mdfId: string };
+/** CR-346: a line is a showcase PANEL (panelId [+ mdfId]) or a loose CUT PIECE (designId + cutSizeId). */
+type Line = { kind: "panel" | "cut"; panelId: string; qty: number; mdfId: string; designId: string; cutSizeId: string };
 const kg = (n: number) => `${Math.round(n * 100) / 100} kg`;
+const panelLine = (panelId: string, mdfId: string): Line => ({ kind: "panel", panelId, qty: 1, mdfId, designId: "", cutSizeId: "" });
+const cutLine = (): Line => ({ kind: "cut", panelId: "", qty: 1, mdfId: "", designId: "", cutSizeId: "" });
 
 export function PanelOrderForm({
   initial,
@@ -62,28 +69,40 @@ export function PanelOrderForm({
   const form = useFormSave(onClose);
   const [customers, setCustomers] = useState<CustomerRow[]>(() => cachedCustomers() ?? []);
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
+  const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs()); // CR-344: size-keyed MDF master
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [weights, setWeights] = useState<Map<string, number | null>>(() => cachedCutWeights() ?? new Map());
-  const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs());
   const [salesperson, setSalesperson] = useState(() => initial?.salesperson || currentSalespersonName(cachedSalesPersons() ?? []));
 
   const [customer, setCustomer] = useState(initial?.customer ?? presetCustomerId ?? "");
   const [custSearch, setCustSearch] = useState(false);
-  const [lines, setLines] = useState<Line[]>(() => initial?.lines.map((l) => ({ panelId: l.panel, qty: l.qty, mdfId: l.mdf || "" })) ?? []);
+  const [lines, setLines] = useState<Line[]>(
+    () =>
+      initial?.lines.map((l) =>
+        l.panel ? { ...panelLine(l.panel, l.mdf || ""), qty: l.qty } : { ...cutLine(), qty: l.qty, designId: l.design || "", cutSizeId: l.cut_piece_size || "" },
+      ) ?? [],
+  );
+  const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
+  const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
   const [preselected, setPreselected] = useState(!!initial);
   const [orderDate, setOrderDate] = useState(initial?.order_date || todayISO());
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     void listCustomers().then((r) => r.ok && setCustomers(r.customers));
-    void listPanels().then((r) => r.ok && setPanels(r.panels));
+    void listPanels().then((r) => {
+      if (!r.ok) return;
+      setPanels(r.panels);
+      setCutSizes(r.cutSizes);
+    });
+    void listDesigns().then((r) => r.ok && setDesigns(r.designs));
+    void listMdfs().then((r) => r.ok && setMdfs(r.rows));
     void listCutStock().then((r) => {
       if (r.ok) {
         setStock(r.stock);
         setWeights(r.weights);
       }
     });
-    void listMdfs().then((r) => r.ok && setMdfs(r.rows));
     void listSalesPersons().then((r) => r.ok && setSalesperson((s) => s || currentSalespersonName(r.salesPersons)));
   }, []);
 
@@ -91,7 +110,7 @@ export function PanelOrderForm({
   useEffect(() => {
     if (preselected || !presetDesignIds?.length || panels.length === 0) return;
     const want = new Set(presetDesignIds);
-    setLines(panels.filter((p) => p.lines.some((l) => want.has(l.designId))).map((p) => ({ panelId: p.id, qty: 1, mdfId: defaultMdf(p.id) })));
+    setLines(panels.filter((p) => p.lines.some((l) => want.has(l.designId))).map((p) => panelLine(p.id, defaultMdf(p.id))));
     setPreselected(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels, presetDesignIds, preselected]);
@@ -102,18 +121,58 @@ export function PanelOrderForm({
   );
   const customerName = customers.find((c) => c.id === customer)?.name ?? "";
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
+  // CR-344: the pick list = MDF master rows whose size matches the panel's MDF size; one option picks itself.
   const mdfById = useMemo(() => new Map(mdfs.map((m) => [m.id, m])), [mdfs]);
-  const mdfOptions = useMemo(() => mdfs.map((m) => ({ value: m.id, label: m.label, hint: m.weightKg != null ? `${m.weightKg} kg` : undefined })), [mdfs]);
-  // CR-309: the MDF whose size equals the panel size is the natural default.
+  const norm = (s: string) => s.trim().toLowerCase();
+  const sameSize = (p: PanelRow | undefined) => (p?.mdfSize.trim() ? mdfs.filter((m) => norm(m.size) === norm(p.mdfSize)) : []);
+  const mdfOptions = (panelId: string) =>
+    sameSize(panelById.get(panelId)).map((m) => ({ value: m.id, label: m.thickness || m.size, hint: m.weightKg != null ? `${m.weightKg} kg` : undefined }));
   const defaultMdf = (panelId: string) => {
-    const size = panelById.get(panelId)?.panelSize.trim().toLowerCase();
-    return (size && mdfs.find((m) => m.size.trim().toLowerCase() === size)?.id) || "";
+    const v = sameSize(panelById.get(panelId));
+    return v.length === 1 ? v[0].id : "";
+  };
+  // A line is missing its thickness when the panel's size has options and none of them is picked (server refuses too).
+  const mdfMissing = (l: Line) => {
+    const v = sameSize(panelById.get(l.panelId));
+    return !!l.panelId && v.length > 0 && !v.some((m) => m.id === l.mdfId);
+  };
+  // CR-349: weight split per line — pieces vs board (a cut-piece line has no board); null until weighed.
+  const lineSplit = (l: Line): { pieces: number | null; mdf: number | null } => {
+    if (l.kind === "cut") {
+      const c = effCut(l);
+      const w = l.designId && c ? weights.get(stockKey(l.designId, c)) : null;
+      return { pieces: w == null ? null : w * (l.qty || 0), mdf: null };
+    }
+    const p = panelById.get(l.panelId);
+    if (!p) return { pieces: null, mdf: null };
+    const s = panelWeightSplit(p, weights, mdfById.get(l.mdfId)?.weightKg ?? null);
+    return { pieces: s.pieces == null ? null : s.pieces * (l.qty || 0), mdf: s.mdf == null ? null : s.mdf * (l.qty || 0) };
   };
   const lineWeight = (l: Line): number | null => {
-    const p = panelById.get(l.panelId);
-    if (!p) return null;
-    const w = panelWeight(p, weights, mdfById.get(l.mdfId)?.weightKg ?? null);
-    return w == null ? null : w * (l.qty || 0);
+    const s = lineSplit(l);
+    if (s.pieces == null) return null;
+    if (l.kind === "panel" && l.mdfId && s.mdf == null) return null;
+    return s.pieces + (s.mdf ?? 0);
+  };
+  // CR-346: cut-piece rows pick a Panel Item (a design with a cut-piece row) and one of the cut sizes.
+  const designById = useMemo(() => new Map(designs.map((d) => [d.id, d])), [designs]);
+  // CR-357: a blank cut size = the design's full size (CR-289 rule; the server mints the CutPieceSize row named
+  // after the Size code). Resolve it here only for weight / duplicate / requirement previews — "" when not minted yet.
+  const effCut = (l: Line) => l.cutSizeId || (cutSizes.find((c) => c.label === designById.get(l.designId)?.sizeLabel)?.id ?? "");
+  const itemIds = useMemo(() => new Set((cachedCutStockRows() ?? []).map((r) => r.designId)), [stock]); // eslint-disable-line react-hooks/exhaustive-deps
+  const designOptions = useMemo(
+    () => designs.filter((d) => itemIds.has(d.id) || lines.some((l) => l.designId === d.id)).map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.sizeLabel || undefined })),
+    [designs, itemIds, lines],
+  );
+  const cutOptions = useMemo(() => cutSizes.map((c) => ({ value: c.id, label: c.label })), [cutSizes]);
+  const onCreateCutSize = async (i: number, name: string) => {
+    const res = await createCutSize(name);
+    if (!res.ok || !res.rowid) {
+      toast.error(res.error || "Could not add the cut piece size to the master");
+      return;
+    }
+    setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
+    setLine(i, { cutSizeId: res.rowid });
   };
   const panelOptions = useMemo(
     () => panels.map((p) => ({ value: p.id, label: p.panelCode, hint: p.lines.map((l) => l.designName).join(", ") || undefined })),
@@ -131,33 +190,54 @@ export function PanelOrderForm({
   // Picker tiles toggle a line per panel (CR-193 multi-pick, now as lines).
   const togglePick = (id: string) => {
     form.touch();
-    setLines((ls) => (ls.some((l) => l.panelId === id) ? ls.filter((l) => l.panelId !== id) : [...ls, { panelId: id, qty: 1, mdfId: defaultMdf(id) }]));
+    setLines((ls) => (ls.some((l) => l.panelId === id) ? ls.filter((l) => l.panelId !== id) : [...ls, panelLine(id, defaultMdf(id))]));
   };
 
+  const lineKey = (l: Line) => (l.kind === "panel" ? `p|${l.panelId}` : `c|${l.designId}|${effCut(l)}`);
   const dupIds = useMemo(() => {
     const seen = new Set<string>();
     const dup = new Set<string>();
     for (const l of lines) {
-      if (!l.panelId) continue;
-      if (seen.has(l.panelId)) dup.add(l.panelId);
-      seen.add(l.panelId);
+      if (l.kind === "panel" ? !l.panelId : !l.designId) continue;
+      const k = lineKey(l);
+      if (seen.has(k)) dup.add(k);
+      seen.add(k);
     }
     return dup;
   }, [lines]);
   const totalQty = lines.reduce((s, l) => s + (l.qty || 0), 0);
-  const filled = lines.filter((l) => l.panelId);
+  const filled = lines.filter((l) => (l.kind === "panel" ? l.panelId : l.designId));
+  const panelsOn = filled.filter((l) => l.kind === "panel");
+  const cutsOn = filled.filter((l) => l.kind === "cut");
   const lineWeights = filled.map(lineWeight);
   const totalWeight = lineWeights.every((w) => w != null) ? lineWeights.reduce((s, w) => s + (w ?? 0), 0) : null;
 
-  // Requirement preview across every line — all lines draw from the same stock.
-  const preview = useMemo(() => requirementsFor(filled, panelById, stock), [filled, panelById, stock]);
+  // Requirement preview across every line — panels and loose cut pieces draw from the same stock.
+  const needLines = useMemo(
+    (): NeedLine[] =>
+      filled.map((l) =>
+        l.kind === "panel"
+          ? { panelId: l.panelId, qty: l.qty }
+          : { panelId: "", qty: l.qty, designId: l.designId, cutSizeId: effCut(l), designName: designById.get(l.designId)?.uniqueName || designById.get(l.designId)?.designName || "", cutSizeName: cutSizes.find((c) => c.id === effCut(l))?.label || designById.get(l.designId)?.sizeLabel || "" },
+      ),
+    [filled, designById, cutSizes],
+  );
+  const preview = useMemo(() => requirementsFor(needLines, panelById, stock), [needLines, panelById, stock]);
   const covered = preview.length > 0 && preview.every((p) => !p.short);
 
-  const canSave = !!customer && lines.length > 0 && lines.every((l) => l.panelId && l.qty > 0) && dupIds.size === 0;
+  const lineOk = (l: Line) => l.qty > 0 && (l.kind === "panel" ? !!l.panelId && !mdfMissing(l) : !!l.designId);
+  const canSave = !!customer && lines.length > 0 && lines.every(lineOk) && dupIds.size === 0;
 
   const submit = () => {
     if (!canSave) return;
-    void form.run(() => onSave({ customer, salesperson, order_date: orderDate, lines: lines.map((l) => ({ panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined })) }));
+    void form.run(() =>
+      onSave({
+        customer,
+        salesperson,
+        order_date: orderDate,
+        lines: lines.map((l) => (l.kind === "panel" ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId || undefined, qty: l.qty })),
+      }),
+    );
   };
 
   return (
@@ -222,14 +302,14 @@ export function PanelOrderForm({
 
       {/* SO-style line items: one row per showcase panel. */}
       <div className="form-section">
-        <div className="form-section-title">Panels</div>
+        <div className="form-section-title">Panels &amp; Cut Pieces</div>
         <div className="ord-lines">
           <div className="ord-line ord-line-head pnl-line">
             <span>
               Panel<span className="req"> *</span>
             </span>
             <span>Details</span>
-            <span>MDF</span>
+            <span>MDF Thickness</span>
             <span>Weight</span>
             <span>
               Qty<span className="req"> *</span>
@@ -237,15 +317,46 @@ export function PanelOrderForm({
             <span />
           </div>
           {lines.map((l, i) => {
+            if (l.kind === "cut") {
+              // CR-346: a loose cut-piece line — Item · Cut Piece Size · (no MDF) · Weight · Qty · ✕ on the same grid.
+              const d = designById.get(l.designId);
+              const dupC = !!l.designId && dupIds.has(lineKey(l));
+              const w = lineWeight(l);
+              return (
+                <div className="ord-line pnl-line" key={i}>
+                  <div className="form-field" style={{ gap: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <ImageThumb images={d?.images ?? []} size={28} alt={d?.uniqueName ?? ""} />
+                      <Combobox className="grow" value={l.designId} onChange={(v) => setLine(i, { designId: v })} placeholder="Search item…" options={designOptions} invalid={dupC} ariaLabel="Item" emptyText="No Panel Items yet — add items on Panel Items first" />
+                    </div>
+                    {dupC && <span className="field-err">Already on this order — change its quantity instead</span>}
+                  </div>
+                  <Combobox
+                    value={l.cutSizeId}
+                    options={cutOptions}
+                    onChange={(v) => setLine(i, { cutSizeId: v })}
+                    onCreate={(name) => void onCreateCutSize(i, name)}
+                    placeholder={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"}
+                    ariaLabel="Cut piece size"
+                  />
+                  <span className="dim" style={{ fontSize: "var(--t-sm)", alignSelf: "center" }} title="A loose cut piece has no board">Cut piece — no MDF</span>
+                  <input value={w == null ? "" : kg(w)} readOnly tabIndex={-1} className="calc" placeholder={l.designId ? "—" : ""} title={w == null ? "ƒx needs a weight on this cut piece — set it on Panel Items" : "ƒx cut-piece weight × qty"} aria-label="Weight" />
+                  <NumberInput min={1} value={l.qty || ""} onChange={(e) => setLine(i, { qty: Number(e.target.value) || 0 })} placeholder="1" aria-label="Quantity" />
+                  <button type="button" className="btn ord-rm" onClick={() => removeLine(i)} title="Remove cut piece" aria-label="Remove cut piece" tabIndex={-1}>
+                    ✕
+                  </button>
+                </div>
+              );
+            }
             const p = panelById.get(l.panelId);
-            const dup = !!l.panelId && dupIds.has(l.panelId);
+            const dup = !!l.panelId && dupIds.has(lineKey(l));
             const meta = p
               ? [p.panelSize && `Panel: ${p.panelSize}`, p.vinylSize && `Vinyl: ${p.vinylSize}`, p.lines.map((x) => x.designName).join(", ")].filter(Boolean).join("  ·  ")
               : "";
             return (
               <div className="ord-line pnl-line" key={i}>
                 <div className="form-field" style={{ gap: 2 }}>
-                  <Combobox value={l.panelId} onChange={(v) => setLine(i, { panelId: v })} placeholder="Search panel…" options={panelOptions} invalid={dup} ariaLabel="Panel" />
+                  <Combobox value={l.panelId} onChange={(v) => setLine(i, { panelId: v, mdfId: v === l.panelId ? l.mdfId : defaultMdf(v) })} placeholder="Search panel…" options={panelOptions} invalid={dup} ariaLabel="Panel" />
                   {dup && <span className="field-err">Already on this order — change its quantity instead</span>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -254,10 +365,20 @@ export function PanelOrderForm({
                     {meta || "—"}
                   </span>
                 </div>
-                {/* CR-309: MDF per panel line; the weight is ƒx (cut pieces × pieces + MDF) × qty. */}
-                <Combobox value={l.mdfId} onChange={(v) => setLine(i, { mdfId: v })} options={mdfOptions} placeholder="MDF…" ariaLabel="MDF" />
+                {/* CR-309/344: thickness from the MDF master rows of the panel's size; the weight is ƒx (cut pieces × pieces + that board) × qty. */}
+                {p && sameSize(p).length === 0 ? (
+                  <span className="dim" style={{ fontSize: "var(--t-sm)", alignSelf: "center" }} title={p.mdfSize ? `Add MDF rows of size ${p.mdfSize} in Settings ▸ MDF` : `Set an MDF size on ${p.panelCode} ▸ Edit`}>
+                    {p.mdfSize ? `No MDF for size ${p.mdfSize}` : "No MDF size on panel"}
+                  </span>
+                ) : (
+                  <div className="form-field" style={{ gap: 2 }}>
+                    <Combobox value={l.mdfId} onChange={(v) => setLine(i, { mdfId: v })} options={mdfOptions(l.panelId)} placeholder={p ? "Thickness…" : ""} invalid={mdfMissing(l)} ariaLabel="MDF thickness" />
+                    {mdfMissing(l) && <span className="field-err">Pick the MDF thickness</span>}
+                  </div>
+                )}
                 {(() => {
                   const w = lineWeight(l);
+                  const sp = lineSplit(l);
                   return (
                     <input
                       value={w == null ? "" : kg(w)}
@@ -265,7 +386,7 @@ export function PanelOrderForm({
                       tabIndex={-1}
                       className="calc"
                       placeholder={p ? "—" : ""}
-                      title={w == null ? "ƒx needs a weight on every cut piece — set it on Panel Items" : "ƒx Σ cut-piece weight × pieces + MDF, × qty"}
+                      title={w == null ? "ƒx needs a weight on every cut piece — set it on Panel Items" : `ƒx pieces ${kg(sp.pieces ?? 0)} + MDF ${sp.mdf == null ? "—" : kg(sp.mdf)} (× qty)`}
                       aria-label="Weight"
                     />
                   );
@@ -284,12 +405,23 @@ export function PanelOrderForm({
           <button type="button" className="btn" onClick={() => setPickerOpen(true)}>
             <Icon name="search" size={12} /> Pick from showcase
           </button>
+          {/* CR-346: loose cut pieces on the same order ("10 panels + 20 cut pieces"). */}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              form.touch();
+              setLines((ls) => [...ls, cutLine()]);
+            }}
+          >
+            <Icon name="plus" size={12} /> Add cut piece
+          </button>
         </div>
         <div className="qt-totals">
           <div className="row total">
             <span>Total</span>
             <span className="mono">
-              {filled.length} panel{filled.length === 1 ? "" : "s"} · {fmt(totalQty)} pcs · {totalWeight == null ? <span className="dim" title="Set a weight on every cut piece (Panel Items) to total it">— kg</span> : kg(totalWeight)}
+              {panelsOn.length} panel{panelsOn.length === 1 ? "" : "s"}{cutsOn.length > 0 && ` · ${cutsOn.length} cut piece line${cutsOn.length === 1 ? "" : "s"}`} · {fmt(totalQty)} pcs · {totalWeight == null ? <span className="dim" title="Set a weight on every cut piece (Panel Items) to total it">— kg</span> : kg(totalWeight)}
             </span>
           </div>
         </div>
@@ -326,7 +458,7 @@ export function PanelOrderForm({
         />
       )}
       {pickerOpen && (
-        <PanelPickerModal panels={panels} selectedIds={filled.map((l) => l.panelId)} onToggle={togglePick} onClose={() => setPickerOpen(false)} stock={stock} />
+        <PanelPickerModal panels={panels} selectedIds={panelsOn.map((l) => l.panelId)} onToggle={togglePick} onClose={() => setPickerOpen(false)} stock={stock} />
       )}
     </FormPage>
   );

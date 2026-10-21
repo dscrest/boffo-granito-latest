@@ -19,8 +19,8 @@ import { cachedAdjustEntries, listProductionLogs, type AdjustEntry } from "@/fea
 
 const dash = <span className="dim">—</span>;
 
+// Item leads; Date rides after the quantity; the server Adj # stays hidden (CR-355).
 const COLUMNS: ColumnDef<AdjustEntry>[] = [
-  { key: "date", label: "Date", className: "mono", render: (r) => r.adjDate || dash },
   {
     key: "item",
     label: "Item",
@@ -39,6 +39,7 @@ const COLUMNS: ColumnDef<AdjustEntry>[] = [
     style: { textAlign: "right" },
     render: (r) => <span style={{ color: r.qtyBoxes < 0 ? "var(--c-red)" : "var(--c-green)", fontWeight: 600 }}>{r.qtyBoxes > 0 ? "+" : ""}{fmt(r.qtyBoxes)}</span>,
   },
+  { key: "date", label: "Date", className: "mono", render: (r) => r.adjDate || dash },
   { key: "reason", label: "Reason", render: (r) => r.reason || dash },
   { key: "note", label: "Note", className: "muted", render: (r) => r.note || dash },
   { key: "group", label: "Adj #", className: "muted mono", render: (r) => r.requestGroup || dash },
@@ -52,7 +53,7 @@ export function StockAdjustments() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("stockAdjust.query", "");
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("stockAdjustColumns", COLUMNS, ["group", "created"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("stockAdjustColumns.v2", COLUMNS, ["group", "created"]) // .v2 (CR-355);
 
   const load = async () => {
     setLoading(true);
@@ -114,7 +115,13 @@ export function StockAdjustments() {
               </thead>
               <tbody>
                 {pageRows.map((r) => (
-                  <tr key={r.id}>
+                  <tr
+                    key={r.id}
+                    tabIndex={0}
+                    onClick={() => navigate(`/design/${encodeURIComponent(r.designId)}?tab=stock`)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) navigate(`/design/${encodeURIComponent(r.designId)}?tab=stock`); }}
+                    style={{ cursor: "pointer" }}
+                  >
                     {visible.map((c) => (
                       <td key={c.key} className={c.className} style={c.style}>
                         {c.render!(r)}

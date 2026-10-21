@@ -24,6 +24,7 @@ export interface DemandLine {
   id: string; // OrderItem ROWID
   salesOrderId?: string;
   status?: string; // SalesOrder.status
+  designId: string; // Design ROWID — the grouping/stock key (CR-341)
   designName: string;
   orderQty: number;
   producedQty: number;
@@ -34,6 +35,7 @@ export interface DemandLine {
 }
 
 export interface DemandRow {
+  designId: string;
   designName: string;
   openDemand: number; // Σ ordered − allocated over open orders
   free: number;
@@ -64,13 +66,13 @@ export function lineSupply(o: { orderQty: number; producedQty: number }, free: n
     stock and in-production pool first-come by sales order. */
 export function lineSupplies(
   orders: DemandLine[],
-  stockOf: (designName: string) => { free: number; inProduction: number },
+  stockOf: (designId: string) => { free: number; inProduction: number },
 ): Map<string, LineSupply> {
   const pool = new Map<string, { free: number; inProduction: number }>();
   const out = new Map<string, LineSupply>();
   const sorted = orders.filter(isOpen).slice().sort((a, b) => Number(a.salesOrderId || 0) - Number(b.salesOrderId || 0));
   for (const o of sorted) {
-    const p = pool.get(o.designName) ?? pool.set(o.designName, { ...stockOf(o.designName) }).get(o.designName)!;
+    const p = pool.get(o.designId) ?? pool.set(o.designId, { ...stockOf(o.designId) }).get(o.designId)!;
     const s = lineSupply(o, p.free, p.inProduction);
     out.set(o.id, s);
     const fromFree = Math.min(s.need, Math.max(0, p.free));
@@ -83,23 +85,24 @@ export function lineSupplies(
 /** /prod "To Produce": one row per item with open demand. */
 export function demandByDesign(
   orders: DemandLine[],
-  stockOf: (designName: string) => { free: number; inProduction: number },
+  stockOf: (designId: string) => { free: number; inProduction: number },
 ): DemandRow[] {
-  const by = new Map<string, { demand: number; sos: Set<string>; brands: Map<string, number> }>();
+  const by = new Map<string, { designName: string; demand: number; sos: Set<string>; brands: Map<string, number> }>();
   const brandLabel = new Map<string, string>();
   for (const o of orders.filter(isOpen)) {
     const need = Math.max(0, o.orderQty - o.producedQty);
     if (need <= 0) continue;
-    const cur = by.get(o.designName) ?? by.set(o.designName, { demand: 0, sos: new Set(), brands: new Map() }).get(o.designName)!;
+    const cur = by.get(o.designId) ?? by.set(o.designId, { designName: o.designName, demand: 0, sos: new Set(), brands: new Map() }).get(o.designId)!;
     cur.demand += need;
     cur.brands.set(o.boxBrandId || "", (cur.brands.get(o.boxBrandId || "") || 0) + need);
     if (o.boxBrandId && o.boxBrandLabel) brandLabel.set(o.boxBrandId, o.boxBrandLabel);
     if (o.salesOrderId) cur.sos.add(o.salesOrderId);
   }
-  return [...by.entries()].map(([designName, v]) => {
-    const st = stockOf(designName);
+  return [...by.entries()].map(([designId, v]) => {
+    const st = stockOf(designId);
     return {
-      designName,
+      designId,
+      designName: v.designName,
       openDemand: v.demand,
       free: st.free,
       inProduction: st.inProduction,

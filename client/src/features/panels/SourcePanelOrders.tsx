@@ -40,11 +40,11 @@ export function SourcePanelOrders({ salesOrderId, quoteId }: { salesOrderId?: st
         <table className="tbl">
           <thead>
             <tr>
-              <th>Order No</th>
               <th>Panels</th>
               <th className="num" style={{ textAlign: "right" }}>Qty</th>
               <th>Order Date</th>
               <th>Status</th>
+              <th>Order No</th>
             </tr>
           </thead>
           <tbody>
@@ -62,7 +62,6 @@ export function SourcePanelOrders({ salesOrderId, quoteId }: { salesOrderId?: st
                     if (e.key === "Enter" && e.target === e.currentTarget) navigate(to);
                   }}
                 >
-                  <td className="mono">{o.orderNumber || "—"}</td>
                   <td>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                       <ImageThumb images={panelById.get(o.lines[0]?.panelId ?? "")?.images ?? []} alt={codes} />
@@ -74,6 +73,7 @@ export function SourcePanelOrders({ salesOrderId, quoteId }: { salesOrderId?: st
                   <td>
                     <Chip tone={ORDER_STATUS_TONE[o.status]} label={codeOf(PANEL_ORDER_STATUS_LABEL[o.status])} title={PANEL_ORDER_STATUS_LABEL[o.status]} />
                   </td>
+                  <td className="mono dim">{o.orderNumber || "—"}</td>
                 </tr>
               );
             })}

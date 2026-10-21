@@ -4,6 +4,10 @@
      · Cut Stock ▸ Add Stock      (kind receipt,    Item · Cut Piece Size · Qty · Remark)
      · Cut Stock ▸ Adjust Stock   (kind adjustment, + Add/Remove column, Reason in the bar)
      · Inventory ▸ Stock Adjustments ▸ New (kind adjustment, Item · Batch · Add/Remove · Qty)
+     · Transfer Orders (kind transfer, CR-330: From / To warehouse in the bar, free-text
+       reason, positive qty) — box stock on /stock-transfers/new, cut stock on /cut-stock/transfer
+   CR-329: receipt / adjustment sheets carry a Warehouse picker (default = primary);
+   every picker hides while no warehouse exists.
    The page supplies a `spec` (what the second column is, which items, how
    to save); validation + paste live in stockEntrySheetEdit.ts (pure). One
    Save = one request; errors show in the foot, never a toast over Save.
@@ -21,17 +25,30 @@ import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { designIndex } from "@/features/stages/productionLogSheetEdit";
 import { listAdjustmentReasons } from "./adjustmentReasons";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { blankRow, parseEntryPaste, resolveEntrySheet, type EntryCol, type EntryLine, type EntryRow } from "./stockEntrySheetEdit";
 
 const START_ROWS = 20;
 const GROW_BY = 10;
 const blanks = (n: number) => Array.from({ length: n }, blankRow);
 
+/** The bar's values, as handed to optionsFor / warnFor / onSave. Warehouse ids are "" while the feature is dormant. */
+export interface SheetHeader {
+  date: string;
+  reason: string;
+  note: string;
+  warehouse: string; // single mode
+  from: string; // pair mode
+  to: string;
+}
+
 export interface StockEntrySpec {
   title: string;
-  kind: "receipt" | "adjustment";
+  kind: "receipt" | "adjustment" | "transfer";
   unit: "pcs" | "boxes";
   dateLabel: string;
+  /** CR-329: "single" = the warehouse the count was taken in (default primary); "pair" = From / To of a transfer. */
+  warehouse?: "single" | "pair";
   /** Items offered in the Item column (already filtered by the page). */
   items: { id: string; sku: string; uniqueName: string; designName: string; hint?: string }[];
   second: {
@@ -39,7 +56,7 @@ export interface StockEntrySpec {
     required: boolean;
     placeholder?: string;
     /** When set the cell is a Combobox fed per item; else a free-text cell. */
-    optionsFor?: (designId: string) => ComboOption[];
+    optionsFor?: (designId: string, h: SheetHeader) => ComboOption[];
     /** Paste lookup: lower-cased label → value (Combobox cells only). */
     byName?: Map<string, string>;
     /** Typing an unknown value offers "Create …"; return the value to select (or undefined to abort). */
@@ -48,9 +65,9 @@ export interface StockEntrySpec {
     disabledFor?: (designId: string) => boolean;
   };
   /** Non-blocking warning under a line (e.g. "4 boxes of this batch are reserved"). */
-  warnFor?: (line: EntryLine) => string | undefined;
+  warnFor?: (line: EntryLine, h: SheetHeader) => string | undefined;
   /** Persist one submission. Resolve with ok=false + error to keep the sheet open. */
-  onSave: (header: { date: string; reason: string; note: string }, lines: EntryLine[]) => Promise<{ ok: boolean; error?: string }>;
+  onSave: (header: SheetHeader, lines: EntryLine[]) => Promise<{ ok: boolean; error?: string }>;
   /** Where Cancel / a successful Save go. */
   backTo: string;
   /** ColumnPicker storage key. */
@@ -77,12 +94,36 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   const navigate = useNavigate();
   const form = useFormSave(() => navigate(spec.backTo));
   const adjusting = spec.kind === "adjustment";
+  const transferring = spec.kind === "transfer";
 
   const [rows, setRows] = useState<EntryRow[]>(() => blanks(START_ROWS));
   const [date, setDate] = useState(todayISO());
   const [reason, setReason] = useState("");
   const [reasons, setReasons] = useState<ComboOption[]>([]);
   const [note, setNote] = useState("");
+  // CR-329: warehouse bar — single (default primary) or From / To pair.
+  const { options: whOptions, primary, enabled: whEnabled } = useWarehouses();
+  const showWh = !!spec.warehouse && whEnabled;
+  const [wh, setWh] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  useEffect(() => {
+    if (!primary) return;
+    setWh((v) => v || primary.id);
+    setFrom((v) => v || primary.id);
+  }, [primary]);
+  const header = useMemo<SheetHeader>(
+    () => ({
+      date,
+      reason: reason.trim(),
+      note: note.trim(),
+      warehouse: showWh && spec.warehouse === "single" ? wh : "",
+      from: showWh && spec.warehouse === "pair" ? from : "",
+      to: showWh && spec.warehouse === "pair" ? to : "",
+    }),
+    [date, reason, note, showWh, spec.warehouse, wh, from, to],
+  );
+  const pairBad = showWh && spec.warehouse === "pair" && (!from || !to || from === to);
   const [showErrors, setShowErrors] = useState(false);
   const [saveError, setSaveError] = useState("");
   const cols = useColumns(spec.columnsKey, OPTIONAL, []);
@@ -129,16 +170,16 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   );
   const bad = (r: EntryRow, col: EntryCol) => showErrors && !!errors.get(r.key)?.has(col);
   const lineByKey = useMemo(() => new Map(lines.map((l) => [l.key, l])), [lines]);
-  const reasonMissing = adjusting && !reason.trim();
+  const reasonMissing = (adjusting || transferring) && !reason.trim();
 
   const save = () =>
     form.run(async () => {
-      if (errors.size > 0 || lines.length === 0 || reasonMissing) {
+      if (errors.size > 0 || lines.length === 0 || reasonMissing || pairBad) {
         setShowErrors(true);
         return;
       }
       setSaveError("");
-      const res = await spec.onSave({ date, reason: reason.trim(), note: note.trim() }, lines);
+      const res = await spec.onSave(header, lines);
       if (!res.ok) {
         setSaveError(res.error || "Save failed");
         return;
@@ -165,6 +206,32 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
         <div className="psheet-bar tools">
           <label className="dim nw" htmlFor="ses-date">{spec.dateLabel}</label>
           <DateInput id="ses-date" value={date} max={todayISO()} style={{ width: 150 }} onChange={(e) => setDate(e.target.value || todayISO())} />
+          {showWh && spec.warehouse === "single" && (
+            <>
+              <label className="dim nw">Warehouse</label>
+              <div style={{ width: 200 }}>
+                <Combobox value={wh} options={whOptions} clearable={false} ariaLabel="Warehouse" onChange={(v) => { form.touch(); setWh(v); }} />
+              </div>
+            </>
+          )}
+          {showWh && spec.warehouse === "pair" && (
+            <>
+              <label className="dim nw">From <span className="req">*</span></label>
+              <div style={{ width: 190 }}>
+                <Combobox value={from} options={whOptions} placeholder="From warehouse…" invalid={showErrors && (!from || from === to)} ariaLabel="From warehouse" onChange={(v) => { form.touch(); setFrom(v); }} />
+              </div>
+              <label className="dim nw">To <span className="req">*</span></label>
+              <div style={{ width: 190 }}>
+                <Combobox value={to} options={whOptions.filter((o) => o.value !== from)} placeholder="To warehouse…" invalid={showErrors && (!to || from === to)} ariaLabel="To warehouse" onChange={(v) => { form.touch(); setTo(v); }} />
+              </div>
+            </>
+          )}
+          {transferring && (
+            <>
+              <label className="dim nw" htmlFor="ses-treason">Reason <span className="req">*</span></label>
+              <input id="ses-treason" value={reason} style={{ width: 220 }} placeholder="Why is stock moving?" aria-invalid={showErrors && reasonMissing} onChange={(e) => { form.touch(); setReason(e.target.value); }} />
+            </>
+          )}
           {adjusting && (
             <>
               <label className="dim nw" htmlFor="ses-reason">Reason <span className="req">*</span></label>
@@ -204,7 +271,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
               {rows.map((r, i) => {
                 const filled = !!r.design && (parseInt(r.qty, 10) || 0) > 0;
                 const rowBad = showErrors && errors.has(r.key);
-                const warn = spec.warnFor && lineByKey.has(r.key) ? spec.warnFor(lineByKey.get(r.key)!) : undefined;
+                const warn = spec.warnFor && lineByKey.has(r.key) ? spec.warnFor(lineByKey.get(r.key)!, header) : undefined;
                 const secondDisabled = !r.design || !!spec.second.disabledFor?.(r.design);
                 return (
                   <tr key={r.key} data-i={i} className={filled ? "on" : undefined}>
@@ -224,7 +291,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                       {spec.second.optionsFor ? (
                         <Combobox
                           value={r.second}
-                          options={r.design ? spec.second.optionsFor(r.design) : []}
+                          options={r.design ? spec.second.optionsFor(r.design, header) : []}
                           placeholder={secondDisabled ? "" : spec.second.placeholder || `${spec.second.label}…`}
                           invalid={bad(r, "second")}
                           disabled={secondDisabled}
@@ -297,8 +364,8 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
           <Icon name="plus" size={12} /> {GROW_BY} rows
         </button>
         <span role="alert" style={{ color: "var(--c-red)" }}>
-          {showErrors && (errors.size > 0 || reasonMissing)
-            ? [errors.size > 0 ? `${errors.size} row${errors.size === 1 ? "" : "s"} to fix` : "", reasonMissing ? "pick a reason" : ""].filter(Boolean).join(" · ")
+          {showErrors && (errors.size > 0 || reasonMissing || pairBad)
+            ? [errors.size > 0 ? `${errors.size} row${errors.size === 1 ? "" : "s"} to fix` : "", reasonMissing ? (transferring ? "give a reason" : "pick a reason") : "", pairBad ? "pick two different warehouses" : ""].filter(Boolean).join(" · ")
             : saveError}
         </span>
         <span style={{ flex: 1 }} />

@@ -1,7 +1,7 @@
 /* Self-check for planProgress — run with:  npx tsx client/src/features/quotes/planProgress.test.ts
    Same style as functions/data-ops/lib/fit.test.js: plain asserts, no framework. */
 import assert from "node:assert";
-import { planProgress, progressSummary } from "./planProgress";
+import { planClaims, planProgress, progressSummary } from "./planProgress";
 import type { ContainerPlan } from "@/data";
 
 const line = (design: string, boxes: number) => ({ design, palletId: "", palletName: "", pallets: 1, boxes });
@@ -60,6 +60,19 @@ const plan: ContainerPlan = {
 {
   const r = planProgress(plan, new Map([["id-7", 500]]), (d) => (d === "SLAB-A" ? "id-7" : d));
   assert.strictEqual(r[0].status, "Sent");
+}
+
+// CR-338 planClaims: Open loadings' load_plan.plan[so] → container index; Dispatched / other SO / malformed ignored.
+{
+  const bx = (id: string, status: string, loadPlan: string) => ({ id, status, loadPlan });
+  const lp = (plan: Record<string, number>) => JSON.stringify({ v: 1, lines: [{ so: "so1", design: "A", batch: "", boxes: 1, palletId: "" }], plan });
+  const claims = planClaims(
+    [bx("L1", "Open", lp({ so1: 1 })), bx("L2", "Dispatched", lp({ so1: 0 })), bx("L3", "Open", lp({ so9: 2 })), bx("L4", "Open", "{not json"), bx("L5", "Open", ""), bx("L6", "Open", lp({ so1: 1 }))],
+    "so1",
+  );
+  assert.deepStrictEqual([...claims.keys()], [1]);
+  assert.strictEqual(claims.get(1)!.id, "L1"); // first writer wins
+  assert.strictEqual(planClaims([], "so1").size, 0);
 }
 
 console.log("planProgress: all checks passed");

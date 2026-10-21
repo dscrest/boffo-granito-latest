@@ -10,6 +10,7 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { fmt, finishClass, pct } from "@/lib/format";
 import { type Order } from "@/data";
 import { useOrders } from "./useOrders";
+import { orderLabel } from "./ordersApi";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { OrderDrawer } from "./OrderDrawer";
 import { AdvanceButton } from "./AdvanceButton";
@@ -178,10 +179,10 @@ function ByOrderGroup({
           <div className="po-num">
             {group.salesOrderId ? (
               <Link className="linkish" to={`/orders/${group.salesOrderId}`} title="Open sales order">
-                {group.orderNumber || group.poNumber}
+                {orderLabel(group)}
               </Link>
             ) : (
-              group.orderNumber || group.poNumber
+              orderLabel(group)
             )}
           </div>
           {!collapsed && (
@@ -190,9 +191,9 @@ function ByOrderGroup({
             </span>
           )}
         </div>
-        {group.poNumber && (
-          <div className="party-name" title="Customer PO number">
-            <span className="mono">PO · {group.poNumber}</span>
+        {group.orderNumber && (
+          <div className="party-name" title="Sales order number">
+            <span className="mono">SO · {group.orderNumber}</span>
           </div>
         )}
         <div className="party-name">

@@ -707,18 +707,19 @@ export function ProductionTable() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <SortTh id="code" label="Production ID" sort={sort} />
+                    {/* CR-355: Customer → Design lead; the PRD code is the last data column. */}
+                    <th>Customer</th>
                     <th>Design</th>
                     <th>Batch</th>
                     <th>Mfg Date</th>
                     <th>Order</th>
-                    <th>Customer</th>
                     {/* In Production = the plan qty (qty_requested) — editable in
                         edit mode; Produced takes the boxes made now. */}
                     <th className="num" style={{ textAlign: "right", width: editMode ? 110 : undefined }}>In Production</th>
                     <th className="num" style={{ textAlign: "right", width: editMode ? 110 : undefined }}>Produced</th>
                     <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                     <th style={{ width: 150 }}>Status</th>
+                    <SortTh id="code" label="Production ID" sort={sort} />
                     {canEdit && <th style={{ width: 44 }} />}
                   </tr>
                 </thead>
@@ -744,15 +745,18 @@ export function ProductionTable() {
                       const locked = e.producedSoFar > 0; // /production-update refuses a qty change after output
                       const detail = `/prod/${encodeURIComponent(productionDetailKey(e))}`;
                       batchRows(e).forEach((rec, i) => out.push(
-                        <tr key={`${g.group}-${i}`}>
-                          <td className="mono">
-                            <Link className="linkish" to={detail} title="View production">{g.code}</Link>
-                          </td>
+                        <tr
+                          key={`${g.group}-${i}`}
+                          tabIndex={editMode ? undefined : 0}
+                          onClick={editMode ? undefined : () => navigate(detail)}
+                          onKeyDown={editMode ? undefined : (ev) => { if (ev.key === "Enter" && ev.target === ev.currentTarget) navigate(detail); }}
+                          style={{ cursor: editMode ? undefined : "pointer" }}
+                        >
+                          <td>{g.customer || (g.independent ? "—" : "")}</td>
                           <td><span className="design-name">{g.designSummary}</span></td>
                           <td className="mono nw">{batchCell(rec)}</td>
                           <td className="mono muted nw">{mfgCell(rec)}</td>
                           <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
-                          <td>{g.customer || (g.independent ? "—" : "")}</td>
                           <td className="num mono" style={{ textAlign: "right" }}>
                             {i > 0 ? null : editMode ? (
                               <NumberInput
@@ -783,7 +787,7 @@ export function ProductionTable() {
                             )}
                           </td>
                           <td className="num mono" style={{ textAlign: "right" }}>{i > 0 ? null : remaining ? fmt(remaining) : <span className="dim">—</span>}</td>
-                          <td>
+                          <td onClick={(ev) => ev.stopPropagation()}>
                             {i > 0 ? null : canEdit ? (
                               // In edit mode the Status select stages; outside it commits
                               // on change (and Completed-with-remaining opens the dialog).
@@ -803,8 +807,11 @@ export function ProductionTable() {
                               <span className="chip" style={{ color: stageChip(e.stage).color }} title={stageChip(e.stage).label}>{codeOf(stageChip(e.stage).label)}</span>
                             )}
                           </td>
+                          <td className="mono">
+                            {i > 0 ? null : <Link className="linkish" to={detail} title="View production" onClick={(ev) => ev.stopPropagation()}>{g.code}</Link>}
+                          </td>
                           {canEdit && (
-                            <td>
+                            <td onClick={(ev) => ev.stopPropagation()}>
                               {/* The Produced column is the capture while editing —
                                   the + menu stays for batch-specific entry. */}
                               {editMode || i > 0 ? null : plusMenu(e)}

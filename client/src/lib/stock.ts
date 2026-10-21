@@ -23,16 +23,16 @@ import type { Order } from "@/data";
 import type { ProductionEntry } from "@/features/stages/productionApi";
 
 /** The opening-stock number to feed designStock() for one item. Batch-tracked
-    items sum their entry_type="opening" rows (openingByDesign, keyed on
-    design_name from batchStockApi); singular items use accounting_stock. Reading
-    only one source per item is the guard against double-counting opening. */
+    items sum their entry_type="opening" rows (openingByDesign, keyed on the
+    Design ROWID from batchStockApi — CR-341); singular items use accounting_stock.
+    Reading only one source per item is the guard against double-counting opening. */
 export function openingStockFor(
-  design: { isBatched?: boolean; designName: string; accountingStock: number | null } | null | undefined,
+  design: { isBatched?: boolean; id: string; accountingStock: number | null } | null | undefined,
   openingByDesign?: Map<string, number>,
 ): number {
   if (!design) return 0;
   return design.isBatched
-    ? openingByDesign?.get(design.designName) ?? 0
+    ? openingByDesign?.get(design.id) ?? 0
     : design.accountingStock ?? 0;
 }
 
@@ -54,18 +54,17 @@ export interface DesignStock {
   free: number; // available − boxes order items already own but have not loaded (CR-199)
 }
 
-/** Derive stock numbers for one design. Pass the full `orders`/`prodLogs`
-    lists — filtering by design name happens here. */
+/** Derive stock numbers for one item. Pass the full `orders`/`prodLogs`
+    lists — filtering by Design ROWID happens here. */
 export function designStock(
-  designName: string,
+  designId: string,
   opts: { openingStock?: number; adjusted?: number; allocated?: number; orders: Order[]; prodLogs: ProductionEntry[] },
 ): DesignStock {
   const { openingStock = 0, adjusted = 0, allocated = 0, orders, prodLogs } = opts;
-  // Key on the plain design_name — the shared stock key. Order.design is the
-  // full unique label (name · size · finish) for display, so match on
-  // Order.designName (plain), which lines up with ProductionEntry.design.
-  const ords = orders.filter((o) => (o.designName || o.design) === designName);
-  const logs = prodLogs.filter((e) => e.design === designName);
+  // CR-341: key on the Design ROWID. The plain design_name is shared by every size · finish
+  // of a design, so keying on it merged their stock (and disagreed with AllocateStockModal).
+  const ords = orders.filter((o) => o.designId === designId);
+  const logs = prodLogs.filter((e) => e.designId === designId);
 
   const soProduced = ords.reduce((s, o) => s + o.producedQty, 0);
   const loadedTot = ords.reduce((s, o) => s + o.loadedQty, 0);

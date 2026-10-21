@@ -1884,6 +1884,9 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   color: var(--dim); font-size: 18px; line-height: 1;
 }
 .combo-clear:hover { background: var(--accent-soft); color: var(--accent); }
+/* CR-321: filter select wrapper — hosts the clear × left of the chevron, like .combo */
+.fsel { position: relative; display: inline-flex; }
+.fsel select.on { padding-right: 44px; }
 .combo-pop {
   /* Portaled to <body>; JS sets position:fixed + left/top/width from the
      control's rect so no scrollable-modal overflow can clip it. */
@@ -2585,3 +2588,54 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   left: 50%; top: 28%; transform: translateX(-50%); width: 360px;
   box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.55), var(--shadow-lg);
 }
+
+/* ---------- inline notes (ui/States.tsx Note, CR-328) ---------- */
+.note { display: flex; gap: 9px; align-items: flex-start; padding: 9px 12px; border-radius: 9px; border: 1px solid; font-size: var(--t-sm); line-height: 1.5; margin: 8px 0; }
+.note > svg { flex: none; margin-top: 3px; }
+.note-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.note.warn { background: var(--warn-soft); border-color: color-mix(in oklch, var(--c-amber) 45%, transparent); color: var(--c-amber); }
+.note.info { background: var(--accent-soft); border-color: color-mix(in oklch, var(--accent) 30%, transparent); color: var(--accent-ink); }
+.note.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--c-green) 40%, transparent); color: var(--c-green); }
+.note a { color: inherit; font-weight: 600; }
+
+/* ---------- Loading workspace: one tab per container (CR-326) ---------- */
+.ctabs { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; padding: 0 4px; }
+.ctab { display: inline-flex; align-items: center; gap: 9px; height: 40px; padding: 0 14px; border: 1px solid var(--border); border-bottom: none; border-radius: 10px 10px 0 0; background: var(--panel-2); color: var(--fg-2); font-size: var(--t-md); cursor: pointer; }
+.ctab:hover { color: var(--fg); }
+.ctab.on { background: var(--panel); color: var(--fg); font-weight: 600; box-shadow: inset 0 3px 0 var(--accent); }
+.ctab .sub { font-weight: 400; color: var(--dim); font-size: var(--t-sm); }
+.ctab-main { all: unset; display: inline-flex; align-items: center; gap: 9px; cursor: pointer; font: inherit; color: inherit; }
+.ctab-x { width: 20px; height: 20px; margin-left: 2px; border: 0; border-radius: 50%; background: transparent; color: var(--dim); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.ctab-x:hover { background: var(--danger-soft); color: var(--c-red); }
+.ctab.add { border-style: dashed; color: var(--accent); font-weight: 600; }
+.ctab-body { border-top-left-radius: 0; display: flex; flex-wrap: wrap; align-items: flex-start; }
+.load-main { flex: 999 1 560px; min-width: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.load-rail { flex: 1 1 300px; max-width: 340px; border-left: 1px solid var(--border); padding: 14px 16px; background: var(--panel-2); display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
+.load-rail .form-rows { gap: 8px 10px; }
+.load-rail .rail-title { font-size: var(--t-xs); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 1280px) { .load-rail { border-left: 0; border-top: 1px solid var(--border); max-width: none; } }
+.load-sheet td .combo { min-width: 180px; }
+.load-sheet td input:not([type="checkbox"]) { min-width: 60px; }
+.load-sheet tfoot td { font-weight: 700; border-top: 1px solid var(--border); background: var(--panel-2); }
+.load-docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.load-docs .btn { height: 36px; background: var(--panel); justify-content: flex-start; }
+
+/* ---------- Loading workspace Sheet mode (CR-335): band row per container ---------- */
+.load-sheet thead th { position: sticky; top: 0; z-index: 1; }
+.load-band td { background: var(--accent-soft); border-top: 2px solid color-mix(in oklch, var(--accent) 30%, transparent); border-bottom: 1px solid color-mix(in oklch, var(--accent) 30%, transparent); height: 44px; }
+.load-band.done td { background: var(--panel-2); border-color: var(--border-2); }
+.tbl tr.load-band:hover td { background: var(--accent-soft); }
+.tbl tr.load-band.done:hover td { background: var(--panel-2); }
+.band-cells { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 400; }
+.band-cell { display: inline-flex; align-items: center; gap: 6px; height: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); padding: 0 8px; }
+.band-cell input, .tbl td .band-cell input { border: 0; box-shadow: none; background: transparent; height: 26px; width: 118px; padding: 0; min-width: 0; }
+.band-cell .cell-lbl { font-size: var(--t-xs); color: var(--dim); font-weight: 600; white-space: nowrap; }
+/* CR-350: the Container (format) pick sits on the band as a label-left field, not stacked. */
+.band-cells > .form-field { flex-direction: row; align-items: center; gap: 6px; margin: 0; }
+.band-cells > .form-field > .lbl { font-size: var(--t-xs); color: var(--dim); font-weight: 600; white-space: nowrap; margin: 0; }
+.band-cells > .form-field .combo { min-width: 180px; }
+/* CR-354: step 2 (container & vehicle) sits UNDER a container's design rows; locked = one dim line. */
+.band-step td, .band-more td { background: var(--panel-2); padding: 8px 12px; }
+.band-step .band-cells { gap: 8px 10px; }
+.band-more .form-rows { margin: 0; }
+.hint-row td { color: var(--dim); font-size: var(--t-sm); height: 34px; }

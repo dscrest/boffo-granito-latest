@@ -88,21 +88,56 @@ export async function checkSession(): Promise<SessionUser | null> {
   }
 }
 
-export async function signIn(email: string, password: string): Promise<SessionUser> {
-  const res = await fetch(`${API_BASE}/data-ops/auth/login`, {
+/* One POST helper for the sign-in legs (/auth/login, /auth/zoho/*). credentials:include
+   receives the httpOnly session cookie; X-App-Token rides along when a session exists
+   (the Books connect exchange must prove the caller is a signed-in Admin). */
+async function postAuth<T>(path: string, body: unknown): Promise<T> {
+  const token = storedAuth()?.token;
+  const res = await fetch(`${API_BASE}/data-ops/${path}`, {
     method: "POST",
-    credentials: "include", // receive + store the httpOnly session cookie
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ email, password }),
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(token ? { "X-App-Token": token } : {}),
+    },
+    body: JSON.stringify(body),
   });
-  const json = (await res.json().catch(() => null)) as
-    | { ok: boolean; token?: string; user?: SessionUser; error?: string }
-    | null;
-  if (!res.ok || !json?.ok || !json.token || !json.user) {
-    throw new Error(json?.error || "Sign-in failed");
-  }
-  localStorage.setItem(KEY, JSON.stringify({ token: json.token, user: json.user }));
+  const json = (await res.json().catch(() => null)) as (T & { ok: boolean; error?: string }) | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "Sign-in failed");
+  return json;
+}
+
+type Minted = { token?: string; user?: SessionUser };
+/* The localStorage write happens BEFORE the caller flips to "authed" — App.tsx and
+   lib/api.ts read boffo_auth directly on their first render. */
+function storeMinted(json: Minted): SessionUser | undefined {
+  if (json.token && json.user) localStorage.setItem(KEY, JSON.stringify({ token: json.token, user: json.user }));
   return json.user;
+}
+
+export async function signIn(email: string, password: string): Promise<SessionUser> {
+  const user = storeMinted(await postAuth<Minted>("auth/login", { email, password }));
+  if (!user) throw new Error("Sign-in failed");
+  return user;
+}
+
+/* ---- Sign in with Zoho (CR-324) ----
+   start → Zoho consent → back on /app/?code=…&state=…&location=… → exchange.
+   The same exchange also completes an Admin's "Connect Zoho Books / CRM" (CR-325/359):
+   then nothing is minted and `zoho` names the provider + connected organisation. */
+export async function startZohoSignIn(): Promise<void> {
+  const json = await postAuth<{ url: string }>("auth/zoho/start", {});
+  window.location.href = json.url;
+}
+
+export async function exchangeZohoCode(
+  code: string,
+  state: string,
+  dc: string,
+): Promise<{ user?: SessionUser; zoho?: { provider: string; orgName: string } }> {
+  const json = await postAuth<Minted & { zoho?: { provider: string; orgName: string } }>("auth/zoho/exchange", { code, state, location: dc });
+  return { user: storeMinted(json), zoho: json.zoho };
 }
 
 export function signOut(): void {

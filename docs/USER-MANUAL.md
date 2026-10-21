@@ -235,7 +235,9 @@ The **Sales Orders** menu item has a **List | Kanban** toggle at the top of the 
 
 ### 5.5 Palletization
 
-*Group produced boxes onto pallets and run them through the load lifecycle.* (Menu label: **Palletization and Loading**; route `/packing`.) Every palletization is tied to a Sales Order — there is no independent (make-to-stock) palletization.
+*Group produced boxes onto pallets and run them through the load lifecycle.* Three sidebar pages, one stage each (CR-360): **Ready for Palletization** (`/packing`, the queue), **In Palletization** (`/palletizing`, work in progress) and **Palletization Completed** (`/palletized`, palletized stock waiting to be loaded). Every palletization is tied to a Sales Order — there is no independent (make-to-stock) palletization.
+
+**Release (CR-361):** the row's **+** menu on Palletization Completed and on Loading and Dispatch holds **Release…** — type how many boxes and a reason (Admin may leave it blank). Boxes in an open container return to **Ready for Loading**; palletized boxes that are not loaded yet return to **free stock** and the order's allocation is returned (allocate again to reuse them). A dispatched container cannot be released.
 
 **A Palletization Plan** is a first-class record with a server-minted **PAL/FY/NNN** number that groups a Sales Order's items onto a vehicle. Each item on the plan also carries its own sequential **`PAL-NNN`** code (like Production's `PROD-NNN`), so individual palletised items are traceable.
 

@@ -17,6 +17,7 @@ import { FormPage, useFormSave } from "@/ui/FormPage";
 import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { createCutSize, listPanels, cachedCutSizes, type CutSizeOption, type PanelInput, type PanelRow } from "./panelsApi";
+import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { cachedCutStockRows, listCutStock, saveCutPiece, type CutStockRow } from "./panelOrdersApi";
 
 interface LineDraft {
@@ -26,6 +27,8 @@ interface LineDraft {
 }
 
 const blankLine = (): LineDraft => ({ design: "", cut_piece_size: "", cut_piece_qty: 0 });
+/** CR-344: MDF Size pick list = the distinct sizes on the MDF master (DB-sourced, never static). */
+const mdfSizesOf = (mdfs: MdfRow[]) => [...new Set(mdfs.map((m) => m.size.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
 /** Seed the form from an existing panel (edit / clone). */
 export function panelToInput(p: PanelRow): PanelInput {
@@ -33,6 +36,7 @@ export function panelToInput(p: PanelRow): PanelInput {
     panel_code: p.panelCode,
     panel_size: p.panelSize,
     vinyl_size: p.vinylSize,
+    mdf_size: p.mdfSize,
     lines: p.lines.map((l) => ({ design: l.designId, cut_piece_size: l.cutSizeId, cut_piece_qty: l.qty })),
   };
 }
@@ -54,6 +58,9 @@ export function PanelForm({
   const code = initial?.panel_code ?? "";
   const [panelSize, setPanelSize] = useState(initial?.panel_size ?? "1200x2100");
   const [vinylSize, setVinylSize] = useState(initial?.vinyl_size ?? "");
+  // CR-344: the panel carries its MDF size; thickness + weight come from the size-keyed MDF master.
+  const [mdfSize, setMdfSize] = useState(initial?.mdf_size ?? "");
+  const [mdfSizes, setMdfSizes] = useState<string[]>(() => mdfSizesOf(cachedMdfs()));
   const [lines, setLines] = useState<LineDraft[]>(
     initial?.lines.length ? initial.lines.map((l) => ({ ...l })) : [blankLine()],
   );
@@ -64,8 +71,14 @@ export function PanelForm({
   useEffect(() => {
     void listDesigns().then((r) => r.ok && setDesigns(r.designs));
     void listPanels().then((r) => r.ok && setCutSizes(r.cutSizes));
+    void listMdfs().then((r) => r.ok && setMdfSizes(mdfSizesOf(r.rows)));
     void listCutStock().then((r) => r.ok && setPieces(r.rows));
   }, []);
+
+  const mdfSizeOptions = useMemo(() => {
+    const all = [...new Set([...mdfSizes, mdfSize.trim()].filter(Boolean))];
+    return all.map((t) => ({ value: t, label: t }));
+  }, [mdfSizes, mdfSize]);
 
   const designById = useMemo(() => new Map(designs.map((d) => [d.id, d])), [designs]);
   // CR-306: only the Panel Items (designs with a cut-piece row) are offered.
@@ -123,6 +136,7 @@ export function PanelForm({
         panel_code: code.trim(),
         panel_size: panelSize.trim(),
         vinyl_size: vinylSize.trim(),
+        mdf_size: mdfSize.trim(),
         lines: completeLines,
       }),
     );
@@ -179,6 +193,32 @@ export function PanelForm({
               }}
               placeholder="e.g. 1200x2100"
               maxLength={30}
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* CR-344: the panel names its MDF SIZE only; thicknesses + weights live on the
+          size-keyed MDF master (Settings ▸ MDF) and the order line picks one of them. */}
+      <div className="form-section">
+        <div className="form-section-title">MDF</div>
+        <div className="form-rows">
+          <label className="form-field">
+            <span className="lbl">MDF Size (mm)</span>
+            <Combobox
+              value={mdfSize}
+              options={mdfSizeOptions}
+              onChange={(v) => {
+                form.touch();
+                setMdfSize(v);
+              }}
+              onCreate={(name) => {
+                form.touch();
+                setMdfSize(name.trim());
+              }}
+              placeholder="e.g. 1200x2400"
+              ariaLabel="MDF size"
+              emptyText="No MDF sizes yet — add them in Settings ▸ MDF, or type one"
             />
           </label>
         </div>

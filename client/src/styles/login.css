@@ -127,6 +127,34 @@
   cursor: default;
 }
 
+/* "or use your password" rule between the Zoho button and the form (CR-324). */
+.boffo-auth-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 14px;
+  font-size: 13px;
+  color: var(--lg-dim);
+}
+.boffo-auth-or::before,
+.boffo-auth-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--lg-border);
+}
+
+/* Secondary action: the password submit, outlined so the Zoho button stays the one primary. */
+.boffo-auth-submit {
+  background: transparent;
+  color: var(--lg-fg);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.boffo-auth-submit:hover {
+  filter: none;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* Sub-line under the CTA. */
 .boffo-auth-hint {
   margin: 12px 0 0;

@@ -9,7 +9,7 @@
    the item's Panel Items detail. Pure maths = demandByKey (panelOrderNeeds).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Chip } from "@/ui/Chip";
 import { KPI } from "@/ui/primitives";
@@ -22,7 +22,7 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
-import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
+import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, pendingNeedLines, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
 
 const dash = <span className="dim">—</span>;
 
@@ -57,9 +57,19 @@ const COLUMNS: ColumnDef<Row>[] = [
   {
     key: "orders",
     label: "Orders",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => (r.orders.length ? <span title={r.orders.map((o) => o.orderNumber || o.id).join(", ")}>{fmt(r.orders.length)}</span> : dash),
+    // Which orders need this cut piece, and how many each — "PNL/26-27/003 ×4"; click opens the order (row click still opens the item).
+    render: (r) =>
+      r.orders.length ? (
+        <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {r.orders.map((o) => (
+            <Link key={o.id} className="linkish mono" to={`/panel-orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title={`Open ${o.orderNumber || "order"} — needs ${fmt(o.need)} pcs`}>
+              {o.orderNumber || o.id} <span className="dim">×{fmt(o.need)}</span>
+            </Link>
+          ))}
+        </span>
+      ) : (
+        dash
+      ),
   },
   { key: "flag", label: "Stock", render: (r) => (r.onHand === 0 ? <Chip tone="red" label="Zero stock" /> : r.shortage > 0 ? <Chip tone="amber" label="Short" /> : <Chip tone="green" label="Covered" />) },
 ];
@@ -104,7 +114,8 @@ export function PendingCutStock() {
     const panelById = new Map(panels.map((p) => [p.id, p]));
     const byId = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
-    return demandByKey(orders, panelById, stock, stock.keys()).map((r) => {
+    // CR-347: only what is still PENDING to load counts as demand.
+    return demandByKey(orders.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads) })), panelById, stock, stock.keys()).map((r) => {
       const d = byId.get(r.designId);
       return { ...r, design: d, designName: r.designName || (d ? d.uniqueName || d.designName : ""), cutSizeName: r.cutSizeName || cutName.get(r.cutSizeId) || "", sizeLabel: d?.sizeLabel || "" };
     });

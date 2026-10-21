@@ -452,7 +452,7 @@ export function OrderForm({
                     <div className="form-field" style={{ gap: 2 }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         {d ? (
-                          <LineStockChip stock={stockFor(d.name)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} label={l.design} />
+                          <LineStockChip stock={stockFor(d.id)} qty={parseInt(l.ordered_qty_boxes, 10) || 0} label={l.design} />
                         ) : (
                           <span style={{ width: 18, flexShrink: 0 }} />
                         )}
@@ -467,7 +467,7 @@ export function OrderForm({
                               // quote picker; design_name only for legacy items.
                               value: x.uniqueName || x.name,
                               label: x.uniqueName || x.name,
-                              hint: `${fmt(stockFor(x.name).available)} avail`,
+                              hint: `${fmt(stockFor(x.id).available)} avail`,
                             }))}
                           />
                         </div>

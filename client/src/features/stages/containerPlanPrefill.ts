@@ -11,7 +11,7 @@ import { parseContainerPlan, type ContainerPlan, type ContainerPlanLine, type Or
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedOrders, listOrders, subscribeOrders } from "@/features/orders/ordersApi";
 import { useMasters } from "@/features/masters/useMasters";
-import { planProgress } from "@/features/quotes/planProgress";
+import { planClaims, planProgress, type ContainerProgressStatus } from "@/features/quotes/planProgress";
 import { dispatchRows, dispatchedByDesign } from "./DispatchTab";
 import type { LoadBox, PalPlan } from "./palPlansApi";
 
@@ -83,14 +83,25 @@ export function useContainerPlanBySo() {
   return { planBySo, designIdOf, defaultPalletFor };
 }
 
-/** Every not-yet-Sent container of the SO's LATEST plan, in plan order — what the next loadings are
-    slated to carry. Plan-only loadings render the first live instead of their minted load_plan
-    snapshot (which stays as the fallback), so a plan edit shows everywhere immediately. [] = no
-    parseable plan. ponytail: progress counts DISPATCHED boxes only, so Open loadings planned
-    earlier still list their container here; the multi-container page (CR-301) de-dupes within
-    its own session via each section's `planCi`, nothing more. */
-export type PlanSlice = { ci: number; lines: ContainerPlanLine[]; containerFormat?: string };
-export function unsentPlanContainers(
+/** One container of the SO's LATEST plan as the loading sees it: its lines + format, its progress
+    (dispatched drain, see planProgress) and the Open loading that already claims it (CR-338). */
+export type PlanSlice = {
+  ci: number;
+  no: number;
+  lines: ContainerPlanLine[];
+  containerFormat?: string;
+  containerFormatName?: string;
+  pallets: number;
+  boxes: number;
+  status: ContainerProgressStatus;
+  /** An Open loading whose `load_plan.plan[soId]` points here. */
+  claimedBy?: LoadBox;
+};
+
+/** EVERY container of the SO's plan, in plan order. [] = no parseable plan. Plan-only loadings render
+    their claimed (else first unsent) container live instead of their minted load_plan snapshot, so a
+    plan edit shows everywhere immediately. */
+export function planSlices(
   soId: string,
   planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
   plans: PalPlan[],
@@ -100,16 +111,42 @@ export function unsentPlanContainers(
   const cp = soId ? planBySo.get(soId) : undefined;
   if (!cp) return [];
   const prog = planProgress(cp.plan, dispatchedByDesign(dispatchRows(plans, boxes, { kind: "so", salesOrderIds: [soId] })), designIdOf);
-  return cp.plan.containers.flatMap((c, ci) => (prog[ci]?.status !== "Sent" ? [{ ci, lines: c.lines, containerFormat: c.containerFormat }] : []));
+  const claims = planClaims(boxes, soId);
+  return cp.plan.containers.map((c, ci) => ({
+    ci,
+    no: c.no,
+    lines: c.lines,
+    containerFormat: c.containerFormat,
+    containerFormatName: c.containerFormatName,
+    pallets: c.pallets,
+    boxes: c.boxes,
+    status: prog[ci]?.status ?? "Planned",
+    claimedBy: claims.get(ci),
+  }));
 }
 
-/** The first unsent container (null = no plan / all sent). */
+/** The containers still open to a NEW loading: not Sent (dispatched drain) and not claimed by an Open
+    loading — what the next loadings are slated to carry. */
+export function unsentPlanContainers(
+  soId: string,
+  planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
+  plans: PalPlan[],
+  boxes: LoadBox[],
+  designIdOf: (name: string) => string,
+): PlanSlice[] {
+  return planSlices(soId, planBySo, plans, boxes, designIdOf).filter((s) => s.status !== "Sent" && !s.claimedBy);
+}
+
+/** The container a loading shows: its OWN claim when `forBoxId` is given, else the first unsent
+    (null = no plan / nothing left). */
 export function nextPlanContainer(
   soId: string,
   planBySo: Map<string, { docNo: string; plan: ContainerPlan }>,
   plans: PalPlan[],
   boxes: LoadBox[],
   designIdOf: (name: string) => string,
+  forBoxId?: string,
 ): PlanSlice | null {
-  return unsentPlanContainers(soId, planBySo, plans, boxes, designIdOf)[0] ?? null;
+  const all = planSlices(soId, planBySo, plans, boxes, designIdOf);
+  return (forBoxId && all.find((s) => s.claimedBy?.id === forBoxId)) || all.find((s) => s.status !== "Sent" && !s.claimedBy) || null;
 }

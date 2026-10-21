@@ -14,7 +14,7 @@
  * A null matrix (legacy role) is synthesized from features/can_update/can_delete.
  * The role named "Admin" is a superuser: bypasses the guard, locked against edits.
  *
- * register(app, { init, rowList, sendErr }) wires:
+ * register(app, { init, rowList, sendErr, writeOpLog }) wires:
  *   POST /auth/login            {email,password} -> {token,user}
  *   POST /auth/logout           (Bearer) kill session
  *   GET  /auth/me               (Bearer) current user + perms
@@ -25,11 +25,17 @@
  *   GET  /auth/users            (Bearer, Admin) list users
  *   POST /auth/users            (Bearer, Admin) create user {email,name,password,role}
  *   PATCH /auth/users/:rowid    (Bearer, Admin) update {name?,password?,role?,active?}
+ *   POST /auth/zoho/start       (anon) -> {url} Zoho consent for sign-in; sets the state cookie (CR-324)
+ *   POST /auth/zoho/exchange    (anon) {code,state,location} -> {token,user} (sign-in)
+ *                               or, for a Books connect started by an Admin, -> {books} (CR-325)
+ *   POST /zoho/books/connect    (Bearer, Admin) -> {url} Zoho consent for Books (CR-325)
+ *   /zoho/books/*               status / connection / contacts — lib/zoho.js registerBooks
  * plus a global guard: every other route requires a valid Bearer token and the
  * matrix permission for its module+action (tables/business routes are mapped
  * below; unmapped routes fall back to the legacy can_update/can_delete rules).
  */
 const crypto = require("crypto");
+const zoho = require("./zoho");
 
 const SESSION_HOURS = 24 * 7; // 7 days
 const CACHE_TTL_MS = 60_000; // token -> user cache per warm instance
@@ -89,8 +95,8 @@ const MODULE_NAV = {
   orders: ["byorder", "packing"],
   customers: ["parties"],
   // "containers" = Container Master (CR-261), an Items master like Pallet Master.
-  items: ["design", "stock", "stock-adjustments", "sizes", "pallets", "containers", "prod"],
-  panel_craft: ["panel-dashboard", "panel-items", "panels", "panel-orders", "sample-orders", "cut-stock", "pending-cut-stock"], // CR-315 sample-orders
+  items: ["design", "stock", "stock-adjustments", "stock-transfers", "sizes", "pallets", "containers", "prod"], // stock-transfers = CR-330
+  panel_craft: ["panel-dashboard", "panel-items", "panels", "panel-orders", "sample-orders", "panel-loading", "cut-stock", "pending-cut-stock"], // CR-315 sample-orders · CR-348 panel-loading
   stages: ["po", "qc", "container-shipments", "fit", "loadplan", "loading", "final"],
   invoices: ["invoices"],
   reports: ["reports", "ops"],
@@ -111,8 +117,10 @@ const TABLE_MODULE = {
   Brand: "items", Grade: "items", Finish: "items", Glaze: "items", Category: "items",
   Panel: "panel_craft", PanelLine: "panel_craft", PanelOrder: "panel_craft", PanelOrderLine: "panel_craft", // PanelOrderLine was missing (CR-315 drive-by)
   SampleOrder: "panel_craft", SampleOrderLine: "panel_craft", // CR-315
+  PanelLoad: "panel_craft", PanelLoadLine: "panel_craft", // CR-347
   CutPieceSize: "panel_craft", CutPieceStock: "panel_craft", CutStockEntry: "panel_craft", Mdf: "panel_craft",
   AdjustmentReason: "items",
+  Warehouse: "items", // CR-329
   Container: "stages", ContainerLoading: "stages",
   PalletizationPlan: "stages", PalletizationPlanLine: "stages", LoadBox: "stages",
   Invoice: "invoices",
@@ -128,6 +136,7 @@ const GET_SHARED = new Set([
   "Currency", "SalesPerson", "Notification", "PaymentTerm",
   "PartyBrand", "StatusTransition", "Vehicle", "TransactionSeries",
   "AdjustmentReason", // CR-308: both modules' adjustment sheets read the reasons
+  "Warehouse", // CR-329: every stock sheet / Locations panel reads the warehouse list
 ]);
 
 /* Business route (first path segment) -> [module, action]. Approval verdicts
@@ -152,28 +161,97 @@ const ROUTE_PERM = {
   "pal-vehicle": ["stages", "edit"],
   "pal-line-box": ["stages", "edit"],
   "pal-lines-box": ["stages", "edit"],
+  "pal-line-release": ["stages", "edit"], // CR-361: reason enforced in the route (deleteReason)
   "pal-topup": ["stages", "edit"],
-  "panel-save": ["panel_craft", "edit"],
+  "panel-save": ["panel_craft", "create"], // CR-336: upsert — edit when body.rowid (UPSERT_ROUTES)
   "panel-delete": ["panel_craft", "delete"],
   "panel-order-save": ["panel_craft", "create"], // was unmapped (CR-315 drive-by)
   "panel-order-delete": ["panel_craft", "delete"],
   "panel-order-status": ["panel_craft", "edit"],
   "sample-order-save": ["panel_craft", "create"], // CR-315
   "sample-order-delete": ["panel_craft", "delete"],
-  "sample-order-supply": ["panel_craft", "edit"], // CR-316
+  "panel-load-save": ["panel_craft", "edit"], // CR-347 (replaces sample-order-supply)
+  "panel-load-delete": ["panel_craft", "delete"], // CR-347
   "panel-order-checkpoint": ["panel_craft", "edit"], // CR-313
   "panel-order-allocate": ["panel_craft", "edit"], // CR-312
   "cut-stock-entry": ["panel_craft", "edit"],
   "cut-piece-save": ["panel_craft", "edit"],
   "cut-piece-delete": ["panel_craft", "delete"],
   "stock-adjust": ["items", "edit"],
+  "stock-transfer": ["items", "edit"], // CR-330
+  "warehouse-primary": ["items", "edit"], // CR-329
   "load-box": ["stages", "edit"],
   "load-box-share": ["stages", "edit"],
   "load-box-update": ["stages", "edit"],
-  "load-box-delete": ["stages", "edit"],
+  "load-box-delete": ["stages", "delete"], // CR-336: was edit
   "load-box-dispatch": ["stages", "edit"],
   "invoice-for-container": ["invoices", "create"],
+  "zoho": ["customers", "edit"], // CR-325/359: Books / CRM record search, mapping, push (connect/disconnect/sync/import re-check Admin)
+  // CR-336: these used to fall to the legacy can_update rule, which a create-only
+  // role satisfies — so "no edit/delete" was not true for them.
+  "production-delete": ["stages", "delete"],
+  "delete-order-item": ["orders", "delete"],
+  "update-so-with-items": ["orders", "edit"],
+  "allocate-stock": ["orders", "edit"],
+  "deallocate-stock": ["orders", "edit"],
+  "production-update": ["stages", "edit"],
+  "production-record": ["stages", "edit"],
+  "production-stage": ["stages", "edit"],
+  "production-complete": ["stages", "edit"],
+  "production-status": ["stages", "edit"],
+  "production-record-share": ["stages", "edit"],
+  "send-to-loading": ["stages", "edit"],
+  "combine-leftovers": ["stages", "edit"],
 };
+
+/* CR-336: save routes that insert without body.rowid and update with one. */
+const UPSERT_ROUTES = new Set(["panel-order-save", "sample-order-save", "panel-save"]);
+
+/* CR-336: maintenance routes — Admin only, whatever the matrix says. */
+const ADMIN_ROUTES = new Set([
+  "seed", "resync-size-snapshots", "migrate-panel-orders", "migrate-mdf-sizes", "recount-order-items",
+  "renumber-loads", "reattribute-blank-lines", "backfill-line-pallets", "fx-refresh",
+]);
+
+// POST routes that are read-only computations — any authenticated role may call.
+const READONLY_POST = new Set(["/fit-suggest"]);
+
+/* Classify a request for the matrix guard (pure — see appauth.test.js).
+   { admin:true } | { readonly:true } | { module, action } | null (= legacy fallback).
+   Express matches paths case-insensitively, so business routes are looked up
+   lowercased; table names stay exact-case (assertTable rejects other spellings). */
+function routeAction(path, method, body) {
+  const seg = path.split("/")[1] || "";
+  const low = seg.toLowerCase();
+  if (ADMIN_ROUTES.has(low)) return { admin: true };
+  const biz = ROUTE_PERM[low];
+  if (biz) {
+    const action = UPSERT_ROUTES.has(low) && body && body.rowid ? "edit" : biz[1];
+    return { module: biz[0], action };
+  }
+  if (READONLY_POST.has(path)) return { readonly: true };
+  const module = TABLE_MODULE[seg];
+  if (!module) return null;
+  const action =
+    method === "GET" ? "view"
+    : method === "DELETE" ? "delete"
+    : method === "PATCH" ? "edit"
+    : path.endsWith("/restore") ? "edit"
+    : "create";
+  return { module, action };
+}
+
+/* CR-336: the default role for every new account — view + create + export,
+   never edit/delete. Self-seeds on first use (defaultRoleId). */
+const STAFF_ROLE = "Staff";
+const STAFF_MATRIX = {
+  modules: Object.fromEntries(MODULES.filter((m) => m !== "settings").map((m) => [m, ["view", "create", "export"]])),
+  approve: [],
+};
+
+/* CR-337: AppSetting key — comma-separated email domains whose Zoho users are
+   auto-provisioned as Staff on first sign-in. Admin-only write (index.js). */
+const LOGIN_DOMAINS_KEY = "zoho_login_domains";
 
 function isAdminName(roleName) {
   return String(roleName || "").trim().toLowerCase() === "admin";
@@ -242,8 +320,12 @@ function publicUser(u, role) {
 }
 
 module.exports.hashPassword = hashPassword;
+module.exports.routeAction = routeAction; // pure, tested in appauth.test.js
+module.exports.STAFF_MATRIX = STAFF_MATRIX;
+module.exports.LOGIN_DOMAINS_KEY = LOGIN_DOMAINS_KEY;
+module.exports.hasPerm = hasPerm;
 
-module.exports.register = function register(app, { init, rowList, sendErr }) {
+module.exports.register = function register(app, { init, rowList, sendErr, writeOpLog }) {
   const sessionCache = new Map(); // token -> { user, expiresAtStr, cachedAt }
 
   async function loadSession(catalyst, token) {
@@ -274,11 +356,12 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     return entry;
   }
 
-  // Read the session token from the httpOnly cookie (no cookie-parser dep).
-  function cookieToken(req) {
-    const m = /(?:^|;\s*)boffo_session=([^;]+)/.exec(req.headers.cookie || "");
+  // Read one cookie by name (no cookie-parser dep).
+  function readCookie(req, name) {
+    const m = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(req.headers.cookie || "");
     return m ? decodeURIComponent(m[1]).trim() : "";
   }
+  const cookieToken = (req) => readCookie(req, "boffo_session");
 
   function bearer(req) {
     // Preferred: httpOnly `boffo_session` cookie (not readable by JS → XSS-safe).
@@ -295,14 +378,11 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
   }
 
   /* ---- Global guard. Registered before all business/CRUD routes. ---- */
-  // POST routes that are read-only computations — any authenticated role may call.
-  const READONLY_POST = new Set(["/fit-suggest"]);
-
   app.use(async (req, res, next) => {
     if (req.method === "OPTIONS") return next();
     const path = req.path || req.url;
     if (path === "/" || path === "") return next(); // health probe
-    if (path === "/auth/login") return next();
+    if (path === "/auth/login" || path.startsWith("/auth/zoho/")) return next(); // CR-324: OAuth legs are anonymous
 
     const token = bearer(req);
     if (!token) return res.status(401).json({ ok: false, error: "Sign in required" });
@@ -322,31 +402,14 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       const perms = entry.user.perms;
       const seg = path.split("/")[1] || "";
 
-      // Business routes with an explicit module+action mapping. Express matches
-      // routes case-insensitively, so the lookup must too — otherwise
-      // /DISPATCH/1 misses the map, lands on the legacy fallback below and
-      // still reaches the /dispatch handler. (Table names stay exact-case:
-      // assertTable rejects any other spelling.)
-      const biz = ROUTE_PERM[seg.toLowerCase()];
-      if (biz) {
-        if (!hasPerm(perms, biz[0], biz[1]))
-          return res.status(403).json({ ok: false, error: `Your role cannot ${biz[1]} ${biz[0]}` });
-        return next();
-      }
-
-      if (READONLY_POST.has(path)) return next();
-
-      // Generic CRUD on a mapped table -> matrix check by HTTP method.
-      const module = TABLE_MODULE[seg];
-      if (module) {
-        const action =
-          req.method === "GET" ? "view"
-          : req.method === "DELETE" ? "delete"
-          : req.method === "PATCH" ? "edit"
-          : path.endsWith("/restore") ? "edit"
-          : "create";
-        if (!hasPerm(perms, module, action))
-          return res.status(403).json({ ok: false, error: `Your role cannot ${action} ${module}` });
+      // Business routes (ROUTE_PERM / UPSERT_ROUTES / ADMIN_ROUTES) and generic
+      // CRUD on a mapped table (TABLE_MODULE × HTTP method) — see routeAction.
+      const act = routeAction(path, req.method, req.body);
+      if (act && act.admin) return res.status(403).json({ ok: false, error: "Admin role required" });
+      if (act && act.readonly) return next();
+      if (act) {
+        if (!hasPerm(perms, act.module, act.action))
+          return res.status(403).json({ ok: false, error: `Your role cannot ${act.action} ${act.module}` });
         return next();
       }
 
@@ -370,6 +433,8 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       }
 
       // Legacy fallback: side tables and unmapped routes keep today's rules (writes).
+      // ponytail: the remaining unmapped POSTs (/upload, Vehicle, PaymentTerm,
+      // AppSetting inserts…) are create-shaped; map them above if one grows teeth.
       if (req.method === "DELETE" && !perms.can_delete)
         return res.status(403).json({ ok: false, error: "Your role cannot delete records" });
       if ((req.method === "POST" || req.method === "PATCH") && !perms.can_update)
@@ -431,40 +496,175 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     }
   }
 
+  /* The AppUser row for an email (soft-deleted rows excluded); undefined when unknown. */
+  async function findUser(catalyst, email) {
+    const safe = String(email).toLowerCase().replace(/'/g, "");
+    return rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT ROWID, email, name, password_hash, active, role, zoho_zuid FROM AppUser WHERE email = '${safe}' AND deleted_at is null`,
+      ),
+    )[0];
+  }
+  const isActive = (user) => !!user && String(user.active) === "true";
+
+  /* CR-336: ROWID of the Staff role; creates it on first use. */
+  async function defaultRoleId(catalyst) {
+    const hit = rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Role WHERE name = '${STAFF_ROLE}'`),
+    )[0];
+    if (hit) return String(hit.ROWID);
+    const row = await catalyst.datastore().table("Role").insertRow({
+      name: STAFF_ROLE,
+      matrix: JSON.stringify(STAFF_MATRIX),
+      ...legacyColumns(STAFF_MATRIX),
+    });
+    return String(row.ROWID);
+  }
+
+  /* CR-337: email domains allowed to self-provision via Zoho (AppSetting). */
+  async function loginDomains(catalyst) {
+    const row = rowList(
+      await catalyst.zcql().executeZCQLQuery(
+        `SELECT setting_value FROM AppSetting WHERE setting_key = '${LOGIN_DOMAINS_KEY}' AND deleted_at is null`,
+      ),
+    )[0];
+    return String((row && row.setting_value) || "")
+      .toLowerCase()
+      .split(/[,\s]+/)
+      .map((d) => d.replace(/^@/, ""))
+      .filter(Boolean);
+  }
+
+  /* CR-337: first Zoho sign-in of an unknown email → a Staff account, if the
+     domain is allowed. A soft-deleted row blocks re-creation (unique email). */
+  async function provisionZohoUser(catalyst, me) {
+    const safe = me.email.replace(/'/g, "");
+    const gone = rowList(
+      await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM AppUser WHERE email = '${safe}'`),
+    )[0];
+    if (gone) throw httpErr(`The BOFFO account for ${me.email} was removed. Ask your administrator.`, 401);
+    const domain = me.email.split("@")[1] || "";
+    if (!domain || !(await loginDomains(catalyst)).includes(domain))
+      throw httpErr(`No BOFFO account for ${me.email}. Ask your administrator.`, 401);
+    const role = await defaultRoleId(catalyst);
+    const row = await catalyst.datastore().table("AppUser").insertRow({
+      email: me.email,
+      name: me.name || me.email,
+      active: true,
+      role,
+      zoho_zuid: me.zuid,
+      zoho_linked_at: istNow(),
+    });
+    return { ROWID: row.ROWID, email: me.email, name: me.name || me.email, active: true, role };
+  }
+
+  /* The ONE session-minting path: password login and Zoho sign-in both end here. */
+  async function mintSession(catalyst, user, res) {
+    let role = null;
+    if (user.role) {
+      role = rowList(
+        await catalyst.zcql().executeZCQLQuery(
+          `SELECT ROWID, name, features, can_update, can_delete, matrix FROM Role WHERE ROWID = ${user.role}`,
+        ),
+      )[0];
+    }
+    const token = crypto.randomBytes(32).toString("hex");
+    await catalyst.datastore().table("AuthSession").insertRow({
+      token,
+      app_user: String(user.ROWID),
+      expires_at: istNow(SESSION_HOURS * 3600 * 1000),
+    });
+    // Deliver the token in an httpOnly cookie (JS can't read it → XSS-safe).
+    // `token` stays in the JSON body too during rollout for back-compat.
+    res.cookie("boffo_session", token, SESSION_COOKIE_OPTS);
+    res.json({ ok: true, token, user: publicUser(user, role) });
+    syncSalesPersons(catalyst); // fire-and-forget — reps mirror app users
+  }
+
   /* ---- POST /auth/login ---- */
   app.post("/auth/login", async (req, res) => {
     try {
       const { email, password } = req.body || {};
       if (!email || !password) throw httpErr("Email and password are required", 400);
       const catalyst = init(req);
-      const safe = String(email).toLowerCase().replace(/'/g, "");
-      const user = rowList(
-        await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, email, name, password_hash, active, role FROM AppUser WHERE email = '${safe}' AND deleted_at is null`,
-        ),
-      )[0];
-      if (!user || String(user.active) !== "true" || !verifyPassword(password, user.password_hash))
+      const user = await findUser(catalyst, email);
+      if (!isActive(user) || !verifyPassword(password, user.password_hash))
         throw httpErr("Invalid email or password", 401);
+      await mintSession(catalyst, user, res);
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
 
-      let role = null;
-      if (user.role) {
-        role = rowList(
-          await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, name, features, can_update, can_delete, matrix FROM Role WHERE ROWID = ${user.role}`,
-          ),
-        )[0];
+  /* ---- Zoho OAuth (CR-324 sign-in, CR-325 Books connect) ----
+     Both legs land on the SPA (/app/?code=…&state=…&location=…), which POSTs to
+     /auth/zoho/exchange. The state cookie carries "<nonce>.<purpose>" so the
+     exchange knows whether it is minting a session or storing the Books token. */
+  const STATE_COOKIE = "boffo_oauth_state";
+  const STATE_COOKIE_OPTS = { ...SESSION_COOKIE_OPTS, maxAge: 10 * 60 * 1000 };
+  function startConsent(res, scope, purpose, offline) {
+    const state = crypto.randomBytes(16).toString("hex");
+    const url = zoho.authUrl({ scope, state, offline });
+    res.cookie(STATE_COOKIE, `${state}.${purpose}`, STATE_COOKIE_OPTS);
+    res.json({ ok: true, url });
+  }
+
+  /* ---- POST /auth/zoho/start (anonymous) → consent URL for sign-in ---- */
+  app.post("/auth/zoho/start", (req, res) => {
+    try {
+      startConsent(res, zoho.SCOPE_LOGIN, "login", false);
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
+
+  /* ---- POST /zoho/:provider/connect (Admin) → consent URL for Zoho Books / Zoho CRM (CR-325/359) ---- */
+  app.post("/zoho/:provider/connect", (req, res) => {
+    try {
+      assertAdmin(req);
+      const P = zoho.providerOf(req.params.provider);
+      if (!P) throw httpErr("Unknown Zoho provider", 404);
+      startConsent(res, P.scope, P.name, true);
+    } catch (err) {
+      sendErr(res, err);
+    }
+  });
+
+  /* ---- POST /auth/zoho/exchange {code, state, location} ---- */
+  app.post("/auth/zoho/exchange", async (req, res) => {
+    try {
+      const { code, state, location } = req.body || {};
+      const [want, purpose] = readCookie(req, STATE_COOKIE).split(".");
+      res.clearCookie(STATE_COOKIE, { path: "/" });
+      if (!code || !state || !want || String(state) !== want) throw httpErr("Sign-in request expired — try again", 400);
+      const dc = String(location || "").toLowerCase();
+      const catalyst = init(req);
+
+      if (zoho.providerOf(purpose)) {
+        // Only a signed-in Admin may connect the organisation's Books / CRM account.
+        const entry = await loadSession(catalyst, bearer(req));
+        if (!entry || !isAdminName(entry.user.role)) throw httpErr("Admin role required", 403);
+        const tok = await zoho.exchangeCode(String(code), dc);
+        if (!tok.refresh_token) throw httpErr("Zoho did not grant offline access — try connecting again", 400);
+        const conn = await zoho.connect(catalyst, rowList, tok, dc, purpose);
+        return res.json({ ok: true, zoho: { provider: conn.provider, orgName: conn.orgName } });
       }
-      const token = crypto.randomBytes(32).toString("hex");
-      await catalyst.datastore().table("AuthSession").insertRow({
-        token,
-        app_user: String(user.ROWID),
-        expires_at: istNow(SESSION_HOURS * 3600 * 1000),
-      });
-      // Deliver the token in an httpOnly cookie (JS can't read it → XSS-safe).
-      // `token` stays in the JSON body too during rollout for back-compat.
-      res.cookie("boffo_session", token, SESSION_COOKIE_OPTS);
-      res.json({ ok: true, token, user: publicUser(user, role) });
-      syncSalesPersons(catalyst); // fire-and-forget — reps mirror app users
+
+      const tok = await zoho.exchangeCode(String(code), dc);
+      const me = await zoho.userInfo(tok.access_token, dc);
+      if (!me.email) throw httpErr("Your Zoho account has no email address", 401);
+      let user = await findUser(catalyst, me.email);
+      if (user) {
+        if (!isActive(user)) throw httpErr(`The BOFFO account for ${me.email} is disabled. Ask your administrator.`, 401);
+        // CR-337: remember that this account signs in with Zoho (first time only).
+        // ponytail: the ZUID is a record, not a lock — Zoho's verified email is the
+        // identity; refuse on a ZUID mismatch if that ever matters.
+        if (!user.zoho_zuid)
+          await catalyst.datastore().table("AppUser").updateRow({ ROWID: user.ROWID, zoho_zuid: me.zuid, zoho_linked_at: istNow() });
+      } else {
+        user = await provisionZohoUser(catalyst, me); // CR-337
+      }
+      await mintSession(catalyst, user, res);
     } catch (err) {
       sendErr(res, err);
     }
@@ -657,7 +857,7 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       const catalyst = init(req);
       const users = rowList(
         await catalyst.zcql().executeZCQLQuery(
-          `SELECT ROWID, email, name, active, role, CREATEDTIME, MODIFIEDTIME FROM AppUser WHERE deleted_at is null ORDER BY email`,
+          `SELECT ROWID, email, name, active, role, password_hash, zoho_zuid, zoho_linked_at, CREATEDTIME, MODIFIEDTIME FROM AppUser WHERE deleted_at is null ORDER BY email`,
         ),
       );
       const roles = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, name FROM Role`));
@@ -671,6 +871,8 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
           active: String(u.active) === "true",
           role: u.role ? String(u.role) : null,
           roleName: u.role ? roleName.get(String(u.role)) || "" : "",
+          hasPassword: !!u.password_hash, // CR-337: the hash itself never leaves
+          zohoLinkedAt: u.zoho_zuid ? String(u.zoho_linked_at || "") || "linked" : "",
           createdTime: u.CREATEDTIME ? String(u.CREATEDTIME) : "",
           modifiedTime: u.MODIFIEDTIME ? String(u.MODIFIEDTIME) : "",
         })),
@@ -685,8 +887,9 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
     try {
       assertAdmin(req);
       const { email, name, password, role } = req.body || {};
-      if (!email || !password) throw httpErr("email and password are required", 400);
-      if (String(password).length < 6) throw httpErr("Password must be at least 6 characters", 400);
+      if (!email) throw httpErr("email is required", 400);
+      // CR-337: password optional — blank = the account signs in with Zoho only.
+      if (password && String(password).length < 6) throw httpErr("Password must be at least 6 characters", 400);
       const catalyst = init(req);
       const safe = String(email).toLowerCase().trim().replace(/'/g, "");
       const dup = rowList(
@@ -696,9 +899,9 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       const row = await catalyst.datastore().table("AppUser").insertRow({
         email: safe,
         name: name || "",
-        password_hash: hashPassword(password),
+        ...(password ? { password_hash: hashPassword(password) } : {}),
         active: true,
-        ...(role ? { role: String(role) } : {}),
+        role: role ? String(role) : await defaultRoleId(catalyst), // CR-336: Staff unless told otherwise
       });
       res.json({ ok: true, rowid: String(row.ROWID) });
     } catch (err) {
@@ -727,4 +930,6 @@ module.exports.register = function register(app, { init, rowList, sendErr }) {
       sendErr(res, err);
     }
   });
+
+  zoho.registerZoho(app, { init, rowList, sendErr, assertAdmin, writeOpLog }); // CR-325 / CR-356 / CR-359 (/zoho/:provider/*)
 };

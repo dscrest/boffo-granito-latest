@@ -20,7 +20,7 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
-import { EmptyState } from "@/ui/States";
+import { EmptyState, Note } from "@/ui/States";
 import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
@@ -344,9 +344,9 @@ export function LoadingWorkspace({
       ) : tab === "plan" ? (
         <>
           {unplanned.length > 0 && (
-            <div className="card" style={{ padding: "10px 12px", borderColor: "var(--c-amber)" }}>
+            <Note tone="warn" style={{ margin: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-                <span style={{ fontWeight: 600, color: "var(--c-amber)" }}>Ready, not in any container</span>
+                <span style={{ fontWeight: 600 }}>Ready, not in any container</span>
                 <span className="dim mono" style={{ fontSize: "var(--t-sm)" }}>
                   {fmt(unplanned.reduce((s, i) => s + i.ready, 0))} boxes
                 </span>
@@ -366,7 +366,7 @@ export function LoadingWorkspace({
                   </span>
                 ))}
               </div>
-            </div>
+            </Note>
           )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 12, alignItems: "start" }}>
             {soBoxes.map((b) => {

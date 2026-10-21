@@ -1,9 +1,13 @@
 /* Palletization — full-page stage board of PalletizationPlanLines
    (DispatchBoard), backed by the Catalyst Data Store via palPlansApi. Since
-   CR-160 it is TWO pages over the same component, scoped by `stages`:
+   CR-160 it is pages over the same component, scoped by `stages` — three
+   since CR-360, one stage each:
      /packing      → Ready for Palletization (the Planning stage only)
-     /palletizing  → In Palletization + recorded Ready for Loading rows (CR-278)
-   The page header holds the status tab, the ONE Kanban/Sheet view toggle,
+     /palletizing  → In Palletization (the Palletizing stage only)
+     /palletized   → Palletization Completed (recorded Ready for Loading rows;
+                     Load + Release live in the row's "+" menu, CR-361)
+   Each page lists its own stage only — no status dropdown (CR-364 removed
+   the page | All filter). The page header holds the ONE Kanban/Sheet view toggle,
    Group (+ Sections when the page has >1 stage) and "New Palletization Plan"
    (opens PalPlanForm and lands on the created record). The old plans-list
    grid was retired in the 2026-08-22 declutter — git history holds it. */
@@ -14,13 +18,12 @@ import { toast } from "@/ui/Toast";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { can } from "@/lib/auth";
-import { usePersistedState, useViewState } from "@/lib/usePersistedState";
-import { COLUMNS, DispatchBoard, DISPATCH_GROUP_DIMS, lineStage, type DispatchGroupBy } from "./DispatchBoard";
+import { useViewState } from "@/lib/usePersistedState";
+import { COLUMNS, DispatchBoard, DISPATCH_GROUP_DIMS, type DispatchGroupBy } from "./DispatchBoard";
 import {
   cachedLoadBoxes,
   cachedPalPlans,
   listPalPlans,
-  loadableLineIds,
   type LoadBox,
   type PalPlan,
   type PalStatus,
@@ -37,17 +40,11 @@ type StageKey = (typeof COLUMNS)[number]["key"];
 export function PalPlans({
   stages = ["Planning"],
   sectionsKey = "palplans.stages",
-  pageLabel,
-  allOption = true,
 }: {
   /** Stage sections this page shows (in order). One stage = no Sections picker. */
   stages?: StageKey[];
   /** localStorage key for the Sections show/hide prefs (per page). */
   sectionsKey?: string;
-  /** Status-dropdown label for this page's own rows (CR-278); defaults to the stage labels joined. */
-  pageLabel?: string;
-  /** false = no "All" overview on this page (CR-299: /packing is the queue only — palletized rows never show there). */
-  allOption?: boolean;
 }) {
   const navigate = useNavigate();
   // Sections picker defs — this page's stage columns.
@@ -55,14 +52,6 @@ export function PalPlans({
     () => COLUMNS.filter((c) => stages.includes(c.key)).map((c) => ({ key: c.key, label: c.label })),
     [stages],
   );
-  // Status filter: the page's own stage(s) by default (CR-278, key bumped to .v3 —
-  // CR-246's "All" default made both pages show one identical grid). "All" stays
-  // the opt-in overview of every stage (boxed + dispatched included), read-only.
-  const TABS = [
-    { id: "page", label: pageLabel || STAGE_DEFS.map((c) => c.label).join(" + ") },
-    ...(allOption ? [{ id: "all", label: "All" }] : []),
-  ];
-  const [tab, setTab] = usePersistedState(`${sectionsKey}.show.v3`, "page");
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
   // whatever Settings → Default view says; key kept from the old inner toggle
   // so existing users keep their preference.
@@ -127,17 +116,6 @@ export function PalPlans({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetOrderId]);
 
-  const showAll = allOption && tab === "all";
-  // Counts = the rows the board will show for that option.
-  const loadable = loadableLineIds(plans.flatMap((p) => p.lines));
-  const tabCount = (id: string) =>
-    plans.reduce(
-      (n, p) =>
-        n +
-        p.lines.filter((l) => id === "all" || (p.status !== "Completed" && !l.loadBoxId && boardStages.includes(lineStage(l, loadable)))).length,
-      0,
-    );
-
   const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
     <button
       onClick={() => setView(v)}
@@ -159,14 +137,6 @@ export function PalPlans({
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       <div className="fbar" style={{ marginBottom: 12 }}>
-        <Icon name="filter" size={12} />
-        <select className={showAll ? undefined : "on"} value={showAll ? "all" : "page"} onChange={(e) => setTab(e.target.value)} title="Filter by status">
-          {TABS.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.label} ({tabCount(t.id)})
-            </option>
-          ))}
-        </select>
         <div style={{ flex: 1 }} />
         <button
           className="hbtn"
@@ -222,7 +192,7 @@ export function PalPlans({
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={plans} showAll={showAll} allPlans={plans} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={boardStages} onChanged={() => void load()} />
+        <DispatchBoard plans={plans} allPlans={plans} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={boardStages} onChanged={() => void load()} />
       )}
     </div>
   );
