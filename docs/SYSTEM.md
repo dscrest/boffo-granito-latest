@@ -1793,6 +1793,19 @@ Typecheck is not verification. To drive the real flow, mint an `AuthSession` row
 inject it into `sessionStorage`. Watch for the admin-guard race on first load. Use the `ZZT`
 prefix for test records so they are easy to find and remove.
 
+### Demo / test environment (CR-441)
+
+A second, fully separate stack for demos and testing — **never the live project or its data**.
+Catalyst project `export-tracker-demo` (`69851000000395215`, org OCTFIS) holds a clone of the live
+Data Store schema (60 tables; snapshot in `docs/schema/live-datastore-schema.json`, ids in
+`docs/schema/demo-table-ids.json`) and both functions, deployed by `bash scripts/deploy-demo.sh`
+(swaps a demo `catalyst-config.json` in and restores the live one; `.catalystrc` is untouched).
+The front end is Catalyst **Slate** at `https://export-tracker-demo.onslate.com`, built from `client/`
+of the company mirror repo with `VITE_API_BASE` pointing at the demo functions — the one place the
+client is cross-origin, so the Slate domain must be an Authorized Domain (CORS) in the demo project.
+Dummy data: `scripts/seed-demo-masters.mjs` then `seed-multi.mjs` / `seed-panel-stages.mjs` with
+`SEED_HOST` = demo. Runbook: `docs/DEMO-ENVIRONMENT.md`. `origin` pushes to both GitHub repos.
+
 ---
 
 ## 11 · Open, parked and never-built

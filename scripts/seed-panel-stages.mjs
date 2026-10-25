@@ -47,7 +47,8 @@ const PLAN = {
     { key: "O3", label: "In Cutting", lines: [{ panel: "alpha", qty: 1, mdf: "m8" }], status: "InCutting", marks: { alpha: { mdf: "Ready", vinyl: "Printing" } } },
     { key: "O4", label: "Ready · panels loaded, MDF pending", lines: [{ panel: "alpha", qty: 2, mdf: "m8" }], status: "Ready", ready: ["alpha"], trips: [[{ panel: "alpha", material: "Panel", qty: 2 }]] },
     { key: "O5", label: "Completed (2 panels)", lines: [{ panel: "alpha", qty: 1, mdf: "m12" }, { panel: "beta", qty: 2 }], status: "Ready", ready: ["alpha", "beta"],
-      trips: [[{ panel: "alpha", material: "Panel", qty: 1 }, { panel: "alpha", material: "Mdf", qty: 1 }], [{ panel: "beta", material: "Panel", qty: 2 }]] },
+      // CR-406: EVERY panel line carries an MDF row (ordered = panel qty), so beta's boards must leave too before the order derives Dispatched.
+      trips: [[{ panel: "alpha", material: "Panel", qty: 1 }, { panel: "alpha", material: "Mdf", qty: 1 }], [{ panel: "beta", material: "Panel", qty: 2 }], [{ panel: "beta", material: "Mdf", qty: 2 }]] },
   ],
   vehicles: ["GJ-01-ZP-0001", "GJ-01-ZP-0002", "GJ-01-ZP-0003"],
 };
@@ -204,7 +205,12 @@ async function seedOrders() {
       const r = await post("panel-load-save", {
         load_date: today(), vehicle_number: PLAN.vehicles[trip % PLAN.vehicles.length],
         driver_name: `ZZT Driver ${trip + 1}`, driver_mobile: `98250 0000${trip + 1}`, note: `ZZT trip ${t + 1} — ${o.label}`,
-        orders: [{ order_type: "Panel", order: st.id, lines: o.trips[t].map((p) => ({ line: String(lineOf(lines, p.panel).ROWID), material: p.material, qty: p.qty })) }],
+        // CR-405: a panel loads per cut-piece kind (material Item + design + cut_piece_size); MDF boards stay one Mdf row.
+        orders: [{ order_type: "Panel", order: st.id, lines: o.trips[t].flatMap((p) => {
+          const line = String(lineOf(lines, p.panel).ROWID);
+          if (p.material === "Mdf") return [{ line, material: "Mdf", qty: p.qty }];
+          return PLAN.panels[p.panel].lines.map((l) => ({ line, material: "Item", design: S.design, cut_piece_size: S.cuts[l.cut], qty: l.qty * p.qty }));
+        }) }],
       });
       st.trips[t] = { id: String(r.data.loads[0].ROWID), number: r.data.order_number, status: r.data.loads[0].status }; save();
       log(`·   ${r.data.order_number} on ${PLAN.vehicles[trip % PLAN.vehicles.length]}: ${o.trips[t].map((p) => `${S.panelCodes[p.panel]} ${p.material} ×${p.qty}`).join(", ")} → ${st.trips[t].status}`);

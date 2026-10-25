@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 154 |
+| Completed | 155 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **199** |
+| **Total** | **200** |
 
 ## Foundation & workspace
 
@@ -273,3 +273,4 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Phase 2 inventory | Running plain-language inventory of Phase 2, updated as each request ships. | Completed | 2026-10-03 |  |
 | Locations guide | User-manual chapter: what to set up before using locations (warehouses, primary, bays, purposes), every screen where a location is picked or shown for boxes, pallets and panels, and the two rules for the floor. | Completed | 2026-10-24 | CR-411…413 |
 | Deliverables list (this workbook) | Feature-wise list of Completed / In progress / Future deliverables, maintained in Excel from here on. | Completed | 2026-10-22 |  |
+| Demo / test environment | A second, fully separate copy of the system (own database with the same 60 tables, own server functions, public web address) filled with dummy data for demos and testing; live data is never touched. Runbook: docs/DEMO-ENVIRONMENT.md. | Completed | 2026-10-25 | CR-441 |

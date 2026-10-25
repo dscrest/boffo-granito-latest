@@ -3,7 +3,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { routeAction, hasPerm, STAFF_MATRIX } = require("./appauth");
+const { routeAction, hasPerm, STAFF_MATRIX, signState, verifyState } = require("./appauth");
 
 const staff = { matrix: STAFF_MATRIX.modules };
 const allowed = (path, method, body) => {
@@ -59,4 +59,17 @@ test("Staff matrix has no edit/delete anywhere and no settings module", () => {
     assert.notEqual(mod, "settings");
     assert.deepEqual(acts, ["view", "create", "export"]);
   }
+});
+
+/* CR-443: the Zoho OAuth state verifies without the cookie (cross-origin Slate). */
+test("signed OAuth state round-trips, rejects tampering and expiry", () => {
+  const now = 1_700_000_000_000;
+  const s = signState("login", now, "secret");
+  assert.equal(verifyState(s, now + 1000, "secret"), "login");
+  assert.equal(verifyState(signState("crm", now, "secret"), now, "secret"), "crm");
+  assert.equal(verifyState(s, now + 11 * 60 * 1000, "secret"), null, "expired");
+  assert.equal(verifyState(s, now, "other"), null, "wrong secret");
+  assert.equal(verifyState(s.replace(".login.", ".books."), now, "secret"), null, "purpose tampered");
+  assert.equal(verifyState("abc.login.1.zz", now, "secret"), null);
+  assert.equal(verifyState("", now, "secret"), null);
 });

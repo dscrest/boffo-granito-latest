@@ -126,8 +126,32 @@ export async function signIn(email: string, password: string): Promise<SessionUs
    start → Zoho consent → back on /app/?code=…&state=…&location=… → exchange.
    The same exchange also completes an Admin's "Connect Zoho Books / CRM" (CR-325/359):
    then nothing is minted and `zoho` names the provider + connected organisation. */
+/* CR-443: bind the Zoho round trip to THIS browser without a cookie — a cross-origin host (Slate)
+   never gets the server's state cookie back. Remember the state we leave with; AuthGate compares on
+   return and the server independently verifies the state's signature + expiry. */
+const OAUTH_STATE_KEY = "boffo_oauth_state";
+export function rememberOauthState(consentUrl: string): void {
+  try {
+    const s = new URL(consentUrl).searchParams.get("state");
+    if (s) sessionStorage.setItem(OAUTH_STATE_KEY, s);
+  } catch {
+    /* storage blocked — the server-side signature check still applies */
+  }
+}
+/** The remembered state (cleared on read); "" when none / storage blocked. */
+export function takeOauthState(): string {
+  try {
+    const s = sessionStorage.getItem(OAUTH_STATE_KEY) || "";
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    return s;
+  } catch {
+    return "";
+  }
+}
+
 export async function startZohoSignIn(): Promise<void> {
   const json = await postAuth<{ url: string }>("auth/zoho/start", {});
+  rememberOauthState(json.url);
   window.location.href = json.url;
 }
 

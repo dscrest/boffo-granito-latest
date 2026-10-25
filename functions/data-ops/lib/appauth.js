@@ -325,6 +325,32 @@ function publicUser(u, role) {
   };
 }
 
+/* CR-443: the OAuth `state` is SIGNED — HMAC(nonce.purpose.expiry) with the Zoho client secret — so
+   /auth/zoho/exchange can verify it without the state cookie. A cross-origin front end (Slate) never
+   sends that cookie back (SameSite), which made every Zoho sign-in there "expire". The cookie stays as
+   an extra check whenever the browser does send it; the client also binds the round trip to the
+   browser by remembering the state it left with (lib/auth.ts). Pure, tested in appauth.test.js. */
+const STATE_TTL_MS = 10 * 60 * 1000;
+function stateSig(payload, secret) {
+  return crypto.createHmac("sha256", secret).update(payload).digest("hex").slice(0, 32);
+}
+function signState(purpose, now = Date.now(), secret = process.env.ZOHO_CLIENT_SECRET || "") {
+  const payload = `${crypto.randomBytes(16).toString("hex")}.${purpose}.${now + STATE_TTL_MS}`;
+  return `${payload}.${stateSig(payload, secret)}`;
+}
+/** → the purpose carried by a valid, unexpired state; null otherwise. */
+function verifyState(state, now = Date.now(), secret = process.env.ZOHO_CLIENT_SECRET || "") {
+  const parts = String(state || "").split(".");
+  if (parts.length !== 4) return null;
+  const [nonce, purpose, exp, sig] = parts;
+  const want = stateSig(`${nonce}.${purpose}.${exp}`, secret);
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  if (!purpose || !(Number(exp) > now)) return null;
+  return purpose;
+}
+module.exports.signState = signState;
+module.exports.verifyState = verifyState;
+
 module.exports.hashPassword = hashPassword;
 module.exports.routeAction = routeAction; // pure, tested in appauth.test.js
 module.exports.STAFF_MATRIX = STAFF_MATRIX;
@@ -604,14 +630,14 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
 
   /* ---- Zoho OAuth (CR-324 sign-in, CR-325 Books connect) ----
      Both legs land on the SPA (/app/?code=…&state=…&location=…), which POSTs to
-     /auth/zoho/exchange. The state cookie carries "<nonce>.<purpose>" so the
+     /auth/zoho/exchange. The signed state carries the purpose (CR-443), so the
      exchange knows whether it is minting a session or storing the Books token. */
   const STATE_COOKIE = "boffo_oauth_state";
-  const STATE_COOKIE_OPTS = { ...SESSION_COOKIE_OPTS, maxAge: 10 * 60 * 1000 };
+  const STATE_COOKIE_OPTS = { ...SESSION_COOKIE_OPTS, maxAge: STATE_TTL_MS };
   function startConsent(res, scope, purpose, offline) {
-    const state = crypto.randomBytes(16).toString("hex");
+    const state = signState(purpose);
     const url = zoho.authUrl({ scope, state, offline });
-    res.cookie(STATE_COOKIE, `${state}.${purpose}`, STATE_COOKIE_OPTS);
+    res.cookie(STATE_COOKIE, state, STATE_COOKIE_OPTS);
     res.json({ ok: true, url });
   }
 
@@ -640,9 +666,12 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
   app.post("/auth/zoho/exchange", async (req, res) => {
     try {
       const { code, state, location } = req.body || {};
-      const [want, purpose] = readCookie(req, STATE_COOKIE).split(".");
+      const cookieState = readCookie(req, STATE_COOKIE);
       res.clearCookie(STATE_COOKIE, { path: "/" });
-      if (!code || !state || !want || String(state) !== want) throw httpErr("Sign-in request expired — try again", 400);
+      // CR-443: the signature + expiry prove the state is ours; a same-origin browser also returns the
+      // cookie, and then it must be THIS state (a cross-origin host sends none — that is fine).
+      const purpose = verifyState(state);
+      if (!code || !purpose || (cookieState && cookieState !== String(state))) throw httpErr("Sign-in request expired — try again", 400);
       const dc = String(location || "").toLowerCase();
       const catalyst = init(req);
 

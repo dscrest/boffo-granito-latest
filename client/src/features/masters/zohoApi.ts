@@ -11,6 +11,7 @@
    review step). A 409 "reauth_required" = "Connect <label> in Settings".
    ============================================================ */
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { rememberOauthState } from "@/lib/auth";
 import type { ChipTone } from "@/ui/Chip";
 import type { CustomerInput } from "./customersApi";
 
@@ -102,6 +103,7 @@ export const zohoStatus = (): Promise<ZohoStatus> => apiGet<{ ok: boolean } & Zo
 /** Admin: starts the consent; the browser leaves for Zoho and returns to /app/?code=… */
 export async function connectZoho(): Promise<void> {
   const r = await apiPost<{ ok: boolean; url: string }>(`${base}/connect`, {});
+  rememberOauthState(r.url); // CR-443: same browser-binding as sign-in
   window.location.href = r.url;
 }
 export const disconnectZoho = (): Promise<unknown> => apiDelete(`${base}/connection`);

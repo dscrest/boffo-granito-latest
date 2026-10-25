@@ -72,7 +72,7 @@ export const PDF_STYLES: StyleDictionary = {
 export function pdfHeader(docTitle: string, docNumber: string): Content {
   return {
     columns: [
-      { stack: [{ text: "BOFFO", style: "brand" }, { text: "Order OS · Plant Morbi", style: "fine" }] },
+      { stack: [{ text: "BOFFO", style: "brand" }, { text: "Order OS", style: "fine" }] },
       {
         stack: [
           { text: docTitle, style: "docTitle", alignment: "right" },

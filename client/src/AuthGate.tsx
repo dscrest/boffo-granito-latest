@@ -8,7 +8,7 @@
    this gate (mounted outside the HashRouter, so location.search is intact)
    exchanges the code before the usual session check. */
 import { useEffect, useState } from "react";
-import { checkSession, exchangeZohoCode, signIn, startZohoSignIn, type SessionUser } from "./lib/auth";
+import { checkSession, exchangeZohoCode, signIn, startZohoSignIn, takeOauthState, type SessionUser } from "./lib/auth";
 import boffoLogo from "./assets/boffo-logo.png";
 import { BoffoLoader } from "./ui/BoffoLoader";
 import "./styles/login.css";
@@ -32,7 +32,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     const run = async () => {
       if (code) {
         try {
-          const r = await exchangeZohoCode(code, qs.get("state") ?? "", qs.get("location") ?? "");
+          const state = qs.get("state") ?? "";
+          // CR-443: the state we left with must come back (ponytail: lenient when storage had none —
+          // the server still verifies the state's signature and expiry).
+          const left = takeOauthState();
+          if (left && left !== state) throw new Error("Sign-in request expired — try again");
+          const r = await exchangeZohoCode(code, state, qs.get("location") ?? "");
           scrub();
           // An Admin's "Connect Zoho …" round trip: already signed in — land on the pane.
           if (r.zoho) window.location.hash = "#/settings/zoho";
@@ -113,8 +118,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             <form className="boffo-auth-form" onSubmit={onSubmit}>
               <div className="boffo-auth-brand">
                 {/* White + orange brand logo (boffogranito.com asset) — the
-                    login theme is dark so the white wordmark reads. */}
-                <img className="logo" src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
+                    login theme is dark so the white wordmark reads.
+                    Demo build (VITE_DEMO, set by scripts/deploy-demo-client.sh) hides it. */}
+                {!import.meta.env.VITE_DEMO && (
+                  <img className="logo" src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
+                )}
                 <span className="sub">Order OS</span>
               </div>
 
@@ -165,7 +173,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
               <div className="boffo-auth-foot">
                 <span className="dot" />
-                Plant Morbi · Secure access
+                Secure access
               </div>
             </form>
           </div>

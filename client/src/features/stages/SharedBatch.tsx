@@ -64,7 +64,7 @@ export function SharedBatch() {
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 14 }}>Batch · Plant Morbi</div>
+            <div className="muted" style={{ fontSize: 14 }}>Batch</div>
           </div>
           {batch && (
             <div style={{ textAlign: "right" }}>

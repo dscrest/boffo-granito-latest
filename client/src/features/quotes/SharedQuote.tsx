@@ -138,7 +138,7 @@ export function SharedQuote() {
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 14 }}>Order OS · Plant Morbi</div>
+            <div className="muted" style={{ fontSize: 14 }}>Order OS</div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ fontSize: 17, fontWeight: 700 }}>QUOTATION</div>

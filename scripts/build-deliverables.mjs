@@ -240,6 +240,7 @@ const rows = [
   ["Documentation & process", "Phase 2 inventory", "Running plain-language inventory of Phase 2, updated as each request ships.", C, "2026-10-03", ""],
   ["Documentation & process", "Locations guide", "User-manual chapter: what to set up before using locations (warehouses, primary, bays, purposes), every screen where a location is picked or shown for boxes, pallets and panels, and the two rules for the floor.", C, "2026-10-24", "CR-411…413"],
   ["Documentation & process", "Deliverables list (this workbook)", "Feature-wise list of Completed / In progress / Future deliverables, maintained in Excel from here on.", C, "2026-10-22", ""],
+  ["Documentation & process", "Demo / test environment", "A second, fully separate copy of the system (own database with the same 60 tables, own server functions, public web address) filled with dummy data for demos and testing; live data is never touched. Runbook: docs/DEMO-ENVIRONMENT.md.", C, "2026-10-25", "CR-441"],
 ];
 
 const MODULES = [...new Set(rows.map(r => r[0]))];

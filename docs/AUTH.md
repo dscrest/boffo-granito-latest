@@ -28,18 +28,21 @@ The Zoho flow is a custom OAuth 2.0 authorization-code flow ported from the SKU 
 ```
 Login page   "Sign in with Zoho"
    │  POST /server/data-ops/auth/zoho/start            (anonymous)
-   │  ← 200 {url} + Set-Cookie boffo_oauth_state=<nonce>.login (httpOnly, Lax, 10 min)
-   │  browser: location.href = url
+   │  ← 200 {url} + Set-Cookie boffo_oauth_state=<state> (httpOnly, Lax, 10 min)
+   │     state = <nonce>.<purpose>.<expiry>.<HMAC(ZOHO_CLIENT_SECRET)>          (CR-443, signed)
+   │  browser: sessionStorage.boffo_oauth_state = state; location.href = url
    ▼
 accounts.zoho.in/oauth/v2/auth?client_id&redirect_uri&scope=AaaServer.profile.READ
                                &response_type=code&access_type=online&state=<nonce>
    │  user signs in / consents (first time only)
    ▼
 https://<app domain>/app/?code=…&state=<nonce>&location=in|us|eu…   ← the Authorized Redirect URI
-   │  AuthGate (mounted outside the HashRouter) reads location.search
+   │  AuthGate (mounted outside the HashRouter) reads location.search;
+   │  the remembered sessionStorage state must equal ?state (same browser)
    │  POST /auth/zoho/exchange {code, state, location}             (anonymous)
    ▼
-server: state == cookie?  → POST https://accounts.zoho.<location>/oauth/v2/token (code→access token)
+server: verifyState(state) — signature + expiry; if the browser sent the cookie it must equal state
+        → POST https://accounts.zoho.<location>/oauth/v2/token (code→access token)
         → GET  https://accounts.zoho.<location>/oauth/user/info   (Email, name, ZUID)
         → AppUser WHERE email = <Email> AND active AND deleted_at is null
         → mintSession(): AuthSession row + boffo_session cookie + {token, user}
@@ -50,7 +53,11 @@ Rules that matter:
 
 - **Only pre-created users.** Decision 2026-10-12: the Zoho email must match an existing active
   `AppUser`. Roles stay Admin-controlled. Unknown email → `No BOFFO account for <email>. Ask your administrator.`
-- **State cookie = CSRF guard.** Missing / mismatched state → 400 "Sign-in request expired — try again".
+- **Signed state = CSRF guard (CR-443).** The state carries its own HMAC and expiry, so the exchange
+  no longer depends on the `boffo_oauth_state` cookie — a cross-origin front end (Catalyst Slate)
+  never sends that cookie back (SameSite) and every sign-in there used to "expire". The cookie is still
+  compared when the browser does send it, and the client refuses a state it did not leave with
+  (`sessionStorage`). Bad / expired / mismatched state → 400 "Sign-in request expired — try again".
   The cookie is cleared on every exchange attempt.
 - **Multi-DC.** Consent starts on `accounts.zoho.<ZOHO_DC>` (`in`). Zoho appends `location` to the
   callback; the token exchange and the profile call go to **that** DC's host. Accounts on `.com`,

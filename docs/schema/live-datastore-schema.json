@@ -1,0 +1,6036 @@
+{
+  "exported": "2026-10-25",
+  "source_project": "69851000000043001",
+  "tables": [
+    {
+      "table_name": "PanelLoad",
+      "source_table_id": "69851000000351032",
+      "columns": [
+        {
+          "column_name": "order_number",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_type",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "panel_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sample_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "load_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vehicle_number",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "photos",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "performed_by",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "driver_name",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "driver_mobile",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Warehouse",
+      "source_table_id": "69851000000335014",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "is_primary",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "purposes",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "parent",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "SampleOrderLine",
+      "source_table_id": "69851000000320174",
+      "columns": [
+        {
+          "column_name": "sample_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "piece_kind",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "supplied_qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "supplied_on",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "SampleOrder",
+      "source_table_id": "69851000000322323",
+      "columns": [
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_number",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "salesperson",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "quote",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "CutStockEntry",
+      "source_table_id": "69851000000317365",
+      "columns": [
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entry_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "kind",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "reason",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "ref_table",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "ref_rowid",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "performed_by",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "warehouse",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "doc_number",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "AdjustmentReason",
+      "source_table_id": "69851000000316601",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Mdf",
+      "source_table_id": "69851000000314493",
+      "columns": [
+        {
+          "column_name": "size",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "thickness",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 3,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "panel",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PanelOrderLine",
+      "source_table_id": "69851000000315921",
+      "columns": [
+        {
+          "column_name": "panel_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "panel",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "mdf",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Category",
+      "source_table_id": "69851000000047004",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "ContainerFormat",
+      "source_table_id": "69851000000313445",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "total_pallets",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "total_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallets_json",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "size",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Finish",
+      "source_table_id": "69851000000044719",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "RecipeComponentAttr",
+      "source_table_id": "69851000000256283",
+      "columns": [
+        {
+          "column_name": "orgId",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "recipeId",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "componentId",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "propertyId",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "propertyName",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "unit",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "required",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "defaultValueId",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sequence",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Size",
+      "source_table_id": "69851000000041006",
+      "columns": [
+        {
+          "column_name": "code",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "width_mm",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "length_mm",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tile_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "thickness_mm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pcs_per_packing",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sqm_per_box",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sqft_per_box",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remark",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "CutPieceStock",
+      "source_table_id": "69851000000183280",
+      "columns": [
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 3,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PanelOrder",
+      "source_table_id": "69851000000193408",
+      "columns": [
+        {
+          "column_name": "panel",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "salesperson",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "quote",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "checklist",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_number",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "checkpoints",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "allocation",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "warehouse",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PanelLine",
+      "source_table_id": "69851000000194524",
+      "columns": [
+        {
+          "column_name": "panel",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Panel",
+      "source_table_id": "69851000000189422",
+      "columns": [
+        {
+          "column_name": "panel_code",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "panel_size",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vinyl_size",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "image_urls",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "mdf_size",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "CutPieceSize",
+      "source_table_id": "69851000000182460",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "AppSetting",
+      "source_table_id": "69851000000154134",
+      "columns": [
+        {
+          "column_name": "setting_key",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "setting_value",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "LoadBox",
+      "source_table_id": "69851000000089442",
+      "columns": [
+        {
+          "column_name": "box_number",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "capacity",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "dispatch_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vehicle",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "line_seal",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "electronic_seal",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "loading_supervisor",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "share_token",
+          "data_type": "varchar",
+          "max_length": 64,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "container_size",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "transporter",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "lr_number",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "destination",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "load_plan",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "load_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "container_format",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 80,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "NumberMaster",
+      "source_table_id": "69851000000048360",
+      "columns": [
+        {
+          "column_name": "entity_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_rowid",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sequence_number",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PaymentTerm",
+      "source_table_id": "69851000000045003",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "term_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Vehicle",
+      "source_table_id": "69851000000083283",
+      "columns": [
+        {
+          "column_name": "vehicle_number",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "driver_name",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "mobile_number",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PalletizationPlanLine",
+      "source_table_id": "69851000000077368",
+      "columns": [
+        {
+          "column_name": "plan",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_item",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "position",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "palletised_batch",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": "Planning"
+        },
+        {
+          "column_name": "load_box",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "batch_number",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet_group",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "manual_edit",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet_no",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet_type",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "warehouse",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PalletizationPlan",
+      "source_table_id": "69851000000080312",
+      "columns": [
+        {
+          "column_name": "pal_number",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vehicle_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "planned_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "dispatch_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_person",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vehicle",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "ProductionLog",
+      "source_table_id": "69851000000068024",
+      "columns": [
+        {
+          "column_name": "qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "production_date",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shift",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "performed_by",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "order_item",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "qty_requested",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "request_group",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "entry_type",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "stage",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "parent_log",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "batch_number",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "shade",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "share_token",
+          "data_type": "varchar",
+          "max_length": 64,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "second_stage",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": "false"
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "reason",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "warehouse",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Notification",
+      "source_table_id": "69851000000062554",
+      "columns": [
+        {
+          "column_name": "occurred_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "recipient",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "text",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "link",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "StatusTransition",
+      "source_table_id": "69851000000066173",
+      "columns": [
+        {
+          "column_name": "occurred_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_type",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_rowid",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "from_status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "to_status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "actor",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Currency",
+      "source_table_id": "69851000000065195",
+      "columns": [
+        {
+          "column_name": "code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": true,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "symbol",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "exchange_rate",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "manual_override",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate_updated_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PartyBrand",
+      "source_table_id": "69851000000060042",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": true,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Grade",
+      "source_table_id": "69851000000043028",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "OperationLog",
+      "source_table_id": "69851000000054086",
+      "columns": [
+        {
+          "column_name": "occurred_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "table_name",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "operation",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_rowid",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 12,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "error_text",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "duration_ms",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "actor",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "payload_summary",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Brand",
+      "source_table_id": "69851000000044360",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "internal_or_external",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "logo",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Activity",
+      "source_table_id": "69851000000051439",
+      "columns": [
+        {
+          "column_name": "occurred_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "actor",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "entity_rowid",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "action",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "detail_text",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tag",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "ContainerLoading",
+      "source_table_id": "69851000000047779",
+      "columns": [
+        {
+          "column_name": "position",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "batch",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Container",
+      "source_table_id": "69851000000052488",
+      "columns": [
+        {
+          "column_name": "container_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container_type",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "capacity_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "capacity_pallets",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vessel_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "etd",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "eta",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "port_of_loading",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "port_of_discharge",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "capacity_area_sqm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "max_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PalletisedBatchLine",
+      "source_table_id": "69851000000041727",
+      "columns": [
+        {
+          "column_name": "boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "batch",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "order_item",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "batch_number",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "shade",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PalletisedBatch",
+      "source_table_id": "69851000000051080",
+      "columns": [
+        {
+          "column_name": "boxes_packed",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "delivery_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "is_demo",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "batch_number",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "shade",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "is_mixed",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": "false"
+        }
+      ]
+    },
+    {
+      "table_name": "Invoice",
+      "source_table_id": "69851000000052126",
+      "columns": [
+        {
+          "column_name": "invoice_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "invoice_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "total_amount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "currency",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "OrderItemEvent",
+      "source_table_id": "69851000000053001",
+      "columns": [
+        {
+          "column_name": "event_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty_delta",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "performed_by",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "note",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_item",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "OrderItem",
+      "source_table_id": "69851000000043765",
+      "columns": [
+        {
+          "column_name": "ordered_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "produced_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "purchased_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qc_passed_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "palletized_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "loaded_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "dispatched_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "stage",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "due_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_order",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "priority_level",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "discount_pct",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sub_total",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "final_total",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "description",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "SalesOrder",
+      "source_table_id": "69851000000046003",
+      "columns": [
+        {
+          "column_name": "order_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "po_number",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "port_of_discharge",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "currency",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "quote",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "payment_term",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "manual_so_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipment_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_person",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "customer_notes",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "terms",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "total_amount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "discount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "adjustment",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_pct",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_amount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_type",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_branding",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "exchange_rate",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "reject_reason",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container_plan",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "QuoteItem",
+      "source_table_id": "69851000000045721",
+      "columns": [
+        {
+          "column_name": "quantity_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate_basis",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "discount_pct",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sub_total",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "final_total",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "quote",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "description",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "converted_qty_boxes",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": "0"
+        },
+        {
+          "column_name": "box_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Organization",
+      "source_table_id": "69851000000048001",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "books_org_id",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "default_currency",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Quote",
+      "source_table_id": "69851000000042361",
+      "columns": [
+        {
+          "column_name": "quote_number",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "quote_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "port_of_discharge",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "currency",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "public_link_token",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "conversion_flag",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "total_amount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "payment_term",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "expiry_date",
+          "data_type": "date",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sales_person",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "reference_no",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer_notes",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "terms",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "discount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "adjustment",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_pct",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_amount",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "tax_type",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "share_token",
+          "data_type": "varchar",
+          "max_length": 64,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "exchange_rate",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "reject_reason",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "container_plan",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "DesignPallet",
+      "source_table_id": "69851000000049437",
+      "columns": [
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Pallet",
+      "source_table_id": "69851000000050437",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet_type",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallet_size_label",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "boxes_per_pallet",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pallets_per_container",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "empty_pallet_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "remarks",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "packing_details",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "coverage_sqm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "coverage_sqft",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "b_boxes_per_pallet",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "b_pallets_per_container",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "b_pallet_weight",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Design",
+      "source_table_id": "69851000000047363",
+      "columns": [
+        {
+          "column_name": "unique_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "design_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "base_design_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "sku",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "party_brand_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pcs_per_box",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "coverage_sqm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "coverage_sqft",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "random_faces",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "width_mm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "length_mm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "collection_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate_per_sqft",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "rate_per_sqmt",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "image_url",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "image_urls",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "books_item_id",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "finish",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "category",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "glaze",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "brand",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "grade",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "product_owner",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "accounting_stock",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 4,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "is_batched",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design_owner",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design_buyer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "surface_application",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "punch",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "series",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "catalogue",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Customer",
+      "source_table_id": "69851000000041365",
+      "columns": [
+        {
+          "column_name": "code",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "country_code",
+          "data_type": "varchar",
+          "max_length": 5,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "currency",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "books_contact_id",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "address",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "port_of_discharge",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "active",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "payment_term",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_salutation",
+          "data_type": "varchar",
+          "max_length": 12,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_first_name",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_last_name",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_email",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_work_phone",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_mobile",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_attention",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_country",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_street1",
+          "data_type": "varchar",
+          "max_length": 150,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_street2",
+          "data_type": "varchar",
+          "max_length": 150,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_city",
+          "data_type": "varchar",
+          "max_length": 80,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_state",
+          "data_type": "varchar",
+          "max_length": 80,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_pincode",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "billing_phone",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_attention",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_country",
+          "data_type": "varchar",
+          "max_length": 60,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_street1",
+          "data_type": "varchar",
+          "max_length": 150,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_street2",
+          "data_type": "varchar",
+          "max_length": 150,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_city",
+          "data_type": "varchar",
+          "max_length": 80,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_state",
+          "data_type": "varchar",
+          "max_length": 80,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_pincode",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "shipping_phone",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "main_party_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "working_status",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "handling_person",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "company_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "customer_type",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "contact_persons",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "additional_addresses",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "overseas",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "foreign key",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "gst_no",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "gst_treatment",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "place_of_contact",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pan_no",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "website",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "credit_limit",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "notes",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "opening_balance",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "crm_account_id",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "SalesPerson",
+      "source_table_id": "69851000000049078",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "email",
+          "data_type": "varchar",
+          "max_length": 160,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "phone",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "region",
+          "data_type": "varchar",
+          "max_length": 120,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "active",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "app_user",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "AuthSession",
+      "source_table_id": "69851000000050078",
+      "columns": [
+        {
+          "column_name": "token",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "expires_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "app_user",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "AppUser",
+      "source_table_id": "69851000000045362",
+      "columns": [
+        {
+          "column_name": "email",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "password_hash",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "active",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "role",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "zoho_zuid",
+          "data_type": "varchar",
+          "max_length": 30,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "zoho_linked_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "TransactionSeries",
+      "source_table_id": "69851000000042002",
+      "columns": [
+        {
+          "column_name": "doc_type",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "prefix",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "current_number",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "fy_token",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Catalogue",
+      "source_table_id": "69851000000372021",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Series",
+      "source_table_id": "69851000000373011",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Punch",
+      "source_table_id": "69851000000375013",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "image",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "SurfaceApplication",
+      "source_table_id": "69851000000371011",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "PanelLoadLine",
+      "source_table_id": "69851000000347033",
+      "columns": [
+        {
+          "column_name": "panel_load",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "order_line",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "material",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "qty",
+          "data_type": "int",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "weight_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 3,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "cut_piece_size",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Glaze",
+      "source_table_id": "69851000000048719",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "seq_code",
+          "data_type": "varchar",
+          "max_length": 10,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "Role",
+      "source_table_id": "69851000000043395",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": true,
+          "search_index_enabled": true,
+          "default_value": null
+        },
+        {
+          "column_name": "features",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "can_update",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "can_delete",
+          "data_type": "boolean",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "matrix",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    }
+  ]
+}

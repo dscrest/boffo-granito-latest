@@ -80,7 +80,7 @@ export function SharedPallet() {
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
-            <div className="muted" style={{ fontSize: 14 }}>Pallet · Plant Morbi</div>
+            <div className="muted" style={{ fontSize: 14 }}>Pallet</div>
           </div>
           {box && (
             <div style={{ textAlign: "right" }}>

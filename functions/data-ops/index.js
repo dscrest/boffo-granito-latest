@@ -1640,7 +1640,7 @@ async function createSalesOrder(ds, body, maps) {
   const salesPerson = resolveOptional(maps.sMap, body.salesperson, "Sales person") || body.sales_person_rowid || null;
   const { items, total } = computeLines(body.lines);
   const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
-  const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
+  const bwMap = await designBoxWeights(maps.catalyst, designIds); // CR-427 (was a bare `catalyst` → ReferenceError on every SO create)
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
