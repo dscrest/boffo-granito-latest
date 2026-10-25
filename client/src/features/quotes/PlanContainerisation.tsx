@@ -13,8 +13,8 @@
      the size's largest), saved in the plan and prefilled on the loading.
    · Weight Fitting — each container has a Ton capacity (default 28 t,
      editable) and boxes-per-container = floor(tonCapacity·1000 /
-     boxWeightKg) from the Item's per-box weight (Size default, per-item
-     override), falling back to the Pallet format's.
+     boxWeightKg) from the Item's per-box weight (Size default, typed per
+     item — like its pcs/box since CR-391), falling back to the Pallet format's.
    Packing is strictly item-wise, in line order (line 1
    first): every container starts with a single item, so raising an
    item's quantity refills its own partial container before opening a
@@ -125,6 +125,7 @@ interface DraftLine {
   ordered?: number; // original quote qty for this row (reference only; undefined for new lines)
   group?: string; // rows sharing a group pack into ONE (mixed) container — set by a Move
   over?: boolean; // manual override: the group's container may exceed 100% (CR-196)
+  boxWeightKg?: number; // CR-427: weight frozen on the quote/SO line; undefined (new / legacy rows) = live Item
 }
 
 interface ResolvedLine {
@@ -295,12 +296,13 @@ function ContainerisePlanner({
       const wide = exact.length || sized.some((p) => p.sizeId) ? [] : pallets.filter((p) => p.sizeId && !sized.includes(p) && (!w || widthOf(p.sizeLabel) === w));
       const opts = [...exact, ...sized, ...wide].filter((p) => p.boxesPerPallet > 0);
       const palletOptions = opts.map((p) => ({ value: p.id, label: p.name }));
-      if (opts.length === 0) return fail("no Pallet format for this size", { designId: d.id, boxWeightKg: d.boxWeightKg, tonnes: base.qty * (d.boxWeightKg || 0) / 1000 });
+      if (opts.length === 0) return fail("no Pallet format for this size", { designId: d.id, boxWeightKg: dl.boxWeightKg || d.boxWeightKg, tonnes: base.qty * (dl.boxWeightKg || d.boxWeightKg || 0) / 1000 });
 
       const chosen = opts.find((p) => p.id === dl.palletId) || opts[0];
-      // CR-190: the Item's (overridable) box weight wins; the Pallet format's is the fallback —
-      // same order as the server loading-capacity check.
-      const boxWeightKg = d.boxWeightKg || chosen.boxWeightKg;
+      // CR-427: the weight frozen on the line wins (a later Item weight edit must not move an existing
+      // order); then CR-190: the Item's (overridable) box weight, then the Pallet format's — the
+      // physical loading check (/load-container) stays on the live Item.
+      const boxWeightKg = dl.boxWeightKg || d.boxWeightKg || chosen.boxWeightKg;
       const tonnes = base.qty * boxWeightKg / 1000;
       // CR-261: what a container holds comes from the Container Master, per SIZE. CR-300: each ROW
       // picks its own among the size's containers built from its pallet; unpicked (or a pick not in
@@ -1218,7 +1220,7 @@ export function PlanContainerisation() {
         // cloned split (300+200) survives re-seed; Ordered rides the first row.
         const groups = planRowGroups(parseContainerPlan(quote.containerPlan));
         return quote.lines.flatMap<Omit<DraftLine, "key">>((l) => {
-          const base = { item: l.item, rate: l.rate, discount: l.discount, description: l.description || "" };
+          const base = { item: l.item, rate: l.rate, discount: l.discount, description: l.description || "", boxWeightKg: l.boxWeightKg };
           const gs = groups.get(l.item);
           if (!gs?.length) return [{ ...base, qty: l.qty, palletId: "", formatId: "", ordered: l.qty }];
           return gs.map((g, k) => ({ ...base, qty: g.qty, palletId: g.palletId, formatId: g.formatId, group: g.group, over: g.over, ordered: k === 0 ? l.qty : undefined }));
@@ -1334,7 +1336,7 @@ export function PlanSoContainerisation({ soId, embedded }: { soId?: string; embe
         const emitted = new Set<string>();
         const out = items.flatMap<Omit<DraftLine, "key">>((o) => {
           const item = o.design || o.designName; // o.design hydrates as unique_name || design_name — must match itemOptions keys
-          const base = { item, rate: o.rate || 0, discount: o.discount || 0, description: o.description || "" };
+          const base = { item, rate: o.rate || 0, discount: o.discount || 0, description: o.description || "", boxWeightKg: o.boxWeightKg };
           const gs = groups.get(item);
           if (!gs?.length) return [{ ...base, qty: plan ? 0 : o.orderQty, palletId: o.palletId || "", formatId: "", ordered: o.orderQty }];
           if (emitted.has(item)) return [];

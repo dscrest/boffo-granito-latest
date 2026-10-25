@@ -46,8 +46,12 @@ interface SORow {
 
 // The status the row reads by — shared by the chip, the filter and the sort.
 const statusKey = (r: SORow) => soLiveStatus(r.head.status || "Confirmed", r.items).key;
+// CR-385: the pill carries the status word only; the count sits beside it so the pill never wraps.
 const soChip = (c: SoChip, title?: string) => (
-  <span className={`chip qstatus nw ${c.cls}`} title={title ?? c.title}>{c.label}</span>
+  <span style={{ whiteSpace: "nowrap" }} title={title ?? c.title}>
+    <span className={`chip qstatus ${c.cls}`}>{c.label}</span>
+    {c.detail && <span className="muted mono" style={{ marginLeft: 6, fontSize: "var(--t-sm)" }}>{c.detail}</span>}
+  </span>
 );
 
 export function draftToInput(dr: OrderDraft): NewSalesOrderInput {

@@ -13,8 +13,10 @@ import { cachedOrders, listOrders, subscribeOrders } from "@/features/orders/ord
 import { cachedQuotes, listQuotes, subscribeQuotes } from "@/features/quotes/quotesApi";
 import { cachedCustomers, listCustomers, subscribeCustomers } from "@/features/masters/customersApi";
 import { cachedDesigns, listDesigns, subscribeDesigns } from "@/features/masters/designsApi";
+import { searchSettings } from "@/features/settings/SettingsHome";
+import { isAdmin } from "@/lib/auth";
 
-type Kind = "Order" | "Quote" | "Customer" | "Item";
+type Kind = "Order" | "Quote" | "Customer" | "Item" | "Setting";
 
 interface Hit {
   kind: Kind;
@@ -73,7 +75,21 @@ function search(q: string): Hit[] {
     })),
   );
 
-  return [...orders, ...quotes, ...customers, ...designs];
+  // CR-408: settings pages and preferences (admin only — /settings is an admin route). No fetch.
+  const settings: Hit[] = isAdmin()
+    ? searchSettings(t)
+        .slice(0, PER_GROUP)
+        .map(({ group, item }) => ({
+          kind: "Setting" as const,
+          id: `${item.route} ${item.label}`,
+          title: item.label,
+          sub: `${group.title} · ${item.desc}`,
+          // A Preferences row has no page of its own — land on Settings with the pane preselected.
+          route: item.pane ? `/settings?g=${encodeURIComponent(item.pane)}` : item.route,
+        }))
+    : [];
+
+  return [...orders, ...quotes, ...customers, ...designs, ...settings];
 }
 
 export function GlobalSearch() {
@@ -152,7 +168,7 @@ export function GlobalSearch() {
       <input
         ref={inputRef}
         value={q}
-        placeholder="Search PO, design, customer, invoice…"
+        placeholder={isAdmin() ? "Search PO, design, customer, settings…" : "Search PO, design, customer, invoice…"}
         onChange={(e) => {
           setQ(e.target.value);
           setOpen(true);

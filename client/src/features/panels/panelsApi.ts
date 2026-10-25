@@ -35,6 +35,7 @@ export interface PanelRow {
   panelSize: string;
   vinylSize: string;
   mdfSize: string; // CR-344: the panel's MDF size — the order line picks a thickness of that size from the Mdf master
+  remarks: string; // CR-425: free text, e.g. the old reference ID
   images: DesignImage[]; // File Store images, same shape as Design.image_urls
   lines: PanelLineRow[];
   createdTime: string;
@@ -120,6 +121,7 @@ async function fetchPanels(): Promise<{
     panelSize: str(p.panel_size),
     vinylSize: str(p.vinyl_size),
     mdfSize: str(p.mdf_size),
+    remarks: str(p.remarks),
     images: parseImages(str(p.image_urls)),
     lines: linesByPanel.get(String(p.ROWID)) ?? [],
     createdTime: str(p.CREATEDTIME),
@@ -140,6 +142,7 @@ export interface PanelInput {
   panel_size: string;
   vinyl_size: string;
   mdf_size: string; // CR-344: must match an Mdf master size for the order line to pick a thickness
+  remarks: string; // CR-425
   lines: PanelLineInput[];
 }
 
@@ -160,6 +163,7 @@ function savePanel(input: PanelInput, rowid?: string): Promise<OpResult> {
       panel_size: input.panel_size.trim(),
       vinyl_size: input.vinyl_size.trim(),
       mdf_size: input.mdf_size.trim(),
+      remarks: input.remarks.trim(),
       lines: input.lines,
     }),
   );

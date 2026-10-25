@@ -1,4 +1,4 @@
-/* Grid | List | Kanban segmented toggle shown at the top of the Sales Order
+/* Grid | List segmented toggle (Kanban hidden app-wide, CR-418) shown at the top of the Sales Order
    pages. Icon-only, real <Link> anchors (right-click open-in-new-tab works)
    styled like the QuoteDetail Details|PDF segmented control. */
 import type { CSSProperties } from "react";
@@ -24,7 +24,6 @@ export function ViewToggle() {
       {/* Grid is the default Sales Order view (the sidebar lands here).
           exact match: /orders/:id (detail) must not light up Grid */}
       <Link to="/orders" style={segStyle(pathname === "/orders")} title="Grid" aria-label="Grid view"><Icon name="orders" size={15} /></Link>
-      <Link to="/kanban" style={segStyle(pathname.startsWith("/kanban"))} title="Kanban" aria-label="Kanban view"><Icon name="kanban" size={15} /></Link>
     </div>
   );
 }

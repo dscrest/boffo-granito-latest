@@ -170,7 +170,7 @@ export function LoadingDetail() {
     return <div className="muted mono" style={{ padding: 24 }}>Loading…</div>;
   }
   if (!box) {
-    return <RecordDetail backTo="/loading" title="Loading not found" fields={[]} hiddenStorageKey="loadingDetailFields" />;
+    return <RecordDetail backTo="/loading" title="Loading not found" fields={[]} hiddenStorageKey="loadingDetailFields.v2" />;
   }
 
   const open = box.status === "Open";
@@ -232,8 +232,6 @@ export function LoadingDetail() {
   );
   const fields: RecordField[] = [
     { key: "name", label: "Container Name", value: box.name || "—" }, // CR-333
-    { key: "orders", label: "Order(s)", value: [...new Set(heads.map((h) => h.so).filter(Boolean))].join(", ") || "—" },
-    { key: "customer", label: "Customer", value: [...new Set(heads.map((h) => h.customer).filter(Boolean))].join(", ") || "—" },
     { key: "plannedBoxes", label: "Planned Boxes", value: planLines.length ? fmt(plannedBoxes) : totalBoxes ? fmt(totalBoxes) : "—" },
     { key: "vehicle", label: "Vehicle", value: box.vehicleNumber || "—" },
     { key: "driver", label: "Driver", value: box.driverName || "—" },
@@ -304,7 +302,8 @@ export function LoadingDetail() {
           </>
         }
         fields={fields}
-        hiddenStorageKey="loadingDetailFields"
+        hiddenStorageKey="loadingDetailFields.v2" // .v2 (CR-390): Order(s)/Customer rows gone, Created hidden
+        defaultHidden={["CREATEDTIME"]}
         hideFields // user 2026-09-21: Fields button hidden "for now"
         activityTable="LoadBox"
         entityId={box.id}
@@ -376,7 +375,7 @@ export function LoadingDetail() {
           </div>
         )}
         <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+          <div className="card-head">
             <span style={{ fontWeight: 600 }}>Loaded Items</span>
             {/* Fill bar — design-coloured segments, fractional vs each line's pallet capacity. */}
             <div

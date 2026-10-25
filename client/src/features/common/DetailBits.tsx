@@ -6,11 +6,12 @@
    ============================================================ */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
 import { SkeletonRows } from "@/ui/States";
 import type { PalletOrder, PalletRow } from "@/features/masters/palletsApi";
 
-export function DetailRow({ label, value, dim }: { label: string; value: string; dim?: boolean }) {
+export function DetailRow({ label, value, dim }: { label: string; value: ReactNode; dim?: boolean }) {
   return (
     <div style={{ display: "flex", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
       <span className="muted" style={{ width: 160, flexShrink: 0, fontSize: "var(--t-sm)" }}>{label}</span>

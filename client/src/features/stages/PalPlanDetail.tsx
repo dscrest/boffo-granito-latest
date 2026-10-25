@@ -15,7 +15,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDelete } from "@/ui/ConfirmDialog";
+import { promptDialog } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
@@ -33,9 +33,12 @@ import {
   PAL_STATUS_LABEL,
   oiProgressOf,
   palLineStatusLabel,
+  setPalLineLocation,
   type LoadBox,
   type PalPlan,
 } from "./palPlansApi";
+import { SetLocationModal } from "@/features/common/SetLocationModal";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 
 type DetailTab = "items" | "dispatch" | "timeline" | "activity";
 const tabStyle = (active: boolean): CSSProperties => ({
@@ -52,6 +55,8 @@ export function PalPlanDetail() {
   const [loading, setLoading] = useState(() => cachedPalPlans() == null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<DetailTab>("items");
+  const [locating, setLocating] = useState(false); // CR-412: place every un-loaded pallet of the plan
+  const { enabled: whEnabled, nameOf: whName } = useWarehouses();
 
   const load = async () => {
     setLoading(true);
@@ -86,8 +91,17 @@ export function PalPlanDetail() {
 
   const onDelete = async () => {
     if (!plan) return;
-    const reason = await confirmDelete({ message: `Delete palletization plan ${plan.palNumber}? This cannot be undone.` });
-    if (reason == null) return;
+    // CR-370: every line returns to free stock first; reason mandatory for every role.
+    const n = plan.lines.length;
+    const reason = await promptDialog({
+      title: "Delete palletization",
+      message: `Delete palletization ${plan.palNumber}? ${n ? `All ${n} line${n === 1 ? "" : "s"} return to free stock and the order's allocation is returned. ` : ""}Boxes already in a container must be released first.`,
+      placeholder: "Reason for deleting (required)",
+      required: true,
+      danger: true,
+      confirmLabel: "Delete",
+    });
+    if (!reason) return;
     const res = await deletePalPlan(plan.id, reason);
     if (!res.ok) {
       toast.error(res.error || "Delete failed");
@@ -128,8 +142,11 @@ export function PalPlanDetail() {
   // Edit is always visible (detail-page standard); a Completed plan locks it.
   const editLock = plan.status === "Completed" ? "Completed plans can't be edited" : "";
 
+  // CR-412: lines still standing in the yard (not in a container) — the ones a location applies to.
+  const placeable = plan.lines.filter((l) => !l.loadBoxId);
   const moreItems = [
     ...(can("stages", "create") ? [{ label: "Clone", onClick: () => navigate(`/packing/${encodeURIComponent(plan?.id || "")}/clone`) }] : []),
+    ...(can("stages", "edit") && whEnabled && placeable.length ? [{ label: "Set Location…", onClick: () => setLocating(true) }] : []),
     { label: "Print Palletization slip", onClick: onPrint },
     { label: "Print Packing Report", onClick: onPrintPacking },
     ...(can("stages", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
@@ -146,7 +163,7 @@ export function PalPlanDetail() {
           id: x.id,
           to: `/packing/${x.id}`,
           title: x.palNumber,
-          subtitle: [x.vehicleNumber, PAL_STATUS_LABEL[x.status]].filter(Boolean).join("  ·  "),
+          subtitle: PAL_STATUS_LABEL[x.status],
           searchText: [...x.soNumbers, ...x.customerNames].join(" "),
         }))}
       />
@@ -170,7 +187,7 @@ export function PalPlanDetail() {
             </button>
           </div>
           <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
-            {[plan.vehicleNumber && `Vehicle ${plan.vehicleNumber}`, `${fmt(plan.totalBoxes)} boxes`, plan.salespersonName].filter(Boolean).join("  ·  ")}
+            {[`${fmt(plan.totalBoxes)} boxes`, plan.salespersonName].filter(Boolean).join("  ·  ")}
           </div>
 
           {/* Tabs: palletise items · dispatch · timeline · activity */}
@@ -204,8 +221,9 @@ export function PalPlanDetail() {
                           <th>Design</th>
                           <th>Size</th>
                           <th>Pallet</th>
+                          {whEnabled && <th>Location</th>}
                           <th>Status</th>
-                          <th>Vehicle</th>
+                          <th>Loading</th>
                           <th className="num" style={{ textAlign: "right" }}>Boxes</th>
                           <th style={{ width: 30 }} />
                         </tr>
@@ -224,6 +242,7 @@ export function PalPlanDetail() {
                               <td><span className="design-name">{l.designLabel}</span></td>
                               <td className="muted mono">{l.sizeCode || "—"}</td>
                               <td className="muted">{l.palletName}</td>
+                              {whEnabled && <td className="muted">{l.warehouseId && !box ? whName(l.warehouseId) : "—"}</td>}
                               <td>
                                 <span className={`chip palstatus ${partial ? "p-palletized" : chipCls}`} title={label}>
                                   {codeOf(label)}
@@ -237,7 +256,7 @@ export function PalPlanDetail() {
                                     onClick={(ev) => ev.stopPropagation()}
                                     title={box.status === "Dispatched" ? `Dispatched ${box.dispatchDate}` : "Open the loading"}
                                   >
-                                    {box.vehicleNumber || `Container ${box.boxNumber}`}
+                                    Container {box.boxNumber}
                                   </Link>
                                 ) : (
                                   "—"
@@ -261,7 +280,7 @@ export function PalPlanDetail() {
                           );
                         })}
                         <tr>
-                          <td colSpan={7} style={{ fontWeight: 500 }}>Subtotal</td>
+                          <td colSpan={whEnabled ? 8 : 7} style={{ fontWeight: 500 }}>Subtotal</td>
                           <td className="num mono" style={{ fontWeight: 500 }}>{fmt(subtotal)}</td>
                         </tr>
                       </tbody>
@@ -276,7 +295,6 @@ export function PalPlanDetail() {
           <div style={{ marginTop: 14 }}>
             {/* TODO: rename to Dispatch Details */}
             <div className="form-section-title" style={{ marginBottom: 8 }}>Plan Details</div>
-            <DetailRow label="Vehicle No." value={plan.vehicleNumbers.join(", ") || "—"} />
             <DetailRow label="Driver" value={plan.driverName || "—"} />
             <DetailRow label="Driver Mobile" value={plan.mobileNumber || "—"} />
             <DetailRow label="Palletization Date" value={plan.plannedDate || "—"} />
@@ -304,6 +322,22 @@ export function PalPlanDetail() {
         </div>
       </div>
 
+      {locating && (
+        <SetLocationModal
+          value={new Set(placeable.map((l) => l.warehouseId)).size === 1 ? placeable[0].warehouseId : ""}
+          title={`Set Location · ${placeable.length} item${placeable.length === 1 ? "" : "s"}`}
+          note="Where this plan's pallets stand. Clear it to unset."
+          onSave={async (wid) => {
+            const r = await setPalLineLocation(placeable.map((l) => l.id), wid);
+            setLocating(false);
+            if (!r.ok) { toast.error(r.error || "Could not set location"); return; }
+            toast.success(wid ? "Location set" : "Location cleared");
+            invalidatePalPlans();
+            await load();
+          }}
+          onClose={() => setLocating(false)}
+        />
+      )}
     </div>
   );
 }

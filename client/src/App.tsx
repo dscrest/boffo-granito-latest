@@ -5,7 +5,7 @@
    chunk (code-splitting). Route path === the prototype's view id.
    ============================================================ */
 import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ToastHost } from "@/ui/Toast";
 import { ConfirmHost } from "@/ui/ConfirmDialog";
@@ -63,9 +63,7 @@ const StockDetails = lazy(() => import("@/features/masters/StockDetails").then((
 const DesignEdit = lazy(() => import("@/features/masters/DesignEdit").then((m) => ({ default: m.DesignEdit })));
 const OrderDetail = lazy(() => import("@/features/orders/OrderDetail").then((m) => ({ default: m.OrderDetail })));
 const PurchaseOrderDetail = lazy(() => import("@/features/stages/PurchaseOrderDetail").then((m) => ({ default: m.PurchaseOrderDetail })));
-const Masters = lazy(() => import("@/features/masters/Masters").then((m) => ({ default: m.Masters })));
 // Panel Craft — showcase panels (master + detail) and their cutting-job orders.
-const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
 const PanelDetail = lazy(() => import("@/features/panels/PanelDetail").then((m) => ({ default: m.PanelDetail })));
 const PanelFormPage = lazy(() => import("@/features/panels/PanelFormPage").then((m) => ({ default: m.PanelFormPage })));
 // CR-345: ONE Orders register (Panel + Sample) and ONE type-first New Order; CR-348: the Loading page.
@@ -79,7 +77,6 @@ const SampleOrderDetail = lazy(() => import("@/features/panels/SampleOrderDetail
 const SampleOrderFormPage = lazy(() => import("@/features/panels/SampleOrderFormPage").then((m) => ({ default: m.SampleOrderFormPage })));
 const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
 // CR-306…311: Panel Items (designs + cut pieces), the bulk cut-stock sheets, the Panel Craft dashboard.
-const PanelItems = lazy(() => import("@/features/panels/PanelItems").then((m) => ({ default: m.PanelItems })));
 const PanelItemDetail = lazy(() => import("@/features/panels/PanelItemDetail").then((m) => ({ default: m.PanelItemDetail })));
 const CutStockSheetPage = lazy(() => import("@/features/panels/CutStockSheetPage").then((m) => ({ default: m.CutStockSheetPage })));
 const PanelDashboard = lazy(() => import("@/features/panels/PanelDashboard").then((m) => ({ default: m.PanelDashboard })));
@@ -89,22 +86,18 @@ const PendingCutStock = lazy(() => import("@/features/panels/PendingCutStock").t
 const StockAdjustments = lazy(() => import("@/features/masters/StockAdjustments").then((m) => ({ default: m.StockAdjustments })));
 const StockAdjustmentSheet = lazy(() => import("@/features/masters/StockAdjustmentSheet").then((m) => ({ default: m.StockAdjustmentSheet })));
 // CR-329/330: warehouses master + transfer orders (list + bulk sheet).
-const Warehouses = lazy(() => import("@/features/masters/Warehouses").then((m) => ({ default: m.Warehouses })));
 const StockTransfers = lazy(() => import("@/features/masters/StockTransfers").then((m) => ({ default: m.StockTransfers })));
 const StockTransferSheet = lazy(() => import("@/features/masters/StockTransferSheet").then((m) => ({ default: m.StockTransferSheet })));
-const Pallets = lazy(() => import("@/features/masters/Pallets").then((m) => ({ default: m.Pallets })));
 const PalletDetail = lazy(() => import("@/features/masters/PalletDetail").then((m) => ({ default: m.PalletDetail })));
-const Sizes = lazy(() => import("@/features/masters/Sizes").then((m) => ({ default: m.Sizes })));
 const SizeDetail = lazy(() => import("@/features/masters/SizeDetail").then((m) => ({ default: m.SizeDetail })));
 // Legacy per-shipment container page (no nav entry) — lives at /container-shipments since CR-261.
 const Containers = lazy(() => import("@/features/masters/Containers").then((m) => ({ default: m.Containers })));
-const ContainerFormats = lazy(() => import("@/features/masters/ContainerFormats").then((m) => ({ default: m.ContainerFormats })));
 const ContainerFormatFormPage = lazy(() => import("@/features/masters/ContainerFormatFormPage").then((m) => ({ default: m.ContainerFormatFormPage })));
 const ContainerFormatDetail = lazy(() => import("@/features/masters/ContainerFormatDetail").then((m) => ({ default: m.ContainerFormatDetail })));
 const FitSuggest = lazy(() => import("@/features/stages/FitSuggest").then((m) => ({ default: m.FitSuggest })));
 const UsersAdmin = lazy(() => import("@/features/admin/Users").then((m) => ({ default: m.UsersAdmin })));
 const RolesAdmin = lazy(() => import("@/features/admin/Roles").then((m) => ({ default: m.RolesAdmin })));
-const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
+const GlassKit = lazy(() => import("@/features/settings/GlassKit").then((m) => ({ default: m.GlassKit })));
 const SettingsHome = lazy(() => import("@/features/settings/SettingsHome").then((m) => ({ default: m.SettingsHome })));
 const DataOperations = lazy(() => import("@/features/settings/DataOperations").then((m) => ({ default: m.DataOperations })));
 const ZohoSyncSettings = lazy(() => import("@/features/settings/ZohoSyncSettings").then((m) => ({ default: m.ZohoSyncSettings })));
@@ -140,12 +133,7 @@ function navTree(): NavNode[] {
         { id: "stock-adjustments", label: "Stock Adjustments", icon: "edit" },
         // CR-330: Zoho-Books-style transfer orders between warehouses (boxes + cut pieces).
         { id: "stock-transfers", label: "Transfer Orders", icon: "truck" },
-        // Size Master lives under Settings ▸ Product Masters (admin-only).
-        // Pallet Master = the master of pallet formats (an Items master).
-        // Palletization (Sales, id "packing") is the process that consumes it.
-        { id: "pallets", label: "Pallet Master", icon: "palette" },
-        // Container Master (CR-261) = what one container of a size holds (pallet formats × count).
-        { id: "containers", label: "Container Master", icon: "truck" },
+        // CR-436: Size, Pallet and Container Master live on the Masters page (Export / Item Master tabs).
         { id: "prod", label: "Production", icon: "factory" },
       ],
     },
@@ -182,10 +170,9 @@ function navTree(): NavNode[] {
         // Workflow order (CR-306): items picked from the master → their cut
         // pieces + stock → panels assembled from them → orders dispatch against it.
         { id: "panel-dashboard", label: "Dashboard", icon: "dashboard" },
-        { id: "panel-items", label: "Panel Items", icon: "tile" },
+        // CR-436: Panel Items + Panels live on the Masters page (Panel Master tab).
         { id: "cut-stock", label: "Cut Piece", icon: "tile" },
         { id: "pending-cut-stock", label: "Pending Cut Piece", icon: "tile" },
-        { id: "panels", label: "Panel Master", icon: "tile" },
         { id: "panel-orders", label: "Orders", icon: "orders" }, // CR-345: Panel + Sample orders in one register
         { id: "panel-loading", label: "Loading", icon: "truck" }, // CR-348: what is pending to load, record vehicle trips
       ],
@@ -205,6 +192,8 @@ function navTree(): NavNode[] {
     //     { id: "invoices", label: "Invoices", icon: "invoice" },
     //   ],
     // },
+    // CR-440: no Masters entry in the sidebar — the Masters menu lives under Settings (gear) only;
+    // /masters (redirects, ⌘K, Settings tiles) still opens that workspace for roles holding "masters".
     {
       label: "Reports",
       icon: "chart",
@@ -316,6 +305,10 @@ const NavNodeRow = memo(function NavNodeRow({ node, depth, openGroups, onToggle 
   );
 });
 
+/* CR-378 BOFFO Glass: app-wide since 2026-10-22. main.tsx sets <html data-skin="glass">
+   before the first paint; glass.css keys every rule off that attribute, so removing the
+   attribute restores the slate skin. Theme (light/dark/system) is picked from the rail
+   user menu at the bottom of the sidebar (CR-379, features/shell/HeaderMenus.tsx). */
 export default function App() {
   const location = useLocation();
   const currentId = location.pathname.replace(/^\//, "") || "dashboard";
@@ -331,7 +324,6 @@ export default function App() {
     void loadDefaultView();
   }, []);
   const isAdmin = user?.role === "Admin";
-  const navigate = useNavigate();
   // Re-filter when the session user lands (perms snapshot lives in sessionStorage).
   const tree = useMemo(() => filterTreeByRole(navTree()), [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -402,24 +394,14 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="foot">
-          <div className="row">
-            <span className="dot" />
-            <span style={{ color: "var(--fg-2)" }}>Live data</span>
-          </div>
-        </div>
+        {/* CR-379: the account chip is the rail foot — settings, theme, tours, sign out. */}
+        <UserMenu user={user} />
       </aside>
 
       <header className="header">
         {/* Breadcrumbs removed 2026-07-06 — the sidebar shows location; search leads the header. */}
         <GlobalSearch />
-        {isAdmin && (
-          <button className="hbtn" title="Settings" aria-label="Settings" data-tour="settings" onClick={() => navigate("/settings")}>
-            <Icon name="settings" size={13} />
-          </button>
-        )}
         <NotificationBell />
-        <UserMenu user={user} />
       </header>
 
       <main className="main">
@@ -466,7 +448,7 @@ export default function App() {
             <Route path="/prod/:id" element={<ProductionDetail />} />
             <Route path="/qc" element={<QC />} />
             <Route path="/container-shipments" element={<Containers />} />
-            <Route path="/containers" element={<ContainerFormats />} />
+            <Route path="/containers" element={<Navigate to="/masters?g=export&m=containers" replace />} />
             <Route path="/containers/new" element={<ContainerFormatFormPage />} />
             <Route path="/containers/:id/edit" element={<ContainerFormatFormPage />} />
             <Route path="/containers/:id/clone" element={<ContainerFormatFormPage />} />
@@ -499,12 +481,12 @@ export default function App() {
             <Route path="/stock-adjustments/new" element={<StockAdjustmentSheet />} />
             <Route path="/stock-transfers" element={<StockTransfers />} />
             <Route path="/stock-transfers/new" element={<StockTransferSheet />} />
-            <Route path="/pallets" element={<Pallets />} />
+            <Route path="/pallets" element={<Navigate to="/masters?g=export&m=pallets" replace />} />
             <Route path="/pallets/new" element={<PalletFormPage />} />
             <Route path="/pallets/:id/edit" element={<PalletFormPage />} />
             <Route path="/pallets/:id/clone" element={<PalletFormPage />} />
             <Route path="/pallets/:id" element={<PalletDetail />} />
-            <Route path="/panels" element={<Panels />} />
+            <Route path="/panels" element={<Navigate to="/masters?g=panel&m=panels" replace />} />
             <Route path="/panels/new" element={<PanelFormPage />} />
             <Route path="/panels/:id/edit" element={<PanelFormPage />} />
             <Route path="/panels/:id/clone" element={<PanelFormPage />} />
@@ -526,19 +508,24 @@ export default function App() {
             <Route path="/pending-cut-stock" element={<PendingCutStock />} />
             <Route path="/panel-dashboard" element={<PanelDashboard />} />
             <Route path="/panel-loading" element={<PanelLoading />} />
-            <Route path="/panel-items" element={<PanelItems />} />
+            <Route path="/panel-items" element={<Navigate to="/masters?g=panel&m=panel_items" replace />} />
             <Route path="/panel-items/:id" element={<PanelItemDetail />} />
-            <Route path="/sizes" element={<Sizes />} />
+            <Route path="/cut-piece-sizes" element={<Navigate to="/masters?g=panel&m=cut_piece_size" replace />} />
+            <Route path="/sizes" element={<Navigate to="/masters?g=item&m=sizes" replace />} />
             <Route path="/sizes/:id" element={<SizeDetail />} />
             <Route path="/settings" element={isAdmin ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />
             <Route path="/data-operations" element={isAdmin ? <DataOperations /> : <Navigate to="/dashboard" replace />} />
             <Route path="/settings/zoho" element={isAdmin ? <ZohoSyncSettings /> : <Navigate to="/dashboard" replace />} />
             <Route path="/settings/zoho-books" element={<Navigate to="/settings/zoho" replace />} />
-            <Route path="/masters" element={isAdmin ? <Masters /> : <Navigate to="/dashboard" replace />} />
-            <Route path="/warehouses" element={isAdmin ? <Warehouses /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/glass-kit" element={isAdmin ? <GlassKit /> : <Navigate to="/dashboard" replace />} />
+            {/* CR-436/439: the Masters menu lives INSIDE the Settings workspace (rail Masters ▸ Item / Panel / Export).
+                /masters opens that workspace on Masters — Admin, or any role holding the "masters" nav id; non-admins see
+                the Masters menu only. Old list routes redirect in. */}
+            <Route path="/masters" element={isAdmin || hasFeature("masters") ? <SettingsHome /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/warehouses" element={<Navigate to="/masters?g=export&m=warehouses" replace />} />
             <Route path="/users" element={isAdmin ? <UsersAdmin /> : <Navigate to="/dashboard" replace />} />
             <Route path="/roles" element={isAdmin ? <RolesAdmin /> : <Navigate to="/dashboard" replace />} />
-            <Route path="/currencies" element={isAdmin ? <CurrenciesAdmin /> : <Navigate to="/dashboard" replace />} />
+            <Route path="/currencies" element={<Navigate to="/masters?g=export&m=currencies" replace />} />
             <Route
               path="/approvals"
               element={canApprove("Quote") || canApprove("SalesOrder") || canApprove("Production") ? <Approvals /> : <Navigate to="/dashboard" replace />}

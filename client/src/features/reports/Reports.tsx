@@ -32,7 +32,7 @@ import type { WhCell } from "@/lib/warehouseStock";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, listPanels, type CutSizeOption } from "@/features/panels/panelsApi";
-import { cachedCutStockRows, cutWarehouseCells, listCutStock, listCutStockEntries, type CutStockEntryRow, type CutStockRow } from "@/features/panels/panelOrdersApi";
+import { cachedCutStockRows, cachedPanelOrders, cutWarehouseCells, listCutStock, listCutStockEntries, listPanelOrders, type CutStockEntryRow, type CutStockRow, type PanelOrderRow } from "@/features/panels/panelOrdersApi";
 import { batchLedger, type BatchMoveRow } from "@/features/stages/batchLedger";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
 import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
@@ -1352,7 +1352,11 @@ interface WarehouseStockRow {
 
 function WarehouseStockReport() {
   const { warehouses, nameOf, enabled } = useWarehouses();
-  const [unit, setUnit] = usePersistedState<"boxes" | "pcs">("reportWarehouse.unit", "boxes");
+  // CR-409: a third stock type — Panels = open panel orders placed at a location (CR-410).
+  // CR-412: a fourth — Pallets = palletized lines standing at a location, not yet in a container.
+  const [unit, setUnit] = usePersistedState<"boxes" | "pcs" | "panels" | "pallets">("reportWarehouse.unit.v2", "boxes");
+  const [panelOrders, setPanelOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
+  const [palPlans, setPalPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
   const [view, setView] = usePersistedState<"list" | "matrix">("reportWarehouse.view", "list");
   const [batchRows, setBatchRows] = useState<BatchStockRow[]>(() => cachedBatchStock() ?? []);
   const [boxCells, setBoxCells] = useState<WhCell[]>(() => cachedWarehouseStock());
@@ -1367,7 +1371,7 @@ function WarehouseStockReport() {
 
   useEffect(() => {
     let alive = true;
-    void Promise.all([listBatchStock(), listCutStock(), listCutStockEntries(), listDesigns(), listPanels()]).then(([b, cs, ce, d, p]) => {
+    void Promise.all([listBatchStock(), listCutStock(), listCutStockEntries(), listDesigns(), listPanels(), listPanelOrders(), listPalPlans()]).then(([b, cs, ce, d, p, po, pp]) => {
       if (!alive) return;
       setLoading(false);
       if (!b.ok) { setError(b.error || "Failed to load stock"); return; }
@@ -1378,6 +1382,8 @@ function WarehouseStockReport() {
       if (ce.ok) setCutEntries(ce.rows);
       if (d.ok) setDesigns(d.designs);
       if (p.ok) setCutSizes(p.cutSizes);
+      if (po.ok) setPanelOrders(po.orders);
+      if (pp.ok) setPalPlans(pp.plans);
     });
     return () => { alive = false; };
   }, [nonce]);
@@ -1395,6 +1401,29 @@ function WarehouseStockReport() {
         return hydrate(c, r?.designId ?? c.key.split("|")[0], r?.designLabel ?? c.key.split("|")[0], r?.sizeCode ?? "", r?.batchNumber ?? "");
       });
     }
+    if (unit === "panels") {
+      // CR-410: one row per open panel order placed at a location — qty = the order's panels (pcs).
+      return panelOrders
+        .filter((o) => o.warehouseId && o.status !== "Dispatched" && o.status !== "Cancelled")
+        .map((o) => ({
+          key: o.id, designId: o.id, designLabel: o.customerName, sizeCode: "", second: o.orderNumber,
+          warehouseId: o.warehouseId, warehouse: nameOf(o.warehouseId) || "—",
+          onHand: o.totalQty, committed: 0, available: o.totalQty, over: 0,
+        }));
+    }
+    if (unit === "pallets") {
+      // CR-412: one row per palletized line standing at a location (not yet in a container) — qty = boxes on the pallet.
+      // designId carries the PLAN id so the row links to /packing/:id.
+      return palPlans.flatMap((p) =>
+        p.lines
+          .filter((l) => l.warehouseId && !l.loadBoxId && (l.status === "Palletizing" || l.status === "ReadyToLoad"))
+          .map((l) => ({
+            key: l.id, designId: p.id, designLabel: l.designLabel, sizeCode: l.sizeCode, second: l.batchNumber,
+            warehouseId: l.warehouseId, warehouse: nameOf(l.warehouseId) || "—",
+            onHand: l.boxes, committed: 0, available: l.boxes, over: 0,
+          })),
+      );
+    }
     const dById = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
     return cutWarehouseCells(warehouses, cutEntries, cutStock).map((c) => {
@@ -1402,18 +1431,19 @@ function WarehouseStockReport() {
       const d = dById.get(designId);
       return hydrate(c, designId, d?.uniqueName || d?.designName || designId, d?.sizeLabel || "", cutName.get(cutSizeId) || "—");
     });
-  }, [unit, batchRows, boxCells, cutStock, cutEntries, designs, cutSizes, warehouses, nameOf]);
+  }, [unit, batchRows, boxCells, cutStock, cutEntries, designs, cutSizes, warehouses, nameOf, panelOrders, palPlans]);
 
-  const secondLabel = unit === "boxes" ? "Batch" : "Cut size";
+  const secondLabel = unit === "boxes" || unit === "pallets" ? "Batch" : unit === "panels" ? "Order" : "Cut size";
+  const itemLabel = unit === "panels" ? "Customer" : "Item";
   const fields = useMemo<FilterField<WarehouseStockRow>[]>(
     () => [
-      { key: "warehouse", label: "Warehouse", type: "select", options: distinct(rowsRaw.map((r) => r.warehouse)), get: (r) => r.warehouse },
-      { key: "item", label: "Item", type: "select", options: distinct(rowsRaw.map((r) => r.designLabel)), get: (r) => r.designLabel },
+      { key: "warehouse", label: "Location", type: "select", options: distinct(rowsRaw.map((r) => r.warehouse)), get: (r) => r.warehouse },
+      { key: "item", label: itemLabel, type: "select", options: distinct(rowsRaw.map((r) => r.designLabel)), get: (r) => r.designLabel },
       { key: "size", label: "Size", type: "select", options: distinct(rowsRaw.map((r) => r.sizeCode)), get: (r) => r.sizeCode },
       { key: "second", label: secondLabel, type: "text", get: (r) => r.second },
       { key: "onHand", label: "On hand", type: "numrange", get: (r) => r.onHand },
     ],
-    [rowsRaw, secondLabel],
+    [rowsRaw, secondLabel, itemLabel],
   );
   const rows = useMemo(() => applyFilters(rowsRaw, criteria, fields), [rowsRaw, criteria, fields]);
   const tot = useMemo(
@@ -1428,42 +1458,50 @@ function WarehouseStockReport() {
   const pager = usePagination(rows.length, "reportWarehousePageSize", `${unit}|${JSON.stringify(criteria)}|${sort.sortKey}|${sort.dir}`);
   const pageRows = pager.slice(sort.sorted);
 
-  // One tile per warehouse (what sits there), then the total.
+  // One tile per WAREHOUSE (its locations summed — CR-409), then the total.
+  const topOf = (id: string) => warehouses.find((w) => w.id === id)?.parentId || id;
   const perWarehouse = new Map<string, number>();
-  for (const r of rows) perWarehouse.set(r.warehouse, (perWarehouse.get(r.warehouse) || 0) + r.onHand);
+  for (const r of rows) perWarehouse.set(topOf(r.warehouseId), (perWarehouse.get(topOf(r.warehouseId)) || 0) + r.onHand);
+  const unitWord = unit === "panels" ? "pcs" : unit === "pallets" ? "boxes" : unit;
+  const noCommitted = unit === "panels" || unit === "pallets";
   const kpis: KpiSpec[] = [
-    ...warehouses.map((w) => ({ label: w.name, value: fmt(perWarehouse.get(w.name) || 0), unit, color: w.isPrimary ? "var(--c-blue)" : undefined })),
-    { label: "Committed", value: fmt(tot.committed), unit, color: "var(--c-amber)" },
-    { label: "On hand", value: fmt(tot.onHand), unit, color: "var(--c-green)" },
+    ...warehouses.filter((w) => !w.parentId).map((w) => ({ label: w.name, value: fmt(perWarehouse.get(w.id) || 0), unit: unitWord, color: w.isPrimary ? "var(--c-blue)" : undefined })),
+    ...(noCommitted ? [] : [{ label: "Committed", value: fmt(tot.committed), unit: unitWord, color: "var(--c-amber)" }]),
+    { label: "On hand", value: fmt(tot.onHand), unit: unitWord, color: "var(--c-green)" },
   ];
+  const emptyHint =
+    unit === "boxes" ? "Record production or opening stock to see boxes here."
+    : unit === "panels" ? "Set a location on a panel order (More ▸ Set Location) to see it here."
+    : unit === "pallets" ? "Pick a location when you palletize (or + ▸ Set Location on the board) to see pallets here."
+    : "Add cut pieces to see them here.";
 
   if (!enabled && !loading) {
     return (
-      <ReportShell title="Warehouse Stock" subtitle="What sits in each warehouse">
-        <EmptyState icon="package" title="No warehouses yet" hint="Add warehouses under Settings ▸ Warehouses — stock then shows per location here." />
+      <ReportShell title="Stock Locations" subtitle="What sits at each location">
+        <EmptyState icon="package" title="No warehouses yet" hint="Add a warehouse and its locations under Settings ▸ Warehouses & Locations — stock then shows per location here." />
       </ReportShell>
     );
   }
   return (
     <ReportShell
-      title="Warehouse Stock"
-      subtitle="What sits in each warehouse — boxes or cut pieces"
+      title="Stock Locations"
+      subtitle="What sits at each location — boxes, cut pieces or panels"
       kpis={kpis}
-      filter={{ title: "warehouse stock", fields, criteria, onChange: setCriteria }}
+      filter={{ title: "stock locations", fields, criteria, onChange: setCriteria }}
       bar={
         <>
-          <Seg value={unit} onChange={setUnit} options={[{ id: "boxes", label: "Boxes" }, { id: "pcs", label: "Cut pieces" }]} label="Stock type" />
-          <Seg value={view} onChange={setView} options={[{ id: "list", label: "List" }, { id: "matrix", label: "Item × Warehouse" }]} label="View" />
+          <Seg value={unit} onChange={setUnit} options={[{ id: "boxes", label: "Boxes" }, { id: "pcs", label: "Cut pieces" }, { id: "panels", label: "Panels" }, { id: "pallets", label: "Pallets" }]} label="Stock type" />
+          <Seg value={view} onChange={setView} options={[{ id: "list", label: "List" }, { id: "matrix", label: `${itemLabel} × Location` }]} label="View" />
         </>
       }
       csv={{
-        name: `report-warehouse-stock-${unit}`,
+        name: `report-stock-locations-${unit}`,
         rows,
         columns: [
-          { header: "Item", value: (r) => r.designLabel },
+          { header: itemLabel, value: (r) => r.designLabel },
           { header: "Size", value: (r) => r.sizeCode },
           { header: secondLabel, value: (r) => r.second },
-          { header: "Warehouse", value: (r) => r.warehouse },
+          { header: "Location", value: (r) => r.warehouse },
           { header: "On hand", value: (r) => r.onHand },
           { header: "Committed", value: (r) => r.committed },
           { header: "Available", value: (r) => r.available },
@@ -1476,14 +1514,15 @@ function WarehouseStockReport() {
       ) : view === "matrix" ? (
         <div className="card">
           <div style={{ overflow: "auto" }}>
+            {/* CR-409: columns = only the locations that hold something (the rows), never all 70. */}
             <PivotTable
               rows={rows}
               rowKey={(r) => r.designLabel}
               colKey={(r) => r.warehouse}
               value={(r) => r.onHand}
-              rowHeader="Item"
-              emptyTitle="No stock in any warehouse"
-              emptyHint={unit === "boxes" ? "Record production or opening stock to see boxes here." : "Add cut pieces to see them here."}
+              rowHeader={itemLabel}
+              emptyTitle="No stock at any location"
+              emptyHint={emptyHint}
             />
           </div>
         </div>
@@ -1493,10 +1532,10 @@ function WarehouseStockReport() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <SortTh id="item" label="Item" sort={sort} />
+                  <SortTh id="item" label={itemLabel} sort={sort} />
                   <SortTh id="size" label="Size" sort={sort} />
                   <SortTh id="second" label={secondLabel} sort={sort} />
-                  <SortTh id="warehouse" label="Warehouse" sort={sort} />
+                  <SortTh id="warehouse" label="Location" sort={sort} />
                   <SortTh id="onHand" label="On hand" sort={sort} className="num" style={numTh} />
                   <SortTh id="committed" label="Committed" sort={sort} className="num" style={numTh} />
                   <SortTh id="available" label="Available" sort={sort} className="num" style={numTh} />
@@ -1506,12 +1545,12 @@ function WarehouseStockReport() {
                 {pageRows.map((r) => (
                   <tr key={r.key}>
                     <td className="nw">
-                      <Link className="linkish clip" to={unit === "boxes" ? `/design/${r.designId}?tab=locations` : `/panel-items/${encodeURIComponent(r.designId)}`} title={r.designLabel}>{r.designLabel}</Link>
+                      <Link className="linkish clip" to={unit === "boxes" ? `/design/${r.designId}?tab=locations` : unit === "panels" ? `/panel-orders/${encodeURIComponent(r.designId)}` : unit === "pallets" ? `/packing/${encodeURIComponent(r.designId)}` : `/panel-items/${encodeURIComponent(r.designId)}`} title={r.designLabel}>{r.designLabel}</Link>
                     </td>
                     <td>{r.sizeCode ? <span className="chip size">{r.sizeCode}</span> : <span className="dim">—</span>}</td>
                     <td className="mono" style={{ color: "var(--fg)" }}>{r.second || <span className="dim" title="Unbatched stock">—</span>}</td>
                     <td>{r.warehouse}</td>
-                    <td className="num mono" style={{ fontWeight: 600, color: r.over > 0 ? "var(--c-amber)" : "var(--c-green)" }} title={r.over > 0 ? `${fmt(r.over)} more left this warehouse than it ever held — check the transfers` : undefined}>
+                    <td className="num mono" style={{ fontWeight: 600, color: r.over > 0 ? "var(--c-amber)" : "var(--c-green)" }} title={r.over > 0 ? `${fmt(r.over)} more left this location than it ever held — check the transfers` : undefined}>
                       {fmt(r.onHand)}{r.over > 0 ? " ⚠" : ""}
                     </td>
                     <td className="num mono">{r.committed ? fmt(r.committed) : <span className="dim">—</span>}</td>
@@ -1521,7 +1560,7 @@ function WarehouseStockReport() {
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={7} style={{ padding: 0 }}>
-                      <EmptyState icon="package" title="No stock in any warehouse" hint={unit === "boxes" ? "Record production or opening stock to see boxes here." : "Add cut pieces to see them here."} />
+                      <EmptyState icon="package" title="No stock at any location" hint={emptyHint} />
                     </td>
                   </tr>
                 )}
@@ -2284,7 +2323,7 @@ export const REPORTS: ReportDef[] = [
   { id: "production-batches", title: "Production Batches", subtitle: "Boxes produced per batch — list or item × date matrix", icon: "factory", Component: BatchReport },
   { id: "stock", title: "Live Stock", subtitle: "Opening + produced − loaded, per design", icon: "package", Component: StockReport },
   { id: "stock-batch", title: "Batch-wise Stock", subtitle: "On-hand boxes per item and batch", icon: "package", Component: BatchStockReport },
-  { id: "stock-warehouse", title: "Warehouse Stock", subtitle: "What sits in each warehouse — boxes or cut pieces", icon: "package", Component: WarehouseStockReport }, // CR-331
+  { id: "stock-warehouse", title: "Stock Locations", subtitle: "What sits at each location — boxes, cut pieces or panels", icon: "package", Component: WarehouseStockReport }, // CR-331 · CR-409 locations · CR-410 panels
   { id: "batch-movement", title: "Batch Movement", subtitle: "Where each batch went — palletized, loaded, dispatched, on hand", icon: "factory", Component: BatchMovementReport },
   { id: "ready", title: "Ready Pallets", subtitle: "Palletized and waiting, not yet in a loading", icon: "truck", Component: ReadyReport },
   { id: "pal-status", title: "Palletization Status", subtitle: "Every plan and how far its boxes have moved", icon: "truck", Component: PalStatusReport },

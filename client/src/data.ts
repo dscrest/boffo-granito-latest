@@ -59,6 +59,8 @@ export interface Order {
   dispatchedQty: number;
   /** OrderItem.pallet — the pallet spec chosen at SO creation (Pallet ROWID; "" if unset). */
   palletId: string;
+  /** Box weight frozen on the line at creation (OrderItem.box_weight_kg, CR-427); undefined = read the live Item. */
+  boxWeightKg?: number;
   boxesPerPallet: number;
   totalBoxes: number;
   pallets: number;
@@ -176,6 +178,8 @@ export interface QuoteLine {
   description?: string;
   /** Boxes already converted to Sales Orders (caps further conversion). */
   converted?: number;
+  /** Box weight frozen on the line at creation (QuoteItem.box_weight_kg, CR-427); undefined = read the live Item. */
+  boxWeightKg?: number;
 }
 
 export interface Quote {

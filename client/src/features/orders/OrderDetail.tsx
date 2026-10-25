@@ -14,12 +14,11 @@ import { ContainerPlanCard } from "@/features/quotes/ContainerPlanCard";
 import { QuotePrint } from "@/features/quotes/QuotePrint";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
-import { deleteSalesOrder, listOrders, loadStatus, orderLabel, palStatus, remainingOf, setOrderStatus, soLiveStatus, soStatusLabel } from "./ordersApi";
+import { deleteSalesOrder, listOrders, loadStatus, orderLabel, palStatus, remainingOf, setOrderStatus, soLiveStatus, soStatusLabel, type SoChip } from "./ordersApi";
 import { DeallocateStockModal } from "./DeallocateStockModal";
 import { listOrderBatches } from "@/features/stages/palletisationApi";
 import { listPalPlans, palLineStatusLabel } from "@/features/stages/palPlansApi";
 import { DispatchTab, dispatchRows, dispatchedByDesign } from "@/features/stages/DispatchTab";
-import { SourcePanelOrders } from "@/features/panels/SourcePanelOrders";
 import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
 import { soNextStep } from "@/features/stages/nextStep";
@@ -31,6 +30,9 @@ import { useOrders } from "./useOrders";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { lineSupplies } from "@/lib/needProduction";
 import { useMasters } from "@/features/masters/useMasters";
+
+/** Detail-row text for a progress chip: `Partial · 760 of 900` (CR-385). */
+const chipText = (c: SoChip) => (c.detail ? `${c.label} · ${c.detail}` : c.label);
 
 // Boxes produced on THIS order still waiting to be palletised — drives the
 // palletise selection/checkboxes only. NOT the sellable "Available" figure
@@ -410,6 +412,20 @@ export function OrderDetail() {
     toast.success(label);
     await load();
   };
+  // CR-371: reason mandatory for every role; the server empties containers, removes every
+  // palletization line and returns every allocation — or refuses while a box is already dispatched.
+  const onCancel = async () => {
+    const reason = await promptDialog({
+      title: "Cancel order",
+      message: `Cancel ${head.orderNumber}? Palletized and loaded boxes return to free stock; a box already dispatched blocks the cancel.`,
+      placeholder: "Reason for cancelling (required)",
+      required: true,
+      danger: true,
+      confirmLabel: "Cancel order",
+    });
+    if (!reason) return;
+    await changeStatus("Cancelled", "Order cancelled", reason);
+  };
   const onReject = async () => {
     const reason = await promptDialog({
       title: "Reject order",
@@ -457,13 +473,11 @@ export function OrderDetail() {
   const fields: RecordField[] = [
     // CR-353 (reverses the 2026-07-20 mandate): the customer's PO leads — it is the
     // page title too — and the SO number rides second (still the DB / URL identity).
-    { key: "poNumber", label: "PO Number", value: head.poNumber || "—" },
-    { key: "orderNumber", label: "SO Number", value: head.orderNumber || "—" },
     { key: "party", label: "Customer", value: head.party },
     // Stage omitted — the order's status is the header chip, not repeated here.
     // Where the boxes are — same helpers as the grid columns (CR-233).
-    { key: "palStatus", label: "Palletization Status", value: palStatus(items).label },
-    { key: "loadStatus", label: "Loading Status", value: loadStatus(items).label },
+    { key: "palStatus", label: "Palletization Status", value: chipText(palStatus(items)) },
+    { key: "loadStatus", label: "Loading Status", value: chipText(loadStatus(items)) },
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
@@ -630,7 +644,7 @@ export function OrderDetail() {
                 ? [{ label: "Change Status", onClick: () => setChangingStatus(true) }]
                 : []),
               ...((status === "Confirmed" || status === "InProgress") && can("orders", "edit")
-                ? [{ label: "Cancel Order", danger: true, onClick: () => void changeStatus("Cancelled", "Order cancelled") }]
+                ? [{ label: "Cancel Order", danger: true, onClick: () => void onCancel() }]
                 : []),
               ...(head.salesOrderId && can("orders", "create")
                 ? [{ label: "Clone", onClick: () => navigate(formUrl("clone")) }]
@@ -662,7 +676,6 @@ export function OrderDetail() {
           ? [
               { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onDeallocate={(id) => setDeallocating(id)} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
-              { id: "panels", label: "Panel Orders", content: <SourcePanelOrders salesOrderId={head.salesOrderId} /> },
               {
                 id: "containers",
                 label: "Container Planning",
@@ -693,7 +706,7 @@ export function OrderDetail() {
       modified={head.modifiedTime}
     >
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+        <div className="card-head">
           <span style={{ fontWeight: 600 }}>Items</span>
           <span className="muted" style={{ fontSize: 14 }}>
             {totalAvail} boxes to palletize

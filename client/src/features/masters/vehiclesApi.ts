@@ -5,6 +5,7 @@
    cached like every other list. Every write is logged in OperationLog.
    ============================================================ */
 import { listAll, type OpResult } from "@/lib/dataOps";
+import { titleCase } from "@/lib/format";
 import { createListCache } from "@/lib/cache";
 import { createMaster, updateMaster } from "./mastersApi";
 
@@ -99,7 +100,7 @@ export async function resolveVehicle(input: {
   const found = list.vehicles.find((v) => formatVehicleNumber(v.vehicleNumber) === reg);
   if (found) {
     const patch: Record<string, string> = {};
-    if (driver && driver !== found.driverName) patch.driver_name = driver;
+    if (driver && titleCase(driver) !== found.driverName) patch.driver_name = driver; // CR-429: server stores Title Case
     if (mobile && mobile !== found.mobile) patch.mobile_number = mobile;
     if (Object.keys(patch).length) {
       const r = await updateMaster("Vehicle", found.id, patch);

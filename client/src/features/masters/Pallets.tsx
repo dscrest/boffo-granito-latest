@@ -173,7 +173,7 @@ export function Pallets() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/pallets/new")}>
+            <button className="hbtn primary sm" onClick={() => navigate("/pallets/new")}>
               <Icon name="plus" size={13} />
               New pallet
             </button>

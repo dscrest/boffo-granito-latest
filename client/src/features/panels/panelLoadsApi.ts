@@ -13,8 +13,11 @@ import { resolveVehicle } from "@/features/masters/vehiclesApi";
 
 export interface LoadPick {
   line: string; // PanelOrderLine / SampleOrderLine ROWID
-  material: Material;
+  material: Material; // Item (pieces of one kind) | Mdf — never Panel on a new load (CR-405)
   qty: number; // 0 = skip
+  /** CR-405: the piece kind on an Item pick of a panel line (loose lines may send theirs too). */
+  design?: string;
+  cut_piece_size?: string;
 }
 export interface LoadOrderInput {
   order_type: "Panel" | "Sample";

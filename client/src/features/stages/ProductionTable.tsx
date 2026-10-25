@@ -24,6 +24,7 @@ import { fmt, fmtDateTime, fmtLocalDate, pct } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
 import { confirmDelete, confirmDiscard } from "@/ui/ConfirmDialog";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { batchRows, effectiveRequested, hasOps, resolveSheetEdit, type SheetDraft, type SheetOps } from "./productionSheetEdit";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ToProduce } from "./ToProduce";
@@ -171,7 +172,10 @@ export function ProductionTable() {
   const navigate = useNavigate();
   // View opens on whatever Settings → Default view says, then persists for the
   // session (board stays board until switched back).
-  const [view, setView] = useViewState<"grid" | "board" | "sheet" | "demand">("production.view", "grid", "board");
+  const [rawView, setView] = useViewState<"grid" | "board" | "sheet" | "demand">("production.view", "grid", "board");
+  // CR-417: Kanban and To Produce are hidden (Table + Sheet only) — a persisted "board"/"demand" falls back to
+  // the Table; their render code is kept below, unreachable, like the Loading page's Workspace (CR-172).
+  const view = (rawView === "board" || rawView === "demand" ? "grid" : rawView) as "grid" | "board" | "sheet" | "demand";
   // Status filter opens on All in every view (CR-246).
   const [tab, setTab] = useState("all");
   // Board grouping: an ordered list of dimensions → nested swimlanes (empty = flat).
@@ -219,12 +223,14 @@ export function ProductionTable() {
     if (editMode && !salesPersons.length) void listSalesPersons().then((r) => r.ok && setSalesPersons(r.salesPersons));
   }, [editMode, salesPersons.length]);
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
+  // CR-411: the inline cell has no room for a picker — output lands in the Production bay by default.
+  const { primaryFor: whFor } = useWarehouses();
 
   const COLS = useMemo(() => productionColumns(), []);
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
   // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
   // .v3 (CR-236): Batch + Mfg Date columns.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v4", COLS, ["items", "created", "modified", "code"]); // .v4 (CR-265): Production ID hidden by default
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v5", COLS, ["items", "created", "modified", "code", "batch", "mfg"]); // .v5 (CR-390): Batch / Mfg Date hidden (empty on group rows; the Sheet shows them)
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -496,7 +502,7 @@ export function ProductionTable() {
       if (!err && ops.record != null) {
         // Batch left blank on purpose — the server mints B/YYYY-MM/NNN. Operators who
         // need a specific batch use the + dialog (RecordOutputForm).
-        const r = await recordProduction(e.id, { qty_boxes: ops.record, production_date: todayISO(), performed_by: loggedBy });
+        const r = await recordProduction(e.id, { qty_boxes: ops.record, production_date: todayISO(), performed_by: loggedBy, warehouse: whFor("Production")?.id || undefined });
         if (!r.ok) err = r.error || "Could not record output";
       }
       // Stage last so an explicit choice outranks the server's auto-step.
@@ -605,26 +611,23 @@ export function ProductionTable() {
         </span>
         <AdvancedFilterButton title="Production" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }}>
-          {(["grid", "sheet", "board", "demand"] as const).map((v) => (
+          {(["grid", "sheet"] as const).map((v) => (
             <button
               key={v}
               type="button"
               onClick={() => void changeView(v)}
-              title={v === "grid" ? "Table view" : v === "sheet" ? "Sheet — inline edit qty & stage" : v === "board" ? "Kanban board" : "To Produce — what open orders still need"}
+              title={v === "grid" ? "Table view" : "Sheet — inline edit qty & stage"}
               style={{
                 background: view === v ? "var(--accent-soft)" : "transparent",
                 color: view === v ? "var(--fg)" : "var(--muted)",
                 border: 0, padding: "4px 8px", cursor: "pointer", font: "inherit", display: "inline-flex", alignItems: "center", gap: 5,
               }}
             >
-              <Icon name={v === "grid" ? "columns" : v === "sheet" ? "edit" : v === "board" ? "kanban" : "factory"} size={13} />
-              {/* Grid/Sheet/Kanban are the app-wide standard icons; To Produce is a
-                  different dataset, so it alone carries its name. */}
-              {v === "demand" && <span style={{ fontSize: "var(--t-sm)" }}>To Produce</span>}
+              <Icon name={v === "grid" ? "columns" : "edit"} size={13} />
             </button>
           ))}
         </div>
-        {view !== "demand" && (
+        {(
           <ColumnPicker
             columns={groupCols}
             hidden={groupHidden}
@@ -643,12 +646,11 @@ export function ProductionTable() {
         {view === "sheet" && canEdit && (
           editMode ? (
             <>
-              <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+              <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
                 Cancel
               </button>
               <button
-                className="hbtn primary"
-                style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                className="hbtn primary sm"
                 disabled={!editOps.rows.length || editOps.bad || savingEdits}
                 onClick={() => void saveDraft()}
                 title={editOps.bad ? "Fix the highlighted cells first" : "Save every edited line"}
@@ -658,8 +660,7 @@ export function ProductionTable() {
             </>
           ) : (
             <button
-              className="hbtn"
-              style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+              className="hbtn sm"
               onClick={() => setEditMode(true)}
               title="Edit quantities and status across rows, then Save"
             >
@@ -668,21 +669,16 @@ export function ProductionTable() {
             </button>
           )
         )}
-        {canEdit && (
-          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowImport(true)}>
-            <Icon name="upload" size={13} />
-            Import
-          </button>
-        )}
+        {/* CR-417: Import hidden — `canEdit && <button className="hbtn sm" onClick={() => setShowImport(true)}>Import</button>` */}
         {/* CR-267: Bulk Record Production is the default (primary) action; Start New Production is secondary. */}
         {canEdit && (
-          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/new")}>
+          <button className="hbtn sm" onClick={() => navigate("/prod/new")}>
             <Icon name="plus" size={13} />
             Start New Production
           </button>
         )}
         {canEdit && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/prod/record")}>
+          <button className="hbtn primary sm" onClick={() => navigate("/prod/record")}>
             <Icon name="columns" size={13} />
             Bulk Record Production
           </button>

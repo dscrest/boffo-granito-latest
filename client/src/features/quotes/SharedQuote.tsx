@@ -183,7 +183,7 @@ export function SharedQuote() {
                   return groups.map((g) => (
                     <Fragment key={g.design}>
                       <tr>
-                        <td colSpan={6} style={{ background: "#f1efea", color: "#17181b", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>
+                        <td colSpan={6} style={{ background: "var(--panel-2)", color: "var(--fg)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: 1 }}>
                           Design: {g.design}
                         </td>
                       </tr>

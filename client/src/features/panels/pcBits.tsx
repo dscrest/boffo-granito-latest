@@ -2,19 +2,23 @@
    and column filter select for the .nd record grids, plus the status →
    chip-tone map. Trial-local; graduates to ui/ if the design goes
    app-wide. */
+import { useState } from "react";
 import { Icon } from "@/ui/Icon";
 import type { ChipTone } from "@/ui/Chip";
 import { designImageUrl } from "@/lib/api";
-import type { LoadingStatus, PanelOrderStatus, Readiness } from "./panelOrdersApi";
+import { ImageLightbox } from "@/features/common/ImageLightbox";
+import type { DesignImage } from "@/features/masters/designsApi";
+import type { LoadingStatus, PanelOrderStatus, PanelProgress } from "./panelOrdersApi";
 import type { SampleOrderStatus } from "./sampleOrderStatus";
 import type { PanelRow } from "./panelsApi";
 
 export const ORDER_STATUS_TONE: Record<PanelOrderStatus, ChipTone> = {
   NewRequest: "slate",
-  Received: "amber",
-  InCutting: "blue",
+  Received: "slate", // CR-400: the open stages all read "New"
+  InCutting: "slate",
   Ready: "teal",
   Dispatched: "green",
+  Cancelled: "red", // CR-368
 };
 
 /** CR-315: sample order status → chip tone. */
@@ -22,6 +26,7 @@ export const SAMPLE_STATUS_TONE: Record<SampleOrderStatus, ChipTone> = {
   New: "slate",
   PartiallySupplied: "amber",
   Supplied: "green",
+  Cancelled: "red", // CR-368
 };
 
 export function IconBtn({
@@ -140,15 +145,41 @@ export function PanelTile({
   );
 }
 
-/* CR-313: production-readiness chip tones (derived readiness + per-checkpoint status). */
+/** CR-398: the ⓘ cell on an order line (Panel / Sample order forms) — hover = the record's
+    details (native title), click = its photos in the lightbox. The photo left the row: the
+    rep already picked by photo in the showcase picker; here it only broke column alignment. */
+export function InfoDot({ title, images, alt }: { title: string; images: DesignImage[]; alt: string }) {
+  const [viewer, setViewer] = useState<number | null>(null);
+  const hasImg = images.length > 0;
+  return (
+    <>
+      <button
+        type="button"
+        className="btn ord-info"
+        title={`${title || "No details"}${hasImg ? " — click to view photo" : ""}`}
+        aria-label={`Details for ${alt}: ${title || "none"}`}
+        disabled={!title && !hasImg}
+        onClick={() => hasImg && setViewer(0)}
+        tabIndex={-1}
+      >
+        <Icon name="info" size={13} />
+      </button>
+      {viewer !== null && <ImageLightbox images={images} index={viewer} onIndex={setViewer} onClose={() => setViewer(null)} />}
+    </>
+  );
+}
+
 /** CR-347: derived Loading Status (loadingStatus) — Not loaded · Partially loaded · Loaded. */
 export const LOADING_TONE: Record<LoadingStatus, ChipTone> = { "Not loaded": "slate", "Partially loaded": "amber", Loaded: "green" };
 
-export const READINESS_TONE: Record<Readiness, ChipTone> = {
-  Pending: "slate",
-  "In Progress": "amber",
-  "Ready for Production": "green",
-  "—": "gray",
+/** CR-367/400: the one derived panel-order status (panelProgress) → chip tone. */
+export const PROGRESS_TONE: Record<PanelProgress, ChipTone> = {
+  New: "slate",
+  Ready: "teal",
+  Completed: "green",
+  Dispatched: "green",
+  Cancelled: "red",
 };
+/* CR-313: per-checkpoint status → chip tone. */
 export const checkpointTone = (status: string): ChipTone =>
   status === "Ready" ? "green" : status === "Pending" ? "slate" : status === "Received" ? "blue" : "amber";

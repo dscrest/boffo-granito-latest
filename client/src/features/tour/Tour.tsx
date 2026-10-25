@@ -112,14 +112,9 @@ export const TOURS: Record<string, TourStep[]> = {
       body: "Jump to any record — a customer, quote, order or item — from anywhere. Press ⌘K to open it.",
     },
     {
-      anchor: "settings",
-      title: "Settings",
-      body: "Masters and app configuration — sizes, containers, users, roles and more. Admin only.",
-    },
-    {
       anchor: "usermenu",
       title: "That's the flow!",
-      body: "Customer → Quote → Sales Order → Production → Palletization → Loading. Replay this tour anytime from this menu.",
+      body: "Customer → Quote → Sales Order → Production → Palletization → Loading. Settings (Admin), keyboard shortcuts, light or dark theme and sign-out live in this menu — replay this tour anytime from here.",
     },
   ],
 
@@ -130,11 +125,9 @@ export const TOURS: Record<string, TourStep[]> = {
       body: "Stage four of the flow: Customer → Quote → Sales Order → Production → Palletization → Loading. Order items appear here on their own as production is recorded — or create a plan yourself with New Palletization Plan.",
     },
     {
-      anchor: "pal-view-toggle",
       route: "/packing",
-      waitMs: 5000,
-      title: "Views and stages",
-      body: "Palletization is three pages: Ready for Palletization (this queue), In Palletization (work in progress) and Palletization Completed (palletized stock waiting to be loaded). Kanban and Sheet show the same lines; the Sheet's columns can be shown, hidden and reordered. Use Group to band rows by Customer, Order, Batch or Item.",
+      title: "Three stages",
+      body: "Palletization is three pages: Ready for Palletization (this queue), In Palletization (work in progress) and Palletization Completed (palletized stock waiting to be loaded). The Sheet's columns can be shown, hidden and reordered; Group bands rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",

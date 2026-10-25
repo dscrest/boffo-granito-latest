@@ -3,9 +3,10 @@
    Data Store via sizesApi. Create / edit / delete write real rows;
    every mutation is recorded in OperationLog (see /ops).
 
-   Size is the source of truth for per-box packing data: the Item
-   form and the Pallet form snapshot coverage/weight from the size
-   picked there.
+   Size holds the per-box packing DEFAULTS: the Pallet form snapshots
+   coverage/weight from the size picked there; the Item form starts its
+   own Pcs Per Packing / box weight from the size (CR-391 — typed per
+   item, coverage from the item's own numbers).
 
    Follows the master-page UI convention (see DesignMaster):
    • NO inline row actions — row-click opens the size detail page.
@@ -15,7 +16,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
-import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -215,7 +215,6 @@ export function Sizes() {
         </div>
       ) : (
         <div className="fbar">
-          <BackToSettings />
           {/* Type filter intentionally omitted for now — search covers it. */}
           <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : null}</span>
           <div style={{ flex: 1 }} />
@@ -226,7 +225,7 @@ export function Sizes() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowNew(true)}>
+            <button className="hbtn primary sm" onClick={() => setShowNew(true)}>
               <Icon name="plus" size={13} />
               New size
             </button>

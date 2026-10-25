@@ -56,7 +56,11 @@
 | AppUser | 76673000000094001 | App auth: sign-in accounts |
 | AuthSession | 76673000000095001 | App auth: bearer tokens |
 | SalesPerson | 76673000000115495 | Sales reps on quotes/SO (links AppUser) |
-| PartyBrand | 69851000000060042 (live) | Lookup — party brands (feeds unique_name) |
+| PartyBrand | 69851000000060042 (live) | Lookup — customer brands (feeds unique_name); per-customer since CR-393 |
+| SurfaceApplication | 69851000000371011 (live) | Lookup — Design Master surface applications (CR-394) |
+| Punch | 69851000000375013 (live) | Lookup — punch types with image (CR-394) |
+| Series | 69851000000373011 (live) | Lookup — marketing series (CR-394) |
+| Catalogue | 69851000000372021 (live) | Lookup — catalogues (CR-394) |
 | Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
 | StatusTransition | 69851000000066173 (live) | Status/stage flip audit (Quote/SO/OrderItem) — added 2026-07-13 |
 | Notification | 69851000000062554 (live) | Per-user in-app notifications — added 2026-07-13 |
@@ -200,7 +204,7 @@ accounts). Live seeds: `catalyst-migration/data/Role.json`.
 | sqft_per_box | double(4) | added 2026-07-09 · **computed on save** = `sqm_per_box * 10.7639` |
 | remark | varchar(255) | added 2026-07-09 (requested 1000, Catalyst capped at 255) |
 
-Size is the single source of truth for per-box packing data. `Pallet.coverage_sqm/coverage_sqft` and `Design.width_mm/length_mm/pcs_per_box` are **auto-filled snapshots** of the picked Size — never hand-entered. `box_weight_kg` on both is the exception (CR-133 Pallet, CR-190 Item): the Size value is the default, a typed override is kept by the Size-edit fan-out; `/resync-size-snapshots` still overwrites it.
+Size holds the per-box packing **defaults**. `Pallet.coverage_sqm/coverage_sqft` and `Design.width_mm/length_mm` are **auto-filled snapshots** of the picked Size — never hand-entered. `box_weight_kg` on both is a default with a typed override (CR-133 Pallet, CR-190 Item): a typed value is kept by the Size-edit fan-out; `/resync-size-snapshots` still overwrites it. **CR-391 (2026-10-23): `Design.pcs_per_box` is the ITEM's own** — the Size value only prefills the form; `Design.coverage_sqm/sqft` = the item's own `width × length × pcs` (stamped server-side by `stampDesignCoverage` on every Design POST/PATCH). The Size fan-out and the resync never touch item pcs / coverage any more. Pallet coverage still follows the Size, so an item's m²/box may differ from its pallet's for the same Size (accepted).
 
 Values (`code` → width×length mm): 75x600, 98x600, 98x1200, 198x1200, 200x1200, 300x600, 400x1200, 600x600, 600x900, 600x1200, 800x800, 800x1600, 1200x1200, 1200x2780, 400x400.
 
@@ -227,13 +231,17 @@ Values: Glossy, Hard Matt, Carving, Matt, Elevation, High Glossy, Carving + Punc
 ### PartyBrand (live id 69851000000060042) — added 2026-07-04
 | Column | Type | Notes |
 |---|---|---|
-| name | varchar(255) | key column (app-enforced unique via NATURAL_KEY) |
+| name | varchar(255) | key column (app-enforced unique via NATURAL_KEY — one brand name across all customers) |
 | seq_code | varchar(10) | SKU segment (provisioned; not yet used in SKU) |
+| customer | bigint | **CR-393 — logical FK → Customer ROWID** (plain bigint, live convention); the customer this brand belongs to; null = legacy / unassigned, offered to every buyer — added 2026-10-23 via the Catalyst MCP, column 69851000000373370 |
 | deleted_at | datetime | soft delete |
 
-Party brand master (Settings → Masters → Party Brand). The Design column
-`party_brand_name` stays free-text varchar; the item form offers these names
-via a creatable Combobox and appends the value to `unique_name`.
+Party brand master (Settings → Masters → Customer Brand; **CR-393:** also the "Customer Brands"
+list on the Customer detail, `CustomerBrands.tsx`, which files rows under that customer). The Design
+column `party_brand_name` stays free-text varchar; the item form ("Custom Design Buyer Brand") offers
+the buyer's rows + unassigned names via a creatable Combobox (a created name is filed under the
+chosen buyer) and appends the value to `unique_name`. `BLOCK_DELETE.Customer` and `/customer-dedupe`
+cover `PartyBrand.customer`.
 
 ### PaymentTerm (76673000000049001)
 | Column | Type | Notes |
@@ -340,7 +348,7 @@ is answered `{disabled:true}` while CRM is active — disable it in the console 
 | credit_limit | varchar(30) | CR-356 — kept as text (nothing sorts / sums it); pushed to Books as a number — added 2026-10-21, column 69851000000347451 |
 | notes | text(10000) | CR-356 — Books "Remarks" — added 2026-10-21, column 69851000000347452 |
 | opening_balance | varchar(30) | CR-356 — pulled from Books (`opening_balance_amount`), **display-only**, never pushed — added 2026-10-21, column 69851000000347453 |
-| crm_account_id | varchar(30) | CR-359 — Zoho CRM Account this customer is linked to (set by the CRM sync / import / push / hand mapping; `""` = not linked); `books_contact_id` kept as the hidden Books link — added 2026-10-21 via the Catalyst MCP, column 69851000000351602 |
+| crm_account_id | varchar(30) | CR-359 — Zoho CRM Account this customer is linked to (set by the CRM sync / import / push / hand mapping; `""` = not linked); `books_contact_id` kept as the hidden Books link — added 2026-10-21 via the Catalyst MCP, column 69851000000351602. **CR-372/373 (2026-10-22):** one live row per value — the 2026-10-21 imports made twins (822 rows for ≈530 ids; the sync's existing read hit the 300-row ZCQL cap, now paged) and reused `code`s; `POST /customer-dedupe` merges twins into the Books-linked row (orders repointed, twins soft-deleted) and renews shared codes |
 
 ### Design (76673000000052723) — keys on `unique_name` / `design_name`
 | Column | Type | Notes |
@@ -348,13 +356,13 @@ is answered `{disabled:true}` while CRM is active — disable it in the console 
 | unique_name | varchar(255) | unique (app + data-ops 409); = Design - Size - Finish[ - PartyBrand] |
 | design_name | varchar(255) | |
 | seq_code | varchar(10) | design Short Code — first SKU segment (added 2026-07-04, live project) |
-| base_design_name | varchar(255) | |
+| base_design_name | varchar(255) | **CR-395:** picked from existing item names on the form (stored as the name, not a FK) |
 | sku | varchar(100) | auto: `DesignShortCode-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand]` from stored `seq_code`s (PB segment only when set); uniqueness enforced once short codes are filled |
-| party_brand_name | varchar(255) | free text; picked from PartyBrand master (creatable) |
-| pcs_per_box | int | |
+| party_brand_name | varchar(255) | free text; picked from PartyBrand master (creatable) — **CR-393:** narrowed to the `design_buyer`'s brands + unassigned names |
+| pcs_per_box | int | **CR-391: the item's own** "Pcs Per Packing" — typed on the form, Size value = prefill only; never fanned out from Size any more |
 | box_weight_kg | double | nullable → uncalibrated for fit; Size default, per-item override on the Item form (CR-190); read first by planning + loading (Pallet weight = fallback) |
-| coverage_sqm | double | |
-| coverage_sqft | double | |
+| coverage_sqm | double | **CR-391:** = item `width_mm/1000 × length_mm/1000 × pcs_per_box`, stamped server-side (`stampDesignCoverage`) on every Design insert / patch that carries the three inputs; read by `/load-container` + `/fit-suggest` |
+| coverage_sqft | double | = `coverage_sqm × 10.763915` (same stamp) |
 | random_faces | int | |
 | width_mm | double | tile width (mm); auto-filled from Size, drives coverage calc |
 | length_mm | double | tile length (mm); auto-filled from Size, drives coverage calc |
@@ -370,7 +378,13 @@ is answered `{disabled:true}` while CRM is active — disable it in the console 
 | glaze | FK → Glaze | SET-NULL |
 | brand | FK → Brand | SET-NULL |
 | grade | FK → Grade | SET-NULL |
-| product_owner | varchar(255) | |
+| product_owner | varchar(255) | **unused** — never read or written; superseded by `design_owner` (CR-392) |
+| design_owner | bigint | **CR-392 — logical FK → Customer ROWID** ("Design Owner"; prefilled from AppSetting `default_design_owner`, Settings ▸ Preferences); guarded by `BLOCK_DELETE.Customer` + `/customer-dedupe` — added 2026-10-23 via the Catalyst MCP, column 69851000000372380 |
+| design_buyer | bigint | **CR-392 — logical FK → Customer ROWID** ("Custom Design Buyer"; narrows the Customer Brand pick list, CR-393) — column 69851000000379018 |
+| surface_application | bigint | **CR-394 — logical FK → SurfaceApplication** — column 69851000000376018 |
+| punch | bigint | **CR-394 — logical FK → Punch** — column 69851000000377019 |
+| series | bigint | **CR-394 — logical FK → Series** (Marketing Data) — column 69851000000369014 |
+| catalogue | bigint | **CR-394 — logical FK → Catalogue** (Marketing Data) — column 69851000000378015 |
 | accounting_stock | double | opening stock for **singular** (non-batched) items; locked after first save (null = unlocked; admin re-edit needs `_reason` → OperationLog) |
 | is_batched | boolean | batch-tracked item (added 2026-08-11). Batched items keep opening stock as ProductionLog `entry_type="opening"` rows, not `accounting_stock`. Server rejects flipping once the item carries stock (opening rows or accounting_stock). |
 
@@ -460,6 +474,7 @@ largest `total_boxes`.
 | final_total | double | |
 | quote | FK → Quote | **CASCADE** |
 | design | FK → Design | SET-NULL |
+| box_weight_kg | double | **CR-427 — created on live 2026-10-24 (col 69851000000369650).** Snapshot of `Design.box_weight_kg` at line creation (`designBoxWeights` in `/quote-with-items` + `/update-quote-with-items`); null on legacy lines = Container Planning reads the live Item |
 
 ### SalesOrder (76673000000051371) — UI label: "Sales Order"
 | Column | Type | Notes |
@@ -513,6 +528,7 @@ largest `total_boxes`.
 | discount_pct | double | |
 | sub_total | double | |
 | final_total | double | |
+| box_weight_kg | double | **CR-427 — created on live 2026-10-24 (col 69851000000394132).** Snapshot of `Design.box_weight_kg` at line creation (`createSalesOrder`, `/update-so-with-items` insert; an existing line re-stamps only when its `design` changes); null on legacy lines = Container Planning reads the live Item. `/load-container` / `/fit-suggest` never read it |
 
 ### OrderItemEvent (76673000000053367)
 | Column | Type | Notes |
@@ -659,6 +675,7 @@ Order items pulled onto a plan (lines key on OrderItem — planned before packin
 | box_brand | FK → Brand | SET-NULL · per-line carton-brand override on the /loading Customer Sheet (`""`/null = inherit Customer.box_brand); written via generic PUT; NOT carried through `/pal-line-box` partial splits (overrides are set post-boxing) — added 2026-09-10; repointed BoxBrand→Brand 2026-09-11 |
 | pallet_no | varchar(60) | manual pallet number/range typed on the Loading Sheet (`""` = auto running range "1 TO 16"); written via generic PATCH; printed on the Dispatch Entry / Dispatch Copy; NOT carried through `/pal-line-box` partial splits — added 2026-09-14 (CR-184), column 69851000000277499 |
 | pallet_type | varchar(60) | manual pallet type typed on the Loading Sheet (`""` = blank); written via generic PATCH; not carried through line splits — added 2026-09-19 (CR-208), column 69851000000293012 |
+| warehouse | bigint | **CR-412 — created on live 2026-10-24 (col 69851000000376694).** Logical FK → Warehouse node (a location, or a warehouse without locations) where this line's PALLET stands; null = not placed; moot once `load_box` is set (the container is the place). Written by `/pal-line-status` (body `warehouse` — the Palletise dialog's Location, default = the **Palletization** purpose bay on Start and the **Loading Bay** purpose bay on Complete) and by generic PATCH (Set Location from the boards' "+" / selection bar, the loading row menu, the plan detail More menu). Copied onto every split slice (`/pal-line-status`; `/pal-topup` stamps the TARGET's; `writeLineIntoBox` remainder). A tag on the line, **never a stock movement** — `deriveWarehouseStock` / `warehouseReduce` do not read it. `BLOCK_DELETE.Warehouse`. |
 | deleted_at | datetime | soft delete |
 
 ### LoadBox (69851000000089442) — added 2026-07-27 (cross-plan vehicle slots)
@@ -754,6 +771,7 @@ Natural key = `panel_code`.
 | vinyl_size | varchar(30) | |
 | mdf_size | varchar(30) | the panel's MDF size, e.g. "1200x2400" — matches `Mdf.size` on the size-keyed master; the order line offers that size's thicknesses (CR-342 col 69851000000351002, added 2026-10-15; semantics CR-344) |
 | image_urls | text | JSON `[{id,name}]` File Store ids (max 5, same shape as Design.image_urls; shared ImageManager) — added 2026-08-26 |
+| remarks | text | free text, e.g. the old reference ID (CR-425, col 69851000000396065 added 2026-10-24) |
 | deleted_at | datetime | soft delete |
 
 ### PanelLine (live id 69851000000194524)
@@ -774,7 +792,7 @@ movement.
 lines; create mints `order_number` and is born `NewRequest`; update only while
 `NewRequest` / `Received`, lines replaced wholesale); deleted only via
 `/panel-order-delete/:rowid` (same stage rule, lines soft-deleted too). Generic POST /
-DELETE refused; generic PATCH stays for `checklist` only — `status`, `checkpoints` and `allocation` are `STATE_COLUMNS` (CR-312/313).
+DELETE refused; generic PATCH stays for `checklist` and `warehouse` (CR-410) only — `status`, `checkpoints` and `allocation` are `STATE_COLUMNS` (CR-312/313).
 Status machine (server `/panel-order-status/:rowid`, forward-only; generic PATCH
 rejects `status`): NewRequest → Received → InCutting → Ready; **Dispatched is DERIVED — written only
 by `/panel-load-save` when the last load leaves nothing pending (CR-347)**. **Ready adds** the PENDING
@@ -792,12 +810,13 @@ Status changes only from `/panel-orders/:id` (CR-287).
 | qty | int | **legacy** — see `panel`; the live quantity is Σ `PanelOrderLine.qty` |
 | salesperson | varchar(160) | defaulted from the signed-in user |
 | order_date | date | omit when blank |
-| status | varchar(20) | NewRequest / Received / InCutting / Ready / Dispatched |
+| status | varchar(20) | NewRequest / Received / InCutting / Ready / Dispatched / **Cancelled** (CR-368, via `/panel-order-cancel`, terminal) |
 | sales_order | bigint | logical FK → SalesOrder; source of a "Request Panels" order (CR-286, col 69851000000316427, added 2026-10-06) |
 | quote | bigint | logical FK → Quote; source of a "Request Panels" order (CR-286, col 69851000000316429, added 2026-10-06) |
 | checklist | text | JSON `{"<design>|<cut_piece_size>": true}` — manual Available ticks on the requirements checklist (keys are summed across lines since CR-302), plain column via generic PATCH (CR-288, col 69851000000322244, added 2026-10-06) |
 | allocation | text | JSON `{"<design>|<cut_piece_size>": pcs}` — cut pieces BOOKED to this order, a claim on `CutPieceStock.qty` (never a movement); written only by `/panel-order-allocate` (absolute set), `/panel-order-status` Ready (= need) and `/panel-order-save` (clamp); Σ over open orders ≤ on hand; Dispatch requires `allocation ≥ need` (CR-312, col 69851000000314863, added 2026-10-07) |
-| checkpoints | text | JSON `{"mdf"\|"vinyl"\|"cut": {"status","by","at"}}` — MDF (Pending/Ordered/Received/Ready), Vinyl Printing (Pending/Printing/Ready), Cut Pieces (Pending/Ready) marks; written only by `/panel-order-checkpoint`; overall readiness is derived, never stored (CR-313, col 69851000000314862, added 2026-10-07) |
+| checkpoints | text | JSON `{"cut": {"status","by","at"}, "panels": {"<Panel ROWID>": {"mdf"\|"vinyl"\|"pasted": {"status","by","at"}}}}` — Cut Pieces (Pending/Ready) is order-level; MDF (Pending/Ordered/Received/Ready), Vinyl Printing (Pending/Printing/Ready) and Vinyl Pasted on MDF (Pending/Ready, CR-323) are **per panel** since CR-376 (keyed by the Panel ROWID — a panel sits on one line per order, so the key survives a line rewrite). Legacy top-level `mdf`/`vinyl`/`pasted` marks (CR-313…366) stay as the fallback for a panel without its own mark — no migration. Written only by `/panel-order-checkpoint`; overall progress is derived, never stored (CR-313, col 69851000000314862, added 2026-10-07) |
+| warehouse | bigint | **CR-410 — created on live 2026-10-23 (col 69851000000375787).** Logical FK → Warehouse node (a location, or a warehouse without locations) where the order's panels sit; null = not set. Plain column via generic PATCH (More ▸ Set Location, open orders only); CR-413: also the Panel Order form's **Location** field (create / edit → `/panel-order-save` header, `""` clears, no default); `BLOCK_DELETE.Warehouse` refuses deleting a node an order is placed at. |
 | deleted_at | datetime | soft delete |
 
 ### PanelOrderLine (live id 69851000000315921)
@@ -827,7 +846,7 @@ generic POST / PATCH / DELETE refused.
 | customer | bigint | logical FK → Customer (col 69851000000320533) |
 | salesperson | varchar(120) | logged-in user's name at creation (col 69851000000322684) |
 | order_date | date | defaults to today in the form (col 69851000000322685) |
-| status | varchar(40) | `New` · `PartiallySupplied` · `Supplied` — DERIVED from the lines by `/sample-order-supply`; `STATE_COLUMNS` (col 69851000000322686) |
+| status | varchar(40) | `New` · `PartiallySupplied` · `Supplied` — DERIVED from the lines by `/panel-load-save` / `-delete`; `Cancelled` = the one STORED value (CR-368, `/sample-order-cancel`); `STATE_COLUMNS` (col 69851000000322686) |
 | sales_order | bigint | source SalesOrder when raised via Request Samples (col 69851000000322687) |
 | quote | bigint | source Quote when raised via Request Samples (col 69851000000322688) |
 | note | text | header note (col 69851000000326150) |
@@ -871,18 +890,23 @@ Dispatched (sample order → derived status).
 | performed_by | varchar(120) | `currentActor` (col 69851000000352031) |
 | deleted_at | datetime | soft delete (col 69851000000352032) |
 
-### PanelLoadLine (live id 69851000000347033) — added 2026-10-15 (CR-347)
-One order line × material × qty on a trip. `material`: **Panel** (a panel line's cut pieces — leave
-stock), **Mdf** (its board — not stock; only when the line picked one), **Item** (a loose cut-piece line
-or a sample line). `weight_kg` is STAMPED at load time (CR-349: unit kg × qty; null when a piece or board
-was unweighed) and never recomputed — a master weight edit changes pending and future orders only.
+### PanelLoadLine (live id 69851000000347033) — added 2026-10-15 (CR-347), piece kind 2026-10-23 (CR-405)
+One order line × material × piece kind × qty on a trip. `material`: **Item** (cut pieces of ONE kind —
+`design` + `cut_piece_size` name it on a panel line's row; a loose cut-piece or sample line carries them
+on the order line — leave stock), **Mdf** (the line's board — not stock; CR-406: every panel line has
+the row, thickness picked or not). **Panel** is LEGACY (whole panels, CR-347…403): read as qty × pcs
+under every piece key of the panel, never written any more. `weight_kg` is STAMPED at load time (CR-349:
+unit kg × qty; null when a piece or board was unweighed) and never recomputed — a master weight edit
+changes pending and future orders only.
 | Column | Type | Notes |
 |---|---|---|
 | panel_load | bigint | logical FK → PanelLoad (col 69851000000353021; `load` is a reserved word) |
 | order_line | bigint | logical FK → PanelOrderLine or SampleOrderLine (col 69851000000353022) |
-| material | varchar(10) | `Panel` \| `Mdf` \| `Item` (col 69851000000353023) |
-| qty | int | units loaded on this trip (col 69851000000353024) |
+| material | varchar(10) | `Item` \| `Mdf` (`Panel` legacy, read-only) (col 69851000000353023) |
+| qty | int | units loaded on this trip — pieces or boards (col 69851000000353024) |
 | weight_kg | double(3) | kg of this line on this trip, frozen (col 69851000000353025) |
+| design | bigint | CR-405: Design ROWID of the piece kind on an Item line (col 69851000000377379, added 2026-10-23) |
+| cut_piece_size | bigint | CR-405: CutPieceSize ROWID of the piece kind on an Item line (col 69851000000377380, added 2026-10-23) |
 | deleted_at | datetime | soft delete (col 69851000000353026) |
 
 ### CutPieceSize (live id 69851000000182460)
@@ -933,8 +957,8 @@ History on `/panel-items/:designId`.
 | warehouse | bigint | **CR-329 — created on live 2026-10-12 (col 69851000000338009).** Logical FK → Warehouse; null = the primary. Set from the sheet's Warehouse picker (receipt / adjustment) or the From / To pair (transfer); order / sample movements leave it null. |
 | doc_number | varchar(40) | **CR-330 — created on live 2026-10-12 (col 69851000000338010).** `TRF/<FY>/NNN` on `kind="transfer"` rows (same series as `ProductionLog.request_group` transfer codes); null elsewhere. |
 
-### Warehouse (live id 69851000000335014) — added 2026-10-12 (CR-329)
-Settings ▸ Warehouses — the stock locations master (Zoho Books "Locations"). Generic CRUD via
+### Warehouse (live id 69851000000335014) — added 2026-10-12 (CR-329), locations 2026-10-23 (CR-409)
+Settings ▸ Warehouses & Locations — the stock locations master (Zoho Books "Locations"); a row with `parent` is a Location inside that warehouse. Generic CRUD via
 `warehousesApi` (module `items`, `GET_SHARED`); `is_primary` is route-only (`POST /warehouse-primary/:rowid`
 stamps every null-warehouse `ProductionLog` / `CutStockEntry` row onto the OLD primary, then flips the flag).
 Exactly one primary; the primary and any warehouse referenced by stock rows refuse deletion. No warehouses =
@@ -945,6 +969,7 @@ the feature is dormant. Natural key = `name`.
 | is_primary | boolean | exactly one true — `STATE_COLUMNS` (col 69851000000334153) |
 | purposes | varchar(255) | comma list of `Production` · `Palletization` · `Loading Bay` · `Raw Material` · `Sample Cut Panels` (`WAREHOUSE_PURPOSES`); labels only, except **Loading Bay** = where null-warehouse removals (loaded boxes) are taken from first (col 69851000000334154) |
 | note | varchar(255) | free text (col 69851000000334155) |
+| parent | bigint | **CR-409 — created on live 2026-10-23 (col 69851000000369543).** Logical FK → Warehouse: set = this row is a **Location** (A1 … F12) inside that warehouse; null = a top-level warehouse. One level only (the generic insert 400s a parent that itself has a parent); never changed via PATCH; name unique among siblings (`warehouseSiblingScope`). A location inherits the warehouse's purposes and can't be primary (`/warehouse-primary` 409). Stock rows' `warehouse` points at the leaf. |
 | deleted_at | datetime | soft delete (col 69851000000334156) |
 
 ### Mdf (live id 69851000000314493) — added 2026-10-07 (CR-309), size-keyed master again since CR-344
@@ -972,6 +997,43 @@ Sample / Display · Other. Natural key = `name`.
 | name | varchar(100) | unique (col 69851000000314852) |
 | seq_code | varchar(10) | auto-assigned by the Masters editor (col 69851000000314853) |
 | deleted_at | datetime | soft delete (col 69851000000314854) |
+
+### SurfaceApplication (live id 69851000000371011) — added 2026-10-23 (CR-394)
+Settings ▸ Masters ▸ Surface Application — "types of applications on the surface", picked on the Item
+form (Design Data). Generic CRUD via `mastersApi` (module `items`); `BLOCK_DELETE` keeps a value an item
+uses. Natural key = `name`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | unique (col 69851000000378018) |
+| seq_code | varchar(10) | auto-assigned by the Masters editor (col 69851000000378019) |
+| deleted_at | datetime | soft delete (col 69851000000378020) |
+
+### Punch (live id 69851000000375013) — added 2026-10-23 (CR-394)
+Settings ▸ Masters ▸ Punch Type — punch patterns **with an image** (Masters `"image"` field →
+`ImageUploader` → `POST /upload/design-image`, same File Store folder as item images). Picked on the Item
+form (Design Data). Natural key = `name`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | unique (col 69851000000369016) |
+| seq_code | varchar(10) | auto-assigned (col 69851000000369017) |
+| image | varchar(255) | File Store file id, nullable (`mastersApi.NULLABLE`) (col 69851000000369018) |
+| deleted_at | datetime | soft delete (col 69851000000369019) |
+
+### Series (live id 69851000000373011) — added 2026-10-23 (CR-394)
+Settings ▸ Masters ▸ Series — Marketing Data "Series Name" on the Item form. Natural key = `name`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | unique (col 69851000000375372) |
+| seq_code | varchar(10) | auto-assigned (col 69851000000375373) |
+| deleted_at | datetime | soft delete (col 69851000000375374) |
+
+### Catalogue (live id 69851000000372021) — added 2026-10-23 (CR-394)
+Settings ▸ Masters ▸ Catalogue — Marketing Data "Catalogue Name" on the Item form. Natural key = `name`.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | unique (col 69851000000375378) |
+| seq_code | varchar(10) | auto-assigned (col 69851000000375379) |
+| deleted_at | datetime | soft delete (col 69851000000375380) |
 
 ### Activity (76673000000054380)
 | Column | Type | Notes |
@@ -1075,6 +1137,8 @@ PalletisedBatchLine ─CASCADE─▶ PalletisedBatch  ─SET-NULL─▶ OrderIte
 ContainerLoading ─CASCADE─▶ Container  ─SET-NULL─▶ PalletisedBatch
 Invoice ─SET-NULL─▶ Container, SalesOrder
 Design ─SET-NULL─▶ Size, Finish, Category, Glaze, Brand, Grade
+Design ─logical (bigint, app-guarded)─▶ Customer ×2 (design_owner, design_buyer), SurfaceApplication, Punch, Series, Catalogue   (CR-392/394)
+PartyBrand ─logical─▶ Customer   (CR-393)
 DesignPallet ─CASCADE─▶ Design, Pallet
 Pallet ─SET-NULL─▶ Size
 Customer ─SET-NULL─▶ PaymentTerm

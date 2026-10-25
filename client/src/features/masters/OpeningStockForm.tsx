@@ -107,8 +107,8 @@ export function OpeningStockForm({
           {whEnabled && (
             <div className="form-grid" style={{ gridTemplateColumns: "minmax(200px, 320px)", marginBottom: 12 }}>
               <label className="form-field">
-                <span className="lbl">Warehouse</span>
-                <Combobox value={warehouse} options={whOptions} clearable={false} ariaLabel="Warehouse the batches are in" onChange={setWarehouse} />
+                <span className="lbl">Location</span>
+                <Combobox value={warehouse} options={whOptions} clearable={false} maxVisible={120} ariaLabel="Location the batches are in" onChange={setWarehouse} />
               </label>
             </div>
           )}

@@ -203,7 +203,7 @@ export function StockTransfers() {
                         <EmptyState
                           icon="package"
                           title="No transfer orders yet"
-                          hint={enabled ? "Move stock between warehouses with New Transfer" : "Add warehouses under Settings ▸ Warehouses first — then transfers can be recorded here"}
+                          hint={enabled ? "Move stock between locations with New Transfer" : "Add a warehouse and its locations under Settings ▸ Warehouses & Locations first — then transfers can be recorded here"}
                           action={canEdit && enabled ? <button className="hbtn primary" onClick={() => navigate("/stock-transfers/new")}>New Transfer</button> : undefined}
                         />
                       )}

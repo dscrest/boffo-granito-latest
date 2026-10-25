@@ -208,7 +208,7 @@ export function Palletizations() {
         <AdvancedFilterButton title="Palletizations" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         {can("stages", "create") && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setShowForm(true)}>
+          <button className="hbtn primary sm" onClick={() => setShowForm(true)}>
             <Icon name="plus" size={13} />
             New Palletization
           </button>

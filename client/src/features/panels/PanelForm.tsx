@@ -37,6 +37,7 @@ export function panelToInput(p: PanelRow): PanelInput {
     panel_size: p.panelSize,
     vinyl_size: p.vinylSize,
     mdf_size: p.mdfSize,
+    remarks: p.remarks,
     lines: p.lines.map((l) => ({ design: l.designId, cut_piece_size: l.cutSizeId, cut_piece_qty: l.qty })),
   };
 }
@@ -60,6 +61,7 @@ export function PanelForm({
   const [vinylSize, setVinylSize] = useState(initial?.vinyl_size ?? "");
   // CR-344: the panel carries its MDF size; thickness + weight come from the size-keyed MDF master.
   const [mdfSize, setMdfSize] = useState(initial?.mdf_size ?? "");
+  const [remarks, setRemarks] = useState(initial?.remarks ?? ""); // CR-425: old reference ID etc.
   const [mdfSizes, setMdfSizes] = useState<string[]>(() => mdfSizesOf(cachedMdfs()));
   const [lines, setLines] = useState<LineDraft[]>(
     initial?.lines.length ? initial.lines.map((l) => ({ ...l })) : [blankLine()],
@@ -137,6 +139,7 @@ export function PanelForm({
         panel_size: panelSize.trim(),
         vinyl_size: vinylSize.trim(),
         mdf_size: mdfSize.trim(),
+        remarks: remarks.trim(),
         lines: completeLines,
       }),
     );
@@ -193,6 +196,18 @@ export function PanelForm({
               }}
               placeholder="e.g. 1200x2100"
               maxLength={30}
+            />
+          </label>
+          <label className="form-field">
+            <span className="lbl">Remarks</span>
+            <textarea
+              value={remarks}
+              onChange={(e) => {
+                form.touch();
+                setRemarks(e.target.value);
+              }}
+              placeholder="Old reference ID…"
+              maxLength={500}
             />
           </label>
         </div>

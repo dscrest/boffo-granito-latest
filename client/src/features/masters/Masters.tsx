@@ -1,22 +1,23 @@
 /* ============================================================
-   Masters — generic, config-driven data-entry for the BOFFO
-   lookup tables (Size, Finish, Category, Glaze, Brand, Grade,
-   PaymentTerm). One <MasterTable> driven by a per-table field
-   schema, backed by the Catalyst Data Store via mastersApi (each
-   write recorded in OperationLog). Markup reuses existing app
-   classes (page-head, fbar, card, tbl, btn, hbtn).
+   Masters — CR-436: the ONE Masters page. Three sub-tabs (Export
+   Master · Item Master · Panel Master), each a horizontal strip of
+   its masters rendered in place: the big pages (Items, Sizes,
+   Pallets, Containers, Panel Items, Panels, Warehouses, Currencies)
+   plus the generic <MasterTable> lookup editor (Finish, Glaze,
+   Vehicle …) backed by mastersApi (each write in OperationLog).
+   URL = /masters?g=<group>&m=<master> — the query string IS the
+   selection, so refresh, ⌘K and the Settings tiles deep-link.
    ============================================================ */
-import { useEffect, useMemo, useState } from "react";
+import { lazy, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
 import { ImageUploader } from "@/ui/ImageUploader";
 import { designImageUrl } from "@/lib/api";
 import { ErrorCard, SkeletonRows } from "@/ui/States";
-import { canDelete, canUpdate } from "@/lib/auth";
+import { canDelete, canUpdate, hasFeature, isAdmin } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
 import { formatVehicleNumber } from "./vehiclesApi";
@@ -36,7 +37,7 @@ interface Field {
   format?: (raw: string) => string;
 }
 
-interface MasterDef {
+export interface MasterDef {
   key: string;
   label: string;
   icon: string;
@@ -52,7 +53,7 @@ type Row = MasterRow;
 /* Column/field schema per master. Field keys match the Catalyst Data Store
    column names, so values pass straight through mastersApi to the table. */
 /* Size is NOT here: it outgrew the generic lookup editor (formula columns,
-   per-box packing data) and now has its own page at /sizes under Items. */
+   per-box packing data) — Sizes.tsx renders inside the hub's Item Master tab. */
 const MASTERS: MasterDef[] = [
   {
     key: "finish",
@@ -122,17 +123,53 @@ const MASTERS: MasterDef[] = [
       { key: "seq_code", label: "Seq", auto: true },
     ],
   },
+  // CR-394: Design Master lookups — picked on the Item form (Design Data / Marketing Data).
   {
-    key: "cut_piece_size",
-    label: "Cut Piece Size",
-    icon: "tile",
-    table: "CutPieceSize",
+    key: "surface_application",
+    label: "Surface Application",
+    icon: "palette",
+    table: "SurfaceApplication",
     lead: "name",
     fields: [
       { key: "name", label: "Name", required: true },
       { key: "seq_code", label: "Seq", auto: true },
     ],
   },
+  {
+    key: "punch",
+    label: "Punch Type",
+    icon: "tile",
+    table: "Punch",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "image", label: "Image", type: "image" }, // the punch pattern photo
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
+  {
+    key: "series",
+    label: "Series",
+    icon: "docs",
+    table: "Series",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
+  {
+    key: "catalogue",
+    label: "Catalogue",
+    icon: "docs",
+    table: "Catalogue",
+    lead: "name",
+    fields: [
+      { key: "name", label: "Name", required: true },
+      { key: "seq_code", label: "Seq", auto: true },
+    ],
+  },
+  // Cut Piece Size sits on the Panel Master tab (CUT_PIECE_SIZE_DEF below), not in this list.
   // CR-309 (CR-344 restored, size-keyed): the board a showcase panel is mounted on — picked per panel-order line; its weight joins the panel weight.
   {
     key: "mdf",
@@ -261,7 +298,20 @@ function MasterEditor({
   );
 }
 
-function MasterTable({ def }: { def: MasterDef }) {
+/** The Cut Piece Size lookup — rendered on the Panel Master tab (CR-426 → CR-436). */
+export const CUT_PIECE_SIZE_DEF: MasterDef = {
+  key: "cut_piece_size",
+  label: "Cut Piece Size",
+  icon: "tile",
+  table: "CutPieceSize",
+  lead: "name",
+  fields: [
+    { key: "name", label: "Name", required: true },
+    { key: "seq_code", label: "Seq", auto: true },
+  ],
+};
+
+export function MasterTable({ def }: { def: MasterDef }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -468,37 +518,111 @@ function MasterTable({ def }: { def: MasterDef }) {
   );
 }
 
-export function Masters() {
-  // Deep-linkable from the Settings home (/masters?m=finish). HashRouter-safe.
-  const [params] = useSearchParams();
-  const [active, setActive] = useState(
-    () => MASTERS.find((m) => m.key === params.get("m"))?.key ?? MASTERS[0].key,
-  );
-  const def = MASTERS.find((m) => m.key === active)!;
+/* ---- CR-436 hub ---------------------------------------------------- */
+// Big pages load on demand (same lazy pattern as App.tsx; the App-level Suspense covers them).
+const Pallets = lazy(() => import("./Pallets").then((m) => ({ default: m.Pallets })));
+const ContainerFormats = lazy(() => import("./ContainerFormats").then((m) => ({ default: m.ContainerFormats })));
+const Warehouses = lazy(() => import("./Warehouses").then((m) => ({ default: m.Warehouses })));
+const CurrenciesAdmin = lazy(() => import("@/features/admin/Currencies").then((m) => ({ default: m.CurrenciesAdmin })));
+const DesignMaster = lazy(() => import("./DesignMaster").then((m) => ({ default: m.DesignMaster })));
+const Sizes = lazy(() => import("./Sizes").then((m) => ({ default: m.Sizes })));
+const PanelItems = lazy(() => import("@/features/panels/PanelItems").then((m) => ({ default: m.PanelItems })));
+const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
 
+interface HubMaster {
+  key: string;
+  label: string;
+  icon: string;
+  /** Sidebar nav id the role must hold (hasFeature), or "admin" = Admin only. */
+  feature: string;
+  render: () => ReactNode;
+}
+export interface HubGroup {
+  key: string;
+  /** Pane title ("Item Master"); the rail shows it without " Master". */
+  label: string;
+  icon: string;
+  masters: HubMaster[];
+}
+
+const lookup = (key: string, feature = "admin"): HubMaster => {
+  const def = MASTERS.find((m) => m.key === key)!;
+  return { key, label: def.label, icon: def.icon, feature, render: () => <MasterTable def={def} /> };
+};
+
+// CR-439: rail order Item · Panel · Export (user's order); the first group is the default landing.
+export const HUB_GROUPS: HubGroup[] = [
+  {
+    key: "item",
+    label: "Item Master",
+    icon: "tile",
+    masters: [
+      { key: "items", label: "Items", icon: "tile", feature: "design", render: () => <DesignMaster /> },
+      { key: "sizes", label: "Size Master", icon: "tile", feature: "sizes", render: () => <Sizes /> },
+      ...["finish", "category", "glaze", "brand", "party_brand", "grade", "surface_application", "punch", "series", "catalogue"].map((k) => lookup(k)),
+    ],
+  },
+  {
+    key: "panel",
+    label: "Panel Master",
+    icon: "tile",
+    masters: [
+      { key: "panel_items", label: "Panel Items", icon: "tile", feature: "panel-items", render: () => <PanelItems /> },
+      { key: "cut_piece_size", label: "Cut Piece Size", icon: "tile", feature: "panel-items", render: () => <MasterTable def={CUT_PIECE_SIZE_DEF} /> },
+      lookup("mdf"),
+      { key: "panels", label: "Panels", icon: "tile", feature: "panels", render: () => <Panels /> },
+    ],
+  },
+  {
+    key: "export",
+    label: "Export Master",
+    icon: "truck",
+    masters: [
+      { key: "pallets", label: "Pallet Master", icon: "palette", feature: "pallets", render: () => <Pallets /> },
+      { key: "containers", label: "Container Master", icon: "truck", feature: "containers", render: () => <ContainerFormats /> },
+      lookup("vehicle"),
+      lookup("payment_term"),
+      lookup("adjustment_reason"),
+      { key: "currencies", label: "Currencies", icon: "chart", feature: "admin", render: () => <CurrenciesAdmin /> },
+      { key: "warehouses", label: "Warehouses & Locations", icon: "package", feature: "admin", render: () => <Warehouses /> },
+    ],
+  },
+];
+
+const visible = (m: HubMaster) => isAdmin() || (m.feature !== "admin" && hasFeature(m.feature));
+
+/** The groups + masters the signed-in role may see (empty groups dropped). */
+export const visibleHubGroups = (): HubGroup[] =>
+  HUB_GROUPS.map((g) => ({ ...g, masters: g.masters.filter(visible) })).filter((g) => g.masters.length);
+
+/** Rail label: the group label without " Master" (Item / Panel / Export). */
+export const hubRailLabel = (g: HubGroup) => g.label.replace(/ Master$/, "");
+
+/* CR-439: one group of the Masters menu, rendered INSIDE the Settings workspace pane
+   (SettingsHome rail = Masters ▸ Item / Panel / Export): the group title, its masters as
+   horizontal tabs (.dtabs), and the picked master in place. `?m=` is the tab. */
+export function MastersPane({ group }: { group: HubGroup }) {
+  const [params, setParams] = useSearchParams();
+  const master = group.masters.find((m) => m.key === params.get("m")) ?? group.masters[0];
   return (
-    <div>
-      <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
-          <BackToSettings />
-          <div>
-            <div className="title">Masters</div>
-            <div className="sub">
-              Lookup data entry · {MASTERS.length} tables
-            </div>
-          </div>
+    <>
+      <div className="set-pane-head">
+        <div>
+          <div className="title">{group.label}</div>
         </div>
       </div>
 
-      <div className="fbar" style={{ flexWrap: "wrap" }}>
-        {MASTERS.map((m) => (
-          <button key={m.key} className={`btn ${m.key === active ? "active" : ""}`} onClick={() => setActive(m.key)}>
-            <Icon name={m.icon} size={12} className="ic" /> {m.label}
+      {/* Tabs = the app's chosen-pill strip (.fbar .btn, same look as every filter bar and the rail's
+          active row) — the hairline underline was too faint to tell tabs apart. Wraps: 12 tabs on Item. */}
+      <div className="fbar" style={{ flexWrap: "wrap" }} role="tablist" aria-label={group.label}>
+        {group.masters.map((m) => (
+          <button key={m.key} type="button" role="tab" aria-selected={m.key === master.key} className={`btn ${m.key === master.key ? "active" : ""}`} onClick={() => setParams({ g: group.key, m: m.key }, { replace: true })}>
+            {m.label}
           </button>
         ))}
       </div>
 
-      <MasterTable key={def.key} def={def} />
-    </div>
+      <div className="masters-body" key={`${group.key}/${master.key}`}>{master.render()}</div>
+    </>
   );
 }

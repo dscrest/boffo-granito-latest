@@ -1,30 +1,35 @@
 /* ============================================================
-   Panel Order detail (CR-287, CR-302) — the ONE place a panel order
-   changes status, on the shared RecordDetail (Sales Order parity):
-   DetailRail of orders on the left; right: PNL number + status chip,
-   customer link, right-aligned Edit · forward-step buttons from
-   PANEL_ORDER_TRANSITIONS · More (Clone, Delete) · ✕; Details | Activity.
-   Details = fields card, the Items card (one row per panel line) and the
-   Requirements checklist (CR-288): one row per design × cut size summed
-   across ALL lines vs cut-piece stock, a Panels column naming the panels
-   each row serves with their share (CR-303), short In Stock figures in red
-   (CR-305 — no "Short:" sentence on the card), and a manual "Available" tick per row that the godown
-   saves on the order (PanelOrder.checklist JSON).
+   Panel Order detail (CR-287, CR-302) on the shared RecordDetail (Sales
+   Order parity): DetailRail of orders on the left; right: CR-399 customer
+   name as the title, PNL number small in the sub line + the Loading chip,
+   right-aligned Edit · More (Clone, Cancel, Delete) · ✕; Details |
+   Actions | Dispatch | Activity.
+   CR-400: the header chip is the ONE derived status (panelProgress: New →
+   Ready → Completed → Dispatched) — no Accept / Start Cutting / Ready
+   buttons any more, the lifecycle column is dormant.
+   Details = fields card, the Items card (one row per panel line: image,
+   panel (i), weights, qty) and the Requirements checklist (CR-288): one row
+   per design × cut size summed across ALL lines vs cut-piece stock, a
+   Panels column naming the panels each row serves with their share
+   (CR-303), short In Stock figures in red (CR-305), a manual "Available"
+   tick per row that the godown saves on the order (PanelOrder.checklist).
    CR-312: Allocated · Short columns + Allocate Stock (one modal, both
-   directions) — Dispatch needs every piece BOOKED, not merely on hand.
-   CR-313: Production Readiness card — MDF · Vinyl Printing · Cut Pieces
-   marks (independent, any order, who/when stamped) + derived Overall.
-   Edit / Delete only while New / Received (stock untouched); Edit stays
-   visible but disabled afterwards (house rule). Forward-only: Ready ADDS
-   stock (and books it to the order) and Dispatched DEDUCTS it.
+   directions) — pieces load only once BOOKED.
+   CR-402: the per-panel MDF · Vinyl · Pasted marks live on the Actions tab
+   (PanelActionsTab) beside the loading rows; the order-level Cut Pieces
+   card is gone (dormant mark). CR-368: Cancel Order (More menu, reason
+   mandatory, no loads). Edit / Delete only while nothing is loaded; Edit
+   stays visible but disabled afterwards (house rule).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Chip } from "@/ui/Chip";
-import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
-import { confirmDelete } from "@/ui/ConfirmDialog";
+import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
+import { Combobox } from "@/ui/Combobox";
+import { useWarehouses } from "@/features/masters/useWarehouses";
+import { SetLocationModal } from "@/features/common/SetLocationModal";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
@@ -33,48 +38,44 @@ import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { cachedPanels, listPanels, mdfLabel, type PanelRow } from "./panelsApi";
+import { cachedPanels, listPanels, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
-import { lineWeightSplit, loadingStatus, loadProgress, panelWeightSplit, pendingNeedLines, pendingText, stockKey } from "./panelOrderNeeds";
-import { checkpointTone, LOADING_TONE, READINESS_TONE } from "./pcBits";
+import { lineStages, lineWeightSplit, loadingStatus, loadProgress, pendingNeedLines, pendingText, stockKey, type ProgressRow } from "./panelOrderNeeds";
+import { OrderReadinessTab } from "./OrderReadinessTab";
+import { LOADING_TONE } from "./pcBits";
 import { AllocateCutStockModal } from "./AllocateCutStockModal";
-import { PanelLoadsTab } from "./PanelLoads";
+import { LineCell, PanelActionsTab, PanelLoadsTab, type LoadableOrder } from "./PanelLoads";
 import {
   allocatedByKey,
-  CHECKPOINT_KEYS,
-  CHECKPOINT_LABEL,
-  CHECKPOINT_STATUSES,
-  checkpointStatus,
   PANEL_ORDER_OPEN,
-  readiness,
-  setCheckpoint,
-  type CheckpointKey,
+  panelProgress,
   cachedCutWeights,
   cachedCutStock,
   cachedPanelOrders,
+  cancelPanelOrder,
   deletePanelOrder,
   listCutStock,
   listPanelOrders,
-  PANEL_ORDER_ACTION_LABEL,
   PANEL_ORDER_EDITABLE,
   PANEL_ORDER_LOCK_REASON,
   PANEL_ORDER_STATUS_LABEL,
-  PANEL_ORDER_TRANSITIONS,
   requirementsFor,
   saveChecklist,
-  setPanelOrderStatus,
+  setPanelOrderLocation,
   shortageText,
   type PanelOrderRow,
-  type PanelOrderStatus,
+  type Requirement,
 } from "./panelOrdersApi";
 
-/* RecordDetail chip classes (.chip.qstatus.q-*) — same palette the SO chip uses. */
-const STATUS_CLS: Record<PanelOrderStatus, string> = {
-  NewRequest: "q-draft",
-  Received: "q-sent",
-  InCutting: "q-accepted",
+/* CR-410: Set Location lives in common/SetLocationModal.tsx since CR-412 (shared with the pallet boards). */
+
+/* CR-367/400: the header chip = the derived progress, on the RecordDetail chip palette (.chip.qstatus.q-*). */
+const PROGRESS_CLS: Record<ReturnType<typeof panelProgress>, string> = {
+  New: "q-draft",
   Ready: "q-partial",
+  Completed: "q-accepted",
   Dispatched: "q-converted",
+  Cancelled: "q-rejected",
 };
 
 export function PanelOrderDetail() {
@@ -87,6 +88,8 @@ export function PanelOrderDetail() {
   const [weights, setWeights] = useState<Map<string, number | null>>(() => cachedCutWeights() ?? new Map());
   const [busy, setBusy] = useState(false);
   const [allocating, setAllocating] = useState(false); // CR-312 modal
+  const [locating, setLocating] = useState(false); // CR-410 Set Location modal
+  const { enabled: whEnabled, nameOf: whName } = useWarehouses();
   // Local checklist so a tick shows at once; the save lands in the background.
   const [ticks, setTicks] = useState<Record<string, boolean> | null>(null);
 
@@ -109,15 +112,15 @@ export function PanelOrderDetail() {
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
   const mdfById = useMemo(() => new Map(mdfs.map((m) => [m.id, m])), [mdfs]); // CR-344
   type LineRow = PanelOrderRow["lines"][number];
-  // CR-349: LIVE per-unit kg of a line — pieces (the panel's cut pieces, or the loose cut piece) and the board.
-  const liveUnit = (l: LineRow | undefined): { pieces: number | null; mdf: number | null } => {
-    if (!l) return { pieces: null, mdf: null };
-    if (!l.panelId) return { pieces: weights.get(stockKey(l.designId, l.cutSizeId)) ?? null, mdf: null };
-    const p = panelById.get(l.panelId);
-    return p ? panelWeightSplit(p, weights, mdfById.get(l.mdfId)?.weightKg ?? null) : { pieces: null, mdf: null };
+  // CR-347/405: what is still pending to load, one row per line × piece kind + board — the need, booking and checklist all work on it.
+  const progress = order ? loadProgress(order.lines, order.loads, panelById) : [];
+  // CR-349/405: LIVE kg of ONE unit of a load row — a piece of that kind, or the line's board (null until weighed / a thickness is picked).
+  const unitOf = (r: ProgressRow): number | null => {
+    if (r.material === "Mdf") return mdfById.get(order?.lines.find((l) => l.id === r.lineId)?.mdfId ?? "")?.weightKg ?? null;
+    return weights.get(stockKey(r.designId, r.cutSizeId)) ?? null;
   };
   // Per line: shipped kg are STAMPED on the loads (frozen); pending kg follow the master.
-  const lineSplit = (l: LineRow) => lineWeightSplit(l, order?.loads ?? [], liveUnit(l));
+  const lineSplit = (l: LineRow) => lineWeightSplit(l.id, order?.loads ?? [], progress, unitOf);
   const lineWeight = (l: LineRow): number | null => {
     const s = lineSplit(l);
     if (s.pieces == null) return null;
@@ -132,49 +135,37 @@ export function PanelOrderDetail() {
     const parts = (order?.lines ?? []).map((l) => lineSplit(l)[k]).filter((v): v is number => v != null);
     return parts.length ? parts.reduce((s, v) => s + v, 0) : null;
   };
-  // CR-347: what is still pending to load — the need, booking and checklist all work on it.
-  const progress = order ? loadProgress(order.lines, order.loads) : [];
   const loadStatus = order ? loadingStatus(progress, order.status) : "Not loaded";
   const pending = pendingText(progress);
   // CR-312: free = on hand − every open order's booking; this order's own booking rides on each row.
   const booked = useMemo(() => allocatedByKey(orders ?? []), [orders]);
-  const reqs = order ? requirementsFor(pendingNeedLines(order.lines, order.loads), panelById, stock, { allocation: order.allocation, booked }) : [];
+  const reqs = order ? requirementsFor(pendingNeedLines(order.lines, order.loads, panelById), panelById, stock, { allocation: order.allocation, booked }) : [];
+  // ponytail: band key = the row's panel set; rows are still one per design×cut (CR-303), never split. CR-382.
+  const reqBands = useMemo(() => {
+    const m = new Map<string, Requirement[]>();
+    for (const r of reqs) {
+      const k = r.panels.map((p) => p.panelCode).sort().join(" · ");
+      m.set(k, [...(m.get(k) ?? []), r]);
+    }
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [reqs]);
   const short = reqs.filter((r) => r.short);
   const unbooked = reqs.filter((r) => r.allocated < r.need);
   const unbookedPcs = unbooked.reduce((s, r) => s + r.need - r.allocated, 0);
   const isOpen = !!order && PANEL_ORDER_OPEN.has(order.status);
-  const openReason = !order || isOpen ? "" : order.status === "Dispatched" ? "Order dispatched" : "Accept the request first";
+  const openReason = !order || isOpen ? "" : order.status === "Cancelled" ? "Order cancelled" : "Order dispatched"; // CR-400: open from birth
   const checklist = ticks ?? order?.checklist ?? {};
-  // CR-313: what each checkpoint has to cover, derived from the lines.
-  const sumBy = (label: (l: PanelOrderRow["lines"][number]) => string) => {
-    const m = new Map<string, number>();
-    for (const l of order?.lines ?? []) if (l.panelId) m.set(label(l), (m.get(label(l)) ?? 0) + l.qty); // CR-346: loose cut pieces need no board / vinyl
-    return [...m.entries()].map(([k, q]) => `${k} ×${fmt(q)}`).join(" · ") || "—";
-  };
-  const cpText: Record<CheckpointKey, string> = {
-    mdf: sumBy((l) => mdfLabel(mdfById.get(l.mdfId)) || "No MDF picked"), // CR-344: "size · thickness ×qty" = the procurement need
-    vinyl: sumBy((l) => panelById.get(l.panelId)?.vinylSize || "No vinyl size"),
-    cut: reqs.length
-      ? `Booked ${fmt(reqs.reduce((s, r) => s + r.allocated, 0))} of ${fmt(reqs.reduce((s, r) => s + r.need, 0))} pcs${reqs.some((r) => r.toCut > 0) ? ` · cut ${fmt(reqs.reduce((s, r) => s + r.toCut, 0))} more` : ""}`
-      : "—",
-    pasted: sumBy((l) => panelById.get(l.panelId)?.vinylSize || "No vinyl size"), // CR-323: one printed sheet per panel onto its MDF
-  };
-  const overall = order ? readiness(order.checkpoints, order.status) : "Pending";
+  const overall = order ? panelProgress(order, reqs) : "New"; // CR-367/400: the ONE status
+  const loadable: LoadableOrder | null = order ? { ...order, type: "Panel" } : null;
+  // CR-404: Readiness tab rows — six stages per line; a loose cut piece names its design · size.
+  const readinessRows = (order?.lines ?? []).map((l) => ({
+    key: l.id,
+    code: l.panelId ? l.panelCode : [l.designName, l.cutSizeName].filter(Boolean).join(" · ") || "Cut piece",
+    qty: l.qty,
+    stages: lineStages(l, order!, reqs, lineWeight(l) != null, panelById),
+  }));
 
   if (orders === null) return <SkeletonRows rows={6} />;
-
-  const move = async (to: PanelOrderStatus) => {
-    if (!order) return;
-    setBusy(true);
-    const res = await setPanelOrderStatus(order.id, to);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not update the order");
-      return;
-    }
-    toast.success(`Order moved to ${PANEL_ORDER_STATUS_LABEL[to]}`);
-    await load();
-  };
 
   const onDelete = async () => {
     if (!order) return;
@@ -191,16 +182,26 @@ export function PanelOrderDetail() {
     navigate("/panel-orders");
   };
 
-  // CR-313: one checkpoint mark; the server stamps who / when and mirrors it on the source sale.
-  const mark = async (key: CheckpointKey, status: string) => {
-    if (!order || status === checkpointStatus(order.checkpoints, key)) return;
+  // CR-368: cancel — reason mandatory for every role; refused once anything is loaded.
+  const onCancel = async () => {
+    if (!order) return;
+    const reason = await promptDialog({
+      title: "Cancel order",
+      message: `Cancel panel order ${order.orderNumber || ""} (${order.customerName})? Booked cut pieces return to free stock.`,
+      placeholder: "Reason for cancelling (required)",
+      required: true,
+      danger: true,
+      confirmLabel: "Cancel order",
+    });
+    if (!reason) return;
     setBusy(true);
-    const res = await setCheckpoint(order.id, key, status);
+    const res = await cancelPanelOrder(order.id, reason);
     setBusy(false);
     if (!res.ok) {
-      toast.error(res.error || "Could not save the checkpoint");
+      toast.error(res.error || "Could not cancel the order");
       return;
     }
+    toast.success("Panel order cancelled");
     await load();
   };
 
@@ -219,13 +220,16 @@ export function PanelOrderDetail() {
   const canEdit = can("panel_craft", "edit");
   // CR-347: once a load is recorded the lines are frozen too (a load line would dangle).
   const editable = !!order && PANEL_ORDER_EDITABLE.has(order.status) && order.loads.length === 0;
+  // CR-368: cancellable while nothing has shipped — mirrors the server PANEL_ORDER_CANCELLABLE.
+  const cancellable = !!order && (order.status === "NewRequest" || isOpen) && order.loads.length === 0;
   const lockReason = editable ? undefined : order?.loads.length ? "Pieces have been loaded — remove the loads to change the order" : PANEL_ORDER_LOCK_REASON;
 
   const railItems = newestFirst(orders).map((o) => ({
     id: o.id,
     to: `/panel-orders/${encodeURIComponent(o.id)}`,
-    title: o.orderNumber || "Panel Order",
-    subtitle: [o.customerName, PANEL_ORDER_STATUS_LABEL[o.status]].filter(Boolean).join(" · "),
+    // CR-399: customer first, PNL number small (the SO rail's PO-first shape, CR-353).
+    title: o.customerName || o.orderNumber || "Panel Order",
+    subtitle: [o.orderNumber, PANEL_ORDER_STATUS_LABEL[o.status]].filter(Boolean).join(" · "),
     searchText: `${o.lines.map((l) => l.panelCode).join(" ")} ${o.salesOrderNo} ${o.quoteNo} ${o.salesperson}`,
   }));
 
@@ -242,8 +246,23 @@ export function PanelOrderDetail() {
           value: totalWeight == null ? "Not available — weigh every cut piece on Panel Items" : `${kg(totalWeight)} (pieces ${kgOr(sumPart("pieces"))} · MDF ${kgOr(sumPart("mdf"))})`,
         },
         { key: "loading", label: "Loading", value: pending ? `${loadStatus} — pending ${pending}` : loadStatus },
+        // CR-410: where the panels sit — "Warehouse ▸ Location"; hidden while the feature is dormant.
+        ...(whEnabled ? [{ key: "location", label: "Location", value: order.warehouseId ? whName(order.warehouseId) : "Not set" }] : []),
       ]
     : [];
+
+  // CR-410: Set Location → generic PATCH on PanelOrder.warehouse; the activity row comes free.
+  const onSetLocation = async (id: string) => {
+    if (!order) return;
+    const res = await setPanelOrderLocation(order.id, id);
+    if (!res.ok) {
+      toast.error(res.error || "Could not save the location");
+      return;
+    }
+    toast.success(id ? `Panels placed at ${whName(id)}` : "Location cleared");
+    setLocating(false);
+    await load();
+  };
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -257,18 +276,19 @@ export function PanelOrderDetail() {
         ) : (
           <RecordDetail
             backTo="/panel-orders"
-            title={order.orderNumber || "Panel Order"}
-            statusChip={{ label: PANEL_ORDER_STATUS_LABEL[order.status], cls: STATUS_CLS[order.status], title: short.length && order.status !== "Dispatched" ? shortageText(short) : undefined }}
+            title={order.customerName || order.orderNumber || "Panel Order"}
+            statusChip={{ label: overall, cls: PROGRESS_CLS[overall], title: short.length && isOpen ? shortageText(short) : overall === "New" ? "Every panel's MDF · Vinyl · Pasted must be Ready" : overall === "Ready" ? "Book the cut pieces on the Requirements card" : undefined }}
             subtitle={
               <>
-                {order.customerCode ? (
-                  <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">
-                    {order.customerName}
-                  </Link>
-                ) : (
-                  order.customerName
+                {/* CR-399: the PNL number rides small; the customer link keeps its hop. */}
+                <span className="mono">{order.orderNumber || "Panel Order"}</span>
+                {order.customerCode && (
+                  <>
+                    <span className="dim"> · </span>
+                    <Link className="linkish" to={`/parties/${encodeURIComponent(order.customerCode)}`} title="Open customer">Open customer</Link>
+                  </>
                 )}
-                {/* CR-347: Loading Status beside the lifecycle — separate columns, like the SO roll-up. */}
+                {/* CR-347: Loading Status beside the status — separate columns, like the SO roll-up. */}
                 <span style={{ marginLeft: 8 }}>
                   <Chip tone={LOADING_TONE[loadStatus]} label={loadStatus} title={pending ? `Pending: ${pending}` : "Everything loaded"} />
                 </span>
@@ -282,17 +302,21 @@ export function PanelOrderDetail() {
                     <Icon name="edit" size={13} /> Edit
                   </button>
                 )}
-                {/* Forward steps only — stock moves on Ready (+). CR-347: Dispatched is derived from the loads (Dispatch tab). */}
-                {canEdit &&
-                  PANEL_ORDER_TRANSITIONS[order.status].map((to) => (
-                    <button key={to} className="hbtn primary" disabled={busy} title={`Move to ${PANEL_ORDER_STATUS_LABEL[to]}`} onClick={() => void move(to)}>
-                      <Icon name="check" size={13} />
-                      {PANEL_ORDER_ACTION_LABEL[to]}
-                    </button>
-                  ))}
+                {/* CR-400: no stage buttons — the status derives from the marks, the booking and the loads. */}
                 <MoreMenu
                   items={[
                     ...(can("panel_craft", "create") ? [{ label: "Clone", onClick: () => navigate(`/panel-orders/${encodeURIComponent(order.id)}/clone`) }] : []),
+                    // CR-410: place the panels at a location (open orders only; hidden while no warehouse exists).
+                    ...(canEdit && whEnabled ? [{ label: "Set Location", disabled: busy || !isOpen, title: isOpen ? "Where this order's panels sit" : openReason, onClick: () => setLocating(true) }] : []),
+                    ...(canEdit
+                      ? [{
+                          label: "Cancel Order",
+                          danger: true,
+                          disabled: busy || !cancellable,
+                          title: cancellable ? "Cancel this order — booked pieces return to free stock" : order.loads.length ? "Pieces have been loaded — delete the loads in the Dispatch tab first" : `Order ${PANEL_ORDER_STATUS_LABEL[order.status].toLowerCase()}`,
+                          onClick: () => void onCancel(),
+                        }]
+                      : []),
                     ...(can("panel_craft", "delete")
                       ? [{ label: "Delete", danger: true, disabled: !editable, title: editable ? undefined : "Only a New or Received order can be deleted", onClick: () => void onDelete() }]
                       : []),
@@ -309,16 +333,25 @@ export function PanelOrderDetail() {
             created={order.createdTime}
             modified={order.modifiedTime}
             extraTabs={[
+              { id: "readiness", label: "Readiness", content: <OrderReadinessTab rows={readinessRows} noun="panels" loadStage="Loaded" /> }, // CR-404
+              {
+                id: "actions",
+                label: "Actions",
+                content: <PanelActionsTab order={order} panelsById={panelById} stock={stock} reqs={reqs} onChanged={() => void load()} />, // CR-365
+              },
               {
                 id: "dispatch",
                 label: "Dispatch",
-                content: <PanelLoadsTab order={{ ...order, type: "Panel" }} panelsById={panelById} stock={stock} liveUnit={(lineId) => liveUnit(order.lines.find((l) => l.id === lineId))} onChanged={() => void load()} />,
+                content: <PanelLoadsTab order={{ ...order, type: "Panel" }} panelsById={panelById} stock={stock} unitOf={unitOf} onChanged={() => void load()} />,
               },
             ]}
           >
-            {/* Items card — one row per panel / cut-piece line, the SO Items card shape. */}
+            {locating && <SetLocationModal value={order.warehouseId} onSave={onSetLocation} onClose={() => setLocating(false)} />}
+            {/* Items card — one row per panel / cut-piece line, the SO Items card shape.
+                CR-377: size, designs and the MDF spec sit behind the (i) card (the same LineCell as the
+                Actions / Dispatch tabs); CR-402: the MDF · Vinyl · Pasted marks moved to the Actions tab. */}
             <div className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Items</span>
                 <span className="muted" style={{ fontSize: 14 }}>
                   {order.panelCount} panel{order.panelCount === 1 ? "" : "s"}
@@ -340,9 +373,6 @@ export function PanelOrderDetail() {
                     <tr>
                       <th style={{ width: 44 }}>Image</th>
                       <th>Panel</th>
-                      <th>Panel Size</th>
-                      <th>Designs</th>
-                      <th>MDF</th>
                       <th className="num" style={{ textAlign: "right" }}>Pieces kg</th>
                       <th className="num" style={{ textAlign: "right" }}>MDF kg</th>
                       <th className="num" style={{ textAlign: "right" }}>Total kg</th>
@@ -356,37 +386,40 @@ export function PanelOrderDetail() {
                       const w = lineWeight(l);
                       const shipped = order.loads.some((ld) => ld.lines.some((x) => x.lineId === l.id));
                       const kgTitle = shipped ? "Shipped kg are frozen on the load; pending kg follow the master" : "Follows the master until loaded";
-                      return (
+                      return [
                         <tr key={l.id}>
                           <td><ImageThumb images={p?.images ?? []} alt={l.panelCode} /></td>
                           <td className="mono">
-                            {l.panelId ? (
-                              <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} title="Open panel">{l.panelCode}</Link>
-                            ) : (
-                              <span className="muted" title="A loose cut piece (CR-346)">Cut piece</span>
-                            )}
+                            {/* CR-377: short label + (i) → size · vinyl · MDF · designs in the InfoTag card */}
+                            <LineCell
+                              label={
+                                l.panelId ? (
+                                  <Link className="linkish" to={`/panels/${encodeURIComponent(l.panelId)}`} title="Open panel">{l.panelCode}</Link>
+                                ) : (
+                                  <span className="muted" title="A loose cut piece (CR-346)">{[l.designName, l.cutSizeName].filter(Boolean).join(" · ") || "Cut piece"}</span>
+                                )
+                              }
+                              o={loadable!}
+                              lineId={l.id}
+                              panelsById={panelById}
+                            />
                           </td>
-                          <td className="mono muted">{p?.panelSize || "—"}</td>
-                          <td className="muted" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={l.panelId ? p?.lines.map((x) => x.designName).join(", ") : `${l.designName} · ${l.cutSizeName}`}>
-                            {l.panelId ? p?.lines.map((x) => x.designName).join(", ") || "—" : [l.designName, l.cutSizeName].filter(Boolean).join(" · ") || "—"}
-                          </td>
-                          <td className="mono muted">{l.panelId ? mdfLabel(mdfById.get(l.mdfId)) || <span className="dim">—</span> : <span className="dim">—</span>}</td>
                           <td className="num mono" title={kgTitle}>{sp.pieces == null ? <span className="dim">—</span> : kg(sp.pieces)}</td>
                           <td className="num mono" title={kgTitle}>{!l.mdfId ? <span className="dim">—</span> : sp.mdf == null ? <span className="dim">—</span> : kg(sp.mdf)}</td>
                           <td className="num mono" title={w == null ? "Weigh every cut piece on Panel Items" : kgTitle}>{w == null ? <span className="dim">—</span> : kg(w)}</td>
                           <td className="num mono">{fmt(l.qty)}</td>
-                        </tr>
-                      );
+                        </tr>,
+                      ];
                     })}
                     {order.lines.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>No panels on this order.</td>
+                        <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>No panels on this order.</td>
                       </tr>
                     )}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={5} style={{ fontWeight: 600 }}>Total</td>
+                      <td colSpan={2} style={{ fontWeight: 600 }}>Total</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{kgOr(sumPart("pieces"))}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{kgOr(sumPart("mdf"))}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{totalWeight == null ? <span className="dim">—</span> : kg(totalWeight)}</td>
@@ -397,59 +430,9 @@ export function PanelOrderDetail() {
               </div>
             </div>
 
-            {/* CR-313: Production Readiness — independent checkpoints (four since CR-323) + the derived overall mark. */}
-            <div className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
-                <span style={{ fontWeight: 600 }}>Production Readiness</span>
-                <span style={{ marginLeft: "auto" }} title="All four Ready → Ready for Production; any mark → In Progress">
-                  <Chip tone={READINESS_TONE[overall]} label={overall} />
-                </span>
-              </div>
-              <div style={{ overflow: "auto" }}>
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 150 }}>Checkpoint</th>
-                      <th>Requirement</th>
-                      <th style={{ width: 190 }}>Status</th>
-                      <th>Marked by</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {CHECKPOINT_KEYS.map((k) => {
-                      const m = order.checkpoints[k];
-                      const st = checkpointStatus(order.checkpoints, k);
-                      return (
-                        <tr key={k}>
-                          <td style={{ fontWeight: 600 }}>{CHECKPOINT_LABEL[k]}</td>
-                          <td className="muted" title={cpText[k]}>{cpText[k]}</td>
-                          <td>
-                            {canEdit && isOpen ? (
-                              <Combobox
-                                value={st}
-                                options={CHECKPOINT_STATUSES[k].map((v) => ({ value: v, label: v }))}
-                                onChange={(v) => void mark(k, v)}
-                                ariaLabel={`${CHECKPOINT_LABEL[k]} status`}
-                                disabled={busy}
-                              />
-                            ) : (
-                              <span title={openReason || undefined}><Chip tone={checkpointTone(st)} label={st} /></span>
-                            )}
-                          </td>
-                          <td className="muted mono" style={{ fontSize: "var(--t-sm)", whiteSpace: "nowrap" }}>
-                            {m ? `${m.by} · ${m.at.slice(0, 16)}` : <span className="dim">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
             {/* CR-288: the godown checklist — what this order needs, what is on hand, booked (CR-312) and the manual Available tick. */}
             <div className="card">
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Requirements</span>
                 {/* CR-305: no "Short:" sentence here — the red In Stock figures say it. */}
                 {/* CR-312: always visible for editors, greyed with the reason (house rule). */}
@@ -480,7 +463,19 @@ export function PanelOrderDetail() {
                     </tr>
                   </thead>
                   <tbody>
-                    {reqs.map((r) => (
+                    {reqBands.map(([band, group]) => [
+                      /* CR-382: one band per panel (a row shared by two panels bands under both codes). */
+                      <tr key={`band|${band}`} style={{ background: "var(--accent-soft)", color: "var(--accent-ink)", fontWeight: 700 }}>
+                        <td colSpan={8} className="mono">
+                          {group[0].panels.map((p, i) => (
+                            <span key={p.panelId}>
+                              {i > 0 && <span className="dim"> · </span>}
+                              {p.panelId ? <Link className="linkish" to={`/panels/${encodeURIComponent(p.panelId)}`} title="Open panel">{p.panelCode}</Link> : p.panelCode}
+                            </span>
+                          ))}
+                        </td>
+                      </tr>,
+                      ...group.map((r) => (
                       <tr key={r.key}>
                         <td>
                           <Link className="linkish" to={`/design/${encodeURIComponent(r.designId)}`} title="Open item">
@@ -488,12 +483,11 @@ export function PanelOrderDetail() {
                           </Link>
                         </td>
                         <td className="mono">{r.cutSizeName || <span className="dim">—</span>}</td>
-                        <td className="mono" style={{ whiteSpace: "nowrap" }}>
+                        <td className="mono dim" style={{ whiteSpace: "nowrap" }}>
                           {r.panels.map((p, i) => (
                             <span key={p.panelId}>
-                              {i > 0 && <span className="dim"> · </span>}
-                              <Link className="linkish" to={`/panels/${encodeURIComponent(p.panelId)}`} title="Open panel">{p.panelCode}</Link>
-                              <span className="dim"> ×{fmt(p.qty)}</span>
+                              {i > 0 && " · "}
+                              {p.panelCode} ×{fmt(p.qty)}
                             </span>
                           ))}
                         </td>
@@ -517,7 +511,8 @@ export function PanelOrderDetail() {
                           />
                         </td>
                       </tr>
-                    ))}
+                      )),
+                    ])}
                     {reqs.length === 0 && (
                       <tr>
                         <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>No cut pieces required — these panels have no designs yet.</td>

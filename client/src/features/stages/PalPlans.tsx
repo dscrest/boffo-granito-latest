@@ -7,7 +7,7 @@
      /palletized   → Palletization Completed (recorded Ready for Loading rows;
                      Load + Release live in the row's "+" menu, CR-361)
    Each page lists its own stage only — no status dropdown (CR-364 removed
-   the page | All filter). The page header holds the ONE Kanban/Sheet view toggle,
+   the page | All filter). The page header held the ONE Kanban/Sheet view toggle (hidden CR-418),
    Group (+ Sections when the page has >1 stage) and "New Palletization Plan"
    (opens PalPlanForm and lands on the created record). The old plans-list
    grid was retired in the 2026-08-22 declutter — git history holds it. */
@@ -55,7 +55,9 @@ export function PalPlans({
   // The ONE view switch — Kanban vs Sheet, passed down to the board. Opens on
   // whatever Settings → Default view says; key kept from the old inner toggle
   // so existing users keep their preference.
-  const [view, setView] = useViewState("dispatch.boardView", "sheet" as const, "kanban" as const);
+  const [rawView] = useViewState("dispatch.boardView", "sheet" as const, "kanban" as const);
+  // CR-418: Kanban hidden app-wide — a persisted "kanban" falls back to the Sheet; the board's render code is kept.
+  const view = (rawView === "kanban" ? "sheet" : rawView) as "kanban" | "sheet";
   // Grouping: an ordered list of dimensions → nested swimlanes / sheet bands
   // (same mechanism as Production; the picker reuses ColumnPicker).
   const [groupBy, setGroupBy] = useState<DispatchGroupBy[]>(() => {
@@ -116,9 +118,10 @@ export function PalPlans({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetOrderId]);
 
-  const viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
+  // CR-418: the Kanban | Sheet toggle is hidden (Sheet is the only view); kept for the day it returns.
+  const _viewBtn = (v: "kanban" | "sheet", icon: "kanban" | "orders", label: string) => (
     <button
-      onClick={() => setView(v)}
+      onClick={() => void v}
       title={label}
       aria-label={`${label} view`}
       style={{
@@ -139,9 +142,8 @@ export function PalPlans({
       <div className="fbar" style={{ marginBottom: 12 }}>
         <div style={{ flex: 1 }} />
         <button
-          className="hbtn"
+          className="hbtn sm"
           data-tour="pal-report"
-          style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
           title="Print the pallet packing report for everything palletized today"
           onClick={() =>
             void import("./packingReportPdf")
@@ -154,10 +156,7 @@ export function PalPlans({
         >
           <Icon name="printer" size={13} /> Today's Report
         </button>
-        <span data-tour="pal-view-toggle" style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 6, overflow: "hidden" }} role="group" aria-label="Board view" title="Switch view">
-          {viewBtn("kanban", "kanban", "Kanban")}
-          {viewBtn("sheet", "orders", "Sheet")}
-        </span>
+        {/* CR-418: Kanban | Sheet toggle hidden — {_viewBtn("kanban", "kanban", "Kanban")}{_viewBtn("sheet", "orders", "Sheet")} */}
         <ColumnPicker
           columns={groupCols}
           hidden={groupHidden}
@@ -182,7 +181,7 @@ export function PalPlans({
           />
         )}
         {can("stages", "create") && (
-          <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/packing/new")}>
+          <button className="hbtn primary sm" onClick={() => navigate("/packing/new")}>
             <Icon name="plus" size={13} />
             New Palletization Plan
           </button>

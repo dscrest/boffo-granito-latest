@@ -5,9 +5,10 @@
      /design/:id/clone      clone into a new item
    Reuses the shared <DesignFields> core. Save → createDesign (new /
    clone) or updateDesign (edit), then lands on the saved item.
-   Images and Delete live on the item detail, not here.
+   Images are picked here (Design Data, CR-396); Delete lives on the item detail.
    ============================================================ */
 import { useEffect, useState } from "react";
+import { titleCase } from "@/lib/format";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "@/ui/Toast";
 import { EmptyState } from "@/ui/States";
@@ -22,6 +23,7 @@ import {
   type DesignValues,
 } from "./DesignForm";
 import {
+  EMPTY_LOOKUPS,
   cachedDesigns,
   createDesign,
   listDesigns,
@@ -30,17 +32,7 @@ import {
   type DesignLookups,
   type DesignRow,
 } from "./designsApi";
-
-const EMPTY_LOOKUPS: DesignLookups = {
-  sizes: [],
-  finishes: [],
-  categories: [],
-  glazes: [],
-  brands: [],
-  grades: [],
-  partyBrands: [],
-  partyBrandSeq: {},
-};
+import { loadDefaultDesignOwner } from "@/features/settings/settingsApi";
 
 export function DesignEdit({ clone }: { clone?: boolean } = {}) {
   const { id = "" } = useParams();
@@ -65,7 +57,12 @@ export function DesignEdit({ clone }: { clone?: boolean } = {}) {
         return;
       }
       setLookups(res.lookups);
-      if (!id) return; // new item: blank form, lookups only
+      if (!id) {
+        // CR-392: a new item starts on the organisation's default design owner (Settings ▸ Preferences).
+        const owner = await loadDefaultDesignOwner();
+        if (live && owner) setV((p) => (p.design_owner ? p : { ...p, design_owner: owner }));
+        return; // new item: blank form, lookups only
+      }
       const found = res.designs.find((d) => d.id === id) ?? null;
       setRow(found);
       if (found) {
@@ -100,8 +97,19 @@ export function DesignEdit({ clone }: { clone?: boolean } = {}) {
   const [showErrors, setShowErrors] = useState(false);
 
   const save = async () => {
-    // #12: images are managed on the item detail screen, not at creation.
-    const input = toDesignInput(v, lookups, images);
+    // CR-396: images are picked on the form (Design Data) and saved with the item.
+    // CR-429: the server stores these Title Case — compute unique_name / the party-brand SKU segment from the same text.
+    const input = toDesignInput(
+      {
+        ...v,
+        design_name: titleCase(v.design_name),
+        // CR-437: blank Base Design Name = the Design Name (decided at save, so the field stays clearable while editing).
+        base_design_name: titleCase(v.base_design_name.trim() || v.design_name),
+        party_brand_name: titleCase(v.party_brand_name),
+      },
+      lookups,
+      images,
+    );
     // Friendly duplicate pre-check; the server's 409 on unique_name is the backstop.
     // A new/cloned item must not match ANY existing item (no self-exclude).
     const dup = (cachedDesigns() || []).find(
@@ -151,7 +159,19 @@ export function DesignEdit({ clone }: { clone?: boolean } = {}) {
       }
     >
       {error && <div className="field-err" style={{ marginBottom: 10 }}>{error}</div>}
-      <DesignFields value={v} onChange={set} lookups={lookups} showErrors={showErrors} mode={creating ? "create" : "edit"} />
+      <DesignFields
+        value={v}
+        onChange={set}
+        lookups={lookups}
+        showErrors={showErrors}
+        mode={creating ? "create" : "edit"}
+        images={images}
+        onImages={(next) => {
+          form.touch();
+          setImages(next);
+        }}
+        selfId={clone ? undefined : id || undefined}
+      />
     </FormPage>
   );
 }

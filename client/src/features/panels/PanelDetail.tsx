@@ -205,6 +205,7 @@ export function PanelDetail() {
                     text("Panel Size", panel.panelSize),
                     text("Vinyl Size", panel.vinylSize),
                     text("MDF Size", panel.mdfSize),
+                    text("Remarks", panel.remarks),
                     ["Created", fmtLocalDateTime(panel.createdTime), false] as Detail,
                     ["Modified", fmtLocalDateTime(panel.modifiedTime), false] as Detail,
                   ].map(([label, value, unset]) => (

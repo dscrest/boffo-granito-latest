@@ -140,7 +140,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
               [
                 ["overview", <>Line items <span className="ct">{lineItems.length}</span></>],
                 ["packing", "Packing & pallets"],
-                ["docs", "Documents"],
                 ["activity", "Activity"],
               ] as [string, React.ReactNode][]
             ).map(([id, label]) => (
@@ -159,7 +158,6 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
 
           {tab === "overview" && <OverviewTab order={order} lineItems={lineItems} />}
           {tab === "packing" && <PackingTab order={order} lineItems={lineItems} totals={totals} />}
-          {tab === "docs" && <DocsTab order={order} />}
           {tab === "activity" && <ActivityTab order={order} />}
         </div>
       </aside>
@@ -322,24 +320,9 @@ function PackingTab({
   );
 }
 
-/* Docs/Activity: no document store or per-order event feed is wired yet.
-   Honest empty states until those APIs exist — never invented rows. */
-function DocsTab(_props: { order: Order }) {
-  return (
-    <div className="dpanel">
-      <div className="head">
-        <Icon name="docs" size={12} />
-        Documents
-      </div>
-      <EmptyState
-        icon="docs"
-        title="No documents attached"
-        hint="Document storage isn't connected yet — PI, PO and packing list files will appear here once it is."
-      />
-    </div>
-  );
-}
-
+/* Activity: no per-order event feed is wired yet — an honest empty state
+   below the stage timeline, never invented rows. (The Documents tab was
+   removed in CR-389: it had nothing behind it.) */
 function ActivityTab({ order }: { order: Order }) {
   return (
     <div className="dpanel">
@@ -368,7 +351,7 @@ function ActivityTab({ order }: { order: Order }) {
       <EmptyState
         icon="clock"
         title="Older activity not shown"
-        hint="Stage changes are tracked from Jul 2026 onward; earlier updates live in the audit log (/ops)."
+        hint="Stage changes are tracked from Jul 2026 onward; earlier updates are in the Audit Log."
       />
     </div>
   );

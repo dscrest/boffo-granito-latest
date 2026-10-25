@@ -70,11 +70,11 @@ export function PanelLoading() {
     const q = query.trim().toLowerCase();
     return all
       .filter(isOpen)
-      .map((o) => ({ ...o, pending: pendingText(progressOf(o)), loadStatus: loadStatusOf(o), key: `${o.type}|${o.id}` }))
+      .map((o) => ({ ...o, pending: pendingText(progressOf(o, panelById)), loadStatus: loadStatusOf(o, panelById), key: `${o.type}|${o.id}` }))
       .filter((o) => o.pending)
       .filter((o) => !typeFilter || o.type === typeFilter)
       .filter((o) => !q || o.orderNumber.toLowerCase().includes(q) || o.customerName.toLowerCase().includes(q) || o.salesOrderNo.toLowerCase().includes(q) || o.quoteNo.toLowerCase().includes(q));
-  }, [panelOrders, sampleOrders, query, typeFilter]);
+  }, [panelOrders, sampleOrders, query, typeFilter, panelById]);
 
   const toggle = (key: string) =>
     setSelected((prev) => {

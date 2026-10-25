@@ -114,7 +114,7 @@ async function main() {
   });
 
   await check("panels unbooked → 409 'Book …'; book + stock → InCutting → Ready adds the PENDING need and books it", async () => {
-    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0002", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Panel", qty: 1 }] }] }, { expect: 409 });
+    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0002", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Item", qty: 2, design, cut_piece_size: cutSize }] }] }, { expect: 409 }); // CR-405: pieces per kind
     if (!/Book /.test(r.error || "")) throw new Error(`wrong message: ${r.error}`);
     await post(`panel-order-status/${order}`, { status: "InCutting" });
     const before = await onHand(design, cutSize);
@@ -123,22 +123,23 @@ async function main() {
     eq(Number((await alloc(order))[key]), 26, "booked = need");
   });
 
-  await check("load 2 of 3 panels → stock −4, booking −4, still Ready; over-pending → 400", async () => {
+  await check("load 4 of the 6 pieces (2 of 3 panels' worth) → stock −4, booking −4, still Ready; over-pending → 400; material Panel → 400", async () => {
     const before = await onHand(design, cutSize);
-    await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0003", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Panel", qty: 5 }] }] }, { expect: 400 });
-    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0003", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Panel", qty: 2 }] }] });
+    await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0003", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Panel", qty: 1 }] }] }, { expect: 400 }); // CR-405
+    await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0003", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Item", qty: 7, design, cut_piece_size: cutSize }] }] }, { expect: 400 });
+    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0003", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Item", qty: 4, design, cut_piece_size: cutSize }] }] });
     made.loads.push(r.data.loads[0].ROWID);
     eq(r.data.loads[0].status, "Ready", "still Ready");
     eq(before - (await onHand(design, cutSize)), 4, "2 panels × 2 pieces left stock");
     eq(Number((await alloc(order))[key]), 22, "booking shrank with the stock");
     const ll = await rows("PanelLoadLine", `panel_load=${r.data.loads[0].ROWID}`);
-    eq(Number(ll[0].weight_kg), 2 * 2 * 1.5, "2 panels × 2 pieces × 1.5 kg stamped");
+    eq(Number(ll[0].weight_kg), 4 * 1.5, "4 pieces × 1.5 kg stamped");
     await post("panel-order-save", { rowid: order, customer, salesperson: "ZZT", lines: [{ panel, qty: 3, mdf: m8 }] }, { expect: 409 });
     await post(`panel-order-delete/${order}`, { reason: "ZZT" }, { expect: 409 });
   });
 
-  await check("last panel + the 20 loose pieces → Dispatched (derived) + StatusTransition; the final load cannot be removed", async () => {
-    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0004", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Panel", qty: 1 }, { line: cLine.ROWID, material: "Item", qty: 20 }] }] });
+  await check("last 2 pieces + the 20 loose pieces → Dispatched (derived) + StatusTransition; the final load cannot be removed", async () => {
+    const r = await post("panel-load-save", { load_date: today, vehicle_number: "GJ01ZZT0004", orders: [{ order_type: "Panel", order, lines: [{ line: pLine.ROWID, material: "Item", qty: 2, design, cut_piece_size: cutSize }, { line: cLine.ROWID, material: "Item", qty: 20 }] }] });
     made.loads.push(r.data.loads[0].ROWID);
     eq(r.data.loads[0].status, "Dispatched", "flipped");
     eq(String((await order1(order)).status), "Dispatched", "stored");

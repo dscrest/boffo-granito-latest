@@ -12,6 +12,7 @@
  */
 const zoho = require("./zoho");
 const core = require("./customerSync");
+const { titleCase } = require("./names"); // CR-429: a pull never flips a stored name's case
 
 const s = core.s;
 const label = "Zoho Books";
@@ -47,8 +48,8 @@ function contactToCustomer(contact, termsOrAux = new Map()) {
     if (str) out[k] = str;
   };
   put("books_contact_id", contact.contact_id);
-  put("name", contact.contact_name);
-  put("company_name", contact.company_name || contact.contact_name);
+  put("name", titleCase(contact.contact_name));
+  put("company_name", titleCase(contact.company_name || contact.contact_name));
   const sub = s(contact.customer_sub_type).toLowerCase();
   if (sub === "business" || sub === "individual") out.customer_type = sub;
   put("currency", contact.currency_code);
@@ -61,8 +62,8 @@ function contactToCustomer(contact, termsOrAux = new Map()) {
   const persons = Array.isArray(contact.contact_persons) ? contact.contact_persons : [];
   const primary = persons.find((p) => p.is_primary_contact) || contact;
   put("contact_salutation", primary.salutation);
-  put("contact_first_name", primary.first_name);
-  put("contact_last_name", primary.last_name);
+  put("contact_first_name", titleCase(primary.first_name));
+  put("contact_last_name", titleCase(primary.last_name));
   put("contact_email", primary.email);
   put("contact_work_phone", primary.phone);
   put("contact_mobile", primary.mobile);
@@ -79,8 +80,8 @@ function contactToCustomer(contact, termsOrAux = new Map()) {
     .filter((p) => p !== primary)
     .map((p) => ({
       salutation: s(p.salutation),
-      first_name: s(p.first_name),
-      last_name: s(p.last_name),
+      first_name: titleCase(p.first_name),
+      last_name: titleCase(p.last_name),
       email: s(p.email),
       work_phone: s(p.phone),
       mobile: s(p.mobile),

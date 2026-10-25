@@ -1,13 +1,15 @@
 /* ============================================================
-   Header menus — Notification bell + User avatar dropdown.
-   Both live in the app header (App.tsx). Each owns its open
-   state and closes on outside-click / Esc.
+   Shell menus — Notification bell (header) + the rail user chip
+   with its settings menu (bottom of the sidebar, CR-379).
+   Each owns its open state and closes on outside-click / Esc.
    ============================================================ */
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { useModalA11y } from "@/ui/useModalA11y";
+import { getThemePref, setThemePref, type ThemePref } from "@/lib/theme";
 import { list } from "@/lib/dataOps";
-import { actorName, describeChange, parseDbTime } from "@/lib/format";
-import { useLocation } from "react-router-dom";
+import { actorName, describeChange, opLabel, parseDbTime, tableLabel } from "@/lib/format";
+import { useLocation, useNavigate } from "react-router-dom";
 import { signOut, storedAuth, type SessionUser } from "@/lib/auth";
 import { AUTO_TOURS, startTour } from "@/features/tour/Tour";
 
@@ -65,7 +67,14 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(false);
-  const [lastSeen, setLastSeen] = useState<string>(() => sessionStorage.getItem(SEEN_KEY) || "");
+  // Read-marker: rows newer than this are unread (bold). Set by "Mark all read" only.
+  const [lastSeen, setLastSeen] = useState<string>(() => localStorage.getItem(SEEN_KEY) || "");
+  const markAllRead = () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+    localStorage.setItem(SEEN_KEY, stamp);
+    setLastSeen(stamp);
+  };
+  const unread = (n: Notif) => n.occurredAt > lastSeen;
   useDismiss(ref, open, () => setOpen(false));
 
   // Personal notifications (approval verdicts etc.) for the signed-in user.
@@ -98,7 +107,7 @@ export function NotificationBell() {
           .slice(0, 10)
           .map((r) => {
             const op = str(r.operation).toUpperCase();
-            const verb = OP_VERB[op] || op.toLowerCase() || "changed";
+            const verb = OP_VERB[op] || opLabel(op).toLowerCase() || "changed";
             // The verb is already in the sentence — keep only what describeChange adds beyond it.
             const detail = describeChange(str(r.operation), str(r.payload_summary)).replace(/^(Created|Updated|Deleted)\s*/, "");
             const summary = detail && detail !== "—" ? detail : r.entity_rowid ? `#${str(r.entity_rowid)}` : "";
@@ -106,7 +115,7 @@ export function NotificationBell() {
               id: str(r.ROWID),
               occurredAt: str(r.occurred_at),
               when: rel(str(r.occurred_at)),
-              text: `${actorName(str(r.actor))} ${verb} ${str(r.table_name)}${summary ? ` · ${summary}` : ""}`,
+              text: `${actorName(str(r.actor))} ${verb} ${tableLabel(str(r.table_name))}${summary ? ` · ${summary}` : ""}`,
             };
           });
         setItems(rows);
@@ -149,13 +158,7 @@ export function NotificationBell() {
   const toggle = () => {
     const next = !open;
     setOpen(next);
-    if (next) {
-      fetchItems();
-      // Mark everything seen as of now.
-      const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
-      sessionStorage.setItem(SEEN_KEY, stamp);
-      setLastSeen(stamp);
-    }
+    if (next) fetchItems();
   };
 
   return (
@@ -172,7 +175,7 @@ export function NotificationBell() {
               <div className="hdr-menu-list">
                 {personal.map((n) => (
                   <div
-                    className="hdr-menu-row"
+                    className={`hdr-menu-row${unread(n) ? " unread" : ""}`}
                     key={n.id}
                     style={n.link ? { cursor: "pointer" } : undefined}
                     onClick={() => {
@@ -190,7 +193,14 @@ export function NotificationBell() {
               </div>
             </>
           )}
-          <div className="hdr-menu-head">Recent activity</div>
+          <div className="hdr-menu-head" style={{ display: "flex", alignItems: "center" }}>
+            Recent activity
+            {hasUnseen && (
+              <button type="button" className="back-link" style={{ marginLeft: "auto" }} onClick={markAllRead}>
+                Mark all read
+              </button>
+            )}
+          </div>
           {loading && items.length === 0 ? (
             <div className="hdr-menu-empty">Loading…</div>
           ) : items.length === 0 ? (
@@ -198,7 +208,7 @@ export function NotificationBell() {
           ) : (
             <div className="hdr-menu-list">
               {items.map((n) => (
-                <div className="hdr-menu-row" key={n.id}>
+                <div className={`hdr-menu-row${unread(n) ? " unread" : ""}`} key={n.id}>
                   <div className="hdr-menu-row-text">{n.text}</div>
                   <div className="hdr-menu-row-time">{n.when}</div>
                 </div>
@@ -210,15 +220,68 @@ export function NotificationBell() {
     </div>
   );
 }
+/* ---------------- Rail user chip + menu (CR-379) ----------------
+   Pinned at the bottom of the sidebar: avatar · name · role · ⌄. The menu
+   opens ABOVE the chip (styles.css .rail-menu): Settings (Admin) · Keyboard
+   shortcuts · tours · Light / Dark / Match system · Sign out. */
 
-/* ---------------- User avatar menu ---------------- */
+const THEME_LABEL: Record<ThemePref, string> = { light: "Light", dark: "Dark", system: "Match system" };
+
+function MenuRow({ icon, check, danger, onClick, children }: {
+  icon?: string;
+  check?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button type="button" role="menuitem" className={`hdr-menu-item${danger ? " danger" : ""}`} onClick={onClick}>
+      {children}
+      <span className="tail">{check ? <Icon name="check" size={14} className="chk" /> : icon ? <Icon name={icon} size={14} /> : null}</span>
+    </button>
+  );
+}
+
+// ponytail: the only shortcuts the app has (GlobalSearch, useDismiss, GridFooter) — extend this list when one is added.
+const SHORTCUTS: [string, string][] = [
+  ["⌘K / Ctrl K", "Search anywhere"],
+  ["↑ ↓ Enter", "Move through search results, open one"],
+  ["Esc", "Close a menu, search or dialog"],
+  ["Tab · Enter", "Walk a grid head and sort a column"],
+];
+
+function ShortcutsSheet({ onClose }: { onClose: () => void }) {
+  const panelRef = useModalA11y(onClose);
+  return (
+    <div className="modal-backdrop" style={{ zIndex: 200, alignItems: "center" }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-panel card" ref={panelRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" style={{ maxWidth: 380 }}>
+        <div className="card-head"><div className="card-title">Keyboard shortcuts</div></div>
+        <dl className="keys">
+          {SHORTCUTS.map(([k, what]) => (
+            <Fragment key={k}>
+              <dt><kbd>{k}</kbd></dt>
+              <dd>{what}</dd>
+            </Fragment>
+          ))}
+        </dl>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+          <button type="button" className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function UserMenu({ user }: { user: SessionUser | null }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [keys, setKeys] = useState(false);
+  const [pref, setPref] = useState<ThemePref>(getThemePref);
+  const navigate = useNavigate();
   useDismiss(ref, open, () => setOpen(false));
   // Page tours replay from here too — only offered on a page that has one.
   const pageTour = AUTO_TOURS[useLocation().pathname];
+  const isAdmin = user?.role === "Admin";
 
   const initials = (user?.name || "BG")
     .split(/\s+/)
@@ -227,56 +290,48 @@ export function UserMenu({ user }: { user: SessionUser | null }) {
     .slice(0, 2)
     .toUpperCase();
 
+  const run = (fn: () => void) => () => {
+    setOpen(false);
+    fn();
+  };
+
   return (
-    <div className="hdr-pop" ref={ref} data-tour="usermenu">
-      <div
-        className="avatar"
-        role="button"
-        tabIndex={0}
-        title={user ? `${user.name} (${user.role || "no role"})` : "Account"}
-        style={{ cursor: "pointer" }}
-        onClick={() => setOpen((o) => !o)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen((o) => !o);
-        }}
-      >
-        {initials}
-      </div>
+    <div className="rail-user" ref={ref} data-tour="usermenu">
       {open && (
-        <div className="hdr-menu" style={{ width: 220, right: 0 }}>
-          <div className="hdr-menu-user">
-            <div className="hdr-menu-user-name">{user?.name || "Signed in"}</div>
-            <div className="hdr-menu-user-sub">{user?.email || ""}</div>
-            <div className="hdr-menu-user-sub">{user?.role || "no role"}</div>
-          </div>
-          <button
-            className="hdr-menu-item"
-            onClick={() => {
-              setOpen(false);
-              startTour();
-            }}
-          >
-            <Icon name="flag" size={13} />
-            Take a tour
-          </button>
-          {pageTour && (
-            <button
-              className="hdr-menu-item"
-              onClick={() => {
-                setOpen(false);
-                startTour(pageTour);
-              }}
-            >
-              <Icon name="flag" size={13} />
-              Page guide
-            </button>
-          )}
-          <button className="hdr-menu-item" onClick={() => signOut()}>
-            <Icon name="log-out" size={13} />
-            Sign out
-          </button>
+        <div className="hdr-menu rail-menu" role="menu">
+          {isAdmin && <MenuRow icon="settings" onClick={run(() => navigate("/settings"))}>Settings</MenuRow>}
+          <MenuRow icon="keyboard" onClick={run(() => setKeys(true))}>Keyboard shortcuts</MenuRow>
+          <MenuRow icon="flag" onClick={run(() => startTour())}>Take a tour</MenuRow>
+          {pageTour && <MenuRow icon="flag" onClick={run(() => startTour(pageTour))}>Page guide</MenuRow>}
+          <div className="hdr-menu-sep" />
+          {(["light", "dark", "system"] as ThemePref[]).map((p) => (
+            <MenuRow key={p} check={pref === p} onClick={() => { setThemePref(p); setPref(p); }}>
+              {THEME_LABEL[p]}
+            </MenuRow>
+          ))}
+          <div className="hdr-menu-sep" />
+          <MenuRow icon="log-out" danger onClick={() => signOut()}>Sign out</MenuRow>
         </div>
       )}
+      <button
+        type="button"
+        className="rail-user-chip"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={user ? `${user.name} (${user.role || "no role"})` : "Account"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="av lg">
+          {initials}
+          <span className="presence online" />
+        </span>
+        <span className="rail-user-text">
+          <b>{user?.name || "Signed in"}</b>
+          <small>{user?.role || "no role"}</small>
+        </span>
+        <Icon name="chev-d" size={14} className="chev" />
+      </button>
+      {keys && <ShortcutsSheet onClose={() => setKeys(false)} />}
     </div>
   );
 }

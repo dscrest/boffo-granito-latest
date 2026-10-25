@@ -111,7 +111,7 @@ export function ContainerFormats() {
   };
 
   const newBtn = (
-    <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/containers/new")}>
+    <button className="hbtn primary sm" onClick={() => navigate("/containers/new")}>
       <Icon name="plus" size={13} />
       New Container
     </button>

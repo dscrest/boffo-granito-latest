@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#eef0f7;font-family:Manrope,system-ui,sans-serif;color:#1c1d26;-webkit-font-smoothing:antialiased}
+a{color:#4f46e5}a:hover{color:#3730a3}
+</style>
+</helmet>
+<div style="max-width:1120px;margin:0 auto;padding:28px 24px;display:flex;flex-direction:column;gap:20px">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <h1 style="margin:0;font-size:30px;font-weight:800;letter-spacing:-0.02em">PNL/2026-27/014</h1>
+    <span style="background:#e4e6ef;color:#4a4c5a;font-size:13px;font-weight:600;padding:5px 12px;border-radius:999px">In production</span>
+    <span style="color:#6b6d7c;font-size:14px;margin-left:auto">ZZT Panel Craft Studio</span>
+  </div>
+
+  <div style="background:#fff;border-radius:22px;padding:28px;box-shadow:0 1px 2px rgba(20,20,40,.04),0 12px 32px rgba(20,20,40,.06)">
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:32px;align-items:center">
+      <div style="position:relative;width:168px;height:168px">
+        <svg viewBox="0 0 100 100" width="168" height="168" style="transform:rotate(-90deg)">
+          <circle cx="50" cy="50" r="42" fill="none" stroke="#e8e9f1" stroke-width="10"></circle>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="#4f46e5" stroke-width="10" stroke-linecap="round" stroke-dasharray="{{ ringDash }}"></circle>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px">
+          <span style="font-size:36px;font-weight:800;letter-spacing:-0.03em;line-height:1">{{ readyCount }}<span style="font-size:18px;color:#8a8c9a;font-weight:600">/{{ total }}</span></span>
+          <span style="font-size:12px;font-weight:600;color:#6b6d7c;text-transform:uppercase;letter-spacing:.06em">panels ready</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+        <div style="font-size:20px;font-weight:700;letter-spacing:-0.01em">{{ headline }}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+          <div style="background:#f4f5fa;border-radius:14px;padding:14px 16px"><div style="font-size:12px;font-weight:600;color:#6b6d7c">Panels</div><div style="font-size:24px;font-weight:800;margin-top:2px">{{ total }}</div></div>
+          <div style="background:#f4f5fa;border-radius:14px;padding:14px 16px"><div style="font-size:12px;font-weight:600;color:#6b6d7c">Pieces</div><div style="font-size:24px;font-weight:800;margin-top:2px">{{ totalPcs }}</div></div>
+          <div style="background:#eceafd;border-radius:14px;padding:14px 16px"><div style="font-size:12px;font-weight:600;color:#4f46e5">Ready to load</div><div style="font-size:24px;font-weight:800;margin-top:2px;color:#4f46e5">{{ readyCount }}</div></div>
+          <div style="background:#fdf1e6;border-radius:14px;padding:14px 16px"><div style="font-size:12px;font-weight:600;color:#b45309">Pending</div><div style="font-size:24px;font-weight:800;margin-top:2px;color:#b45309">{{ pendingCount }}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:#fff;border-radius:22px;padding:24px 28px;box-shadow:0 1px 2px rgba(20,20,40,.04),0 12px 32px rgba(20,20,40,.06)">
+    <div style="font-size:16px;font-weight:700;margin-bottom:18px">Stage progress</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px">
+      <sc-for list="{{ stages }}" as="s" hint-placeholder-count="6">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 8px;background:#f8f8fc;border-radius:16px">
+          <div style="position:relative;width:76px;height:76px">
+            <svg viewBox="0 0 100 100" width="76" height="76" style="transform:rotate(-90deg)">
+              <circle cx="50" cy="50" r="40" fill="none" stroke="#e8e9f1" stroke-width="12"></circle>
+              <circle cx="50" cy="50" r="40" fill="none" stroke="{{ s.color }}" stroke-width="12" stroke-linecap="round" stroke-dasharray="{{ s.dash }}"></circle>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800">{{ s.done }}<span style="color:#8a8c9a;font-weight:600;font-size:12px">/{{ total }}</span></div>
+          </div>
+          <div style="font-size:13px;font-weight:700;white-space:nowrap">{{ s.name }}</div>
+          <div style="font-size:12px;font-weight:600;white-space:nowrap;color:{{ s.color }}">{{ s.label }}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="background:#fff;border-radius:22px;padding:24px 28px;box-shadow:0 1px 2px rgba(20,20,40,.04),0 12px 32px rgba(20,20,40,.06)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:16px;font-weight:700">Panels</div>
+      <div style="display:flex;gap:16px;font-size:12px;font-weight:600;color:#6b6d7c;white-space:nowrap">
+        <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#4f46e5;display:inline-block"></span>Done</span>
+        <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#f59e0b;display:inline-block"></span>Next step</span>
+        <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#e8e9f1;display:inline-block"></span>Pending</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:72px 1fr auto auto;gap:0 20px;align-items:center;padding:8px 12px;font-size:12px;font-weight:600;color:#8a8c9a;border-bottom:1px solid #eef0f6">
+      <div>Panel</div><div>{{ stageHeader }}</div><div>Qty</div><div style="min-width:120px">Status</div>
+    </div>
+    <sc-for list="{{ panels }}" as="p" hint-placeholder-count="4">
+      <div style="display:grid;grid-template-columns:72px 1fr auto auto;gap:0 20px;align-items:center;padding:14px 12px;border-bottom:1px solid #f1f2f7">
+        <div style="font-size:15px;font-weight:700;color:#4f46e5">{{ p.id }}</div>
+        <div style="display:flex;gap:6px">
+          <sc-for list="{{ p.cells }}" as="c" hint-placeholder-count="6">
+            <div title="{{ c.title }}" style="flex:1;height:14px;border-radius:5px;background:{{ c.bg }}"></div>
+          </sc-for>
+        </div>
+        <div style="font-size:14px;font-weight:600;color:#4a4c5a">{{ p.qty }}</div>
+        <div style="min-width:120px"><span style="display:inline-block;white-space:nowrap;font-size:12px;font-weight:700;padding:5px 11px;border-radius:999px;background:{{ p.chipBg }};color:{{ p.chipFg }}">{{ p.status }}</span></div>
+      </div>
+    </sc-for>
+    <div style="font-size:13px;color:#6b6d7c;margin-top:14px">A panel is ready to load once all six stages are done.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;panelCount&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:6,&quot;min&quot;:1,&quot;max&quot;:8,&quot;step&quot;:1,&quot;tsType&quot;:&quot;number&quot;},&quot;randomize&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const names = ["MDF", "Vinyl", "Pasted", "Cut pieces", "Weighed", "Loaded"];
+    const count = this.props.panelCount ?? 6;
+    const seed = [6, 5, 4, 2, 1, 0];
+    const data = Array.from({ length: count }, (_, i) => ({
+      id: String(456 + i), qty: [1, 2, 1, 3, 1, 2, 1, 1][i % 8],
+      done: this.props.randomize ? Math.floor(Math.random() * 7) : seed[i % seed.length]
+    }));
+    const total = data.length;
+    const totalPcs = data.reduce((a, p) => a + p.qty, 0);
+    const readyCount = data.filter(p => p.done === 6).length;
+    const pendingCount = total - readyCount;
+    const C = 2 * Math.PI * 42, c2 = 2 * Math.PI * 40;
+    const dash = (n, circ) => `${(n / total) * circ} ${circ}`;
+    const stages = names.map((name, i) => {
+      const done = data.filter(p => p.done > i).length;
+      const full = done === total;
+      return { name, done, dash: dash(done, c2), color: full ? "#4f46e5" : done ? "#b45309" : "#8a8c9a",
+        label: full ? "Complete" : `${total - done} pending` };
+    });
+    const panels = data.map(p => {
+      const ready = p.done === 6;
+      return { ...p, status: ready ? "Ready" : `${names[p.done]} pending`,
+        chipBg: ready ? "#eceafd" : "#fdf1e6", chipFg: ready ? "#4f46e5" : "#b45309",
+        cells: names.map((n, i) => ({ title: n, bg: i < p.done ? "#4f46e5" : i === p.done ? "#f59e0b" : "#e8e9f1" })) };
+    });
+    const next = stages.find(s => s.done < total);
+    const headline = readyCount === total ? "All panels ready to load"
+      : `${pendingCount} of ${total} panels pending · next up: ${next.name}`;
+    return { total, totalPcs, readyCount, pendingCount, ringDash: dash(readyCount, C), stages, panels, headline,
+      stageHeader: names.join(" · ") };
+  }
+}
+</script>
+</body>
+</html>

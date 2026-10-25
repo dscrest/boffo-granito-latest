@@ -84,10 +84,96 @@ const OP_LABELS: Record<string, string> = {
   unloaded: "Unloaded",
   dispatched: "Dispatched",
   "production-log": "Production Update",
+  // Every other code the server writes (Audit Log filter + column).
+  set: "Updated",
+  cancel: "Cancelled",
+  release: "Released",
+  released: "Released",
+  recount: "Recounted",
+  disassociate: "Unlinked",
+  topup: "Pallet Topped Up",
+  allocate: "Allocated to Pallet",
+  "box-allocate": "Box Allocated",
+  "box-allocate-batch": "Batch Allocated to Box",
+  "allocate-stock": "Stock Allocated",
+  "stock-allocated": "Stock Allocated",
+  "deallocate-stock": "Stock Released",
+  "stock-deallocated": "Stock Released",
+  "stock-adjust": "Stock Adjusted",
+  "stock-transfer": "Stock Transferred",
+  "opening-stock": "Opening Stock",
+  "warehouse-primary": "Primary Warehouse Set",
+  "entry-receipt": "Cut Stock Received",
+  "entry-adjustment": "Cut Stock Adjusted",
+  "entry-transfer": "Cut Stock Transferred",
+  "cut-piece-save": "Cut Pieces Saved",
+  checkpoint: "Checkpoint",
+  "panel-order-load": "Panel Order Loaded",
+  "sample-order-request": "Sample Order Requested",
+  "sample-supplied": "Sample Supplied",
+  "send-to-loading": "Sent to Loading",
+  "vehicle-assign": "Vehicle Assigned",
+  "combine-leftovers": "Leftovers Combined",
+  "production-request": "Production Requested",
+  "production-record": "Production Recorded",
+  "production-record-lines": "Production Recorded",
+  "production-record-li": "Production Recorded", // operation column is varchar(20) — stored truncated
+  "production-update": "Production Updated",
+  "production-status": "Production Status Change",
+  "production-stage": "Production Stage Change",
+  "production-complete": "Production Completed",
+  "production-delete": "Production Deleted",
+  dedupe: "Customers Deduplicated",
+  "dedupe:merge": "Customer Merged",
+  "dedupe:recode": "Customer Recoded",
+  "crm-sync:create": "Customer Synced (new)",
+  "crm-sync:update": "Customer Synced (updated)",
+  "crm-sync:recheck": "Customer Sync Check",
+  "crm-sync:link": "Customer Linked to CRM",
+  "crm-push:create": "Customer Pushed to CRM",
+  "crm-push:update": "Customer Pushed to CRM",
+  "renumber-loads": "Loads Renumbered",
+  "reattribute-blank-lines": "Pallet Lines Re-attributed",
+  "backfill-pallets": "Pallets Backfilled",
+  "migrate-lines": "Lines Migrated",
+  "migrate-sizes": "Sizes Migrated",
 };
 export function opLabel(operation?: string): string {
   const op = (operation || "").trim();
-  return OP_LABELS[op.toLowerCase()] || op.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return OP_LABELS[op.toLowerCase()] || op.replace(/[-_:]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** OperationLog table_name → the name the user sees in the sidebar / page titles. */
+const TABLE_LABELS: Record<string, string> = {
+  Design: "Item",
+  ProductionLog: "Production",
+  SalesOrder: "Sales Order",
+  OrderItem: "Order Line",
+  Quote: "Quote",
+  Customer: "Customer",
+  Brand: "Brand",
+  Vehicle: "Vehicle",
+  Warehouse: "Warehouse",
+  ContainerFormat: "Container",
+  Pallet: "Pallet",
+  PalletizationPlan: "Palletization",
+  PalletizationPlanLine: "Palletization Line",
+  LoadBox: "Loading",
+  Panel: "Panel",
+  PanelLine: "Panel Line",
+  PanelOrder: "Panel Order",
+  PanelOrderLine: "Panel Order Line",
+  PanelLoad: "Panel Loading",
+  SampleOrder: "Sample Order",
+  SampleOrderLine: "Sample Order Line",
+  CutPieceSize: "Cut Size",
+  CutPieceStock: "Cut Stock",
+  CutStockEntry: "Cut Stock Entry",
+  Mdf: "MDF",
+};
+export function tableLabel(table?: string): string {
+  const t = (table || "").trim();
+  return TABLE_LABELS[t] || t.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
 /** OperationLog actor (email / user_id / "system") → short display name. */
@@ -111,7 +197,18 @@ const CHANGE_LABELS: Record<string, string> = {
   design_name: "Design Name",
   party_brand_name: "Customer Brand",
   rate_per_sqmt: "Rate / m²",
-  pcs_per_box: "Pcs / Box",
+  pcs_per_box: "Pcs / Packing",
+  coverage_sqm: "Coverage m²",
+  coverage_sqft: "Coverage ft²",
+  base_design_name: "Base Design Name",
+  collection_name: "Collection",
+  // CR-392…394 Design Master fields
+  design_owner: "Design Owner",
+  design_buyer: "Custom Design Buyer",
+  surface_application: "Surface Application",
+  punch: "Punch Type",
+  series: "Series",
+  catalogue: "Catalogue",
   seq_code: "Short Code",
   sku: "SKU",
   hsn_code: "HSN Code",
@@ -125,6 +222,21 @@ function changeLabel(k: string): string {
 
 /** A bare Catalyst ROWID (15+ digit numeric string). These are system ids and
     must never surface in the UI — only user-friendly codes should. */
+/** CR-429: names are stored Title Case ("Dhiraj Shah Of ABC Exports LLP") — mirror of
+    functions/data-ops/lib/names.js. A word typed ALL-CAPS with ≤3 letters is kept (ABC, MDF, A12);
+    legal suffixes are always upper (LLP, LTD, PVT…).
+    ponytail: whitespace words only — "o'brien" → "O'brien"; split on '/- if a real name needs it. */
+const UPPER_WORDS = new Set(["LLP", "LLC", "LTD", "PVT", "INC", "PLC", "FZE", "FZCO", "GMBH"]);
+export function titleCase(s: unknown): string {
+  const keep = (w: string) => w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w);
+  return String(s ?? "").trim().split(/\s+/).filter(Boolean)
+    .map((w) => {
+      if (UPPER_WORDS.has(w.replace(/[.,]+$/, "").toUpperCase())) return w.toUpperCase();
+      return keep(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
 export const isRowId = (s: unknown): boolean => /^\d{15,}$/.test(String(s ?? "").trim());
 
 /** True when a payload value is a ROWID or a list of ROWIDs (e.g. an `ids`

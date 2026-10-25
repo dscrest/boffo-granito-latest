@@ -41,7 +41,7 @@ export function ContainerPlanCard({ containerPlan, docNo, plannerPath, dispatche
   const summary = progress ? progressSummary(progress) : null;
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+      <div className="card-head">
         <span style={{ fontWeight: 600 }}>Container Plan</span>
         <span className="muted" style={{ fontSize: 14 }}>
           {plan.containers.length} container{plan.containers.length === 1 ? "" : "s"} planned on{" "}

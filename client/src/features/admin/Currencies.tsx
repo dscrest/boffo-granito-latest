@@ -8,7 +8,6 @@
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
-import { BackToSettings } from "@/ui/primitives";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -183,24 +182,18 @@ export function CurrenciesAdmin() {
 
   return (
     <div>
-      <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
-          <BackToSettings />
-          <div>
-            <div className="title">Currencies</div>
-            <div className="sub">{loading ? "Loading…" : "Base INR · rates auto-refresh daily (frankfurter.dev)"}</div>
-          </div>
-        </div>
-        <div className="right">
-          <button className="hbtn" onClick={() => void onRefreshRates()} disabled={refreshing} title="Fetch live rates now">
-            <Icon name="clock" size={13} />
-            {refreshing ? "Refreshing…" : "Refresh rates now"}
-          </button>
-          <button className="hbtn primary" onClick={() => setDraft({ ...EMPTY })}>
-            <Icon name="plus" size={13} />
-            New currency
-          </button>
-        </div>
+      {/* CR-436: rendered inside Masters ▸ Export Master — the tab names the page. */}
+      <div className="fbar">
+        <span className="muted" style={{ fontSize: "var(--t-sm)" }}>{loading ? "Loading…" : "Base INR · rates auto-refresh daily"}</span>
+        <div style={{ flex: 1 }} />
+        <button className="hbtn sm" onClick={() => void onRefreshRates()} disabled={refreshing} title="Fetch live rates now">
+          <Icon name="clock" size={13} />
+          {refreshing ? "Refreshing…" : "Refresh rates now"}
+        </button>
+        <button className="hbtn primary sm" onClick={() => setDraft({ ...EMPTY })}>
+          <Icon name="plus" size={13} />
+          New currency
+        </button>
       </div>
 
       {error && <ErrorCard message={error} onRetry={() => void load()} />}

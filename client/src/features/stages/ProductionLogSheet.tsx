@@ -10,7 +10,7 @@
    the same ids and the server records only what is still missing.
    Validation + Excel paste mapping are pure: productionLogSheetEdit.ts.
    ============================================================ */
-import { useMemo, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { NumberInput } from "@/ui/NumberInput";
@@ -25,10 +25,11 @@ import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { useMasters } from "@/features/masters/useMasters";
 import { useBoxBrands } from "@/features/masters/boxBrands";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { invalidateBatchStock } from "./batchStockApi";
 import { completeProduction, requestProduction } from "./productionApi";
-import { blankRow, designIndex, parsePaste, resolveLogSheet, type LogCol, type LogRow } from "./productionLogSheetEdit";
+import { blankRow, designIndex, parsePaste, resolveLogSheet, warehouseIndex, type LogCol, type LogRow } from "./productionLogSheetEdit";
 
 const START_ROWS = 20;
 const GROW_BY = 10;
@@ -40,6 +41,7 @@ const OPTIONAL: ColumnDef<LogRow>[] = [
   { key: "brand", label: "Box Brand" },
   { key: "note", label: "Remark" },
   { key: "date", label: "Date" },
+  { key: "warehouse", label: "Location" }, // CR-438: per row; blank = the bar's Location
 ];
 
 /** Enter / ↓ / ↑ walk the same column. Comboboxes keep their own keys (option list). */
@@ -65,12 +67,20 @@ export function ProductionLogSheet() {
 
   const [rows, setRows] = useState<LogRow[]>(() => blanks(START_ROWS));
   const [prodDate, setProdDate] = useState(todayISO());
+  // CR-411: the bar's Location = the default for every row, default = the Production bay; CR-438: a row may pick its own.
+  const { options: whOptions, primaryFor, enabled: whEnabled } = useWarehouses();
+  const [wh, setWh] = useState("");
+  const whDefault = primaryFor("Production")?.id ?? "";
+  useEffect(() => {
+    if (whDefault) setWh((v) => v || whDefault);
+  }, [whDefault]);
   const [showErrors, setShowErrors] = useState(false);
   // Save errors show in the foot, not as a toast — a sticky error toast sits on top of Save.
   const [saveError, setSaveError] = useState("");
   // Key bumped to .v2 (CR-264): Size became a fixed column, Date an optional hidden one.
   const cols = useColumns("productionLogSheetColumns.v2", OPTIONAL, ["date"]);
-  const shows = (key: string) => cols.visible.some((c) => c.key === key);
+  const shows = (key: string) => cols.visible.some((c) => c.key === key) && (key !== "warehouse" || whEnabled);
+  const whBarLabel = whOptions.find((o) => o.value === wh)?.label || "";
 
   const designById = useMemo(() => new Map(designRows.map((d) => [d.id, d])), [designRows]);
   const activeDesigns = useMemo(() => designRows.filter((d) => d.status !== "Inactive" && d.status !== "Discontinued"), [designRows]);
@@ -91,8 +101,9 @@ export function ProductionLogSheet() {
       designByKey: designIndex(designRows),
       brandByName: new Map(brands.map((b) => [b.name.trim().toLowerCase(), b._id])),
       sizeByLabel: new Map(sizeOptions.map((s) => [s.label.trim().toLowerCase(), s.value])),
+      warehouseByName: warehouseIndex(whOptions),
     }),
-    [designRows, brands, sizeOptions],
+    [designRows, brands, sizeOptions, whOptions],
   );
 
   /** Patch rows from index `at` on; the sheet grows so there is always a blank tail. */
@@ -164,9 +175,11 @@ export function ProductionLogSheet() {
             production_date: l.date,
             box_brand: l.brand || undefined,
             note: l.note,
+            warehouse: (whEnabled && l.warehouse) || undefined, // CR-438: the row's own; blank → the bar's below
           })),
         production_date: prodDate,
         performed_by: recordedBy,
+        warehouse: (whEnabled && wh) || undefined,
       });
       invalidateBatchStock(); // rows before a failure are already in stock
       if (!done.ok) {
@@ -192,6 +205,15 @@ export function ProductionLogSheet() {
           <label className="dim nw" htmlFor="pls-date">Production date</label>
           <DateInput id="pls-date" value={prodDate} max={todayISO()} style={{ width: 150 }} onChange={(e) => setProdDate(e.target.value || todayISO())} />
           <span className="dim nw">Recorded by <b>{recordedBy || "—"}</b></span>
+          {whEnabled && (
+            <>
+              {/* CR-411: the leaf = "Warehouse ▸ Location"; type a code (c4) to jump to it. */}
+              <label className="dim nw">Location</label>
+              <div style={{ width: 240 }}>
+                <Combobox value={wh} options={whOptions} clearable={false} maxVisible={120} ariaLabel="Location the boxes go into" onChange={(v) => { form.touch(); setWh(v); }} />
+              </div>
+            </>
+          )}
           <span style={{ flex: 1 }} />
           <span className="dim nw"><span className="req">*</span> Required</span>
           <ColumnPicker columns={cols.ordered} hidden={cols.hidden} onToggle={cols.toggle} onMove={cols.move} active={cols.customised} />
@@ -209,6 +231,7 @@ export function ProductionLogSheet() {
                 <th className="num qtyh">Qty (boxes) <span className="req">*</span></th>
                 {shows("note") && <th>Remark</th>}
                 {shows("date") && <th>Date</th>}
+                {shows("warehouse") && <th>Location</th>}
                 <th className="rm" />
               </tr>
             </thead>
@@ -263,6 +286,11 @@ export function ProductionLogSheet() {
                         <DateInput value={r.date} max={todayISO()} style={{ width: "100%" }} aria-label={`Production date, row ${i + 1}`} onChange={(e) => setCell(i, { date: e.target.value })} />
                       </td>
                     )}
+                    {shows("warehouse") && (
+                      <td className="cellin" data-col="warehouse" style={{ minWidth: 200 }}>
+                        <Combobox value={r.warehouse} options={whOptions} maxVisible={120} placeholder={whBarLabel} ariaLabel={`Location, row ${i + 1}`} onChange={(v) => setCell(i, { warehouse: v })} />
+                      </td>
+                    )}
                     <td className="rm">
                       {/* A minted job is not dropped from here — delete it on /prod. */}
                       {!r.jobId && (
@@ -282,7 +310,7 @@ export function ProductionLogSheet() {
                 <td className="cust">Total <span className="dim" style={{ fontWeight: 400 }}>· {lines.length} item{lines.length === 1 ? "" : "s"}</span></td>
                 <td colSpan={shows("brand") ? 2 : 1} />
                 <td className="num mono">{fmt(totalBoxes)}</td>
-                <td colSpan={(shows("note") ? 1 : 0) + (shows("date") ? 1 : 0) + 1} />
+                <td colSpan={(shows("note") ? 1 : 0) + (shows("date") ? 1 : 0) + (shows("warehouse") ? 1 : 0) + 1} />
               </tr>
             </tfoot>
           </table>

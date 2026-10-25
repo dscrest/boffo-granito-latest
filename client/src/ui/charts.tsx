@@ -15,19 +15,16 @@ import {
 } from "recharts";
 import { fmt } from "@/lib/format";
 
-/* recharts writes fills as SVG attributes, where var() is invalid — resolve
-   tokens to their oklch/hex values once per render instead. */
-function cssVar(name: string, fallback: string): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-}
+/* Colours are passed as var(--token) straight into the SVG attributes —
+   presentation attributes accept custom properties, and this way the charts
+   follow a theme toggle live (CR-378) without re-rendering. */
 
 function ChartTip({ active, label, rows }: { active?: boolean; label?: string; rows: [string, string][] }) {
   if (!active || rows.length === 0) return null;
   return (
     <div
       style={{
-        background: "var(--panel-2, #fff)",
+        background: "var(--bg-card, #fff)",
         border: "1px solid var(--border-2)",
         borderRadius: 9,
         padding: "6px 10px",
@@ -86,7 +83,7 @@ export function StageBarChart({ data, height = 220 }: { data: StageBarDatum[]; h
         />
         <Bar dataKey="value" barSize={14} radius={7} background={{ fill: "var(--border)", radius: 7 } as never}>
           {data.map((d) => (
-            <Cell key={d.label} fill={cssVar(`--c-${d.color}`, "#695d50")} />
+            <Cell key={d.label} fill={`var(--c-${d.color})`} />
           ))}
           <LabelList
             dataKey="value"
@@ -110,7 +107,7 @@ export function TrendChart({ data, unit = "boxes", height = 220 }: { data: Trend
   if (data.every((d) => d.value === 0)) {
     return <div className="muted" style={{ textAlign: "center", padding: 18 }}>No orders in this period.</div>;
   }
-  const accent = cssVar("--accent-ink", "#b95c0d");
+  const accent = "var(--accent-ink)";
   return (
     <ResponsiveContainer width="100%" height={height}>
       <AreaChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 12 }}>

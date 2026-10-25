@@ -27,6 +27,7 @@
  */
 const zoho = require("./zoho");
 const core = require("./customerSync");
+const { titleCase } = require("./names"); // CR-429: a pull never flips a stored name's case
 
 const s = core.s;
 const label = "Zoho CRM";
@@ -87,8 +88,8 @@ function accountToCustomer({ account, contacts, booksContactId }, aux = {}) {
   put("crm_account_id", a.id);
   // CR-362 — ponytail: never clears a stale Books link; add "clear when Books says none" if contacts get deleted there.
   put("books_contact_id", booksContactId);
-  put("name", a.Account_Name);
-  put("company_name", a.Account_Name);
+  put("name", titleCase(a.Account_Name));
+  put("company_name", titleCase(a.Account_Name));
   put("website", a.Website);
   put("notes", a.Description);
   if (a.Currency) put("currency", typeof a.Currency === "object" ? a.Currency.name : a.Currency);
@@ -114,8 +115,8 @@ function accountToCustomer({ account, contacts, booksContactId }, aux = {}) {
   const people = (Array.isArray(contacts) ? contacts : []).map((c) => ({
     id: s(c.id),
     salutation: s(c.Salutation),
-    first_name: s(c.First_Name),
-    last_name: s(c.Last_Name),
+    first_name: titleCase(c.First_Name),
+    last_name: titleCase(c.Last_Name),
     email: s(c.Email),
     work_phone: s(c.Phone),
     mobile: s(c.Mobile),

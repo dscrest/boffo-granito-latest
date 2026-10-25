@@ -2,7 +2,7 @@
    what remains to supply per line and the header status DERIVED from the
    lines. Mirrors the server `sampleStatus` (applied by /panel-load-save since CR-347) — keep
    the two together. */
-export const SAMPLE_STATUSES = ["New", "PartiallySupplied", "Supplied"] as const;
+export const SAMPLE_STATUSES = ["New", "PartiallySupplied", "Supplied", "Cancelled"] as const; // CR-368: Cancelled is the one STORED status
 export type SampleOrderStatus = (typeof SAMPLE_STATUSES)[number];
 
 export interface SupplyLine {

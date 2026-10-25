@@ -277,7 +277,6 @@ select:focus, textarea:focus {
   border-bottom: 1px solid var(--border);
   color: var(--text-primary);
 }
-.tbl td.num { font-family: var(--font-mono); text-align: right; }
 .mono { font-family: var(--font-mono); }
 .tbl tbody tr:hover td { background: var(--bg-secondary); }
 /* selected row */
@@ -323,7 +322,20 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
   border-radius: 999px;
   white-space: nowrap;
   line-height: 1.5;
+  /* CR-378: tone colour per class (was inline hex in Chip.tsx) — identical
+     values, 0x18/255 ≈ 9.4% tint. glass.css re-points --chip for dark. */
+  color: var(--chip);
+  background: color-mix(in srgb, var(--chip) 9.4%, transparent);
 }
+.nd-chip.tone-gray   { --chip: #64748b; }
+.nd-chip.tone-amber  { --chip: #b45309; }
+.nd-chip.tone-sky    { --chip: #0369a1; }
+.nd-chip.tone-teal   { --chip: #0d9488; }
+.nd-chip.tone-blue   { --chip: #2563eb; }
+.nd-chip.tone-violet { --chip: #7c3aed; }
+.nd-chip.tone-green  { --chip: #15803d; }
+.nd-chip.tone-slate  { --chip: #334155; }
+.nd-chip.tone-red    { --chip: #b91c1c; }
 /* legacy .chip: pill geometry; the styles.css tone variants (higher
    specificity) keep their own colors until migrated to ui/Chip */
 .chip {

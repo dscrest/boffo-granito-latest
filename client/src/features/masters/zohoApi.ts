@@ -58,10 +58,35 @@ export interface SyncSummary {
   updated: number;
   linked: number;
   skipped: number;
+  /** CR-372: remote records NOT written because their name is already on another linked customer
+      (or on several unmapped ones) — listed in `errors`, never retried by themselves. */
+  duplicates?: number;
   errors: string[];
   at: string; // IST "yyyy-MM-dd HH:mm:ss"
   note?: string;
 }
+
+/* CR-373: duplicate customers (Settings → Zoho → Duplicate customers). The server plans it
+   (lib/customerDedupe.js): rows sharing one CRM account merge into `keep`; survivors sharing a CUS-
+   code are re-coded; names shared by DIFFERENT CRM accounts are reported only. */
+export interface DedupeRow {
+  rowid: string;
+  code: string;
+  name: string;
+  books: boolean; // carries the Zoho Books link
+  created: string;
+}
+export interface DedupePlan {
+  applied: boolean;
+  groups: { crm_account_id: string; keep: DedupeRow; drop: DedupeRow[]; inherit_books: string; moves: Record<string, number> }[];
+  recodes: (DedupeRow & { from: string; to: string })[];
+  conflicts: { name: string; rows: (DedupeRow & { crm_account_id: string })[] }[];
+  merged?: number;
+  repointed?: number;
+  recoded?: number;
+}
+/** Admin. `apply=false` = report only; `true` merges, repoints the orders and re-codes. */
+export const dedupeCustomers = (apply: boolean): Promise<DedupePlan> => apiPost<{ ok: boolean } & DedupePlan>("data-ops/customer-dedupe", { apply });
 
 /** One picker row (server-trimmed). */
 export interface ZohoHit {

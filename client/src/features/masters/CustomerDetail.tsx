@@ -1,13 +1,14 @@
 /* ============================================================
    Customer detail — same split view as the Item (Design) detail page.
    Left: resizable, searchable list of customers. Right: header with
-   Edit / More (Delete) / ✕, Primary Details, the customer's orders,
-   and the Activity log.
+   Edit / More (Delete) / ✕ and four tabs (CR-384): Details (Primary
+   Details + addresses), Transactions (collapsible Sales Orders / Quotes /
+   Samples / Panels), Dispatch, Activity.
 
    Route is keyed by customer *code* (/parties/:id); mutations use the
    row's ROWID. Edit opens the shared PartyForm modal in place.
    ============================================================ */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
@@ -20,12 +21,18 @@ import { can } from "@/lib/auth";
 import { STAGES } from "@/data";
 import { fmt, fmtLocalDateTime } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
-import { ActivityLog } from "@/features/common/RecordDetail";
+import { ActivityLog, tabStyle } from "@/features/common/RecordDetail";
+import { InfoTag } from "@/ui/InfoCard";
+import { codeOf } from "@/ui/statusCode";
+import type { Quote } from "@/data";
+import { cachedQuotes, listQuotes } from "@/features/quotes/quotesApi";
+import { STATUS_CHIP, STATUS_LABEL } from "@/features/quotes/QuotesTable";
 import { DispatchTab } from "@/features/stages/DispatchTab";
 import { PanelsPanel } from "@/features/panels/PanelsPanel";
 import { CustomerSamples } from "@/features/panels/CustomerSamples";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS } from "./PartyForm";
+import { CustomerBrands } from "./CustomerBrands";
 import { ZohoSearchModal, type ZohoPick } from "./ZohoSearchModal";
 import { getZohoRecord, isReauth, pushCustomerToZoho, REAUTH_HINT, ZOHO, ZOHO_LINK, zohoStatus } from "./zohoApi";
 import {
@@ -47,7 +54,7 @@ import {
 } from "./customersApi";
 
 /** [label, value, isUnset] — unset fields read "Not set" (dimmed) rather than a bare dash. */
-type Detail = [string, string, boolean];
+type Detail = [string, ReactNode, boolean];
 const text = (label: string, s: string): Detail => [label, s || "Not set", !s];
 
 /** Names from the contact_persons JSON column ("" on corrupt/empty). */
@@ -91,12 +98,15 @@ const rows = (c: CustomerRow): Detail[] => [
   text("Other Contacts", otherContacts(c.extras.contact_persons)),
   text("Billing Address", composeAddress(c.extras, "billing") || c.address),
   text("Shipping Address", composeAddress(c.extras, "shipping")),
-  // CR-362: both systems in one row — sentence + whichever ids are set.
+  // CR-362: both systems in one row — the sentence; CR-389: the raw ids sit behind (i), never inline.
   [
     "Zoho",
-    [ZOHO_LINK[c.zohoLink].text, c.extras.crm_account_id && `CRM ${c.extras.crm_account_id}`, c.extras.books_contact_id && `Books ${c.extras.books_contact_id}`]
-      .filter(Boolean)
-      .join(" · "),
+    c.extras.crm_account_id || c.extras.books_contact_id ? (
+      <InfoTag label={ZOHO_LINK[c.zohoLink].text} title="Zoho record ids">
+        {c.extras.crm_account_id && <div><span className="muted">CRM account</span> <span className="mono">{c.extras.crm_account_id}</span></div>}
+        {c.extras.books_contact_id && <div><span className="muted">Books contact</span> <span className="mono">{c.extras.books_contact_id}</span></div>}
+      </InfoTag>
+    ) : ZOHO_LINK[c.zohoLink].text,
     c.zohoLink === "none",
   ] as Detail,
   ["Active", c.active ? "Yes" : "No", false],
@@ -240,6 +250,12 @@ export function CustomerDetail() {
   const [addingAddr, setAddingAddr] = useState(false);
   const [editingAddr, setEditingAddr] = useState<number | null>(null);
   const [zohoOpen, setZohoOpen] = useState(false); // CR-325/359 Map to Zoho
+  const [tab, setTab] = useState<"details" | "transactions" | "dispatch" | "activity">("details");
+  // Quotes for the Transactions tab — same SWR cache the Quotes grid uses.
+  const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
+  useEffect(() => {
+    listQuotes().then((r) => r.ok && setQuotes(r.quotes)).catch(() => undefined);
+  }, []);
   // CR-356: can this connection write to Zoho? (null = not loaded yet)
   const [zohoWrite, setZohoWrite] = useState<boolean | null>(null);
   useEffect(() => {
@@ -274,9 +290,10 @@ export function CustomerDetail() {
       if (stageRank(o.stage) < stageRank(g.stage)) g.stage = o.stage;
     }
   }
-  const poRows = [...byPo.values()];
-  // 10 most recent transactions, shown beside Primary Details.
-  const recent = poRows.sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? "")).slice(0, 10);
+  const poRows = [...byPo.values()].sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""));
+  const custQuotes = party
+    ? quotes.filter((qt) => qt.partyCode === party.code).sort((a, b) => (b.createdTime ?? "").localeCompare(a.createdTime ?? ""))
+    : [];
   const needle = q.trim().toLowerCase();
   const railRows = newestFirst(customers);
   const listed = needle
@@ -530,16 +547,28 @@ export function CustomerDetail() {
                   <Icon name="x" size={13} />
                 </button>
               </div>
-              <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
+              <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
                 {[party.code, `${poRows.length} orders`, !party.active && "Inactive"].filter(Boolean).join("  ·  ")}
               </div>
 
-              {/* Low flex bases (340+260+20) so Details + Orders stay
-                  side-by-side down to ~620px panes; wrap only kicks in on
-                  truly small windows. The orders table scrolls horizontally
-                  inside its box when the column gets narrow. */}
-              <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start", marginTop: 14 }}>
-                <div style={{ flex: "1 1 340px", maxWidth: 520, minWidth: 0 }}>
+              {/* Tabs — same row as QuoteDetail / OrderDetail (CR-384). */}
+              <div className="row" style={{ gap: 4, marginTop: 10, marginBottom: tab === "details" ? 14 : 0, borderBottom: "1px solid var(--border)" }}>
+                <button className={`tabish ${tab === "details" ? "active" : ""}`} onClick={() => setTab("details")} style={tabStyle(tab === "details")}>
+                  Details
+                </button>
+                <button className={`tabish ${tab === "transactions" ? "active" : ""}`} onClick={() => setTab("transactions")} style={tabStyle(tab === "transactions")}>
+                  Transactions
+                </button>
+                <button className={`tabish ${tab === "dispatch" ? "active" : ""}`} onClick={() => setTab("dispatch")} style={tabStyle(tab === "dispatch")}>
+                  Dispatch
+                </button>
+                <button className={`tabish ${tab === "activity" ? "active" : ""}`} onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>
+                  Activity
+                </button>
+              </div>
+
+              {tab === "details" && (
+                <div style={{ maxWidth: 640 }}>
                   <div className="form-section-title" style={{ marginBottom: 8 }}>Primary Details</div>
                   {rows(party).map(([label, value, unset]) => (
                     <DetailRow key={label} label={label} value={value} dim={unset} />
@@ -596,14 +625,21 @@ export function CustomerDetail() {
                       <Icon name="plus" size={12} /> Add address
                     </button>
                   )}
-                </div>
 
-                {/* The customer's 10 most recent orders — rows open the Sales Order. */}
-                <div style={{ flex: "1 1 260px", minWidth: 0 }}>
-                  <div className="form-section-title" style={{ marginBottom: 8 }}>
-                    Associated Orders {poRows.length > 0 && <span className="dim">({poRows.length} · {fmt(totalQty)} boxes)</span>}
-                  </div>
-                  <div style={{ overflow: "auto" }}>
+                  {/* CR-393: the brands this customer buys under (PartyBrand rows with customer = this). */}
+                  <CustomerBrands customerId={party.id} />
+                </div>
+              )}
+            </div>
+
+            {/* Transactions — one collapsible per document type; Sales Orders open by default. */}
+            {tab === "transactions" && (
+              <>
+                <details className="tx-section" open>
+                  <summary className="form-section-title">
+                    Sales Orders {poRows.length > 0 && <span className="dim">({poRows.length} · {fmt(totalQty)} boxes)</span>}
+                  </summary>
+                  <div className="card" style={{ padding: 0, overflow: "auto" }}>
                     <table className="tbl">
                       <thead>
                         <tr>
@@ -615,10 +651,10 @@ export function CustomerDetail() {
                         </tr>
                       </thead>
                       <tbody>
-                        {recent.map((o) => (
+                        {poRows.map((o) => (
                           <tr key={o.id}>
                             <td className="mono">
-                              <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title="Open order details">
+                              <Link className="linkish" to={`/orders/${encodeURIComponent(o.id)}`} title="Open order details">
                                 {o.orderNumber || o.poNumber || "—"}
                               </Link>
                             </td>
@@ -636,32 +672,68 @@ export function CustomerDetail() {
                       </tbody>
                     </table>
                   </div>
-                  {poRows.length > recent.length && (
-                    <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 6 }}>
-                      Showing the 10 most recent of {poRows.length} orders.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+                </details>
 
-            {/* Showcase panels this customer ordered (Panel Craft) — the panel
-                order's lifecycle says whether it was sent (Dispatched). */}
-            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Showcase Panels</div>
-            <PanelsPanel scope={{ kind: "customer", customerId: party.id }} />
+                <details className="tx-section">
+                  <summary className="form-section-title">
+                    Quotes {custQuotes.length > 0 && <span className="dim">({custQuotes.length})</span>}
+                  </summary>
+                  <div className="card" style={{ padding: 0, overflow: "auto" }}>
+                    <table className="tbl">
+                      <thead>
+                        <tr>
+                          <th>Quote No</th>
+                          <th>Date</th>
+                          <th>Status</th>
+                          <th>Sales Order</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {custQuotes.map((qt) => (
+                          <tr key={qt.id}>
+                            <td className="mono">
+                              <Link className="linkish" to={`/quotes/${qt.id}`} title="Open quote">
+                                {qt.quoteNo || "—"}
+                              </Link>
+                            </td>
+                            <td className="mono muted">{qt.quoteDate || "—"}</td>
+                            <td>
+                              <span className={`chip qstatus ${STATUS_CHIP[qt.status]}`} title={STATUS_LABEL[qt.status]}>
+                                {codeOf(STATUS_LABEL[qt.status])}
+                              </span>
+                            </td>
+                            <td className="mono">{qt.soNumber || "—"}</td>
+                          </tr>
+                        ))}
+                        {custQuotes.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="muted" style={{ textAlign: "center", padding: 18 }}>No quotes for this customer.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
 
-            {/* CR-317: every sample line supplied (or pending) for this customer, with the order it came from. */}
-            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Samples</div>
-            <CustomerSamples customerId={party.id} />
+                {/* CR-317: every sample line supplied (or pending) for this customer. */}
+                <details className="tx-section">
+                  <summary className="form-section-title">Samples</summary>
+                  <CustomerSamples customerId={party.id} />
+                </details>
 
-            {/* Everything shipped to this customer, across all their orders.
-                This page is sections, not tabs — so Dispatch is a section. */}
-            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Dispatch</div>
-            <DispatchTab scope={{ kind: "customer", customerId: party.id }} />
+                {/* Showcase panels this customer ordered (Panel Craft). */}
+                <details className="tx-section">
+                  <summary className="form-section-title">Panels</summary>
+                  <PanelsPanel scope={{ kind: "customer", customerId: party.id }} />
+                </details>
+              </>
+            )}
+
+            {/* Everything shipped to this customer, across all their orders. */}
+            {tab === "dispatch" && <DispatchTab scope={{ kind: "customer", customerId: party.id }} />}
 
             {/* Audit trail: who created / changed this customer, from OperationLog. */}
-            <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Activity</div>
-            <ActivityLog table="Customer" entityId={party.id} />
+            {tab === "activity" && <ActivityLog table="Customer" entityId={party.id} />}
           </>
         )}
       </div>

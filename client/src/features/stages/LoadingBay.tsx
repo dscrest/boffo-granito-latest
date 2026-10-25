@@ -40,6 +40,8 @@ import { LoadingCustomerSheet } from "./LoadingCustomerSheet";
 import { LoadingWorkspace } from "./LoadingWorkspace";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { ReleaseModal } from "./ReleaseModal";
+import { SetLocationModal } from "@/features/common/SetLocationModal";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { useLoadFlow } from "./useLoadFlow";
 import { nextPlanContainer } from "./containerPlanPrefill";
@@ -60,6 +62,7 @@ import {
   palletsOf,
   sealed,
   setLineBox,
+  setPalLineLocation,
   updateLoadBox,
   type LoadBox,
   type LoadingCapture,
@@ -106,7 +109,7 @@ const ageDays = (p: PalPlan, l: PalPlanLine) => daysSince(l.createdTime || p.cre
    customer + design, CR-161); the LOAD code sits LAST and is hideable like
    any other column. Every cell is one line: `nw` on short values, a `clip`
    span with its own max-width on the long ones (see the .clip note in styles.css). */
-function loadColumns(): ColumnDef<Row>[] {
+function loadColumns(nameOf: (id: string) => string): ColumnDef<Row>[] {
   return [
     {
       key: "customer",
@@ -141,6 +144,13 @@ function loadColumns(): ColumnDef<Row>[] {
       ),
     },
     { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.l.boxes) },
+    // CR-412: where the pallet stands until it enters a container ("—" once loaded — the container is the place).
+    {
+      key: "location",
+      label: "Location",
+      className: "nw",
+      render: (r) => (!r.box && r.l.warehouseId ? <span className="clip" style={{ maxWidth: 170 }} title={nameOf(r.l.warehouseId)}>{nameOf(r.l.warehouseId)}</span> : <span className="dim">—</span>),
+    },
     {
       key: "stage",
       label: "Status",
@@ -380,6 +390,8 @@ export function LoadingBay() {
   const [busy, setBusy] = useState(false);
   const [vehModal, setVehModal] = useState<{ box: LoadBox } | null>(null);
   const [release, setRelease] = useState<{ line: PalPlanLine; box?: LoadBox } | null>(null); // CR-361
+  const [locate, setLocate] = useState<PalPlanLine | null>(null); // CR-412: Ready-for-Loading pallet being placed
+  const { warehouses, enabled: whEnabled, nameOf: whName } = useWarehouses();
   // Shared load flow — picker state + confirm live in the hook (Ready rows' "+ → Load").
   const flow = useLoadFlow({ plans, boxes, onChanged: () => void load() });
   // Live order heads — the plan-JSON fallback for customers/SOs (CR-174).
@@ -416,17 +428,18 @@ export function LoadingBay() {
     setGroupBy((prev) => (prev.includes(key as LoadGroupBy) ? prev.filter((d) => d !== key) : [...prev, key as LoadGroupBy]));
   const moveGroup = (keys: string[]) => setGroupBy((prev) => keys.filter((k) => prev.includes(k as LoadGroupBy)) as LoadGroupBy[]);
 
-  const COLS = useMemo(() => loadColumns(), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const COLS = useMemo(() => loadColumns(whName), [warehouses]);
   // Key bumped to .v2 (CR-161) so the Customer→Design default order and the
   // now-hideable Loading column apply everywhere; the old prefs are dead.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v3", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "code"]); // .v3 (CR-266): Date in, LOAD code hidden
+  // .v3 (CR-266): Date in, LOAD code hidden. .v4 (CR-412): Location column (hidden while no warehouse exists).
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v4", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "code", ...(whEnabled ? [] : ["location"])]);
 
   // ---- derived ------------------------------------------------
   const { allLines, openBoxes, linesOfBox } = flow;
   const boxById = new Map(boxes.map((b) => [b.id, b]));
   // Fill is fractional vs each line's PALLET capacity — a box holding 50 boxes
   // of a 100-box pallet reads 50%, whatever the LoadBox.capacity says.
-  const fillOf = (b: LoadBox) => boxFill(linesOfBox(b.id).map(({ l }) => l));
   const isEmptyBox = (b: LoadBox) => linesOfBox(b.id).length === 0;
 
   // Plan-only loading (SO-first New Loading): minted with a load_plan but
@@ -543,7 +556,7 @@ export function LoadingBay() {
   // ---- loadings view: box-level grid state --------------------
   const formats = useContainerFormats();
   const BOX_COLS = useMemo(() => boxColumns(new Map(formats.map((f) => [f.id, f.name]))), [formats]);
-  const boxCols = useColumns("loadingBoxColumns.v3", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created", "label"]); // .v3 (CR-266): Date in, LOAD code hidden
+  const boxCols = useColumns("loadingBoxColumns.v4", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created", "date", "name", "containerFormat"]); // .v4 (CR-390): LOAD code + Container No. are the identity; Date/Created/Name/format hidden
   // Plain search only — the advanced-filter criteria and group dims are
   // line-shaped and would silently half-apply to box rows.
   const boxSearched = boxRows.filter(
@@ -700,6 +713,8 @@ export function LoadingBay() {
     if (!box) return r.stage === "Ready"
       ? [
           { label: "Load", disabled: flow.busy, title: "Load into a container", onClick: () => flow.setPicker({ lineIds: [r.l.id] }) },
+          // CR-412: where the pallet stands while it waits for a container.
+          ...(canEdit && whEnabled ? [{ label: "Set Location…", title: "Where this pallet stands (Warehouse ▸ Location)", onClick: () => setLocate(r.l) }] : []),
           ...(canEdit ? [{ label: "Release…", title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease({ line: r.l }) }] : []),
         ]
       : [];
@@ -789,7 +804,7 @@ export function LoadingBay() {
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {[l.customerName, l.soNumber].filter(Boolean).join("  ·  ") || "—"}
         </div>
-        {(l.batchNumber || l.palletGroup || box) && (
+        {(l.batchNumber || l.palletGroup || (stage === "Dispatched" && box?.dispatchDate)) && (
           <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
             {l.batchNumber && (
               <span className="chip mono" style={{ fontSize: 13 }} title="Production batch — load one batch per customer for uniform texture">
@@ -799,16 +814,6 @@ export function LoadingBay() {
             {l.palletGroup && (
               <span className="chip" style={{ fontSize: 13, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="This item shares a physical pallet with another batch/item">
                 Mix Batch
-              </span>
-            )}
-            {box && (
-              <span className="chip mono" style={{ fontSize: 13 }} title={`Container · ${Math.round(fillOf(box) * 100)}% full`}>
-                <Icon name="truck" size={10} /> {boxLabel(box)}
-              </span>
-            )}
-            {box && sealed(box) && (
-              <span className="chip mono" style={{ fontSize: 13 }} title="Container no. / line seal captured">
-                {box.containerNumber || box.lineSeal}
               </span>
             )}
             {stage === "Dispatched" && box?.dispatchDate && (
@@ -973,12 +978,11 @@ export function LoadingBay() {
         {view === "sheet" && canEdit && (
           editMode ? (
             <>
-              <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+              <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
                 Cancel
               </button>
               <button
-                className="hbtn primary"
-                style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                className="hbtn primary sm"
                 disabled={!editRows.length || editBad || savingEdits}
                 onClick={() => void saveEdits()}
                 title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
@@ -987,7 +991,7 @@ export function LoadingBay() {
               </button>
             </>
           ) : (
-            <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setEditMode(true)} title="Change loaded boxes or move items between containers, then Save">
+            <button className="hbtn sm" onClick={() => setEditMode(true)} title="Change loaded boxes or move items between containers, then Save">
               <Icon name="edit" size={13} />
               Edit
             </button>
@@ -996,13 +1000,13 @@ export function LoadingBay() {
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} active={boxCols.customised} />}
         {/* CR-227 trial: the spreadsheet-style page, beside New Loading until approved. */}
         {canEdit && (
-          <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => navigate("/loading/plan")}>
+          <button className="hbtn sm" disabled={flow.busy} onClick={() => navigate("/loading/plan")}>
             <Icon name="plus" size={13} />
             New Loading (sheet)
           </button>
         )}
         {canEdit && (
-          <button className="hbtn primary" data-tour="load-new" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={flow.busy} onClick={() => navigate("/loading/new")}>
+          <button className="hbtn primary sm" data-tour="load-new" disabled={flow.busy} onClick={() => navigate("/loading/new")}>
             <Icon name="plus" size={13} />
             New Loading
           </button>
@@ -1273,6 +1277,22 @@ export function LoadingBay() {
 
       {release && (
         <ReleaseModal line={release.line} box={release.box} onDone={() => { invalidatePalPlans(); void load(); }} onClose={() => setRelease(null)} />
+      )}
+
+      {locate && (
+        <SetLocationModal
+          value={locate.warehouseId}
+          note="Where this pallet stands. Clear it to unset."
+          onSave={async (id) => {
+            const r = await setPalLineLocation([locate.id], id);
+            setLocate(null);
+            if (!r.ok) { toast.error(r.error || "Could not set location"); return; }
+            toast.success(id ? "Location set" : "Location cleared");
+            invalidatePalPlans();
+            void load();
+          }}
+          onClose={() => setLocate(null)}
+        />
       )}
 
       {vehModal && (

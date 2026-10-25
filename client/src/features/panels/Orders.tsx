@@ -5,11 +5,14 @@
    Supplied, derived). A Type column + filter tells them apart; the row
    opens the right detail (/panel-orders/:id · /sample-orders/:id).
    Panel rows carry the stock signal (CR-288/295/312: what must still be
-   cut after booked + free, now on the PENDING need — CR-347), the four
-   production checkpoints + Readiness (CR-313/323) and, for both types,
-   the derived Loading Status + what is still pending to load (CR-347).
-   Kanban = Panel rows only (samples have no stage machine). CR-287: no
-   stage buttons here. New Order asks the type first (OrderFormPage).
+   cut after booked + free, now on the PENDING need — CR-347) and, for
+   both types, the derived Loading Status + what is still pending to load
+   (CR-347). CR-367/400: a Panel row's Status column IS the derived progress
+   (New · Ready · Completed · Dispatched · Cancelled — panelProgress); the
+   lifecycle column is dormant, and the four checkpoint columns + Readiness
+   are gone. Kanban = Panel rows
+   by progress (samples have no stage machine). CR-287: no stage buttons
+   here. New Order asks the type first (OrderFormPage).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { useModalA11y } from "@/ui/useModalA11y";
@@ -23,7 +26,7 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { usePersistedState, useViewState } from "@/lib/usePersistedState";
-import { checkpointTone, FilterSelect, IconBtn, LOADING_TONE, ORDER_STATUS_TONE, READINESS_TONE, SAMPLE_STATUS_TONE } from "./pcBits";
+import { FilterSelect, IconBtn, LOADING_TONE, PROGRESS_TONE, SAMPLE_STATUS_TONE } from "./pcBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedPanels, listPanels, mdfLabel, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs } from "./mdfApi";
@@ -33,56 +36,55 @@ import {
   allocatedByKey,
   cachedCutStock,
   cachedPanelOrders,
-  CHECKPOINT_LABEL,
-  checkpointStatus,
   listCutStock,
   listPanelOrders,
   LOADING_STATUSES,
-  PANEL_ORDER_STATUS_LABEL,
-  PANEL_ORDER_STATUSES,
+  panelProgress,
   pendingNeedLines,
   pendingText,
-  readiness,
+  PROGRESS_STATES,
   requirementsFor,
   shortageText,
-  type CheckpointKey,
   type LoadingStatus,
   type PanelOrderRow,
-  type PanelOrderStatus,
-  type Readiness,
+  type PanelProgress,
   type Shortage,
 } from "./panelOrdersApi";
 import { cachedSampleOrders, listSampleOrders, SAMPLE_STATUS_LABEL, SAMPLE_STATUSES } from "./sampleOrdersApi";
+import { useWarehouses } from "@/features/masters/useWarehouses";
+import { nodeLabel } from "@/features/masters/warehousesApi";
 
-const READINESS_ORDER: Readiness[] = ["—", "Pending", "In Progress", "Ready for Production"];
-
-/* Stage dots match the status-chip tones (pcBits ORDER_STATUS_TONE). */
-const STAGE_COLOR: Record<PanelOrderStatus, string> = {
-  NewRequest: "var(--muted)",
-  Received: "var(--warn)",
-  InCutting: "var(--blue)",
-  Ready: "#0d9488",
+/* CR-367: kanban columns = the derived progress states (Cancelled rows stay off the board). */
+const BOARD_STAGES = PROGRESS_STATES.filter((s) => s !== "Cancelled");
+const STAGE_COLOR: Record<PanelProgress, string> = {
+  New: "var(--muted)",
+  Ready: "var(--c-cyan)",
+  Completed: "var(--ok)",
   Dispatched: "var(--ok)",
+  Cancelled: "var(--danger)",
 };
 
 /** A grid row = the order + its derived bits. Panel rows add the first panel's thumb, every
-    line's panel (CR-318 card list), the pieces still lacking (CR-312) and readiness. */
+    line's panel (CR-318 card list), the pieces still lacking (CR-312) and the progress (CR-367). */
 type Row = LoadableOrder & {
   panel?: PanelRow;
   linePanels: (PanelRow | undefined)[];
   shortages: Shortage[];
-  readiness: Readiness;
+  progress: PanelProgress;
   loadStatus: LoadingStatus;
   pending: string;
+  /** CR-410: "Warehouse ▸ Location" of a panel order's panels; "" when unset / a sample order. */
+  location: string;
   key: string;
 };
 
-const statusLabel = (o: LoadableOrder) => (o.type === "Panel" ? PANEL_ORDER_STATUS_LABEL[o.status] : SAMPLE_STATUS_LABEL[o.status]);
-const statusTone = (o: LoadableOrder) => (o.type === "Panel" ? ORDER_STATUS_TONE[o.status] : SAMPLE_STATUS_TONE[o.status]);
-const statusIndex = (o: LoadableOrder) => (o.type === "Panel" ? PANEL_ORDER_STATUSES.indexOf(o.status) : 10 + SAMPLE_STATUSES.indexOf(o.status));
+const closed = (o: Row) => o.type === "Panel" && (o.status === "Dispatched" || o.status === "Cancelled");
+const statusLabel = (o: Row) => (o.type === "Panel" ? o.progress : SAMPLE_STATUS_LABEL[o.status]);
+const statusTone = (o: Row) => (o.type === "Panel" ? PROGRESS_TONE[o.progress] : SAMPLE_STATUS_TONE[o.status]);
+const statusIndex = (o: Row) => (o.type === "Panel" ? PROGRESS_STATES.indexOf(o.progress) : 10 + SAMPLE_STATUSES.indexOf(o.status));
 const detailUrl = (o: LoadableOrder) => `/${o.type === "Panel" ? "panel-orders" : "sample-orders"}/${encodeURIComponent(o.id)}`;
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-const STATUS_OPTIONS = [...new Set([...PANEL_ORDER_STATUSES.map((s) => PANEL_ORDER_STATUS_LABEL[s]), ...SAMPLE_STATUSES.map((s) => SAMPLE_STATUS_LABEL[s])])];
+const STATUS_OPTIONS = [...new Set<string>([...PROGRESS_STATES, ...SAMPLE_STATUSES.map((s) => SAMPLE_STATUS_LABEL[s])])];
 
 /** CR-318: the Panels cell = a count chip; clicking it opens the order's panels as cards (thumb · code · designs · qty · MDF). */
 function PanelCount({ o }: { o: Row & { type: "Panel" } }) {
@@ -147,13 +149,6 @@ function PanelCardsModal({ o, onClose }: { o: Row & { type: "Panel" }; onClose: 
   );
 }
 
-/** CR-313: one checkpoint's status chip; dispatched orders and sample orders read "—". */
-function CpChip({ o, k }: { o: Row; k: CheckpointKey }) {
-  if (o.type !== "Panel" || o.status === "Dispatched") return <span className="dim">—</span>;
-  const st = checkpointStatus(o.checkpoints, k);
-  return <Chip tone={checkpointTone(st)} label={st} title={`${CHECKPOINT_LABEL[k]}: ${st}${o.checkpoints[k] ? ` · ${o.checkpoints[k]!.by}` : ""}`} />;
-}
-
 /** Source sale link (CR-286) — SO or Quote number; "—" for a direct order. */
 function SourceLink({ o }: { o: LoadableOrder }) {
   if (o.salesOrderId)
@@ -190,27 +185,18 @@ const ORDER_COLUMNS: ColumnDef<Row>[] = [
   },
   { key: "date", label: "Order Date", className: "mono muted", render: (o) => o.orderDate || "—" },
   { key: "sales", label: "Sales Person", render: (o) => o.salesperson || "—" },
+  // CR-367: Panel rows show the derived progress; Sample rows their derived supply state.
   { key: "status", label: "Status", render: (o) => <Chip tone={statusTone(o)} label={codeOf(statusLabel(o))} title={statusLabel(o)} /> },
   // CR-347: the derived loading state + what is still pending — separate from the lifecycle (SO roll-up rule).
   { key: "loading", label: "Loading Status", render: (o) => <Chip tone={LOADING_TONE[o.loadStatus]} label={o.loadStatus} title={o.pending ? `Pending: ${o.pending}` : "Everything loaded"} /> },
-  { key: "pending", label: "Pending", render: (o) => (o.pending ? <span style={{ color: "var(--c-amber)", fontWeight: 600, whiteSpace: "nowrap" }}>{o.pending}</span> : <span className="dim">—</span>) },
-  // CR-313: the production checkpoints (four since CR-323) + the derived overall readiness.
-  { key: "mdf", label: "MDF", render: (o) => <CpChip o={o} k="mdf" /> },
-  { key: "vinyl", label: "Vinyl Printing", render: (o) => <CpChip o={o} k="vinyl" /> },
-  { key: "cutPieces", label: "Cut Pieces", render: (o) => <CpChip o={o} k="cut" /> },
-  { key: "pasted", label: "Vinyl Pasted", render: (o) => <CpChip o={o} k="pasted" /> },
-  {
-    key: "readiness",
-    label: "Readiness",
-    render: (o) => (o.readiness === "—" ? <span className="dim">—</span> : <Chip tone={READINESS_TONE[o.readiness]} label={o.readiness} title="MDF · Vinyl Printing · Cut Pieces · Vinyl Pasted on MDF all Ready → Ready for Production" />),
-  },
+  { key: "location", label: "Location", className: "nw", render: (o) => o.location || <span className="dim">—</span> }, // CR-410 (default hidden — empty until placed)
   {
     // CR-288 (5.1): the missing-items hint — "Unavailable · n" (CR-295 wording) with the pieces in the tooltip.
     // CR-312: a row is short only when need exceeds booked + free (pieces that must still be cut).
     key: "stock",
     label: "Stock",
     render: (o) =>
-      o.type !== "Panel" || o.status === "Dispatched" ? <span className="dim">—</span>
+      o.type !== "Panel" || closed(o) ? <span className="dim">—</span>
       : o.shortages.length ? <span style={{ color: "var(--c-amber)", fontWeight: 600, whiteSpace: "nowrap" }} title={shortageText(o.shortages)}>Unavailable · {o.shortages.length}</span>
       : <span style={{ color: "var(--c-green)" }} title="Cut-piece stock available for this order">Available</span>,
   },
@@ -224,7 +210,9 @@ export function Orders() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   // Opens on whatever Settings → Default view says.
-  const [view, setView] = useViewState("panelOrders.view", "sheet" as const, "kanban" as const);
+  const [rawView] = useViewState("panelOrders.view", "sheet" as const, "kanban" as const);
+  // CR-418: Kanban hidden app-wide — a persisted "kanban" falls back to the Sheet; the board's render code is kept.
+  const view = (rawView === "kanban" ? "sheet" : rawView) as "kanban" | "sheet";
   const [panelOrders, setPanelOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
   const [sampleOrders, setSampleOrders] = useState(() => cachedSampleOrders() ?? []);
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
@@ -234,7 +222,8 @@ export function Orders() {
   const [query, setQuery] = usePersistedState("panelOrders.query", "");
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => (params.get("type") === "Sample" ? "Sample" : params.get("type") === "Panel" ? "Panel" : ""));
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("ordersColumns.v2", ORDER_COLUMNS, ["created", "modified", "number"]) // .v2 (CR-355);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("ordersColumns.v4", ORDER_COLUMNS, ["created", "modified", "number", "location"]); // .v4 (CR-410: Location column, default hidden)
+  const { warehouses } = useWarehouses(); // CR-410: location labels
 
   const load = async () => {
     const [o, so, p, s] = await Promise.all([listPanelOrders(), listSampleOrders(), listPanels(), listCutStock(), listMdfs()]); // CR-344: MDF labels from the size-keyed master (cache)
@@ -262,6 +251,22 @@ export function Orders() {
     const q = query.trim().toLowerCase();
     const all: LoadableOrder[] = [...panelOrders.map((o) => ({ ...o, type: "Panel" as const })), ...sampleOrders.map((o) => ({ ...o, type: "Sample" as const }))];
     return all
+      .map((o): Row => {
+        const progress = progressOf(o, panelById);
+        // CR-312/347: pieces still lacking on the PENDING need — also feeds the derived status (CR-367).
+        const reqs = o.type === "Panel" ? requirementsFor(pendingNeedLines(o.lines, o.loads, panelById), panelById, stock, { allocation: o.allocation, booked }) : [];
+        return {
+          ...o,
+          key: `${o.type}|${o.id}`,
+          panel: o.type === "Panel" ? panelById.get(o.lines.find((l) => l.panelId)?.panelId ?? "") : undefined,
+          linePanels: o.type === "Panel" ? o.lines.map((l) => panelById.get(l.panelId)) : [],
+          shortages: reqs.filter((r) => r.toCut > 0),
+          progress: o.type === "Panel" ? panelProgress(o, reqs) : "New",
+          loadStatus: loadStatusOf(o),
+          pending: pendingText(progress),
+          location: o.type === "Panel" && o.warehouseId ? nodeLabel(warehouses, o.warehouseId) : "",
+        };
+      })
       .filter(
         (o) =>
           (!typeFilter || o.type === typeFilter) &&
@@ -272,18 +277,8 @@ export function Orders() {
             o.customerName.toLowerCase().includes(q) ||
             o.salesOrderNo.toLowerCase().includes(q) ||
             o.quoteNo.toLowerCase().includes(q)),
-      )
-      .map((o) => ({
-        ...o,
-        key: `${o.type}|${o.id}`,
-        panel: o.type === "Panel" ? panelById.get(o.lines.find((l) => l.panelId)?.panelId ?? "") : undefined,
-        linePanels: o.type === "Panel" ? o.lines.map((l) => panelById.get(l.panelId)) : [],
-        shortages: o.type === "Panel" ? requirementsFor(pendingNeedLines(o.lines, o.loads), panelById, stock, { allocation: o.allocation, booked }).filter((r) => r.toCut > 0) : [],
-        readiness: o.type === "Panel" ? readiness(o.checkpoints, o.status) : "—",
-        loadStatus: loadStatusOf(o),
-        pending: pendingText(progressOf(o)),
-      }));
-  }, [panelOrders, sampleOrders, query, statusFilter, typeFilter, panelById, stock, booked]);
+      );
+  }, [panelOrders, sampleOrders, query, statusFilter, typeFilter, panelById, stock, booked, warehouses]);
 
   const sort = useSortRows(
     shown,
@@ -298,12 +293,8 @@ export function Orders() {
       : k === "status" ? statusIndex(o)
       : k === "loading" ? LOADING_STATUSES.indexOf(o.loadStatus)
       : k === "pending" ? o.pending
+      : k === "location" ? o.location
       : k === "stock" ? o.shortages.length
-      : k === "mdf" ? (o.type === "Panel" ? checkpointStatus(o.checkpoints, "mdf") : "")
-      : k === "vinyl" ? (o.type === "Panel" ? checkpointStatus(o.checkpoints, "vinyl") : "")
-      : k === "cutPieces" ? (o.type === "Panel" ? checkpointStatus(o.checkpoints, "cut") : "")
-      : k === "pasted" ? (o.type === "Panel" ? checkpointStatus(o.checkpoints, "pasted") : "")
-      : k === "readiness" ? READINESS_ORDER.indexOf(o.readiness)
       : k === "source" ? o.salesOrderNo || o.quoteNo
       : k === "created" ? o.createdTime
       : k === "modified" ? o.modifiedTime
@@ -325,7 +316,7 @@ export function Orders() {
   });
 
   const card = (o: Row & { type: "Panel" }) => {
-    const done = o.status === "Dispatched";
+    const done = closed(o);
     const { style, ...rest } = openProps(o);
     return (
       <div key={o.key} className="pc-job-card" style={{ display: "flex", gap: 10, ...style }} {...rest} title="Open panel order">
@@ -348,10 +339,9 @@ export function Orders() {
           <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
             {[o.orderDate, o.salesperson].filter(Boolean).join(" · ") || "—"}
           </div>
-          {!done && (
-            <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }} title="MDF · Vinyl Printing · Cut Pieces · Vinyl Pasted">
-              <Chip tone={READINESS_TONE[o.readiness]} label={o.readiness} />
-              {o.loadStatus !== "Not loaded" && <Chip tone={LOADING_TONE[o.loadStatus]} label={o.loadStatus} />}
+          {!done && o.loadStatus !== "Not loaded" && (
+            <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <Chip tone={LOADING_TONE[o.loadStatus]} label={o.loadStatus} />
             </div>
           )}
           {!done && o.pending && o.loadStatus === "Partially loaded" && (
@@ -374,14 +364,14 @@ export function Orders() {
 
   const panelRows = shown.filter((o): o is Row & { type: "Panel" } => o.type === "Panel");
   const board = (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${PANEL_ORDER_STATUSES.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto", marginTop: 12 }}>
-      {PANEL_ORDER_STATUSES.map((stage) => {
-        const cards = panelRows.filter((o) => o.status === stage);
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${BOARD_STAGES.length}, minmax(220px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto", marginTop: 12 }}>
+      {BOARD_STAGES.map((stage) => {
+        const cards = panelRows.filter((o) => o.progress === stage);
         return (
           <div key={stage} className="card" style={{ padding: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: STAGE_COLOR[stage] }} />
-              <span style={{ fontWeight: 600 }}>{PANEL_ORDER_STATUS_LABEL[stage]}</span>
+              <span style={{ fontWeight: 600 }}>{stage}</span>
               <span className="muted" style={{ fontSize: 14, marginLeft: "auto" }}>{cards.length}</span>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, minHeight: 80 }}>
@@ -441,11 +431,7 @@ export function Orders() {
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
         <span className="muted">{loading ? "Loading…" : null}</span>
         <div style={{ flex: 1 }} />
-        <span role="group" aria-label="Board view" title="Switch view" style={{ display: "inline-flex", gap: 4 }}>
-          <IconBtn icon="kanban" title="Kanban view (panel orders)" active={view === "kanban"} onClick={() => setView("kanban")} />
-          <IconBtn icon="orders" title="Sheet view" active={view === "sheet"} onClick={() => setView("sheet")} />
-        </span>
-        <span className="pc-divider" />
+        {/* CR-418: Kanban | Sheet IconBtn pair hidden — Sheet is the only view */}
         <FilterSelect label="Type" value={typeFilter} onChange={setTypeFilter} options={["Panel", "Sample"]} />
         <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={STATUS_OPTIONS} />
         <span className="gsearch">

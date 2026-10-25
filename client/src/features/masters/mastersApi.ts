@@ -15,7 +15,7 @@ export interface MasterRow {
 /** Field keys that are numeric columns — coerced to Number on save. */
 const NUMERIC = new Set(["width_mm", "length_mm", "weight_kg"]);
 /** Optional columns a blank must CLEAR (sent as null) rather than leave untouched — e.g. a removed Box Brand image. */
-const NULLABLE = new Set(["logo"]);
+const NULLABLE = new Set(["logo", "image"]); // image = Punch (CR-394)
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 

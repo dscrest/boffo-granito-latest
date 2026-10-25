@@ -14,6 +14,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { readyPalletsLabel, type PalPlanLine } from "./palPlansApi";
 
 export interface PalletiseEntry {
@@ -22,6 +23,8 @@ export interface PalletiseEntry {
   /** Boxes to move (≤ line boxes). Less than the line's boxes = partial —
       the remainder stays behind in its current stage. */
   boxes: number;
+  /** CR-412: Warehouse node where the pallet stands ("" / absent = not stated — the line keeps what it had). */
+  warehouse?: string;
 }
 
 export function PalletiseModal({
@@ -29,6 +32,7 @@ export function PalletiseModal({
   busy,
   toLabel = "Ready for Loading",
   defaultPalletFor,
+  defaultLocation = "",
   progress,
   onConfirm,
   onClose,
@@ -37,6 +41,8 @@ export function PalletiseModal({
   busy: boolean;
   /** Destination stage shown in the footer. */
   toLabel?: string;
+  /** CR-412: the location prefilled for every item (the stage's purpose bay); the user can override. */
+  defaultLocation?: string;
   /** Per-order-item palletized progress (CR-280) — Complete Palletization shows
       each item's ready pallets (boxes) and what is still to palletize. */
   progress?: Map<string, { done: number; total: number }>;
@@ -57,6 +63,12 @@ export function PalletiseModal({
     Object.fromEntries(lines.map((l) => [l.id, String(l.boxes)])),
   );
   const [showErrors, setShowErrors] = useState(false);
+  // CR-412: ONE location for all items in the dialog — a pallet run stands in one bay.
+  const { options: whOptions, enabled: whEnabled } = useWarehouses();
+  const [location, setLocation] = useState(defaultLocation);
+  useEffect(() => {
+    if (defaultLocation) setLocation((v) => v || defaultLocation);
+  }, [defaultLocation]);
 
   useEffect(() => {
     let alive = true;
@@ -79,6 +91,7 @@ export function PalletiseModal({
     lineId: l.id,
     palletId: palletByLine[l.id] || "",
     boxes: boxesOf(l),
+    warehouse: whEnabled ? location : "",
   }));
   const missingPallet = entries.filter((e) => !e.palletId).length;
   const missingBoxes = entries.filter((e) => e.boxes <= 0).length;
@@ -111,6 +124,14 @@ export function PalletiseModal({
         </div>
 
         <div className="df-body">
+          {whEnabled && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <span className="dim nw">Location</span>
+              <div style={{ width: 260 }}>
+                <Combobox value={location} options={whOptions} maxVisible={120} placeholder="Where the pallets stand…" ariaLabel="Pallet location" onChange={setLocation} />
+              </div>
+            </div>
+          )}
           <table className="tbl">
             <thead>
               <tr>

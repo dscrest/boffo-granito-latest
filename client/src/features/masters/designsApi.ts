@@ -34,7 +34,14 @@ export interface LookupOption {
    from the Size lookup) and persists only coverage_sqm/coverage_sqft. */
 export const PERSIST_DESIGN_DIMS = true;
 
-/** All six FK lookup option lists, ready for the form selects. */
+/** One Customer Brand (PartyBrand) suggestion: the name the item stores + the
+    customer it belongs to ("" = legacy / unassigned, offered to every buyer). CR-393 */
+export interface PartyBrandOption {
+  name: string;
+  customerId: string;
+}
+
+/** All FK lookup option lists, ready for the form selects. */
 export interface DesignLookups {
   sizes: LookupOption[];
   finishes: LookupOption[];
@@ -42,11 +49,31 @@ export interface DesignLookups {
   glazes: LookupOption[];
   brands: LookupOption[];
   grades: LookupOption[];
-  // Party brands: PartyBrand master names ∪ legacy free-text values on designs.
-  partyBrands: string[];
+  // CR-394 Design Master lookups
+  surfaceApplications: LookupOption[];
+  punches: LookupOption[];
+  series: LookupOption[];
+  catalogues: LookupOption[];
+  // Party brands: PartyBrand master rows ∪ legacy free-text values on designs.
+  partyBrands: PartyBrandOption[];
   // PartyBrand name → seq_code (SKU segment, appended only when a brand is set).
   partyBrandSeq: Record<string, string>;
 }
+
+export const EMPTY_LOOKUPS: DesignLookups = {
+  sizes: [],
+  finishes: [],
+  categories: [],
+  glazes: [],
+  brands: [],
+  grades: [],
+  surfaceApplications: [],
+  punches: [],
+  series: [],
+  catalogues: [],
+  partyBrands: [],
+  partyBrandSeq: {},
+};
 
 /** One design image: File Store id + the original uploaded filename. */
 export interface DesignImage {
@@ -77,6 +104,18 @@ export interface DesignRow {
   brandLabel: string;
   gradeId: string;
   gradeLabel: string;
+  // CR-392: Customer ROWIDs ("" unset) — names resolve from the customer cache where shown.
+  designOwnerId: string;
+  designBuyerId: string;
+  // CR-394 lookups
+  surfaceApplicationId: string;
+  surfaceApplicationLabel: string;
+  punchId: string;
+  punchLabel: string;
+  seriesId: string;
+  seriesLabel: string;
+  catalogueId: string;
+  catalogueLabel: string;
   // specs / rates
   widthMm: number;
   lengthMm: number;
@@ -104,6 +143,10 @@ const LOOKUP_KEY: Record<string, string> = {
   Glaze: "name",
   Brand: "name",
   Grade: "name",
+  SurfaceApplication: "name",
+  Punch: "name",
+  Series: "name",
+  Catalogue: "name",
 };
 
 function optionsOf(rows: DSRow[] | undefined, table: string): LookupOption[] {
@@ -179,7 +222,7 @@ async function fetchDesigns(): Promise<{
   error?: string;
 }> {
   // listAll pages past ZCQL's 300-row cap; lookups project label columns only.
-  const [designs, size, finish, category, glaze, brand, grade, partyBrand] = await Promise.all([
+  const [designs, size, finish, category, glaze, brand, grade, partyBrand, surfApp, punch, seriesT, catalogue] = await Promise.all([
     listAll("Design", { order: "ROWID desc" }),
     list("Size", {
       limit: 300,
@@ -190,7 +233,12 @@ async function fetchDesigns(): Promise<{
     list("Glaze", { limit: 300, columns: ["name", "seq_code"] }),
     list("Brand", { limit: 300, columns: ["name", "seq_code"] }),
     list("Grade", { limit: 300, columns: ["name", "seq_code"] }),
-    list("PartyBrand", { limit: 300, columns: ["name", "seq_code"] }),
+    list("PartyBrand", { limit: 300, columns: ["name", "seq_code", "customer"] }), // CR-393: per-customer
+    // CR-394 Design Master lookups
+    list("SurfaceApplication", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Punch", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Series", { limit: 300, columns: ["name", "seq_code"] }),
+    list("Catalogue", { limit: 300, columns: ["name", "seq_code"] }),
   ]);
 
   const lookups: DesignLookups = {
@@ -200,6 +248,10 @@ async function fetchDesigns(): Promise<{
     glazes: optionsOf(glaze.rows, "Glaze"),
     brands: optionsOf(brand.rows, "Brand"),
     grades: optionsOf(grade.rows, "Grade"),
+    surfaceApplications: optionsOf(surfApp.rows, "SurfaceApplication"),
+    punches: optionsOf(punch.rows, "Punch"),
+    series: optionsOf(seriesT.rows, "Series"),
+    catalogues: optionsOf(catalogue.rows, "Catalogue"),
     partyBrands: [],
     partyBrandSeq: {},
   };
@@ -213,6 +265,10 @@ async function fetchDesigns(): Promise<{
   const gl = labelMap(lookups.glazes);
   const br = labelMap(lookups.brands);
   const gr = labelMap(lookups.grades);
+  const sa = labelMap(lookups.surfaceApplications);
+  const pu = labelMap(lookups.punches);
+  const se = labelMap(lookups.series);
+  const ca = labelMap(lookups.catalogues);
 
   // PartyBrand name → seq_code (needed by the SKU fallback below and the form).
   for (const r of partyBrand.rows || []) {
@@ -240,6 +296,10 @@ async function fetchDesigns(): Promise<{
     const glazeId = str(d.glaze);
     const brandId = str(d.brand);
     const gradeId = str(d.grade);
+    const surfaceApplicationId = str(d.surface_application);
+    const punchId = str(d.punch);
+    const seriesId = str(d.series);
+    const catalogueId = str(d.catalogue);
     return {
       id: String(d.ROWID),
       designName: str(d.design_name),
@@ -262,6 +322,16 @@ async function fetchDesigns(): Promise<{
       brandLabel: br.get(brandId) || "",
       gradeId,
       gradeLabel: gr.get(gradeId) || "",
+      designOwnerId: str(d.design_owner),
+      designBuyerId: str(d.design_buyer),
+      surfaceApplicationId,
+      surfaceApplicationLabel: sa.get(surfaceApplicationId) || "",
+      punchId,
+      punchLabel: pu.get(punchId) || "",
+      seriesId,
+      seriesLabel: se.get(seriesId) || "",
+      catalogueId,
+      catalogueLabel: ca.get(catalogueId) || "",
       widthMm: num(d.width_mm),
       lengthMm: num(d.length_mm),
       pcsPerBox: num(d.pcs_per_box),
@@ -281,11 +351,15 @@ async function fetchDesigns(): Promise<{
     };
   });
 
-  // Party Brand master names ∪ legacy free-text values still on designs.
-  const masterBrands = (partyBrand.rows || []).map((r) => str(r.name)).filter(Boolean);
-  lookups.partyBrands = [...new Set([...masterBrands, ...rows.map((r) => r.partyBrandName).filter(Boolean)])].sort(
-    (a, b) => a.localeCompare(b),
-  );
+  // Party Brand master rows ∪ legacy free-text values still on designs (no customer).
+  // CR-393: a master row may belong to a customer; the form narrows by the item's buyer.
+  const byName = new Map<string, PartyBrandOption>();
+  for (const r of partyBrand.rows || []) {
+    const name = str(r.name);
+    if (name && !byName.has(name)) byName.set(name, { name, customerId: str(r.customer) });
+  }
+  for (const r of rows) if (r.partyBrandName && !byName.has(r.partyBrandName)) byName.set(r.partyBrandName, { name: r.partyBrandName, customerId: "" });
+  lookups.partyBrands = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 
   return { ok: true, designs: rows, lookups };
 }
@@ -306,10 +380,16 @@ export interface DesignInput {
   glaze: string;
   brand: string;
   grade: string;
+  design_owner: string; // CR-392 Customer ROWID
+  design_buyer: string;
+  surface_application: string; // CR-394
+  punch: string;
+  series: string;
+  catalogue: string;
   // specs / rates
   width_mm: number;
   length_mm: number;
-  pcs_per_box: number;
+  pcs_per_box: number; // CR-391: typed per item (Size value = default only)
   box_weight_kg: number;
   coverage_sqm: number;
   coverage_sqft: number;
@@ -342,7 +422,10 @@ export function parseImages(raw: string): DesignImage[] {
   }
 }
 
-const FK_KEYS = ["size", "finish", "category", "glaze", "brand", "grade"] as const;
+const FK_KEYS = [
+  "size", "finish", "category", "glaze", "brand", "grade",
+  "design_owner", "design_buyer", "surface_application", "punch", "series", "catalogue", // CR-392/394
+] as const;
 
 /** Drop empty FKs so Catalyst doesn't reject a blank ForeignKey. */
 function toPayload(input: DesignInput): Record<string, unknown> {
@@ -413,6 +496,29 @@ export function updateDesign(rowid: string, input: DesignInput) {
 
 export function deleteDesign(rowid: string, reason?: string) {
   return bust(remove("Design", rowid, reason));
+}
+
+/* ---- Customer Brands (PartyBrand rows owned by one customer) — CR-393 ---- */
+
+export interface CustomerBrandRow {
+  id: string;
+  name: string;
+}
+
+/** The brands filed under one customer (the Design form offers these to that buyer). */
+export async function listCustomerBrands(customerId: string): Promise<{ ok: boolean; rows: CustomerBrandRow[]; error?: string }> {
+  if (!customerId) return { ok: true, rows: [] };
+  const res = await list("PartyBrand", { where: `customer = ${customerId}`, columns: ["name"], limit: 300 });
+  if (!res.ok) return { ok: false, rows: [], error: res.error };
+  return { ok: true, rows: (res.rows || []).map((r) => ({ id: String(r.ROWID), name: str(r.name) })).sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
+export function addCustomerBrand(customerId: string, name: string): Promise<OpResult> {
+  return bust(insert("PartyBrand", { name: name.trim(), customer: customerId }));
+}
+
+export function removeCustomerBrand(rowid: string, reason?: string): Promise<OpResult> {
+  return bust(remove("PartyBrand", rowid, reason));
 }
 
 /* ---- Associate Pallets (DesignPallet many-to-many join) ---- */

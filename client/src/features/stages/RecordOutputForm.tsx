@@ -5,6 +5,8 @@
    (headers once, bare inputs, ✕ per row): batch no. · mfg date · qty · box
    brand · remark, with a "+ New Batch" link underneath. Box Brand is per row
    (CR-257); the CR-200 order-based prefill seeds each row until the user picks.
+   CR-438: Location is per ITEM (one picker in each section's counter strip,
+   default = the Production bay) — the batches of one item share it.
    The palletization queue takes
    the SO line's own pallet (server fallback) — the pallet is picked/confirmed
    later, at palletise time. Batch-tracked items make the batch no. mandatory and save via
@@ -39,7 +41,7 @@ import { NumberInput } from "../../ui/NumberInput";
     items emit one single per line (parent loops /production-record). */
 export type RecordOutputPayload =
   | { singles: ProductionRecordInput[] }
-  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string } };
+  | { batches: { rows: ProductionRecordLine[]; performed_by?: string; pallet?: string; warehouse?: string } };
 
 export type RecordOutputResult = { entry: ProductionEntry; payload: RecordOutputPayload; total: number };
 
@@ -71,12 +73,11 @@ export function RecordOutputForm({
   };
 
   const [saving, setSaving] = useState(false);
-  // CR-329: the warehouse every batch below goes into — one picker, default primary.
-  const { options: whOptions, primary, enabled: whEnabled } = useWarehouses();
-  const [warehouse, setWarehouse] = useState("");
-  useEffect(() => {
-    if (primary) setWarehouse((v) => v || primary.id);
-  }, [primary]);
+  // CR-438: Location per ITEM (was one for the form); CR-411: default = the Production bay.
+  const { options: whOptions, primaryFor, enabled: whEnabled } = useWarehouses();
+  const whDefault = primaryFor("Production")?.id ?? "";
+  const [whById, setWhById] = useState<Record<string, string>>({});
+  const whOf = (id: string) => whById[id] ?? whDefault;
   // Box Brand the boxes are packed in — per batch row (CR-257; was per item, CR-197).
   const { options: brandOpts } = useBoxBrands();
   // Default brand per item follows the orders (CR-200): an order-linked line
@@ -181,7 +182,7 @@ export function RecordOutputForm({
             note: r.note.trim() || undefined,
             box_brand: brandOf(entry, r) || undefined,
           }));
-          return { entry, total, payload: { batches: { rows: lines, performed_by: loggedBy, warehouse: (whEnabled && warehouse) || undefined } } };
+          return { entry, total, payload: { batches: { rows: lines, performed_by: loggedBy, warehouse: (whEnabled && whOf(entry.id)) || undefined } } };
         }
         const singles: ProductionRecordInput[] = rows.map((r) => ({
           qty_boxes: parseInt(r.qty, 10) || 0,
@@ -189,7 +190,7 @@ export function RecordOutputForm({
           performed_by: loggedBy,
           note: r.note.trim() || undefined,
           box_brand: brandOf(entry, r) || undefined,
-          warehouse: (whEnabled && warehouse) || undefined,
+          warehouse: (whEnabled && whOf(entry.id)) || undefined,
         }));
         return { entry, total, payload: { singles } };
       });
@@ -211,14 +212,6 @@ export function RecordOutputForm({
         </div>
 
         <div className="df-body">
-          {whEnabled && (
-            <div className="form-grid" style={{ gridTemplateColumns: "minmax(200px, 320px)", marginBottom: 12 }}>
-              <label className="form-field">
-                <span className="lbl">Warehouse</span>
-                <Combobox value={warehouse} options={whOptions} clearable={false} ariaLabel="Warehouse the boxes go into" onChange={setWarehouse} />
-              </label>
-            </div>
-          )}
           {entries.map((entry, ei) => {
             const isBatched = isBatchedFor(entry);
             const cap = capFor(entry);
@@ -242,6 +235,12 @@ export function RecordOutputForm({
                     borderBottom: "1px solid var(--border)",
                   }}
                 >
+                  {whEnabled && (
+                    <label className="form-field" style={{ width: 280, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <span className="lbl">Location</span>
+                      <Combobox value={whOf(entry.id)} options={whOptions} clearable={false} maxVisible={120} ariaLabel={`${entry.design} location`} onChange={(v) => setWhById((m) => ({ ...m, [entry.id]: v }))} />
+                    </label>
+                  )}
                   {!entry.orderItemId && <span className="chip">Make-to-stock</span>}
                   <span style={{ display: "flex", gap: 14, marginLeft: "auto" }}>
                     <Count label="Requested" value={entry.qtyRequested} />

@@ -19,8 +19,10 @@
  * The remote wins on a pull: a value overwrites only where it is non-empty; add-on-only columns
  * (code, box_brand, port_of_discharge, handling_person, main_party_name, working_status, overseas,
  * additional_addresses) are never touched. A customer is matched by the link column, else by name
- * (case-insensitive, unmapped only) which links it, else created with the next CUS- code. Every
- * write goes to OperationLog (actor zoho-<provider>-sync). No watermark yet = nothing imported =
+ * (case-insensitive, ONE unmapped row) which links it, else created with the next CUS- code. CR-372:
+ * the name on a customer linked to another remote record, or on several unmapped customers, is a
+ * DUPLICATE — nothing is written, summary.duplicates / errors say so, the watermark still advances.
+ * Every write goes to OperationLog (actor zoho-<provider>-sync). No watermark yet = nothing imported =
  * the incremental run does nothing and says so — the full pull is always explicit (Import all).
  */
 const zoho = require("./zoho");
@@ -128,6 +130,18 @@ async function loadTerms(catalyst, rowList) {
 
 const istNow = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
 
+/* CR-372: ZCQL caps one query at 300 rows. The unbounded read of existing customers is what minted the
+   2026-10-21 twins (byLink missed every account past the cap → created again, CUS- codes reused).
+   Twin of index.js zcqlAllRows (lib/ cannot import index.js). */
+async function allRows(catalyst, rowList, sqlNoLimit) {
+  const out = [];
+  for (let off = 0; ; off += 300) {
+    const page = rowList(await catalyst.zcql().executeZCQLQuery(`${sqlNoLimit}${/order by/i.test(sqlNoLimit) ? "" : " ORDER BY ROWID"} LIMIT ${off}, 300`));
+    out.push(...page);
+    if (page.length < 300) return out;
+  }
+}
+
 /* CR-358 — one run at a time per warm instance. The Signals webhook, the cron, "Refresh now" and an
    Import page can land seconds apart; two runs that both read `existing` before either writes would
    insert the same new record twice. One lock for both providers (same Customer table).
@@ -146,7 +160,7 @@ async function sync(ctx, A, opts) {
 
 async function run(ctx, A, { full = false, page = 1 } = {}) {
   const { catalyst, rowList, writeOpLog } = ctx;
-  const summary = { ok: true, provider: A.name, mode: full ? "import" : "refresh", page, done: true, created: 0, updated: 0, linked: 0, skipped: 0, errors: [], at: istNow() };
+  const summary = { ok: true, provider: A.name, mode: full ? "import" : "refresh", page, done: true, created: 0, updated: 0, linked: 0, skipped: 0, duplicates: 0, errors: [], at: istNow() };
   const watermarkRow = (await zoho.settingRows(catalyst, rowList, [syncAtKey(A)]))[0];
   let watermark = watermarkRow ? s(watermarkRow.setting_value) : "";
 
@@ -159,17 +173,19 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
   }
 
   const { hits, hasMore } = await A.listChanged(ctx, { watermark, full, page, perPage: full ? IMPORT_PAGE : 200 });
-  const existing = hits.length
-    ? rowList(await catalyst.zcql().executeZCQLQuery("SELECT ROWID, code, name, crm_account_id, books_contact_id FROM Customer WHERE deleted_at is null"))
-    : [];
+  const existing = hits.length ? await allRows(catalyst, rowList, "SELECT ROWID, code, name, crm_account_id, books_contact_id FROM Customer WHERE deleted_at is null") : [];
   const byLink = new Map();
-  const byName = new Map();
+  const byName = new Map(); // nameKey → unmapped rows (CR-372: every candidate, not just the last one)
+  const linkedByName = new Map(); // nameKey → a row already linked to some remote id
   const codes = [];
   for (const r of existing) {
     codes.push(r.code);
     const lid = s(r[A.linkColumn]);
-    if (lid) byLink.set(lid, r);
-    else byName.set(s(r.name).toLowerCase(), r);
+    const key = s(r.name).toLowerCase();
+    if (lid) {
+      byLink.set(lid, r);
+      linkedByName.set(key, r);
+    } else byName.set(key, [...(byName.get(key) || []), r]);
   }
   const { rows: todo, reachedWatermark, skipped, unchanged } = pickChanged(hits, watermark, { full, linked: new Set(byLink.keys()) });
   if (full) {
@@ -200,11 +216,29 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
         let row = byLink.get(rid);
         let op = "update";
         if (!row) {
-          row = byName.get(nameKey);
+          // CR-372: CRM → Books → add-on. One unmapped customer with this name is adopted by the remote
+          // record (link). The name already on a customer linked to ANOTHER remote record, or on several
+          // unmapped customers, is a duplicate: no write, reported — and the watermark still advances
+          // (a duplicate is a decision for the user, not a transient failure to retry forever).
+          const same = byName.get(nameKey) || [];
+          const other = linkedByName.get(nameKey);
+          const dup = other
+            ? `${patch.name}: duplicate — already linked to ${s(other.code)} (${A.label} ${s(other[A.linkColumn])}); merge the accounts in ${A.label}`
+            : same.length > 1
+              ? `${patch.name}: ${same.length} customers with this name here — merge them (Settings → ${A.label} → Duplicate customers) first`
+              : "";
+          if (dup) {
+            summary.duplicates++;
+            summary.errors.push(dup);
+            if (!watermark || newerThan(hit.modified, watermark)) watermark = s(hit.modified);
+            continue;
+          }
+          row = same[0];
           if (row) {
             op = "link";
             byName.delete(nameKey);
             byLink.set(rid, row);
+            linkedByName.set(nameKey, row);
           }
         }
         if (row) {
@@ -213,9 +247,11 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
           else summary.updated++;
         } else {
           op = "create";
-          const ins = await table.insertRow({ code: bump(), active: true, ...patch });
-          row = { ROWID: ins && ins.ROWID, name: patch.name };
+          const newCode = bump();
+          const ins = await table.insertRow({ code: newCode, active: true, ...patch });
+          row = { ROWID: ins && ins.ROWID, code: newCode, name: patch.name, [A.linkColumn]: rid };
           byLink.set(rid, row);
+          linkedByName.set(nameKey, row);
           summary.created++;
         }
         await writeOpLog(catalyst, {

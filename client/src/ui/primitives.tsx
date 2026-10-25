@@ -4,15 +4,15 @@ import { useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
 import { stageOf } from "../data";
 
-/* "‹ Settings" back button for pages reached only through Settings
-   (Users, Roles, Currencies, Masters, Sizes, Data Operations). Sits
-   left of the page title inside a .row wrapper. */
+/* "‹ Back" text link for pages reached only through Settings
+   (Users, Roles, Data Operations, Zoho sync). Sits
+   ABOVE the page title (styles.css .back-link), never beside it. */
 export function BackToSettings() {
   const navigate = useNavigate();
   return (
-    <button className="hbtn" onClick={() => navigate("/settings")} title="Back to Settings">
+    <button type="button" className="back-link" onClick={() => navigate("/settings")} title="Back to Settings">
       <Icon name="chev-l" size={13} />
-      Settings
+      Back
     </button>
   );
 }

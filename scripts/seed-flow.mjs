@@ -15,6 +15,11 @@
    Three orders at three depths: A complete, B partial at every stage,
    C palletised but not loaded. All records marked ZZT.
 
+   ⚠ STALE since the 2026-10-02 LIVE data wipe: the designs and pallet named in
+   SETS / PALLET_NAME no longer exist, so both sets abort in masters(). The
+   current fixture is scripts/seed-multi.mjs (one customer, two-container plan,
+   partial + full palletization, full + partial loading across two containers).
+
    Run:      BOFFO_EMAIL=… BOFFO_PASSWORD=… node scripts/seed-flow.mjs
    Teardown: BOFFO_EMAIL=… BOFFO_PASSWORD=… node scripts/seed-flow.mjs --teardown
    Batch-tracked sample (own quote + state file): add --batch to either.

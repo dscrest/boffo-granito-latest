@@ -23,6 +23,7 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
 import { cachedAdjustEntries, cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type AdjustEntry, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
 import { cachedAdjustedByDesign, cachedOpeningByDesign, cachedWarehouseStock, listBatchStock, warehouseStockKey } from "@/features/stages/batchStockApi";
+import { cachedPalPlans, listPalPlans, type PalPlan } from "@/features/stages/palPlansApi";
 import type { WhCell } from "@/lib/warehouseStock";
 import { useWarehouses } from "./useWarehouses";
 import { designStock, openingStockFor } from "@/lib/stock";
@@ -34,6 +35,7 @@ import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ImageManager } from "@/features/common/ImageManager";
 import { fmtLocalDateTime } from "@/lib/format";
 import { cachedDesigns, deleteDesign, listDesigns, patchDesignCache, type DesignImage, type DesignRow } from "./designsApi";
+import { useMasters } from "./useMasters";
 import { NumberInput } from "../../ui/NumberInput";
 import { computeWeights, rowToValues } from "./DesignForm";
 
@@ -141,7 +143,11 @@ export function ItemDetail() {
   const [openingEntries, setOpeningEntries] = useState<ProductionRecordRow[]>(() => cachedOpeningEntries());
   const [adjustEntries, setAdjustEntries] = useState<AdjustEntry[]>(() => cachedAdjustEntries()); // CR-308
   const [whCells, setWhCells] = useState<WhCell[]>(() => cachedWarehouseStock()); // CR-332: per-warehouse split
-  const { warehouses, nameOf: whName, enabled: whEnabled } = useWarehouses();
+  const [palPlans, setPalPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []); // CR-412: pallets standing at a location
+  const { warehouses, nodes: whNodes, nameOf: whName, enabled: whEnabled } = useWarehouses();
+  // CR-392: owner / buyer are Customer ROWIDs — resolve names from the customer cache.
+  const { customers } = useMasters();
+  const customerName = (cid: string) => (cid ? customers.find((c) => c.id === cid)?.name ?? "" : "");
   const [openingOpen, setOpeningOpen] = useState(false); // batch-wise opening-stock editor
   // Overview (default) | Production | Locations (CR-332) — deep-linkable via ?tab=. Panels tab hidden (CR-296).
   const [sp, setSp] = useSearchParams();
@@ -157,6 +163,7 @@ export function ItemDetail() {
     void listBatchStock().then((res) => {
       if (res.ok) { setOpeningByDesign(res.openingByDesign); setAdjustedByDesign(res.adjustedByDesign); setWhCells(res.byWarehouse); }
     });
+    void listPalPlans().then((res) => res.ok && setPalPlans(res.plans));
   };
   useEffect(() => {
     void refresh();
@@ -212,14 +219,28 @@ export function ItemDetail() {
   const availableStock = stock.available;
 
   const productionTotal = myProductionRows.reduce((s, r) => s + r.qtyBoxes, 0);
-  // CR-332 Locations: every warehouse (0 when empty), its batches beneath. Committed = reserved by orders, spread like loading.
+  // CR-332 Locations: each node ("Warehouse ▸ Location") holding this item, its batches beneath. Committed = reserved by orders, spread like loading.
+  // CR-409: a warehouse has 60–70 locations — only the ones where this item sits are listed.
   const locationRows = (() => {
     if (!design) return [] as { warehouseId: string; warehouse: string; batches: WhCell[]; onHand: number; committed: number }[];
     const mine = whCells.filter((c) => c.key.startsWith(`${design.id}|`));
-    return warehouses.map((w) => {
-      const batches = mine.filter((c) => c.warehouseId === w.id).sort((a, b) => a.key.localeCompare(b.key));
-      return { warehouseId: w.id, warehouse: w.name, batches, onHand: batches.reduce((s, c) => s + c.onHand, 0), committed: batches.reduce((s, c) => s + c.committed, 0) };
-    });
+    return whNodes
+      .map((w) => {
+        const batches = mine.filter((c) => c.warehouseId === w.id).sort((a, b) => a.key.localeCompare(b.key));
+        return { warehouseId: w.id, warehouse: whName(w.id), batches, onHand: batches.reduce((s, c) => s + c.onHand, 0), committed: batches.reduce((s, c) => s + c.committed, 0) };
+      })
+      .filter((r) => r.batches.length > 0);
+  })();
+  // CR-412: this item's pallets standing at a location (palletized, not yet in a container), grouped by location.
+  const palletRows = (() => {
+    if (!design) return [] as { warehouseId: string; warehouse: string; lines: number; boxes: number }[];
+    const by = new Map<string, { lines: number; boxes: number }>();
+    for (const p of palPlans) for (const l of p.lines) {
+      if (l.designId !== design.id || !l.warehouseId || l.loadBoxId || (l.status !== "Palletizing" && l.status !== "ReadyToLoad")) continue;
+      const cur = by.get(l.warehouseId) || { lines: 0, boxes: 0 };
+      by.set(l.warehouseId, { lines: cur.lines + 1, boxes: cur.boxes + l.boxes });
+    }
+    return whNodes.filter((w) => by.has(w.id)).map((w) => ({ warehouseId: w.id, warehouse: whName(w.id), ...by.get(w.id)! }));
   })();
   const locationTotals = locationRows.reduce((a, r) => ({ onHand: a.onHand + r.onHand, committed: a.committed + r.committed }), { onHand: 0, committed: 0 });
   const myOpeningCount = design ? openingEntries.filter((e) => e.design === design.designName).length : 0;
@@ -467,7 +488,7 @@ export function ItemDetail() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th>Warehouse</th>
+                        <th>Location</th>
                         <th>Batch</th>
                         <th className="num" style={{ textAlign: "right" }}>Stock on hand</th>
                         <th className="num" style={{ textAlign: "right" }}>Committed</th>
@@ -475,6 +496,11 @@ export function ItemDetail() {
                       </tr>
                     </thead>
                     <tbody>
+                      {locationRows.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="dim" style={{ padding: "14px 10px" }}>This item is not in stock at any location.</td>
+                        </tr>
+                      )}
                       {locationRows.map((w) => (
                         <Fragment key={w.warehouseId}>
                           <tr>
@@ -508,7 +534,28 @@ export function ItemDetail() {
                       </tfoot>
                     )}
                   </table>
-                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 8 }}>Move stock between warehouses with a Transfer Order (Inventory ▸ Transfer Orders).</div>
+                  {palletRows.length > 0 && (
+                    // CR-412: palletized boxes left the loose-stock figures above — this is where their pallets stand.
+                    <table className="tbl" style={{ marginTop: 14 }}>
+                      <thead>
+                        <tr>
+                          <th>On pallets at</th>
+                          <th>Pallet lines</th>
+                          <th className="num" style={{ textAlign: "right" }}>Boxes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {palletRows.map((r) => (
+                          <tr key={r.warehouseId}>
+                            <td style={{ fontWeight: 600 }}>{r.warehouse}</td>
+                            <td className="dim">{r.lines}</td>
+                            <td className="num mono" style={{ fontWeight: 600 }}>{fmt(r.boxes)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 8 }}>Move stock between locations with a Transfer Order (Inventory ▸ Transfer Orders). Only locations holding this item are listed.</div>
                 </div>
               )}
 
@@ -578,13 +625,25 @@ export function ItemDetail() {
                 <DetailRow label="SKU" value={design.sku || "—"} />
                 <DetailRow label="Short Code" value={design.seqCode || "—"} />
                 <DetailRow label="Design Name" value={design.designName || "—"} />
-                <DetailRow label="Customer Brand" value={design.partyBrandName || "—"} />
+                <DetailRow label="Base Design Name" value={design.baseDesignName || design.designName} /> {/* CR-437: blank = the Design Name */}
+                {/* CR-392/393: owner, buyer and the buyer's brand */}
+                <DetailRow label="Design Owner" value={customerName(design.designOwnerId) || "—"} />
+                <DetailRow label="Custom Design Buyer" value={customerName(design.designBuyerId) || "—"} />
+                <DetailRow label="Buyer Brand" value={design.partyBrandName || "—"} />
                 <DetailRow label="Size" value={design.sizeLabel || "—"} />
+                <DetailRow label="Pcs Per Packing" value={design.pcsPerBox ? fmt(design.pcsPerBox) : "—"} />
                 <DetailRow label="Finish" value={design.finishLabel || "—"} />
                 <DetailRow label="Brand" value={design.brandLabel || "—"} />
                 <DetailRow label="Category" value={design.categoryLabel || "—"} />
+                <DetailRow label="Surface Application" value={design.surfaceApplicationLabel || "—"} />
+                <DetailRow label="Punch Type" value={design.punchLabel || "—"} />
                 <DetailRow label="Glaze" value={design.glazeLabel || "—"} />
                 <DetailRow label="Grade" value={design.gradeLabel || "—"} />
+                <DetailRow label="Random Faces" value={design.randomFaces ? fmt(design.randomFaces) : "—"} />
+                {/* Marketing Data (CR-394) */}
+                <DetailRow label="Collection" value={design.collectionName || "—"} />
+                <DetailRow label="Series" value={design.seriesLabel || "—"} />
+                <DetailRow label="Catalogue" value={design.catalogueLabel || "—"} />
                 {/* Status omitted — shown in the header subtitle, not repeated here. */}
                 <DetailRow label="Rate / m²" value={design.ratePerSqmt ? fmt(design.ratePerSqmt) : "—"} />
                 <DetailRow

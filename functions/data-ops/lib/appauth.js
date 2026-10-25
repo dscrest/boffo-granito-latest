@@ -36,6 +36,7 @@
  */
 const crypto = require("crypto");
 const zoho = require("./zoho");
+const { titleCase } = require("./names"); // CR-429
 
 const SESSION_HOURS = 24 * 7; // 7 days
 const CACHE_TTL_MS = 60_000; // token -> user cache per warm instance
@@ -95,8 +96,9 @@ const MODULE_NAV = {
   orders: ["byorder", "packing"],
   customers: ["parties"],
   // "containers" = Container Master (CR-261), an Items master like Pallet Master.
-  items: ["design", "stock", "stock-adjustments", "stock-transfers", "sizes", "pallets", "containers", "prod"], // stock-transfers = CR-330
-  panel_craft: ["panel-dashboard", "panel-items", "panels", "panel-orders", "sample-orders", "panel-loading", "cut-stock", "pending-cut-stock"], // CR-315 sample-orders · CR-348 panel-loading
+  // "masters" (CR-436) = the Masters hub page; the tabs inside re-check the finer ids.
+  items: ["design", "stock", "stock-adjustments", "stock-transfers", "sizes", "pallets", "containers", "prod", "masters"], // stock-transfers = CR-330
+  panel_craft: ["panel-dashboard", "panel-items", "panels", "panel-orders", "sample-orders", "panel-loading", "cut-stock", "pending-cut-stock", "masters"], // CR-315 sample-orders · CR-348 panel-loading
   stages: ["po", "qc", "container-shipments", "fit", "loadplan", "loading", "final"],
   invoices: ["invoices"],
   reports: ["reports", "ops"],
@@ -121,6 +123,7 @@ const TABLE_MODULE = {
   CutPieceSize: "panel_craft", CutPieceStock: "panel_craft", CutStockEntry: "panel_craft", Mdf: "panel_craft",
   AdjustmentReason: "items",
   Warehouse: "items", // CR-329
+  SurfaceApplication: "items", Punch: "items", Series: "items", Catalogue: "items", // CR-394 Design Master lookups
   Container: "stages", ContainerLoading: "stages",
   PalletizationPlan: "stages", PalletizationPlanLine: "stages", LoadBox: "stages",
   Invoice: "invoices",
@@ -161,15 +164,17 @@ const ROUTE_PERM = {
   "pal-vehicle": ["stages", "edit"],
   "pal-line-box": ["stages", "edit"],
   "pal-lines-box": ["stages", "edit"],
-  "pal-line-release": ["stages", "edit"], // CR-361: reason enforced in the route (deleteReason)
+  "pal-line-release": ["stages", "edit"], // CR-361/369: reason enforced in the route (requireReason, every role)
   "pal-topup": ["stages", "edit"],
   "panel-save": ["panel_craft", "create"], // CR-336: upsert — edit when body.rowid (UPSERT_ROUTES)
   "panel-delete": ["panel_craft", "delete"],
   "panel-order-save": ["panel_craft", "create"], // was unmapped (CR-315 drive-by)
   "panel-order-delete": ["panel_craft", "delete"],
+  "panel-order-cancel": ["panel_craft", "edit"], // CR-368: reason enforced in the route
   "panel-order-status": ["panel_craft", "edit"],
   "sample-order-save": ["panel_craft", "create"], // CR-315
   "sample-order-delete": ["panel_craft", "delete"],
+  "sample-order-cancel": ["panel_craft", "edit"], // CR-368
   "panel-load-save": ["panel_craft", "edit"], // CR-347 (replaces sample-order-supply)
   "panel-load-delete": ["panel_craft", "delete"], // CR-347
   "panel-order-checkpoint": ["panel_craft", "edit"], // CR-313
@@ -211,6 +216,7 @@ const UPSERT_ROUTES = new Set(["panel-order-save", "sample-order-save", "panel-s
 const ADMIN_ROUTES = new Set([
   "seed", "resync-size-snapshots", "migrate-panel-orders", "migrate-mdf-sizes", "recount-order-items",
   "renumber-loads", "reattribute-blank-lines", "backfill-line-pallets", "fx-refresh",
+  "customer-dedupe", // CR-373
 ]);
 
 // POST routes that are read-only computations — any authenticated role may call.
@@ -466,7 +472,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
       for (const u of users) {
         const rep = byUser.get(String(u.ROWID));
         const active = String(u.active) === "true";
-        const wantName = String(u.name || u.email || "").trim();
+        const wantName = titleCase(u.name) || String(u.email || "").trim(); // CR-429
         if (!wantName) continue;
         if (!rep) {
           // Name collision with an unlinked rep → fall back to email as name.
@@ -549,7 +555,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
     const role = await defaultRoleId(catalyst);
     const row = await catalyst.datastore().table("AppUser").insertRow({
       email: me.email,
-      name: me.name || me.email,
+      name: titleCase(me.name) || me.email, // CR-429
       active: true,
       role,
       zoho_zuid: me.zuid,
@@ -898,7 +904,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
       if (dup) throw httpErr(`User already exists: ${safe}`, 409);
       const row = await catalyst.datastore().table("AppUser").insertRow({
         email: safe,
-        name: name || "",
+        name: titleCase(name), // CR-429
         ...(password ? { password_hash: hashPassword(password) } : {}),
         active: true,
         role: role ? String(role) : await defaultRoleId(catalyst), // CR-336: Staff unless told otherwise
@@ -915,7 +921,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
       assertAdmin(req);
       const { name, password, role, active } = req.body || {};
       const patch = { ROWID: req.params.rowid };
-      if (name != null) patch.name = name;
+      if (name != null) patch.name = titleCase(name); // CR-429
       if (password) {
         if (String(password).length < 6) throw httpErr("Password must be at least 6 characters", 400);
         patch.password_hash = hashPassword(password);

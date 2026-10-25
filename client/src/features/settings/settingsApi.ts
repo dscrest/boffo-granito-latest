@@ -22,6 +22,8 @@ export const BATCH_SEPARATOR = "batch_series_separator";
 export const BATCH_START = "batch_series_start";
 // CR-337: comma-separated email domains whose Zoho users self-provision as Staff. Admin-only write (server).
 export const LOGIN_DOMAINS = "zoho_login_domains";
+// CR-392: Customer ROWID prefilled as Design Owner on a new item ("" = none).
+export const DEFAULT_DESIGN_OWNER = "default_design_owner";
 
 export type DefaultView = "sheet" | "kanban";
 /** Mirror of default_view, so a board can seed its view synchronously at mount. */
@@ -167,4 +169,16 @@ export async function loadLoginDomains(): Promise<string> {
 
 export function setLoginDomains(v: string): Promise<{ ok: boolean; error?: string }> {
   return putSetting(LOGIN_DOMAINS, v.trim().toLowerCase());
+}
+
+/* ---------- default_design_owner (default "" = no prefill) — CR-392 ---------- */
+
+export async function loadDefaultDesignOwner(): Promise<string> {
+  const res = await cache.load();
+  const row = res.ok ? rowFor(res.rows, DEFAULT_DESIGN_OWNER) : undefined;
+  return row ? String(row.setting_value ?? "") : "";
+}
+
+export function setDefaultDesignOwner(customerId: string): Promise<{ ok: boolean; error?: string }> {
+  return putSetting(DEFAULT_DESIGN_OWNER, customerId.trim());
 }

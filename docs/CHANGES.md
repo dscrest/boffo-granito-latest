@@ -3,6 +3,495 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-24 — Masters out of the main menu, clearer master tabs (CR-440) — LIVE 2026-10-24
+
+- **Masters only under Settings (CR-440).** The sidebar no longer lists Masters; the menu lives in Settings (gear) ▸
+  Masters ▸ Item / Panel / Export. Old links and search still open it. The master tabs are bordered pills with the
+  selected one highlighted, so the current tab is obvious.
+
+## 2026-10-24 — Masters page as menu + sub-menu with horizontal tabs (CR-439) — LIVE 2026-10-24
+
+- **Masters menu inside Settings (CR-439).** The Settings page's left menu now has **Masters ▸ Item / Panel / Export**
+  as a menu with a sub-menu; the chosen group opens on the right under its own title ("Item Master") with its masters
+  as **horizontal tabs** (Items | Size Master | Finish | …) that swap the list in place. Item is the first group. The
+  sidebar Masters entry opens that same page on Masters; roles without Settings access see the Masters menu only.
+  Links, redirects and search land exactly where they did.
+
+## 2026-10-24 — Location per item / per row when recording production and cut pieces (CR-438) — BUILT, deploy pending
+
+- **Pick a Location per item, not one for the whole form (CR-438).** Log Production now asks for the Location inside
+  each item's section (the batches of one item share it); Production Completion has a Location column per line. The
+  bulk Record Production sheet, cut-stock Add / Adjust and Stock Adjustments gained a last **Location** column per row —
+  leave it blank and the row goes to the Location in the bar, which stays as the default; Excel paste accepts
+  "Warehouse ▸ A1" or just "A1". The Excel import takes an optional Location column (blank rows use the Default
+  location picker). The same item and size at two bays on one sheet is no longer flagged as a duplicate, and the
+  on-hand hints and "only N on hand" warnings follow the row's own bay. Transfer orders are unchanged.
+
+## 2026-10-24 — One Masters page, Base Design Name defaults to the Design Name (CR-436, CR-437) — LIVE 2026-10-24
+
+- **One Masters page (CR-436).** The sidebar has a single **Masters** entry. Inside, three sub-tabs — **Export Master**
+  (Pallet Master, Container Master, Vehicles, Payment Terms, Adjustment Reason, Currencies, Warehouses & Locations),
+  **Item Master** (Items, Size Master, Finish, Category, Glaze, Box Brand, Customer Brand, Grade, Surface Application,
+  Punch Type, Series, Catalogue) and **Panel Master** (Panel Items, Cut Piece Size, MDF, Panels) — each a row of tabs,
+  and the chosen master opens right there. The separate Pallet Master, Container Master, Panel Items and Panel Master
+  menu entries are gone; old links and every Close / Back from a pallet, size, container or panel land on the right tab.
+  Settings keeps one Masters tile group so the header search still finds every list. Roles with Items or Panel Craft
+  view see the page; admin-only lists stay admin-only inside it.
+- **Base Design Name defaults to the Design Name (CR-437).** Leave Base Design Name blank on an item and it is saved
+  as the Design Name. The field still clears with × while editing, so a different base can be picked at any time.
+
+## 2026-10-24 — Base Design search, whiter menu text in Light mode (CR-434, CR-435) — LIVE 2026-10-24
+
+- **Search items for the Base Design Name (CR-434).** The Item form's Base Design Name now has the same 🔍 button as
+  the Design Owner and Buyer pickers. It opens a Search Items window — active items with their SKU, size, collection
+  and customer brand — and picking a row fills the field with that item's name. The item being edited is left out.
+- **Menu text whiter in Light mode (CR-435).** The sidebar's menu labels, group titles and the user line are brighter
+  on the dark rail in Light mode; Dark mode is unchanged.
+
+## 2026-10-24 — Load Copy from the Actions tab (CR-433) — LIVE 2026-10-24 (with CR-431/432 server side)
+
+- **Load Copy where you dispatch (CR-433).** The panel order's Actions tab now has a **Load Copy** menu listing every
+  vehicle trip, newest first. Each entry downloads that trip's copy only — the pieces and boards that left on that
+  vehicle — so items from earlier dispatches never appear on a new copy, and every past trip keeps its own. The
+  Dispatch tab's Loads table kebab still offers the same copies.
+
+## 2026-10-24 — Weight bulk edit frozen per order, Item/Panel Master settings, Title Case names, Brand off the Item form (CR-427…430) — LIVE 2026-10-24
+
+- **Box Weight in Bulk edit, frozen per order (CR-427).** On Items, Search (the advanced filter) → the header
+  checkbox now selects every matching item → Bulk edit has a Box Weight (kg) field. A changed weight applies to
+  orders and quotes created from then on: each quote / sales-order line keeps the weight it was created with, and
+  Container Planning uses that frozen weight (older lines without one, and rows added in the planner, read the
+  live item). Actual container loading checks keep using the live item weight. New `box_weight_kg` on QuoteItem
+  and OrderItem (LIVE).
+- **Settings groups: Item Master and Panel Master (CR-428).** "Product Masters" is now Item Master; Panel Master
+  holds Cut Piece Size (opens the Panel Items list) and MDF; Adjustment Reason and Warehouses moved to Setup &
+  Configuration since both modules use them.
+- **Names save as Title Case (CR-429).** Item design names, customer / company / contact names, drivers,
+  transporters, loading supervisors, user and sales-person names and every lookup master name are stored as
+  "Dhiraj Shah Of ABC Exports LLP" however they were typed — once, on the server, for every form, import and
+  Zoho sync. Short all-caps words (ABC, MDF, A12) and legal suffixes (LLP, LTD, PVT…) keep their capitals.
+  Codes, SKUs, vehicle numbers, sizes and locations are untouched; existing rows change on their next save.
+- **Brand off the Item form (CR-430).** The Design Data section no longer shows Brand and it is not required;
+  the Items grid, filter, bulk edit and item page still show it.
+
+## 2026-10-24 — MDF and Vinyl independent, instant marks on the Actions tab (CR-431, CR-432)
+
+- **Vinyl no longer waits for MDF (CR-431, reverses CR-401).** On a panel order's Actions tab the Vinyl dropdown
+  works whatever the MDF state; the server accepts it too. Pasted still unlocks only when BOTH MDF and Vinyl are
+  Ready ("Mark MDF and Vinyl Printing Ready first").
+- **Marks change the moment you pick them (CR-432).** The dropdown used to sit on the old value until the save
+  finished and the page had re-downloaded every panel order. Now the new value shows at once, the save runs in the
+  background (an error puts the old value back with a message), and the page only patches that one order.
+
+## 2026-10-24 — Cut Piece Size master under Panel Items (CR-426)
+
+- **Cut Piece Sizes live in Panel Craft.** The Panel Items page has a Cut Piece Sizes button that opens the size
+  list (`/cut-piece-sizes`, same New / Edit / Delete as before, Back returns to Panel Items). The entry under
+  Settings ▸ Masters and the Settings tile are gone; typing a new size on a cut-size picker still works.
+
+## 2026-10-24 — Remarks on a panel (CR-425)
+
+- **Remarks on the Panel master.** New / Edit Panel has a Remarks box under Vinyl Size for free text such as
+  the old reference ID. It shows on the panel page (Panel Details) and `/panels` search matches it; a Remarks
+  column is available in the grid (hidden by default). New `Panel.remarks` column; `/panel-save` stores it.
+
+## 2026-10-24 — Darker sidebar in Light mode, Panel Craft data reset (CR-423, CR-424)
+
+- **Sidebar is near-black in Light mode (CR-423).** The menu rail's tint was 82 % black and looked grey over
+  the pale wallpaper. Light mode now uses 94 %; Dark mode is unchanged. One token in `glass.css`.
+- **Panel Craft starts empty (CR-424, LIVE data).** Every panel order (14), sample order line (8), load (3),
+  cut-stock entry (34), cut-piece item (31), panel (9), MDF row (4) and the matching Activity (418) and status
+  history (43) rows were hard-deleted, so PANEL-, PNL/, SMP/ and LD/ numbers restart at 001. Cut Piece Sizes,
+  Adjustment Reasons, Warehouses, Customers and Items were not touched. Add Stock on an item brings it back into
+  Panel Craft; add MDF sizes in Settings before a panel order line can pick one.
+- **Export transactions start empty too (CR-424, LIVE data, same afternoon).** Quotes (1 + 1 line), Sales Orders
+  (3 + 6 lines + 1 event), Production entries incl. opening stock and transfers (40), Palletization plans (3 + 15
+  lines), Load boxes (10) and all status history (126) were hard-deleted. The Operations log kept only its
+  Customer rows (3,002); every other row (277) went. Vehicle, Customers, Items and every master stay; QT/SO/PAL/
+  LOAD/TRF numbers restart at 001. No Item carried a singular opening stock, so nothing was reset on Items.
+- **Item master emptied as well (CR-424, LIVE data, same afternoon).** The 12 Items (9 real designs + 3 ZZT test rows)
+  were hard-deleted; DesignPallet, recipes and Item activity were already empty. Sizes, Brands, Grades, Finishes,
+  Categories, Glazes, Catalogues, Series, Punches, Surface Applications, Pallets and Container formats stay, so new
+  Items pick from the same lists. Their uploaded images remain in the file store as orphans.
+
+## 2026-10-24 — Actions tab: panels on top, cut pieces of the selected panel below (CR-419)
+
+- **One row per panel.** The Actions tab's first table lists each panel once: its pieces still pending, the MDF ·
+  Vinyl · Pasted marks, its MDF board (pending count + a Load box) and one status. Pending counts are amber,
+  loaded ones say Loaded.
+- **Click a panel, see its cut pieces.** A second table under it shows that panel's piece kinds with their own
+  Load Now boxes and "+" menu; Allocate Stock sits on it. The panel with something pending is selected on open.
+- Dispatch still loads everything typed on any panel. No empty spanning cells any more.
+- Verified: tsc, vite build, `panelOrderNeeds` self-check. **Deployed live 2026-10-24**; browser walk + commit pending.
+
+## 2026-10-24 — Shorter Actions tab, no long notes, two Production views, Kanban hidden (CR-415…418)
+
+- **Material cell says the cut size (CR-415).** On a panel order's Actions tab (and Record Load, the Dispatch tab)
+  a piece row reads `150x150`, the board row `MDF`; the design name is in the Line (i) card. The Status cell stays
+  on one line. The Loads table and the Load Copy PDF keep "design · size".
+- **Locked marks look locked (CR-415).** Vinyl before MDF is Ready, and Pasted before both are, were already
+  disabled — now they are visibly greyed wherever they sit, with the reason on hover.
+- **No more paragraphs under tables (CR-416).** Thirteen how-to notes are gone across Panel Craft, Settings,
+  Warehouses, Users and Loading. What blocks a row is said in its Status cell and tooltips.
+- **Production toolbar (CR-417).** Two views, Table and Sheet. Kanban, To Produce and Import are hidden; Filter,
+  search, Group, Fields, Edit, Start New Production and Bulk Record Production stay.
+- **Kanban hidden everywhere (CR-418).** Packing, Panel Orders and Sales Orders show the Sheet only; the Default
+  view setting is hidden with it.
+- Verified: tsc, vite build, `panelOrderNeeds` self-check. **Deployed live 2026-10-24**; browser walk + commit pending.
+
+## 2026-10-24 — Add Stock brings the item into Panel Craft (CR-414)
+
+- **One step instead of two.** The Add Stock sheet (Panel Items ▸ Add Stock, and the Cut Piece page) now lists
+  every active item from the Item master, not just the ones already in Panel Craft, and any cut piece size —
+  pick an item, a size (or leave it blank for the full size, or type a new size and Create it), a qty, Save.
+  The item joins Panel Craft with that stock and its weight in the same save. Bulk and Excel paste as before.
+- **Add Stock / Adjust from an item** open the sheet with that item already in the first row and come back to it.
+- **"+ Cut piece" on the item has an On Hand box.** Type a qty and it records a receipt (same effect as Add
+  Stock, one ledger row); leave it blank and it only defines the piece at 0 pcs, as before.
+- **Add Item stays** for "define with nothing on hand"; Adjust and Transfer are unchanged.
+- Server: a receipt for a pair not defined yet creates it with the line's weight, and gives a weight to a piece
+  that had none — the `0 kg *` rows fill in on their next receipt. Deployed 2026-10-24; browser walk pending.
+
+## 2026-10-24 — A location at every stage: produced, palletized, ready for loading, panels (CR-411…413)
+
+- **Production always records a location (CR-411).** The bulk Record Production sheet, the Complete Production
+  dialog and the Excel import now have the same Location picker Record Output has. The default is the bay of the
+  warehouse marked **Production** (purposes finally do something), else the primary's first location. Nothing
+  recorded from a production screen lands on "▸ Unassigned" any more.
+- **Pallets have a location (CR-412).** When you Start or Complete palletization the dialog asks for ONE
+  location for all the items — prefilled with the **Palletization** bay on Start and the **Loading Bay** on
+  Complete, so the common path costs no extra click. Change it any time with **Set Location**: the "+" menu on a
+  card or row (checked items come along), the selection bar's **Set Location (n)**, the /loading row menu, or the
+  plan's More menu. A **Location** column on the packing and loading sheets, a Location group-by on /packing, the
+  location on the card, Item ▸ Locations ▸ **On pallets at**, and a **Pallets** view on Reports ▸ Stock
+  Locations. Once a pallet is in a container its place is the container. Stock maths unchanged — a location on a
+  pallet is a tag, not a transfer. One live column (`PalletizationPlanLine.warehouse`).
+- **Panel orders take a location on the form (CR-413).** Optional Location under Order Details when creating or
+  editing; the detail's Set Location still works.
+- Verified: tsc, server syntax, `warehouseStock.check` + `warehouseReduce.check` (unchanged, passing).
+  **Deployed live 2026-10-24** (client + both functions; this deploy also carried CR-408…410). Browser walk +
+  API drive pending; commit pending.
+
+## 2026-10-23 — Settings search everywhere · Warehouse ▸ Location (A1 … F12) · Panel location (CR-408…410)
+
+- **Find any setting (CR-408).** The header search (⌘K) now lists settings pages and preferences for admins
+  — type "godown" and Warehouses & Locations comes up. The Settings search matches every word you type,
+  knows synonyms (godown, truck, login), and finds the Preferences rows (batch series, default view…).
+- **Locations inside a warehouse (CR-409).** Settings ▸ Warehouses & Locations: a warehouse holds locations
+  like A1 … F12 — the row's "+" adds one or generates the whole grid (rows A–F × bays 1–12, 72 in one go,
+  existing codes skipped). Every stock picker (Record Output, Opening Stock, adjustments, transfers, cut
+  sheets) now picks a **location** ("Main Godown ▸ A1", type `c4` to jump); stock stays there until a
+  Transfer Order moves it. Item ▸ Locations, Panel Item ▸ Locations and the report (now **Stock Locations**)
+  list only the locations that hold something. Stock recorded before the locations existed shows as
+  "▸ Unassigned" until transferred. One live column (`Warehouse.parent`); the stock maths is unchanged.
+- **Panel location (CR-410).** A panel order's More menu gains **Set Location**; the order shows a Location
+  field, the Panel Orders grid has a Location column (hidden until used), and Stock Locations has a Panels
+  view. One live column (`PanelOrder.warehouse`).
+- Verified: `warehouseStock.check`, `warehouseReduce.check` (both unchanged and passing), tsc. **Deployed live
+  2026-10-24** with CR-411…413; browser walk + API drive pending.
+
+## 2026-10-23 — Load a whole panel, pieces of a panel, or its pasted MDF (CR-405…407)
+
+- **Pieces load per kind, in any count (CR-405).** On the Actions tab (and Record Load, the Dispatch tab)
+  each panel now lists one row per cut-piece kind on it — "Grey · 300x300 · ordered 6" — plus its MDF
+  board. Type any count on a piece row: 2 of the 6 grey pieces can leave today, the rest later. Stock,
+  booking and the pending figures move per piece kind. Loads recorded before today (whole panels) still
+  read correctly. Two columns were added live on the load-line table (design, cut piece size).
+- **Every panel has an MDF row (CR-406)** — even when no thickness was picked on the order line (that is
+  why the three panels in the screenshot showed no MDF row). It loads once the vinyl is pasted on it.
+- **Load whole panel + readable marks (CR-407).** The "+" on a panel's first row offers *Load whole panel*
+  (every ready piece row and, once pasted, its board, on one vehicle); *Load…* on any row still loads that
+  row alone; Dispatch loads everything typed. The Actions tab head gains *Allocate Stock*. The MDF ·
+  Vinyl · Pasted dropdowns now show their value — the "× ⌄" was the clear button eating the label.
+- Verified: `panelOrderNeeds` self-check, tsc, vite build, appauth 5/5. **Deployed live 2026-10-23** (functions + client); API drive + commit pending.
+
+## 2026-10-23 — Readiness tab on every Panel / Sample order (CR-404)
+
+- **Order readiness at a glance.** A new **Readiness** tab (first after Details) shows the user's Order Readiness
+  Dashboard design in the house glass skin: a ring of panels ready to load out of the total with a one-line
+  headline ("3 of 4 panels pending · next up: Cut pieces"), Panels · Pieces · Ready to load · Pending tiles, one
+  ring per stage — MDF · Vinyl · Pasted · Cut pieces · Weighed · Loaded — and a table with the six stage cells
+  per panel (done / next step / pending), its quantity and a Loaded / Ready / "<stage> pending" chip.
+- **Nothing new to fill in.** Every stage is read from what the godown already records: the per-panel marks,
+  the booking on the Requirements card (pieces that already left count as done), the known weight, the loads.
+  A loose cut piece skips the three panel marks. A sample order shows its one stage, Supplied, per item.
+- Per order only, by the user's decision; a global view can follow later.
+- Verified: `panelOrderNeeds` self-check, tsc, vite build, mocked screenshots in dark + light. **LIVE 2026-10-23** (deployed with the pending CR-365…403 batch); commit pending.
+
+## 2026-10-23 — Panel Order page: customer heading, one four-state status, marks on the Actions tab, free loading (CR-399…403)
+
+- **Customer first (CR-399).** The Panel Order page title is the customer's name; `PNL/FY/NNN` sits small in
+  the sub line with an "Open customer" link and the Loading chip. The left rail reads the same way.
+- **One status, no stage buttons (CR-400).** Accept / Start Cutting / Ready are gone. The header chip, the
+  Orders grid, its kanban columns, the Status filter and the dashboard all show the SAME derived status:
+  **New** (some panel not yet pasted) → **Ready** (every panel's MDF · Vinyl · Pasted Ready) → **Completed**
+  (Ready and every cut piece booked) → **Dispatched** (last load) — plus Cancelled. The stored lifecycle
+  column is dormant: an order stays `NewRequest` until its last load; marks, Allocate Stock and loads work
+  from the day the order is raised (server `PANEL_ORDER_OPEN` includes NewRequest). The order-level Cut
+  Pieces mark and the Production Readiness card are gone. Lists without stock data (Source tab, Panel
+  detail, Customer ▸ Panels, Loading page) read the collapsed lifecycle label — New / Ready / Dispatched.
+- **Vinyl waits for MDF (CR-401).** The Vinyl Printing mark is greyed ("Mark MDF Ready first") until that
+  panel's MDF is Ready; the server refuses it the same way. Pasting still waits for both.
+- **Marks on the Actions tab (CR-402).** MDF · Vinyl · Pasted are set on the Actions tab, once per panel
+  line, beside the loading rows; the Items card on Details keeps image · panel (i) · weights · qty.
+- **Load pieces, boards, or both (CR-403).** A panel's cut pieces (and loose cut pieces) load once booked;
+  its MDF board loads once the vinyl is pasted on it; nothing else gates a row. Load one row with its "+"
+  menu or everything ready with Dispatch. Reverses CR-380/383, where pieces waited for the panel's marks.
+- Verified: `panelOrderNeeds` self-check, tsc, vite build, appauth 5/5. **Deployed live 2026-10-23**; browser drive + commit pending.
+
+## 2026-10-23 — Panel / Sample order rows: ⓘ instead of the photo, one column set, one-line stock verdict (CR-398)
+
+- **The photo leaves the order line; an ⓘ carries it (CR-398).** On New Panel Order and New Sample Order
+  the 28px thumb sat inside the Item cell on cut-piece / sample rows but beside the details text on panel
+  rows, so the pickers of the two row kinds started at different x and the "Details" column held a
+  combobox on one row and prose on the next (user: "Photo in details not necessary at the time of adding.
+  Show it with the info icon. Align the controls properly."). Now every row is Panel / Item · ⓘ · Cut
+  Size · MDF Thickness · Weight · Qty · ✕ — a panel row shows "—" under Cut Size, a cut-piece row "—"
+  under MDF; the ⓘ (`InfoDot`, pcBits) shows the record's details on hover and opens its photos in the
+  existing lightbox on click. Sample rows: Item · ⓘ · Piece · Cut Piece Size · Qty · Note · ✕.
+- **Cut Piece Stock Check is one line while creating.** The per-cut-piece rows with the per-panel
+  breakdown are gone from the form; the green / amber `Note` ("Stock covers this order" / "Short on cut
+  pieces") stays. The breakdown is unchanged on the saved order's detail page.
+- The Panel form's Total line no longer wraps inside the 280px totals block.
+- tsc + build pass; deploy + commit pending.
+
+## 2026-10-23 — Design Master to the new spec: per-item packing, owner / buyer, buyer brands, four new lookups (CR-391…397)
+
+- **Pcs Per Packing is the item's own (CR-391).** The user's Design Master spec: "Pcs Per Packing – do not
+  take from size master." The field is typed on the Item form (the Size value only prefills it), coverage
+  ft² / m² are ƒx fields from the item's own width × length × pcs and are stamped server-side on every
+  item save, and a Size edit no longer rewrites item pcs or coverage (box weight keeps its CR-133 default
+  rule). Pallet coverage still follows the Size.
+- **Design Owner and Custom Design Buyer (CR-392).** Two Customer pickers (Combobox + search modal) on the
+  item; the owner is prefilled from a new Settings ▸ Preferences "Default design owner" (the spec's
+  "default will be boffo"). Customer delete / dedupe guard both links.
+- **Buyer brands per customer (CR-393).** A Customer Brand now belongs to a customer: the item's "Custom
+  Design Buyer Brand" list narrows to the buyer's brands (plus unassigned legacy names), a typed new brand
+  is filed under that buyer, and the Customer detail gains a **Customer Brands** list (add / delete). The
+  spec's "Customer Master — Customer Brands, add multiple" lands here with no new table.
+- **Four new lookups (CR-394).** Surface Application, Punch Type (with image), Series and Catalogue —
+  Settings ▸ Masters entries, tiles, Design FKs, delete guards. Picked under Design Data / Marketing Data.
+- **Base Design Name picked from items (CR-395).** A Combobox over existing design names (still stored
+  as the name).
+- **Form in the spec's five sections, image on the form, status editable on edit (CR-396).** Main
+  Information · Calculations · Design Data (image at the top) · Working Data · Marketing Data. Status
+  values stay Active / Inactive (2026-07-06 rule); only the grouping changed.
+- **Capacity queries paged (CR-397, drive-by).** `/load-container` and `/fit-suggest` read every item's
+  coverage with a bare SELECT that stopped at 300 rows; now paged.
+- LIVE: four tables + seven columns created via the Catalyst MCP (ids in DATASTORE-SCHEMA.md). tsc + build
+  pass; **DEPLOYED LIVE 2026-10-23** (functions + client, one `catalyst deploy` that also carried the
+  pending CR-365…390 batches); commit pending.
+
+## 2026-10-22 — Noise cuts: a status once per screen, no field that repeats the title, no empty columns (CR-390)
+
+- **Eleven repeated details removed (CR-390).** From the audit's noise group, approved as a plan. Panel Order
+  detail keeps one progress chip and loses its Stage row and two of three note sentences; the Panel Orders
+  grid drops the Pending column (the Loading Status tooltip has it); the Dispatch card loses its Plan line;
+  the Loading card its two container chips; the SO detail its PO / SO rows; the Loading detail its Order(s)
+  and Customer rows; Production detail and grid hide Date / Customer / Created / Modified and the empty
+  Batch / Mfg Date columns by default; the Palletization detail loses the vehicle number everywhere (its
+  lines' column is now "Loading", a Container link); the Loading box grid hides Date, Name and Container
+  format and shows the LOAD code + Container No. Storage keys bumped so saved column pickers pick up the new
+  defaults. tsc + build pass; not deployed.
+
+## 2026-10-22 — Internal wording off the screen: Zoho ids behind (i), no raw ids in toasts, Documents tab gone (CR-389)
+
+- **Four leaks closed (CR-389).** The user asked for the "unnecessary details and chips" audit's leak group
+  first. Customer detail no longer prints the raw CRM / Books ids in the Zoho row; the sentence stays and
+  the ids open from an (i) card. The New Palletization toast never shows a `#rowid`. The order drawer on
+  /byorder and /kanban loses its Documents tab, which only ever said storage wasn't connected, and its
+  Activity note names the Audit Log instead of a route. Panel Order, Panel Item and Panel Items weight
+  tooltips drop the `ƒx` prefix for plain words. tsc + build pass; not deployed.
+
+## 2026-10-22 — Design-glitch sweep: numbers never wrap, 15 skin fixes (CR-388)
+
+- **A number and its unit stay on one line (CR-388).** The user, Panel Order Items card: "Adjust spaces so KG
+  and values come in single line." `20.25 kg` was breaking after the number in the kg columns. Every numeric
+  table cell is now `white-space: nowrap` (`.tbl td.num`, production sheet, quote table), so the column takes
+  the width it needs and the other columns give way.
+- **Fourteen more glitches from a code audit (CR-388).** The user then asked "Find design glitches in the
+  code?" and said "start working on it." Rendering bugs fixed: a phantom 10th column on the Loading Workspace
+  Sheet band row, a see-through chart tooltip, locked/formula fields that looked editable under the glass
+  skin, an invisible input focus ring on the light theme, a beige stripe in the shared quote. Polish: hover no
+  longer hides a selected row or a load band, in-row buttons line up with the selects, the "Add container"
+  dashed outline is back, hover borders show, Panel Orders' Ready colour follows the theme, 22 inline
+  compact-button styles became one `.hbtn.sm` class, 15 inline card headers became `.card-head`, two dead
+  duplicate CSS blocks removed, the Mix-batch chip keeps its amber. tsc + build pass; not deployed.
+
+## 2026-10-22 — Import all customers runs through; duplicates are reported after it (CR-387)
+
+- **No duplicate gate in front of Import all (CR-387).** The user, Settings ▸ Zoho CRM: "as soon as I hit
+  import contact, I get message merge duplicate… We need to have all imports, skip duplicate, and once done
+  then duplicate only." The CR-373 pre-check refused to start the pull while any duplicate group existed,
+  although the sync itself already skips a duplicate name per record and reports it (CR-372). The groups it
+  showed were leftovers of the 2026-10-21 runs before the pager fix; today's refresh created its one new
+  customer once. Now the confirm opens at once, every page runs, and Find duplicates runs when the pull ends
+  (also after a page that timed out), so the Duplicate customers card lists what is left to merge; the summary
+  toast says `N duplicates skipped — see Duplicate customers below`. The two offset pagers behind the sync and
+  the dedupe now order by ROWID, so a page sequence can never skip a row again. tsc + build pass; deployed 2026-10-22.
+
+## 2026-10-22 — Grid cells show a count + (i) card instead of a list of records (CR-386)
+
+- **No more inline record lists in a cell (CR-386).** The user, Pending Cut Stock: "At all places if there are
+  items such as Orders, Panels, give (i) tag and show count or small details. Showing these details ruins the
+  designs." The Orders column stacked three or four `PNL/… ×n` links and tripled the row height. It now reads
+  `3 orders` with an (i); clicking it opens a floating card (new `InfoTag`) listing each order with the pieces it
+  needs, each a link. Row click still opens the item. The user then asked for "a proper card, not in line", so the
+  CR-352 line-details row under Loading / Items rows is gone too: the same (i) card now carries the panel size,
+  vinyl, MDF and design rows there. Standing rule for every grid from here on. tsc + build pass; deploy, browser
+  drive, commit pending (joins the CR-365…385 tree).
+
+## 2026-10-22 — Customer page in tabs; status pills stop wrapping (CR-384, CR-385)
+
+- **Customer detail is four tabs (CR-384).** The user: "Except associated orders, everything is tab."
+  Details = Primary Details + Additional Addresses (the Associated Orders table is gone).
+  **Transactions** = collapsible sections — Sales Orders (every SO, newest first, open by default),
+  Quotes (new on this page: Quote No · Date · Status · Sales Order), Samples, Panels — each with its count
+  in the heading. **Dispatch** and **Activity** are their own tabs. Same tab row as the Quote / Order pages.
+- **Status pills never wrap (CR-385).** The user, Orders grid: "These kind of long status ruin the design."
+  `Partially Completed — 420 left` / `Partial — 760 of 900` were one pill wrapping to four lines. The pill
+  now carries the word only; the count sits beside it in muted mono (`Partially Completed 420 left`,
+  `Partial 760 of 900`); hover keeps the full sentence. The SO detail header chip is the word alone and its
+  Palletization / Loading Status rows read `Partial · 760 of 900`. Every `.chip` is now `white-space: nowrap`.
+  tsc + build pass; deploy, browser drive, commit pending (joins the CR-365…383 built-not-deployed tree).
+
+## 2026-10-22 — Panel loading: only Ready rows load, "+" Load per row, Requirements grouped by panel, MDF goes pasted (CR-380…383)
+
+- **A panel's cut pieces are ready once they are booked (CR-380).** The user: "my only PANEL-005 is fully
+  ready" — yet its row read "Cut pieces not ready" because the Cut Pieces mark is one mark for the whole
+  order. Now a panel row's cut-piece readiness is its booking on the Requirements card (Allocated ≥ Need —
+  the "Book N more pcs" / "Cut N more" text stays). The order-level Cut Pieces mark no longer gates loading;
+  it still feeds the order's derived Status on the Production Readiness card.
+- **Rows that are not Ready cannot load (CR-381).** Load Now sits at 0 and disabled on every blocked row
+  (title = what is missing) on the Actions tab AND in Record Load (which gained the same Status column —
+  the Loading page opens it too); "Load all pending" became **Load all ready**. The server
+  (`/panel-load-save`) now refuses a pick whose panel marks are not Ready — 409 "PANEL-004 MDF on
+  PNL/…: MDF not ready · Not pasted on MDF" (`materialBlockers`, mirrors client `materialReadiness`); the
+  booking + on-hand gate for pieces is unchanged. Sample rows have no marks and load as before.
+- **"+" menu on every Ready to Dispatch row (CR-382).** The house "+" menu (as on the Loading page) with
+  **Load…** opens Record Load preset to THAT row alone (every other row 0); greyed with the missing reason on a
+  blocked row. The **Requirements card is grouped panel-wise**: a band per panel (PANEL-004 · PANEL-005 …; a
+  row whose pieces serve two panels bands under both codes; loose cut-piece lines band as "Cut piece"), the
+  rows below it unchanged — still one row per design × cut size with its Available tick.
+- **An MDF board loads only once the vinyl is pasted on it (CR-383).** The user: "only vinyl ready is not
+  enough — Pasted on MDF marked Ready makes the MDF loadable." The MDF row now needs the panel's MDF, Vinyl
+  AND Pasted marks Ready (the missing list names each). Notes under both tables say so.
+  Self-check `panelOrderNeeds.test.ts` updated; tsc + build + appauth pass; deploy, drive, browser drive,
+  commit pending (joins the CR-365…379 built-not-deployed tree).
+
+## 2026-10-22 — Account menu at the bottom of the menu rail (CR-379)
+
+- **Your name is now at the bottom of the left rail** (CR-379). Click it for Settings (Admin), Keyboard
+  shortcuts, the tours, the Light / Dark / Match system choice (a tick marks the current one) and Sign out.
+  The top bar keeps only Search and the bell; the moon/sun button and the gear moved into this menu.
+  The menu list scrolls on short screens while your name stays put.
+
+## 2026-10-22 — BOFFO Glass: the app's new look, on every page (CR-378)
+
+- **Glass skin, app-wide** (CR-378). Every page now uses the app's own "glass" design system:
+  a soft wallpaper, a floating dark menu rail with pill items, a see-through toolbar with a round search box,
+  translucent cards with a soft rim, pill buttons and chips, big display titles. Dark by default; the header's
+  moon / sun / screen button switches to light or follows the computer, remembered per device. Customers gets
+  an initials tile beside each name, a Status column and an All / Active / Inactive switch. Printed documents
+  and the sign-in screen keep their own look. Spec: `docs/DESIGN-SYSTEM-GLASS.md`; kit page `#/glass-kit` (Admin).
+
+## 2026-10-22 — Loading sheet: design first, container details behind "+" (CR-374…375)
+
+- **Design first** (CR-374). In the loading sheet a container starts as one line — C1, C2 — with its design
+  rows under it and "Add Items in Bulk" below them. Nothing about the container, vehicle or seals shows until
+  the container has a design; then the C1 line's **+** menu offers **Container & vehicle…**, which opens a
+  window with every detail (container, name, container no., vehicle, driver, seals, size, transporter, LR,
+  destination, supervisor); Dispatch and the documents live in the same menu. The numbers typed show beside
+  it. Containers are called C1, C2… throughout — the LOAD number appears once, at the top. The status chip and
+  the step labels are gone, and the columns line up under their headings.
+- **Pick lists** (CR-375). The small arrow on every search box no longer sits on top of the text; a long
+  name is cut short before it.
+
+## 2026-10-22 — Panel orders: MDF · Vinyl · Pasted marked per panel on the Items card (CR-376…377)
+
+- **Per-panel marks (CR-376).** The user: "move status update for MDF, Vinyl print, paste in the Item column…
+  team will mark individual item-wise MDF, Vinyl and make it ready to load; loads might go in different
+  vehicles; keep the cut piece as it is." MDF, Vinyl Printing and Vinyl Pasted on MDF are now marked **per
+  panel line** — `PanelOrder.checkpoints.panels[panelId][key]` (same JSON column, no schema change; keyed by
+  the Panel ROWID because a panel sits on one line per order and the key survives the wholesale line rewrite
+  on edit). Cut Pieces stays one order-level mark. `POST /panel-order-checkpoint/:rowid {key, status, panel}` —
+  `panel` required for the three (400), must be on a live line (400), the CR-366 pasting gate is checked per
+  panel (409). Legacy order-level marks still read for a panel without its own (`lineCheckpoint` fallback,
+  server `lineCp`) — nothing migrated. `panelProgress` = cut Ready AND every panel line's three Ready AND every
+  piece booked → Ready; any mark anywhere → In Progress. `materialReadiness` (Actions tab) reads the row's own
+  panel, so PANEL-A's MDF row can be Ready while PANEL-B's still says "MDF not ready" — each Dispatch is one
+  vehicle, so they leave on different trips (already CR-347).
+- **Items card columns (CR-377).** Image · Panel (i) · **MDF · Vinyl · Pasted** · Pieces kg · MDF kg · Total kg ·
+  Qty. Panel Size, Designs and the MDF spec column are gone from the table — the (i) toggle on the Panel cell
+  opens the same `LineInfoRow` the Actions / Dispatch tabs use (panel size · vinyl size · MDF · ordered + the
+  design rows). Each mark cell is the house Combobox while the order is open and the user may edit (chip
+  otherwise); the cell title carries the spec (MDF label / vinyl size), who · when, and the pasting gate.
+  Cut-piece lines show "—". The Production Readiness card keeps only the Cut Pieces row + the overall chip.
+  Helper note under the table. Self-check `panelOrderNeeds.test.ts` + `scripts/drive-cr365.mjs` extended.
+  tsc + build + self-check + appauth pass; deploy, drive, browser drive, commit pending.
+
+## 2026-10-22 — Customer deliverables list
+
+- **`docs/BOFFO-DELIVERABLES.xlsx` + `docs/DELIVERABLES.md`.** One feature-wise list of every deliverable with a
+  status — Completed / In progress / Future — built from the Phase 1 and Phase 2 inventories, the register and
+  the open to-do lists (164 rows: 130 · 8 · 26). Generated by `scripts/build-deliverables.mjs`; the Excel is the
+  working copy the customer-facing Future section is maintained in from here on. Document only, no CR number.
+
+## 2026-10-22 — Customers: duplicates found and merged, the sync never twins again (CR-372…373)
+
+- **Why there were duplicates** (CR-372). The 2026-10-21 imports created a second customer for most Zoho
+  CRM accounts (822 customers for about 530 accounts) and handed the same CUS- code to two customers: the
+  sync looked up existing customers with a query that silently stops at 300 rows. The lookup now reads
+  every customer, so an account that is already here is updated, never created again.
+- **Duplicate names are an error, not a new customer** (CR-372). When a CRM account arrives whose name is
+  already on a customer linked to a *different* CRM account, or on several unlinked customers, nothing is
+  written: the run reports "duplicate — already linked to CUS-… ; merge the accounts in Zoho CRM" and
+  moves on. CRM comes first: an existing Zoho Books or add-on customer with that name is simply linked
+  to the CRM account and takes its values.
+- **Duplicate customers card** (CR-373). Settings ▸ Zoho CRM ▸ Duplicate customers: **Find duplicates**
+  lists each CRM account that has two or more customers here — the one synced in CRM & Books stays, the
+  others are merged into it with their quotations, sales orders, panel orders and sample orders; codes used
+  twice are renewed; names shared by different CRM accounts are listed at the bottom and left alone.
+  **Merge N duplicates** does it after a Yes/No confirmation. **Import all** refuses to run while
+  duplicates exist.
+
+## 2026-10-22 — Panel orders: Actions tab, one status, pasting gate, Cancel (CR-365…368)
+
+- **Actions tab on every panel order** (CR-365). Beside Details and Dispatch: one row per line and
+  material (panel, MDF board, cut piece) with Ordered · Loaded · Pending, a **Status** that says
+  **Ready** or exactly what is missing ("MDF not ready", "Vinyl not printed", "Not pasted on MDF",
+  "Book 3 more pcs", "Cut 2 more"), and a **Load Now** quantity. **Dispatch** opens Record Load with
+  those quantities filled in; vehicle, driver and photos are entered there as before.
+- **Vinyl Pasted waits for MDF and Vinyl** (CR-366). The Vinyl Pasted on MDF checkpoint can be marked
+  Ready only once MDF and Vinyl Printing are both Ready — the dropdown is greyed until then and the
+  server refuses the same way.
+- **One status on the Orders grid** (CR-367). The MDF, Vinyl Printing, Cut Pieces, Vinyl Pasted and
+  Readiness columns are gone. The Status column now reads **Pending** (new request), **Not Started**
+  (accepted, nothing done), **In Progress** (any checkpoint, booking or partial load), **Ready** (all
+  four checkpoints Ready and every piece booked), **Completed** (dispatched) or **Cancelled**. The
+  kanban groups by the same states; the panel order page shows the same chip, with the lifecycle stage
+  (New / Received / In Cutting / Ready / Dispatched) as a Stage field and the dashboard's Latest Orders
+  table shows both.
+- **Cancel Order** (CR-368). More ▸ Cancel Order on a panel order or a sample order asks for a reason
+  (required for everyone, Admin included) and cancels it: booked cut pieces return to free stock and the
+  order stops counting against stock. An order that already has a load cannot be cancelled — delete the
+  loads in the Dispatch tab first (each returns its pieces). A sample order cancels only while nothing has
+  been supplied.
+
+## 2026-10-22 — Palletization: Discard a task, Delete returns stock, Cancel Order returns everything (CR-369…371)
+
+- **Discard…** (CR-369). The "+" menu on Ready for Palletization and In Palletization gains Discard…:
+  type the boxes and a reason, and the boxes leave the task and return to free stock — the order's
+  allocation is returned. Same dialog as Release… on Palletization Completed. A reason is now required for
+  every release and discard, Admin included.
+- **Deleting a palletization returns its boxes** (CR-370). Delete on the palletization page first returns
+  every line's boxes to free stock, then removes the plan. It is refused while any of its boxes sit in a
+  container — release those first. Reason required.
+- **Cancel Order empties the board** (CR-371). Cancel Order on a sales order now asks for a reason and
+  then takes its boxes out of open containers, removes every palletization line and hands every allocation
+  back to stock. If any box is already in a dispatched container the cancel is refused with the container
+  named — nothing changes. Before this, a cancelled order quietly kept palletized boxes claimed.
+
 ## 2026-10-21 — Palletization pages no longer carry a status filter (CR-364)
 
 - **The status dropdown is gone from Ready for Palletization, In Palletization and Palletization

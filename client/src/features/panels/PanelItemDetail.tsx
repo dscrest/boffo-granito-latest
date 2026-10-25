@@ -5,7 +5,10 @@
    editable inline · on hand · stock weight · ✕), "+ Cut piece" row with
    the ƒx weight default (cutPieceWeight), the panels that use the design
    (PanelsPanel, design scope) and the stock history (CutStockEntry).
-   Stock itself moves only on /cut-stock (Add / Adjust sheets) and orders.
+   Stock itself moves only through /cut-stock-entry (Add / Adjust sheets,
+   opened prefilled with this item) and orders. CR-414: the "+ Cut piece" row
+   has an On Hand qty — with a qty it posts a receipt (defines the piece AND
+   receives, one ledger row); blank = define at 0 pcs as before.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -17,6 +20,7 @@ import { confirmDelete } from "@/ui/ConfirmDialog";
 import { EmptyState, SkeletonRows } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
+import { todayISO } from "@/lib/dates";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
@@ -31,6 +35,7 @@ import {
   deleteCutPiece,
   listCutStock,
   listCutStockEntries,
+  postCutStockEntry,
   saveCutPiece,
   type CutStockEntryRow,
   type CutStockRow,
@@ -53,6 +58,7 @@ export function PanelItemDetail() {
   // "+ Cut piece" draft
   const [newSize, setNewSize] = useState("");
   const [newWeight, setNewWeight] = useState("");
+  const [newQty, setNewQty] = useState("");
   const [weightTouched, setWeightTouched] = useState(false);
   // inline weight edits, keyed by stock row id
   const [weightDraft, setWeightDraft] = useState<Record<string, string>>({});
@@ -72,7 +78,7 @@ export function PanelItemDetail() {
   const pieces = useMemo(() => stock.filter((r) => r.designId === designId).sort((a, b) => (cutName.get(a.cutSizeId) || "").localeCompare(cutName.get(b.cutSizeId) || "")), [stock, designId, cutName]);
   const history = useMemo(() => entries.filter((e) => e.designId === designId).slice(0, 30), [entries, designId]);
   // CR-332 Locations: pieces per (cut size · warehouse) — the ledger split by warehouse.
-  const { warehouses, nameOf: whName, enabled: whEnabled } = useWarehouses();
+  const { warehouses, nodes: whNodes, nameOf: whName, enabled: whEnabled } = useWarehouses();
   const locations = useMemo(
     () => (whEnabled ? cutWarehouseCells(warehouses, entries, stock).filter((c) => c.key.startsWith(`${designId}|`)) : []),
     [whEnabled, warehouses, entries, stock, designId],
@@ -102,7 +108,12 @@ export function PanelItemDetail() {
     if (!design || !newSize) return;
     setBusy(true);
     const w = shownNewWeight.trim() === "" ? null : Number(shownNewWeight);
-    const res = await saveCutPiece({ design: design.id, cut_piece_size: newSize, weight_kg: w });
+    const qty = parseInt(newQty, 10) || 0;
+    // CR-414: a qty makes this a receipt — the server defines the pair with the weight and writes the ledger row.
+    const res =
+      qty > 0
+        ? await postCutStockEntry({ entry_date: todayISO(), kind: "receipt", lines: [{ design: design.id, cut_piece_size: newSize, qty, weight_kg: w }] })
+        : await saveCutPiece({ design: design.id, cut_piece_size: newSize, weight_kg: w });
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not add the cut piece");
@@ -110,8 +121,9 @@ export function PanelItemDetail() {
     }
     setNewSize("");
     setNewWeight("");
+    setNewQty("");
     setWeightTouched(false);
-    toast.success("Cut piece added");
+    toast.success(qty > 0 ? `Cut piece added · ${fmt(qty)} pcs received` : "Cut piece added");
     reload();
   };
   const onCreateSize = async (name: string) => {
@@ -217,12 +229,12 @@ export function PanelItemDetail() {
           >
             {/* Cut pieces — the item's pieces, each with its own weight and on-hand. */}
             <div className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Cut Pieces</span>
                 <span className="muted" style={{ fontSize: 14 }}>{pieces.length}</span>
                 <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                  {canEdit && <Link className="btn" to="/cut-stock/record" title="Bulk Add Stock sheet"><Icon name="plus" size={12} /> Add Stock</Link>}
-                  {canEdit && <Link className="btn" to="/cut-stock/adjust" title="Adjust stock (breakage, count…)"><Icon name="edit" size={12} /> Adjust</Link>}
+                  {canEdit && <Link className="btn" to={`/cut-stock/record?design=${encodeURIComponent(design.id)}`} title="Receive pieces of this item — any cut size, new sizes are defined as you go"><Icon name="plus" size={12} /> Add Stock</Link>}
+                  {canEdit && <Link className="btn" to={`/cut-stock/adjust?design=${encodeURIComponent(design.id)}`} title="Adjust stock (breakage, count…)"><Icon name="edit" size={12} /> Adjust</Link>}
                 </span>
               </div>
               <div style={{ overflow: "auto" }}>
@@ -277,15 +289,26 @@ export function PanelItemDetail() {
                           <NumberInput
                             maxDecimals={3}
                             value={shownNewWeight}
-                            placeholder="ƒx"
+                            placeholder="Auto"
                             className={weightTouched ? undefined : "calc"}
                             style={{ width: 110, textAlign: "right" }}
-                            title="ƒx item weight per piece × cut face share — type to override"
+                            title="Auto: item weight per piece × cut face share — type to override"
                             aria-label="New cut piece weight"
                             onChange={(e) => { setWeightTouched(true); setNewWeight(e.target.value); }}
                           />
                         </td>
-                        <td colSpan={3}>
+                        <td className="num">
+                          <NumberInput
+                            maxDecimals={0}
+                            value={newQty}
+                            placeholder="0"
+                            style={{ width: 90, textAlign: "right" }}
+                            title="Pieces on hand now — a qty records a receipt; blank defines the cut piece at 0"
+                            aria-label="New cut piece on hand"
+                            onChange={(e) => setNewQty(e.target.value)}
+                          />
+                        </td>
+                        <td colSpan={2}>
                           <button className="hbtn primary" disabled={!newSize || busy} onClick={() => void addPiece()}>
                             <Icon name="plus" size={12} /> Add cut piece
                           </button>
@@ -302,42 +325,41 @@ export function PanelItemDetail() {
               <PanelsPanel scope={{ kind: "design", designId: design.id }} />
             </div>
 
-            {/* CR-332: where the pieces sit — every warehouse, per cut size. */}
+            {/* CR-332: where the pieces sit — per location, per cut size. CR-409: only locations holding pieces of this item. */}
             {whEnabled && (
               <div className="card" style={{ marginBottom: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+                <div className="card-head">
                   <span style={{ fontWeight: 600 }}>Locations</span>
-                  <span className="muted" style={{ fontSize: 14 }}>pieces per warehouse</span>
+                  <span className="muted" style={{ fontSize: 14 }}>pieces per location</span>
                   <Link className="linkish" style={{ marginLeft: "auto", fontSize: "var(--t-sm)" }} to="/cut-stock/transfer">Transfer pieces</Link>
                 </div>
                 <div style={{ overflow: "auto" }}>
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th>Warehouse</th>
+                        <th>Location</th>
                         <th>Cut Piece Size</th>
                         <th className="num" style={{ textAlign: "right" }}>Pcs on hand</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {warehouses.map((w) => {
-                        const mine = locations.filter((c) => c.warehouseId === w.id);
-                        return mine.length ? (
+                      {whNodes
+                        .map((w) => ({ w, mine: locations.filter((c) => c.warehouseId === w.id) }))
+                        .filter(({ mine }) => mine.length > 0)
+                        .map(({ w, mine }) =>
                           mine.map((c, i) => (
                             <tr key={`${c.key} ${c.warehouseId}`}>
-                              <td style={{ fontWeight: i === 0 ? 600 : 400 }}>{i === 0 ? <>{w.name}{w.isPrimary ? <span className="dim" title="Pieces recorded without a warehouse count here"> ★</span> : null}</> : ""}</td>
+                              <td style={{ fontWeight: i === 0 ? 600 : 400 }}>{i === 0 ? <>{whName(w.id)}{w.isPrimary ? <span className="dim" title="Pieces recorded without a location count here"> ★</span> : null}</> : ""}</td>
                               <td className="mono">{cutName.get(c.key.slice(c.key.indexOf("|") + 1)) || "—"}</td>
-                              <td className="num mono" style={{ fontWeight: 600, color: c.over > 0 ? "var(--c-amber)" : undefined }} title={c.over > 0 ? `${fmt(c.over)} more left than this warehouse ever held` : undefined}>{fmt(c.onHand)}{c.over > 0 ? " ⚠" : ""}</td>
+                              <td className="num mono" style={{ fontWeight: 600, color: c.over > 0 ? "var(--c-amber)" : undefined }} title={c.over > 0 ? `${fmt(c.over)} more left than this location ever held` : undefined}>{fmt(c.onHand)}{c.over > 0 ? " ⚠" : ""}</td>
                             </tr>
-                          ))
-                        ) : (
-                          <tr key={w.id}>
-                            <td style={{ fontWeight: 600 }}>{w.name}{w.isPrimary ? <span className="dim"> ★</span> : null}</td>
-                            <td className="dim">—</td>
-                            <td className="num mono dim">0</td>
-                          </tr>
-                        );
-                      })}
+                          )),
+                        )}
+                      {!locations.length && (
+                        <tr>
+                          <td colSpan={3} className="dim" style={{ padding: "14px 10px" }}>No pieces of this item at any location.</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -346,7 +368,7 @@ export function PanelItemDetail() {
 
             {/* Stock history — the dated ledger behind the on-hand figures. */}
             <div className="card">
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Stock History</span>
                 <span className="muted" style={{ fontSize: 14 }}>latest {history.length}</span>
               </div>

@@ -8,6 +8,12 @@ import { SharedBatch } from "./features/stages/SharedBatch";
 import App from "./App";
 import "./styles/styles.css";
 import "./styles/theme.css"; // 2026-09 design system (slate/indigo) — overrides styles.css
+import "./styles/glass.css"; // CR-378 BOFFO Glass — only active under <html data-skin="glass">
+import { applyTheme } from "./lib/theme";
+
+// Glass skin + theme attributes before the first paint (CR-378, app-wide).
+document.documentElement.dataset.skin = "glass";
+applyTheme();
 
 // HashRouter: routes live in the URL fragment (e.g. /app/index.html#/pipeline),
 // so deep links and refreshes work on Catalyst static hosting without any

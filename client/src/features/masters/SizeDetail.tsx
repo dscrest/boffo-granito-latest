@@ -100,8 +100,9 @@ export function SizeDetail() {
     }
     setEditing(false);
     toast.success("Size updated");
-    // Backend fans the new packing data out to Item + Pallet snapshots — drop
-    // their caches so every view refetches the propagated values.
+    // Backend fans the new packing defaults out (Pallet coverage/weight, Item
+    // box-weight default — never item pcs/coverage, CR-391) — drop their caches
+    // so every view refetches the propagated values.
     invalidateDesigns();
     invalidatePallets();
     await Promise.all([refresh(), refreshPallets()]);

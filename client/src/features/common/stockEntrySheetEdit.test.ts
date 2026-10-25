@@ -40,4 +40,16 @@ const row = (over: Partial<EntryRow>): EntryRow => ({ ...blankRow(), ...over });
   assert.deepStrictEqual(parseEntryPaste("B/2026-10/003\tremove\t7", "second", { designByKey: new Map() })[0], { second: "B/2026-10/003", dir: "out", qty: "7" });
 }
 
+// CR-438: the same pair at two Locations is NOT a duplicate; the line carries the row's Location; paste maps it.
+{
+  const a = row({ design: "d1", second: "c1", qty: "2", warehouse: "w1" });
+  const b = row({ design: "d1", second: "c1", qty: "3", warehouse: "w2" });
+  const c = row({ design: "d1", second: "c1", qty: "1" });
+  const { lines, errors } = resolveEntrySheet([a, b, c], { signed: false, secondRequired: true });
+  assert.strictEqual(errors.size, 0, "one pair at two bays (and once at the bar's) is fine");
+  assert.deepStrictEqual(lines.map((l) => l.warehouse), ["w1", "w2", ""]);
+  const p = parseEntryPaste("main ▸ a1\nnowhere", "warehouse", { designByKey: new Map(), warehouseByName: new Map([["main ▸ a1", "w1"], ["a1", "w1"]]) });
+  assert.deepStrictEqual(p, [{ warehouse: "w1" }, { warehouse: "" }]);
+}
+
 console.log("stockEntrySheetEdit: all checks passed");

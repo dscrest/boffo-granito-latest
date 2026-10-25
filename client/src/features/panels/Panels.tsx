@@ -44,6 +44,7 @@ const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
     className: "muted mono",
     render: (r) => [...new Set(r.lines.map((l) => l.cutSizeName).filter(Boolean))].join(", ") || dash,
   },
+  { key: "remarks", label: "Remarks", className: "muted", render: (r) => r.remarks || dash }, // CR-425, hidden by default
   { key: "created", label: "Created", className: "muted mono", render: (r) => fmtDateTime(r.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
   // CR-355: the auto panel code sits last and hidden; Designs lead.
@@ -68,7 +69,7 @@ export function Panels() {
   const [designFilter, setDesignFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns.v2", PANEL_COLUMNS, ["created", "modified", "code"]) // .v2 (CR-355);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns.v3", PANEL_COLUMNS, ["remarks", "created", "modified", "code"]); // .v3 (CR-425; .v2 CR-355)
 
   const load = async () => {
     setLoading(true);
@@ -94,6 +95,7 @@ export function Panels() {
         (!designFilter || r.lines.some((l) => l.designName === designFilter)) &&
         (!q ||
           r.panelCode.toLowerCase().includes(q) ||
+          r.remarks.toLowerCase().includes(q) ||
           r.lines.some((l) => l.designName.toLowerCase().includes(q) || l.cutSizeName.toLowerCase().includes(q))),
     );
   }, [rows, query, designFilter]);
@@ -110,6 +112,7 @@ export function Panels() {
       : k === "panelSize" ? r.panelSize
       : k === "vinylSize" ? r.vinylSize
       : k === "cutSizes" ? r.lines.map((l) => l.cutSizeName).join(", ")
+      : k === "remarks" ? r.remarks
       : k === "created" ? r.createdTime
       : k === "modified" ? r.modifiedTime
       : r.panelCode,

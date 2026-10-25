@@ -7,7 +7,8 @@
      · Transfer Orders (kind transfer, CR-330: From / To warehouse in the bar, free-text
        reason, positive qty) — box stock on /stock-transfers/new, cut stock on /cut-stock/transfer
    CR-329: receipt / adjustment sheets carry a Warehouse picker (default = primary);
-   every picker hides while no warehouse exists.
+   every picker hides while no warehouse exists. CR-438: on those sheets each row
+   may pick its own Location (last column); a blank cell = the bar's.
    The page supplies a `spec` (what the second column is, which items, how
    to save); validation + paste live in stockEntrySheetEdit.ts (pure). One
    Save = one request; errors show in the foot, never a toast over Save.
@@ -23,7 +24,7 @@ import { useFormSave } from "@/ui/FormPage";
 import { toast } from "@/ui/Toast";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
-import { designIndex } from "@/features/stages/productionLogSheetEdit";
+import { designIndex, warehouseIndex } from "@/features/stages/productionLogSheetEdit";
 import { listAdjustmentReasons } from "./adjustmentReasons";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { blankRow, parseEntryPaste, resolveEntrySheet, type EntryCol, type EntryLine, type EntryRow } from "./stockEntrySheetEdit";
@@ -32,7 +33,8 @@ const START_ROWS = 20;
 const GROW_BY = 10;
 const blanks = (n: number) => Array.from({ length: n }, blankRow);
 
-/** The bar's values, as handed to optionsFor / warnFor / onSave. Warehouse ids are "" while the feature is dormant. */
+/** The bar's values, as handed to optionsFor / warnFor / onSave. Warehouse ids are "" while the feature is dormant.
+    CR-438: optionsFor / warnFor get `warehouse` already resolved to the ROW's own when it picked one. */
 export interface SheetHeader {
   date: string;
   reason: string;
@@ -66,15 +68,20 @@ export interface StockEntrySpec {
   };
   /** Non-blocking warning under a line (e.g. "4 boxes of this batch are reserved"). */
   warnFor?: (line: EntryLine, h: SheetHeader) => string | undefined;
-  /** Persist one submission. Resolve with ok=false + error to keep the sheet open. */
+  /** Persist one submission. Resolve with ok=false + error to keep the sheet open.
+      CR-438: `line.warehouse` is the row's own ("" = send the header's). */
   onSave: (header: SheetHeader, lines: EntryLine[]) => Promise<{ ok: boolean; error?: string }>;
   /** Where Cancel / a successful Save go. */
   backTo: string;
   /** ColumnPicker storage key. */
   columnsKey: string;
+  /** CR-414: prefilled leading rows (e.g. the item the sheet was opened from). */
+  initialRows?: Partial<EntryRow>[];
 }
 
 const OPTIONAL: ColumnDef<EntryRow>[] = [{ key: "note", label: "Remark" }];
+// CR-438: single-warehouse sheets add a per-row Location column (blank = the bar's).
+const OPTIONAL_WH: ColumnDef<EntryRow>[] = [...OPTIONAL, { key: "warehouse", label: "Location" }];
 
 /** Enter / ↓ / ↑ walk the same column. Comboboxes keep their own keys (option list). */
 const walkColumn = (e: KeyboardEvent<HTMLTableSectionElement>) => {
@@ -96,7 +103,11 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   const adjusting = spec.kind === "adjustment";
   const transferring = spec.kind === "transfer";
 
-  const [rows, setRows] = useState<EntryRow[]>(() => blanks(START_ROWS));
+  const [rows, setRows] = useState<EntryRow[]>(() => {
+    const r = blanks(START_ROWS);
+    (spec.initialRows ?? []).forEach((p, i) => (r[i] = { ...r[i], ...p }));
+    return r;
+  });
   const [date, setDate] = useState(todayISO());
   const [reason, setReason] = useState("");
   const [reasons, setReasons] = useState<ComboOption[]>([]);
@@ -126,8 +137,12 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   const pairBad = showWh && spec.warehouse === "pair" && (!from || !to || from === to);
   const [showErrors, setShowErrors] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const cols = useColumns(spec.columnsKey, OPTIONAL, []);
-  const shows = (key: string) => cols.visible.some((c) => c.key === key);
+  const rowWh = showWh && spec.warehouse === "single";
+  const cols = useColumns(spec.columnsKey, rowWh ? OPTIONAL_WH : OPTIONAL, []);
+  const shows = (key: string) => cols.visible.some((c) => c.key === key) && (key !== "warehouse" || rowWh);
+  const whBarLabel = whOptions.find((o) => o.value === wh)?.label || "";
+  /** The header as THIS row sees it — its own Location when picked (CR-438). */
+  const headerFor = (r: EntryRow): SheetHeader => (rowWh && r.warehouse ? { ...header, warehouse: r.warehouse } : header);
 
   useEffect(() => {
     if (adjusting) void listAdjustmentReasons().then(setReasons);
@@ -137,7 +152,10 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
     () => spec.items.map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.hint })),
     [spec.items],
   );
-  const lookups = useMemo(() => ({ designByKey: designIndex(spec.items), secondByName: spec.second.byName }), [spec.items, spec.second.byName]);
+  const lookups = useMemo(
+    () => ({ designByKey: designIndex(spec.items), secondByName: spec.second.byName, warehouseByName: warehouseIndex(whOptions) }),
+    [spec.items, spec.second.byName, whOptions],
+  );
 
   /** Patch rows from index `at` on; the sheet grows so there is always a blank tail. */
   const patchRows = (at: number, patches: Partial<EntryRow>[]) => {
@@ -208,21 +226,22 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
           <DateInput id="ses-date" value={date} max={todayISO()} style={{ width: 150 }} onChange={(e) => setDate(e.target.value || todayISO())} />
           {showWh && spec.warehouse === "single" && (
             <>
-              <label className="dim nw">Warehouse</label>
-              <div style={{ width: 200 }}>
-                <Combobox value={wh} options={whOptions} clearable={false} ariaLabel="Warehouse" onChange={(v) => { form.touch(); setWh(v); }} />
+              {/* CR-409: the leaf = "Warehouse ▸ Location"; type a code (c4) to jump to it. */}
+              <label className="dim nw">Location</label>
+              <div style={{ width: 240 }}>
+                <Combobox value={wh} options={whOptions} clearable={false} maxVisible={120} ariaLabel="Location" onChange={(v) => { form.touch(); setWh(v); }} />
               </div>
             </>
           )}
           {showWh && spec.warehouse === "pair" && (
             <>
               <label className="dim nw">From <span className="req">*</span></label>
-              <div style={{ width: 190 }}>
-                <Combobox value={from} options={whOptions} placeholder="From warehouse…" invalid={showErrors && (!from || from === to)} ariaLabel="From warehouse" onChange={(v) => { form.touch(); setFrom(v); }} />
+              <div style={{ width: 230 }}>
+                <Combobox value={from} options={whOptions} maxVisible={120} placeholder="From location…" invalid={showErrors && (!from || from === to)} ariaLabel="From location" onChange={(v) => { form.touch(); setFrom(v); }} />
               </div>
               <label className="dim nw">To <span className="req">*</span></label>
-              <div style={{ width: 190 }}>
-                <Combobox value={to} options={whOptions.filter((o) => o.value !== from)} placeholder="To warehouse…" invalid={showErrors && (!to || from === to)} ariaLabel="To warehouse" onChange={(v) => { form.touch(); setTo(v); }} />
+              <div style={{ width: 230 }}>
+                <Combobox value={to} options={whOptions.filter((o) => o.value !== from)} maxVisible={120} placeholder="To location…" invalid={showErrors && (!to || from === to)} ariaLabel="To location" onChange={(v) => { form.touch(); setTo(v); }} />
               </div>
             </>
           )}
@@ -264,6 +283,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                 {adjusting && <th>Add / Remove</th>}
                 <th className="num qtyh">Qty ({spec.unit}) <span className="req">*</span></th>
                 {shows("note") && <th>Remark</th>}
+                {shows("warehouse") && <th>Location</th>}
                 <th className="rm" />
               </tr>
             </thead>
@@ -271,7 +291,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
               {rows.map((r, i) => {
                 const filled = !!r.design && (parseInt(r.qty, 10) || 0) > 0;
                 const rowBad = showErrors && errors.has(r.key);
-                const warn = spec.warnFor && lineByKey.has(r.key) ? spec.warnFor(lineByKey.get(r.key)!, header) : undefined;
+                const warn = spec.warnFor && lineByKey.has(r.key) ? spec.warnFor(lineByKey.get(r.key)!, headerFor(r)) : undefined;
                 const secondDisabled = !r.design || !!spec.second.disabledFor?.(r.design);
                 return (
                   <tr key={r.key} data-i={i} className={filled ? "on" : undefined}>
@@ -291,7 +311,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                       {spec.second.optionsFor ? (
                         <Combobox
                           value={r.second}
-                          options={r.design ? spec.second.optionsFor(r.design, header) : []}
+                          options={r.design ? spec.second.optionsFor(r.design, headerFor(r)) : []}
                           placeholder={secondDisabled ? "" : spec.second.placeholder || `${spec.second.label}…`}
                           invalid={bad(r, "second")}
                           disabled={secondDisabled}
@@ -326,6 +346,11 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                         <input value={r.note} aria-label={`Remark, row ${i + 1}`} onChange={(e) => setCell(i, { note: e.target.value })} />
                       </td>
                     )}
+                    {shows("warehouse") && (
+                      <td className="cellin" data-col="warehouse" style={{ minWidth: 200 }}>
+                        <Combobox value={r.warehouse} options={whOptions} maxVisible={120} placeholder={whBarLabel} ariaLabel={`Location, row ${i + 1}`} onChange={(v) => setCell(i, { warehouse: v })} />
+                      </td>
+                    )}
                     <td className="rm">
                       <button className="rm-x" tabIndex={-1} onClick={() => removeRow(i)} aria-label={`Remove row ${i + 1}`}>
                         <Icon name="x" size={12} />
@@ -341,7 +366,7 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                 <td className="cust">Total <span className="dim" style={{ fontWeight: 400 }}>· {lines.length} line{lines.length === 1 ? "" : "s"}</span></td>
                 <td colSpan={adjusting ? 2 : 1} />
                 <td className="num mono">{adjusting ? `+${fmt(totalIn)} / −${fmt(totalOut)}` : fmt(totalIn)}</td>
-                <td colSpan={(shows("note") ? 1 : 0) + 1} />
+                <td colSpan={(shows("note") ? 1 : 0) + (shows("warehouse") ? 1 : 0) + 1} />
               </tr>
             </tfoot>
           </table>

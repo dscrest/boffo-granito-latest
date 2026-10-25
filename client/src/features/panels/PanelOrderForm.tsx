@@ -15,6 +15,9 @@
    each with its board weight); mandatory once the panel has any, auto when
    it has exactly one. Weight = Σ cut-piece weight × pieces + that board,
    × qty — read-only ƒx, "—" until every cut piece has a weight.
+   CR-398: panel rows and cut-piece rows share ONE column set (Panel / Item ·
+   ⓘ · Cut Size · MDF · Weight · Qty · ✕); the photo + details sit behind the
+   ⓘ (hover = details, click = photo); the stock check is one verdict line.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/ui/Icon";
@@ -27,7 +30,8 @@ import { todayISO } from "@/lib/dates";
 import { cachedCustomers, listCustomers, type CustomerRow } from "@/features/masters/customersApi";
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
-import { ImageThumb } from "@/features/common/ImageLightbox";
+import { useWarehouses } from "@/features/masters/useWarehouses";
+import { Note } from "@/ui/States";
 import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, cachedPanels, createCutSize, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
@@ -35,6 +39,7 @@ import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { cachedCutStock, cachedCutStockRows, cachedCutWeights, listCutStock, requirementsFor, stockKey, type NeedLine, type PanelOrderInput } from "./panelOrdersApi";
 import { panelWeightSplit } from "./panelOrderNeeds";
 import { PanelPickerModal } from "./PanelPickerModal";
+import { InfoDot } from "./pcBits";
 
 /** CR-346: a line is a showcase PANEL (panelId [+ mdfId]) or a loose CUT PIECE (designId + cutSizeId). */
 type Line = { kind: "panel" | "cut"; panelId: string; qty: number; mdfId: string; designId: string; cutSizeId: string };
@@ -87,6 +92,9 @@ export function PanelOrderForm({
   const [preselected, setPreselected] = useState(!!initial);
   const [orderDate, setOrderDate] = useState(initial?.order_date || todayISO());
   const [pickerOpen, setPickerOpen] = useState(false);
+  // CR-413: where the panels will sit — optional, no default (a new order has nothing on the floor yet).
+  const { options: whOptions, enabled: whEnabled } = useWarehouses();
+  const [warehouse, setWarehouse] = useState(initial?.warehouse || "");
 
   useEffect(() => {
     void listCustomers().then((r) => r.ok && setCustomers(r.customers));
@@ -235,6 +243,7 @@ export function PanelOrderForm({
         customer,
         salesperson,
         order_date: orderDate,
+        warehouse,
         lines: lines.map((l) => (l.kind === "panel" ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId || undefined, qty: l.qty })),
       }),
     );
@@ -297,6 +306,22 @@ export function PanelOrderForm({
             <span className="lbl">Sales Person</span>
             <input value={salesperson} readOnly tabIndex={-1} className="calc" placeholder="From your sign-in" title="Auto-filled from your sign-in" />
           </label>
+          {whEnabled && (
+            <label className="form-field">
+              <span className="lbl">Location</span>
+              <Combobox
+                value={warehouse}
+                options={whOptions}
+                maxVisible={120}
+                placeholder="Where the panels will sit…"
+                ariaLabel="Location"
+                onChange={(v) => {
+                  form.touch();
+                  setWarehouse(v);
+                }}
+              />
+            </label>
+          )}
         </div>
       </div>
 
@@ -306,9 +331,10 @@ export function PanelOrderForm({
         <div className="ord-lines">
           <div className="ord-line ord-line-head pnl-line">
             <span>
-              Panel<span className="req"> *</span>
+              Panel / Item<span className="req"> *</span>
             </span>
-            <span>Details</span>
+            <span />
+            <span>Cut Size</span>
             <span>MDF Thickness</span>
             <span>Weight</span>
             <span>
@@ -318,19 +344,17 @@ export function PanelOrderForm({
           </div>
           {lines.map((l, i) => {
             if (l.kind === "cut") {
-              // CR-346: a loose cut-piece line — Item · Cut Piece Size · (no MDF) · Weight · Qty · ✕ on the same grid.
+              // CR-346/398: a loose cut-piece line — Item · ⓘ · Cut Piece Size · (no MDF) · Weight · Qty · ✕ on the same grid.
               const d = designById.get(l.designId);
               const dupC = !!l.designId && dupIds.has(lineKey(l));
               const w = lineWeight(l);
               return (
                 <div className="ord-line pnl-line" key={i}>
                   <div className="form-field" style={{ gap: 2 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <ImageThumb images={d?.images ?? []} size={28} alt={d?.uniqueName ?? ""} />
-                      <Combobox className="grow" value={l.designId} onChange={(v) => setLine(i, { designId: v })} placeholder="Search item…" options={designOptions} invalid={dupC} ariaLabel="Item" emptyText="No Panel Items yet — add items on Panel Items first" />
-                    </div>
+                    <Combobox value={l.designId} onChange={(v) => setLine(i, { designId: v })} placeholder="Search item…" options={designOptions} invalid={dupC} ariaLabel="Item" emptyText="No Panel Items yet — add items on Panel Items first" />
                     {dupC && <span className="field-err">Already on this order — change its quantity instead</span>}
                   </div>
+                  <InfoDot title={d ? [d.uniqueName || d.designName, d.sizeLabel].filter(Boolean).join("  ·  ") : ""} images={d?.images ?? []} alt={d?.uniqueName || "item"} />
                   <Combobox
                     value={l.cutSizeId}
                     options={cutOptions}
@@ -339,8 +363,8 @@ export function PanelOrderForm({
                     placeholder={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"}
                     ariaLabel="Cut piece size"
                   />
-                  <span className="dim" style={{ fontSize: "var(--t-sm)", alignSelf: "center" }} title="A loose cut piece has no board">Cut piece — no MDF</span>
-                  <input value={w == null ? "" : kg(w)} readOnly tabIndex={-1} className="calc" placeholder={l.designId ? "—" : ""} title={w == null ? "ƒx needs a weight on this cut piece — set it on Panel Items" : "ƒx cut-piece weight × qty"} aria-label="Weight" />
+                  <span className="ord-dash" title="A loose cut piece has no board">—</span>
+                  <input value={w == null ? "" : kg(w)} readOnly tabIndex={-1} className="calc" placeholder={l.designId ? "—" : ""} title={w == null ? "Needs a weight on this cut piece — set it on Panel Items" : "Weight = cut-piece weight × qty"} aria-label="Weight" />
                   <NumberInput min={1} value={l.qty || ""} onChange={(e) => setLine(i, { qty: Number(e.target.value) || 0 })} placeholder="1" aria-label="Quantity" />
                   <button type="button" className="btn ord-rm" onClick={() => removeLine(i)} title="Remove cut piece" aria-label="Remove cut piece" tabIndex={-1}>
                     ✕
@@ -359,12 +383,8 @@ export function PanelOrderForm({
                   <Combobox value={l.panelId} onChange={(v) => setLine(i, { panelId: v, mdfId: v === l.panelId ? l.mdfId : defaultMdf(v) })} placeholder="Search panel…" options={panelOptions} invalid={dup} ariaLabel="Panel" />
                   {dup && <span className="field-err">Already on this order — change its quantity instead</span>}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <ImageThumb images={p?.images ?? []} size={28} alt={p?.panelCode ?? ""} />
-                  <span className="dim" style={{ fontSize: "var(--t-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={meta}>
-                    {meta || "—"}
-                  </span>
-                </div>
+                <InfoDot title={meta} images={p?.images ?? []} alt={p?.panelCode || "panel"} />
+                <span className="ord-dash" title="A showcase panel carries its own cut pieces">—</span>
                 {/* CR-309/344: thickness from the MDF master rows of the panel's size; the weight is ƒx (cut pieces × pieces + that board) × qty. */}
                 {p && sameSize(p).length === 0 ? (
                   <span className="dim" style={{ fontSize: "var(--t-sm)", alignSelf: "center" }} title={p.mdfSize ? `Add MDF rows of size ${p.mdfSize} in Settings ▸ MDF` : `Set an MDF size on ${p.panelCode} ▸ Edit`}>
@@ -386,7 +406,7 @@ export function PanelOrderForm({
                       tabIndex={-1}
                       className="calc"
                       placeholder={p ? "—" : ""}
-                      title={w == null ? "ƒx needs a weight on every cut piece — set it on Panel Items" : `ƒx pieces ${kg(sp.pieces ?? 0)} + MDF ${sp.mdf == null ? "—" : kg(sp.mdf)} (× qty)`}
+                      title={w == null ? "Needs a weight on every cut piece — set it on Panel Items" : `Weight = pieces ${kg(sp.pieces ?? 0)} + MDF ${sp.mdf == null ? "—" : kg(sp.mdf)} (× qty)`}
                       aria-label="Weight"
                     />
                   );
@@ -417,8 +437,9 @@ export function PanelOrderForm({
             <Icon name="plus" size={12} /> Add cut piece
           </button>
         </div>
-        <div className="qt-totals">
-          <div className="row total">
+        {/* CR-398: the panel total string is longer than a quote's — grow past the 280px block instead of wrapping. */}
+        <div className="qt-totals" style={{ width: "fit-content", minWidth: 280 }}>
+          <div className="row total" style={{ gap: 16, whiteSpace: "nowrap" }}>
             <span>Total</span>
             <span className="mono">
               {panelsOn.length} panel{panelsOn.length === 1 ? "" : "s"}{cutsOn.length > 0 && ` · ${cutsOn.length} cut piece line${cutsOn.length === 1 ? "" : "s"}`} · {fmt(totalQty)} pcs · {totalWeight == null ? <span className="dim" title="Set a weight on every cut piece (Panel Items) to total it">— kg</span> : kg(totalWeight)}
@@ -430,21 +451,10 @@ export function PanelOrderForm({
       {preview.length > 0 && (
         <div className="form-section">
           <div className="form-section-title">Cut Piece Stock Check</div>
-          {preview.map((p) => (
-            <div key={p.key} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", fontSize: "var(--t-md)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: p.short ? "var(--c-red)" : "var(--c-green)", flexShrink: 0 }} />
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {p.designName} · {p.cutSizeName}
-                <span className="dim mono"> — {p.panels.map((x) => `${x.panelCode} ×${x.qty}`).join(" · ")}</span>
-              </span>
-              <span className="mono dim">
-                {fmt(p.have)} of {fmt(p.need)} pcs
-              </span>
-            </div>
-          ))}
-          <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4 }}>
+          {/* CR-398: the verdict only while creating — the per-piece breakdown lives on the saved order. */}
+          <Note tone={covered ? "ok" : "warn"} style={{ margin: 0 }}>
             {covered ? "Stock covers this order — it can dispatch directly." : "Short on cut pieces — this order will need a cutting job."}
-          </div>
+          </Note>
         </div>
       )}
 

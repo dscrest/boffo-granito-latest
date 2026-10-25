@@ -5,13 +5,12 @@
    sales person, status) with PanelOrderLine rows — one per showcase
    Panel × qty — the Sales Order shape. Header + lines save in ONE call
    (/panel-order-save); lines are editable only while New / Received.
-   Lifecycle (forward-only, server-enforced via /panel-order-status):
-   NewRequest → Received → InCutting → Ready → Dispatched, plus direct
-   Received → Dispatched when cut-piece stock already covers the order.
-   NewRequest (label "New") is where EVERY order is born — direct or raised
-   from a Quote / Sales Order ("Request Panels", CR-286; CR-294 made direct
-   orders start there too). Panel Craft accepts it to Received. Status
-   changes only on /panel-orders/:id (CR-287).
+   Lifecycle column: NewRequest is where EVERY order is born (CR-294);
+   CR-400 made the stage DORMANT — no Accept / Start Cutting / Ready
+   buttons, the shown status is the derived panelProgress (New → Ready →
+   Completed → Dispatched). Only Dispatched (last load) and Cancelled
+   (/panel-order-cancel) are still written; /panel-order-status stays
+   server-side for the drive scripts only.
    Ready ADDS Σ(line pieces × line qty) to CutPieceStock; Dispatched
    DEDUCTS the same. CutPieceStock is on-hand per (design, cut size) —
    audit trail is OperationLog + StatusTransition.
@@ -34,18 +33,28 @@ export {
   CHECKPOINT_STATUSES,
   checkpointStatus,
   demandByKey,
-  lineMaterials,
+  LINE_CHECKPOINT_KEYS,
+  lineCheckpoint,
+  lineCheckpointMark,
+  lineLoadRows,
   lineWeightSplit,
   loadingStatus,
   LOADING_STATUSES,
   loadProgress,
   MATERIAL_LABEL,
+  materialReadiness,
   PANEL_ORDER_OPEN,
+  panelProgress,
   panelWeightSplit,
+  pastedAllowed,
+  withLineMark,
   pendingNeedLines,
   pendingText,
-  readiness,
+  PROGRESS_STATES,
   requirementsFor,
+  pieceLabel,
+  rowKey,
+  rowLabel,
   shortagesFor,
   stockKey,
   type Allocation,
@@ -53,14 +62,16 @@ export {
   type CheckpointMark,
   type Checkpoints,
   type DemandRow,
+  type LineCheckpointKey,
   type LoadIn,
+  type PanelPieces,
   type LoadLineIn,
   type LoadingStatus,
   type Material,
   type NeedLine,
   type NeedOpts,
+  type PanelProgress,
   type ProgressRow,
-  type Readiness,
   type Requirement,
   type Shortage,
 } from "./panelOrderNeeds";
@@ -68,34 +79,18 @@ export {
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
 
-export const PANEL_ORDER_STATUSES = ["NewRequest", "Received", "InCutting", "Ready", "Dispatched"] as const;
+export const PANEL_ORDER_STATUSES = ["NewRequest", "Received", "InCutting", "Ready", "Dispatched", "Cancelled"] as const; // CR-368: Cancelled is terminal
 export type PanelOrderStatus = (typeof PANEL_ORDER_STATUSES)[number];
 
-/** Mirrors the server PANEL_ORDER_TRANSITIONS (forward-only). CR-347: Dispatched is never a
-    button — the last load (/panel-load-save) flips it. */
-export const PANEL_ORDER_TRANSITIONS: Record<PanelOrderStatus, PanelOrderStatus[]> = {
-  NewRequest: ["Received"],
-  Received: ["InCutting"],
-  InCutting: ["Ready"],
-  Ready: [],
-  Dispatched: [],
-};
-
+/** CR-400: the lifecycle column is dormant — every open stage reads "New"; the shown status is
+    panelProgress (derived). Dispatched flips on the last load, Cancelled via /panel-order-cancel. */
 export const PANEL_ORDER_STATUS_LABEL: Record<PanelOrderStatus, string> = {
-  NewRequest: "New", // CR-294: the born stage, every order
-  Received: "Received",
-  InCutting: "In Cutting",
+  NewRequest: "New",
+  Received: "New", // ponytail: legacy stages collapse to the 4 words; derive progress on the stock-less lists if anyone asks for Ready/Completed there
+  InCutting: "New",
   Ready: "Ready",
   Dispatched: "Dispatched",
-};
-
-/** Button label for moving INTO a status (detail-page header, CR-287). */
-export const PANEL_ORDER_ACTION_LABEL: Record<PanelOrderStatus, string> = {
-  NewRequest: "",
-  Received: "Accept",
-  InCutting: "Start Cutting",
-  Ready: "Ready",
-  Dispatched: "Dispatch",
+  Cancelled: "Cancelled",
 };
 
 /** Header + lines may change (and the order may be deleted) only here — mirrors the server (CR-302). */
@@ -130,13 +125,23 @@ export interface LoadRow extends LoadIn {
 
 const MATERIALS: readonly Material[] = ["Panel", "Mdf", "Item"];
 /** Group PanelLoad + PanelLoadLine rows per order (col = panel_order | sample_order). */
-export function parseLoads(loadRows: Record<string, unknown>[], lineRows: Record<string, unknown>[], col: "panel_order" | "sample_order"): Map<string, LoadRow[]> {
+export function parseLoads(
+  loadRows: Record<string, unknown>[],
+  lineRows: Record<string, unknown>[],
+  col: "panel_order" | "sample_order",
+  /** CR-405: name lookups for the piece kind on an Item line (panel orders); sample loads pass none. */
+  names: { design?: Map<string, { uniqueName?: string; designName?: string }>; cut?: Map<string, string> } = {},
+): Map<string, LoadRow[]> {
   const linesByLoad = new Map<string, LoadLineIn[]>();
   for (const l of lineRows) {
     const key = str(l.panel_load);
     const material = (MATERIALS as readonly string[]).includes(str(l.material)) ? (str(l.material) as Material) : "Item";
     const w = l.weight_kg == null || l.weight_kg === "" ? null : Number(l.weight_kg);
-    const row: LoadLineIn = { lineId: str(l.order_line), material, qty: num(l.qty), weightKg: w != null && isFinite(w) ? w : null };
+    const d = names.design?.get(str(l.design));
+    const row: LoadLineIn = {
+      lineId: str(l.order_line), material, qty: num(l.qty), weightKg: w != null && isFinite(w) ? w : null,
+      designId: str(l.design), cutSizeId: str(l.cut_piece_size), designName: d?.uniqueName || d?.designName || "", cutSizeName: names.cut?.get(str(l.cut_piece_size)) || "",
+    };
     linesByLoad.set(key, [...(linesByLoad.get(key) ?? []), row]);
   }
   const out = new Map<string, LoadRow[]>();
@@ -189,6 +194,8 @@ export interface PanelOrderRow {
   allocation: Allocation;
   /** CR-313: MDF · Vinyl Printing · Cut Pieces marks (missing = Pending). */
   checkpoints: Checkpoints;
+  /** CR-410: the Warehouse node (location) where this order's panels sit; "" = not set. */
+  warehouseId: string;
   lines: PanelOrderLineRow[];
   /** CR-347: vehicle trips recorded against this order, oldest first. */
   loads: LoadRow[];
@@ -251,7 +258,7 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
   const panelCode = new Map((panelsRes.ok ? panelsRes.panels : []).map((p) => [p.id, p.panelCode]));
   const cutName = new Map((panelsRes.ok ? panelsRes.cutSizes : []).map((c) => [c.id, c.label]));
   const design = new Map((designsRes.ok ? designsRes.designs : []).map((d) => [d.id, d]));
-  const loadsByOrder = parseLoads(loads.rows || [], loadLines.rows || [], "panel_order");
+  const loadsByOrder = parseLoads(loads.rows || [], loadLines.rows || [], "panel_order", { design, cut: cutName }); // CR-405: piece names on load lines
   const linesByOrder = new Map<string, PanelOrderLineRow[]>();
   for (const l of lines.rows || []) {
     const key = str(l.panel_order);
@@ -289,6 +296,7 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
       checklist: parseChecklist(str(o.checklist)),
       allocation: parseAllocation(str(o.allocation)),
       checkpoints: parseJsonCol<Checkpoints>(str(o.checkpoints)),
+      warehouseId: str(o.warehouse),
       lines: ls,
       loads: loadsByOrder.get(id) ?? [],
       panelCount: ls.length,
@@ -460,6 +468,8 @@ export interface PanelOrderInput {
   /** Source record (CR-286) — set by "Request Panels" from an SO / Quote; create only, shown as the Source column. */
   sales_order?: string;
   quote?: string;
+  /** CR-413: Warehouse node where the panels will sit ("" clears; absent leaves it alone). */
+  warehouse?: string;
   lines: PanelOrderLineInput[];
 }
 
@@ -469,6 +479,7 @@ export function panelOrderToInput(o: PanelOrderRow): PanelOrderInput {
     customer: o.customerId,
     salesperson: o.salesperson,
     order_date: o.orderDate,
+    warehouse: o.warehouseId || "",
     sales_order: o.salesOrderId || undefined,
     quote: o.quoteId || undefined,
     lines: o.lines.map((l) =>
@@ -487,14 +498,19 @@ export function saveChecklist(rowid: string, checklist: Record<string, boolean>)
   return bust(update("PanelOrder", rowid, { checklist: JSON.stringify(checklist) }));
 }
 
+/** CR-410: where the order's panels sit — a Warehouse node id ("" clears). Plain column, generic PATCH (activity row comes free). */
+export function setPanelOrderLocation(rowid: string, warehouse: string): Promise<OpResult> {
+  return bust(update("PanelOrder", rowid, { warehouse: warehouse || null }));
+}
+
 /** Soft-delete header + lines — New / Received only, reason mandatory (server-enforced). */
 export function deletePanelOrder(rowid: string, reason?: string): Promise<OpResult> {
   return bust(op(`panel-order-delete/${rowid}`, { reason }));
 }
 
-/** Stage flip via the status machine (adds stock on Ready, deducts on Dispatched). */
-export function setPanelOrderStatus(rowid: string, status: PanelOrderStatus) {
-  return bust(op<{ ROWID: string; status: string }>(`panel-order-status/${rowid}`, { status }));
+/** CR-368: cancel — reason mandatory for every role; bookings are freed. Refused once anything is loaded. */
+export function cancelPanelOrder(rowid: string, reason: string) {
+  return bust(op<{ ROWID: string; status: string }>(`panel-order-cancel/${rowid}`, { reason }));
 }
 
 /** CR-312: set the order's booking — absolute pcs per stockKey (lower = release, 0 = none). Server checks need + free. */
@@ -502,17 +518,27 @@ export function allocatePanelOrder(rowid: string, allocation: Allocation) {
   return bust(op<{ ROWID: string; allocation: Allocation }>(`panel-order-allocate/${rowid}`, { allocation }));
 }
 
-/** CR-313: mark one production checkpoint; the server stamps who / when. */
-export function setCheckpoint(rowid: string, key: CheckpointKey, status: string) {
-  return bust(op<{ ROWID: string; checkpoints: Checkpoints }>(`panel-order-checkpoint/${rowid}`, { key, status }));
+/** CR-313: mark one production checkpoint; the server stamps who / when.
+    CR-376: mdf / vinyl / pasted are marked per panel (`panel` = Panel ROWID on one of the order's lines); `cut` is order-level. */
+export function setCheckpoint(rowid: string, key: CheckpointKey, status: string, panel?: string) {
+  // CR-432: a mark moves no stock — patch the cached order in place instead of busting both caches (which re-downloaded every table).
+  return op<{ ROWID: string; checkpoints: Checkpoints }>(`panel-order-checkpoint/${rowid}`, { key, status, ...(panel ? { panel } : {}) }).then((r) => {
+    const next = r.ok ? r.data?.checkpoints : undefined;
+    if (next) cache.patch((v) => ({ ...v, orders: v.orders.map((o) => (o.id === rowid ? { ...o, checkpoints: next } : o)) }));
+    return r;
+  });
 }
 
 /* ---- cut-piece items + stock movements (CR-306…308) ---- */
 export interface CutStockEntryLine {
   design: string;
-  cut_piece_size: string;
+  cut_piece_size: string; // CR-414: "" on a receipt = the item's full size
   qty: number; // receipt / transfer: > 0; adjustment: signed, ≠ 0
   note?: string;
+  /** CR-414: receipt only — weight per piece for a cut piece defined by this line (or still unweighed). */
+  weight_kg?: number | null;
+  /** CR-438: this line's location; blank → the call-level `warehouse`. */
+  warehouse?: string;
 }
 /** One dated bulk movement: Add Stock (receipt), Adjust Stock (adjustment, reason required)
     or a Transfer Order between warehouses (transfer: from/to + reason, CR-330). */
@@ -527,6 +553,7 @@ export function postCutStockEntry(input: {
   to_warehouse?: string;
   lines: CutStockEntryLine[];
 }) {
+  invalidatePanels(); // CR-414: a receipt may mint a full-size CutPieceSize
   return bust(op<{ lines: number }>("cut-stock-entry", input));
 }
 /** Define / re-weigh a cut-piece item. A blank cut_piece_size = the item's full size. */

@@ -67,6 +67,39 @@ export function primaryWarehouseId(warehouses: WarehouseIn[]): string {
   return warehouses.find((w) => w.isPrimary)?.id ?? warehouses[0]?.id ?? "";
 }
 
+/** CR-409: raw `Warehouse` rows → reducer nodes. A row with `parent` is a LOCATION
+    inside that warehouse: it inherits the warehouse's purposes and is never primary
+    (only top-level rows carry the flag). One helper so the two fetch paths
+    (warehousesApi, batchStockApi) cannot drift. */
+export function toWarehouseIn(rows: { ROWID: unknown; is_primary?: unknown; purposes?: unknown; parent?: unknown }[]): WarehouseIn[] {
+  const pid = (v: unknown) => (v == null || v === "" ? "" : String(v));
+  const top = new Map(rows.filter((r) => !pid(r.parent)).map((r) => [String(r.ROWID), r]));
+  return rows.map((r) => {
+    const p = pid(r.parent) ? top.get(pid(r.parent)) : undefined;
+    return {
+      id: String(r.ROWID),
+      isPrimary: !pid(r.parent) && (r.is_primary === true || String(r.is_primary) === "true"),
+      purposes: parsePurposes(String((p ? p.purposes : r.purposes) || "")),
+    };
+  });
+}
+
+/** CR-409: location codes are a grid (A1 … F12) — sort A1, A2, …, A10, B1; never lexical. */
+export const codeCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** CR-409: the grid — rows `A`–`F` × bays `1`–`12` → ["A1", …, "A12", "B1", …, "F12"]. [] on a bad range. Pure. */
+export function gridCodes(fromRow: string, toRow: string, fromBay: number, toBay: number): string[] {
+  const a = fromRow.trim().toUpperCase().charCodeAt(0);
+  const z = toRow.trim().toUpperCase().charCodeAt(0);
+  if (!(a >= 65 && a <= 90 && z >= a && z <= 90)) return [];
+  const lo = Math.max(1, Math.floor(fromBay));
+  const hi = Math.min(999, Math.floor(toBay));
+  if (!(hi >= lo)) return [];
+  const out: string[] = [];
+  for (let r = a; r <= z; r++) for (let b = lo; b <= hi; b++) out.push(`${String.fromCharCode(r)}${b}`);
+  return out;
+}
+
 export function deriveWarehouseStock(warehouses: WarehouseIn[], moves: WhMoveIn[], claims: WhClaimIn[] = []): WhCell[] {
   const primary = primaryWarehouseId(warehouses);
   const known = new Map(warehouses.map((w) => [w.id, w]));

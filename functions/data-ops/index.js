@@ -123,6 +123,11 @@ const ALLOWED = new Set([
   "PanelLoad", // CR-347: one vehicle trip per panel / sample order (route-only writes: /panel-load-save|-delete)
   "PanelLoadLine",
   "Warehouse", // CR-329: stock locations (Settings ▸ Warehouses)
+  // CR-394: Design Master lookups — surface application, punch type (with image), series, catalogue.
+  "SurfaceApplication",
+  "Punch",
+  "Series",
+  "Catalogue",
 ]);
 
 function assertTable(table) {
@@ -382,6 +387,13 @@ function deleteReason(req, table) {
   if (!reason && role !== "admin" && !REASON_EXEMPT_TABLES.has(table)) throw badRequest("A reason is required to delete");
   return reason;
 }
+/* CR-368…371: a cancel or a discard ALWAYS says why — every role, no Admin exemption
+   (user decision 2026-10-22; the CR-270 exemption stays for plain deletes). */
+function requireReason(req, what) {
+  const reason = String((req.query && req.query.reason) || (req.body && req.body.reason) || "").trim();
+  if (!reason) throw badRequest(`A reason is required ${what}`);
+  return reason;
+}
 
 /* ---- Generic-route input guards (ZCQL-injection defense) ----
    The generic list/get/patch routes interpolate query params into ZCQL. The
@@ -419,7 +431,16 @@ const BLOCK_DELETE = {
   Customer: [
     ["Quote", "customer", "quotation"],
     ["SalesOrder", "customer", "sales order"],
+    // CR-392/393: logical FKs (plain bigint on LIVE — no DB SET-NULL), so the guard is the only net.
+    ["Design", "design_owner", "item (design owner)"],
+    ["Design", "design_buyer", "item (design buyer)"],
+    ["PartyBrand", "customer", "customer brand"],
   ],
+  // CR-394: a lookup value picked on an item stays.
+  SurfaceApplication: [["Design", "surface_application", "item"]],
+  Punch: [["Design", "punch", "item"]],
+  Series: [["Design", "series", "item"]],
+  Catalogue: [["Design", "catalogue", "item"]],
   Quote: [["SalesOrder", "quote", "sales order"]], // downstream conversion; NOT QuoteItem (no line-delete UI yet)
   Mdf: [["PanelOrderLine", "mdf", "panel-order line"]], // CR-344: a thickness picked on an order stays
   SalesOrder: [
@@ -433,9 +454,13 @@ const BLOCK_DELETE = {
   // downstream transaction first, then channel backward.
   OrderItem: [["ProductionLog", "order_item", "production entry"]],
   // CR-329: a warehouse with stock history stays (transfer the stock away, then delete).
+  // CR-409: a warehouse keeps its locations (delete them first); CR-410: a panel order placed there.
   Warehouse: [
     ["ProductionLog", "warehouse", "stock entry"],
     ["CutStockEntry", "warehouse", "cut stock entry"],
+    ["Warehouse", "parent", "location"],
+    ["PanelOrder", "warehouse", "panel order"],
+    ["PalletizationPlanLine", "warehouse", "palletized line"], // CR-412
   ],
 };
 
@@ -505,7 +530,7 @@ function assertDateOrder(start, end, startLabel, endLabel) {
 }
 
 /** Throw 409 if `value` already exists in table.field (optionally excluding one ROWID). */
-async function assertUnique(catalyst, table, field, value, excludeRowid) {
+async function assertUnique(catalyst, table, field, value, excludeRowid, extraWhere = "") {
   if (value == null || String(value).trim() === "") return;
   const safe = String(value).replace(/'/g, "''"); // ZCQL string-literal escape
   // Ignore soft-deleted rows so a deleted name can be re-used (every table
@@ -513,12 +538,16 @@ async function assertUnique(catalyst, table, field, value, excludeRowid) {
   const rows = rowList(
     await catalyst
       .zcql()
-      .executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ${field} = '${safe}' AND deleted_at is null`),
+      .executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ${field} = '${safe}' AND deleted_at is null${extraWhere}`),
   );
   if (rows.some((r) => String(r.ROWID) !== String(excludeRowid || ""))) {
     throw badRequest(`${table} ${field} "${value}" already exists`, 409);
   }
 }
+/** CR-409: a Warehouse name is unique among its SIBLINGS — "A1" may exist in every
+    warehouse, but only once per warehouse; top-level warehouse names are unique among
+    themselves. Returns the extra ZCQL clause for assertUnique. */
+const warehouseSiblingScope = (parent) => (rowidParam(parent) ? ` AND parent = ${rowidParam(parent)}` : " AND parent is null");
 
 /* Fields that are legitimately signed (deltas / doc adjustments) — exempt
    from the app-wide no-negative-numbers rule (persistent rule #5). */
@@ -526,6 +555,25 @@ const SIGNED_FIELDS = new Set(["adjustment", "qty_delta"]);
 
 /** Throw 400 if any numeric value in the payload is negative (rule #5).
     Covers both real numbers and numeric strings; SIGNED_FIELDS exempt. */
+/* CR-391: an item's coverage is its own width × length × pcs (pcs typed per item; the
+   Size value is only the form's default). Stamped on every Design write that carries
+   the three inputs so the stored value can never disagree with the form's ƒx field. */
+/** CR-427: Design.box_weight_kg per ROWID — frozen onto quote / SO lines at creation so a later
+    bulk weight edit on the Item master never moves an existing order's planning tonnes. */
+async function designBoxWeights(catalyst, designIds) {
+  const ids = [...new Set((designIds || []).map((d) => String(d)).filter((d) => /^\d+$/.test(d)))];
+  if (!ids.length) return new Map();
+  const rows = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, box_weight_kg FROM Design WHERE ROWID IN (${ids.join(",")})`));
+  return new Map(rows.map((r) => [String(r.ROWID), Number(r.box_weight_kg) || 0]));
+}
+
+function stampDesignCoverage(r) {
+  if (r.width_mm === undefined || r.length_mm === undefined || r.pcs_per_box === undefined) return;
+  const sqm = ((Number(r.width_mm) || 0) / 1000) * ((Number(r.length_mm) || 0) / 1000) * (Number(r.pcs_per_box) || 0);
+  r.coverage_sqm = Math.round(sqm * 1e4) / 1e4;
+  r.coverage_sqft = Math.round(sqm * 10.763915 * 1e4) / 1e4;
+}
+
 function assertNoNegatives(obj) {
   for (const [k, v] of Object.entries(obj || {})) {
     if (SIGNED_FIELDS.has(k)) continue;
@@ -556,6 +604,10 @@ const NATURAL_KEY = {
   CutPieceSize: "name",
   AdjustmentReason: "name",
   Warehouse: "name", // CR-329
+  SurfaceApplication: "name", // CR-394
+  Punch: "name",
+  Series: "name",
+  Catalogue: "name",
 };
 
 /**
@@ -593,6 +645,7 @@ const EXT_MIME = {
 };
 
 const { sniffImage } = require("./lib/sniffImage");
+const { titleCase, normalizeNames } = require("./lib/names"); // CR-429
 app.get("/public/design-image/:fileId", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -921,6 +974,7 @@ app.post("/quote-with-items", async (req, res) => {
         const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
+        const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
 
         const doc = docCompute(total, body);
         const bornStatus = canApprove(req, "Quote") ? "Approved" : "Draft";
@@ -972,6 +1026,7 @@ app.post("/quote-with-items", async (req, res) => {
           await ds.table("QuoteItem").insertRow({
             quote: quoteId,
             design: designIds[i],
+            box_weight_kg: bwMap.get(String(designIds[i])) || 0, // CR-427 snapshot
             quantity_boxes: Number(it.line.qty) || 0,
             rate: Number(it.line.rate) || 0,
             rate_basis: it.line.rate_basis || "box",
@@ -1018,6 +1073,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
         const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
+        const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
 
         const doc = docCompute(total, body);
         // Status is never editable here (use /quote-status). Editing content
@@ -1096,6 +1152,7 @@ app.post("/update-quote-with-items/:rowid", async (req, res) => {
           await ds.table("QuoteItem").insertRow({
             quote: quoteId,
             design: designIds[i],
+            box_weight_kg: bwMap.get(String(designIds[i])) || 0, // CR-427 snapshot
             quantity_boxes: Number(it.line.qty) || 0,
             rate: Number(it.line.rate) || 0,
             rate_basis: it.line.rate_basis || "box",
@@ -1293,6 +1350,10 @@ app.post("/so-status/:rowid", async (req, res) => {
           throw badRequest("Your role cannot approve or reject sales orders", 403);
         if (to === "Rejected" && !reason)
           throw badRequest("A rejection reason is required");
+        if (to === "Cancelled" && !reason) throw badRequest("A reason is required to cancel the order"); // CR-371
+        // CR-371: a cancelled order leaves nothing on the palletization board and hands every
+        // allocation back — or refuses (409) BEFORE the status write when a box is already dispatched.
+        if (to === "Cancelled" && from !== "Cancelled") await cancelSoPalletization(catalyst, ds, soId, reason);
 
         // Persist the reason on the record (see /quote-status) for the grid hover.
         await ds.table("SalesOrder").updateRow(
@@ -1317,20 +1378,6 @@ app.post("/so-status/:rowid", async (req, res) => {
         // RETIRED no-op since CR-198 (production-first): confirming an SO no longer
         // creates production jobs — see enqueueSoProduction. Call kept for rollback.
         if (to === "Confirmed") await enqueueSoProduction(catalyst, ds, soId);
-        // A cancelled order hands its allocated stock back (CR-199). Best-effort:
-        // boxes already palletised stay claimed until they are unpacked.
-        if (to === "Cancelled") {
-          const allocs = await zcqlAllRows(
-            catalyst,
-            `SELECT ROWID FROM ProductionLog WHERE sales_order = ${soId} AND entry_type = 'alloc' AND deleted_at is null`,
-          );
-          // Still best-effort (the cancel itself must not fail), but never silent:
-          // a claim that stays behind keeps stock reserved, so it is logged.
-          for (const a of allocs) {
-            try { await deallocateCore(catalyst, ds, String(a.ROWID)); }
-            catch (e) { console.error("cancel dealloc", soId, String(a.ROWID), e && e.message); }
-          }
-        }
         return { rowid: soId, data: { ROWID: soId, status: to } };
       },
     );
@@ -1428,6 +1475,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         const salesPerson = resolveOptional(sMap, body.salesperson, "Sales person");
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
+        const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
 
         // Line rules, checked before any write: a line with work keeps its
         // design, can't drop below what is already palletised/loaded/dispatched,
@@ -1520,11 +1568,16 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
             sub_total: it.sub,
             final_total: it.sub,
           };
-          if (l.id) await ds.table("OrderItem").updateRow({ ROWID: String(l.id), ...fields });
-          else
+          if (l.id) {
+            // CR-427: the frozen weight moves only when the line's ITEM changes — a qty/rate edit keeps it.
+            const old = oldItems.find((r) => String(r.ROWID) === String(l.id));
+            const swapped = !old || String(old.design || "") !== String(designIds[i]);
+            await ds.table("OrderItem").updateRow({ ROWID: String(l.id), ...fields, ...(swapped ? { box_weight_kg: bwMap.get(String(designIds[i])) || 0 } : {}) });
+          } else
             await ds.table("OrderItem").insertRow({
               sales_order: soId,
               ...fields,
+              box_weight_kg: bwMap.get(String(designIds[i])) || 0, // CR-427 snapshot
               produced_qty_boxes: 0,
               purchased_qty_boxes: 0,
               qc_passed_qty_boxes: 0,
@@ -1587,6 +1640,7 @@ async function createSalesOrder(ds, body, maps) {
   const salesPerson = resolveOptional(maps.sMap, body.salesperson, "Sales person") || body.sales_person_rowid || null;
   const { items, total } = computeLines(body.lines);
   const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
+  const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
@@ -1632,6 +1686,7 @@ async function createSalesOrder(ds, body, maps) {
     await ds.table("OrderItem").insertRow({
       sales_order: soId,
       design: designIds[i],
+      box_weight_kg: bwMap.get(String(designIds[i])) || 0, // CR-427 snapshot
       pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
       ordered_qty_boxes: Number(l.qty) || 0,
       produced_qty_boxes: 0,
@@ -2834,14 +2889,16 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
     const to = String((req.body || {}).status || "");
     const pallet = String((req.body || {}).pallet || "");
     const reqBoxes = Number((req.body || {}).boxes);
+    // CR-412: where the pallet stands (a Warehouse node id) — stamped on the moved line / slice.
+    const warehouse = String((req.body || {}).warehouse || "").replace(/[^0-9]/g, "");
 
     const result = await withOpLog(
       catalyst,
-      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to, ...(pallet ? { pallet } : {}), ...(reqBoxes ? { boxes: reqBoxes } : {}) } },
+      { table_name: "PalletizationPlanLine", operation: "status", payload: { ROWID: lineId, status: to, ...(pallet ? { pallet } : {}), ...(reqBoxes ? { boxes: reqBoxes } : {}), ...(warehouse ? { warehouse } : {}) } },
       async () => {
         const rows = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, order_item, plan, sales_order, design, pallet, boxes, position, batch_number, pallet_group, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, order_item, plan, sales_order, design, pallet, boxes, position, batch_number, pallet_group, manual_edit, box_brand, warehouse FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         );
         if (!rows.length) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -2870,6 +2927,8 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
             ...(line.box_brand ? { box_brand: String(line.box_brand) } : {}),
             ...(line.pallet_group ? { pallet_group: String(line.pallet_group) } : {}),
             ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
+            // CR-412: the moving slice takes the new location, else keeps the line's.
+            ...(warehouse ? { warehouse } : line.warehouse ? { warehouse: String(line.warehouse) } : {}),
           });
           // CR-281: the un-palletized remainder of a partial Complete re-queues.
           const remainderStatus = from === "Palletizing" && to === "ReadyToLoad" ? "Planning" : from;
@@ -2896,7 +2955,7 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
         }
 
         await ds.table("PalletizationPlanLine").updateRow({
-          ROWID: lineId, status: to, ...(/^\d+$/.test(pallet) ? { pallet } : {}),
+          ROWID: lineId, status: to, ...(/^\d+$/.test(pallet) ? { pallet } : {}), ...(warehouse ? { warehouse } : {}),
         });
         await logTransition(catalyst, {
           entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: to,
@@ -2937,13 +2996,16 @@ async function adjustCutStock(catalyst, ds, designId, cutSizeId, delta, entry) {
   if (!d || !c) throw badRequest("design and cut_piece_size are required");
   const row = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT ROWID, qty FROM CutPieceStock WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null`,
+      `SELECT ROWID, qty, weight_kg FROM CutPieceStock WHERE design = ${d} AND cut_piece_size = ${c} AND deleted_at is null`,
     ),
   )[0];
   const next = (row ? Number(row.qty) || 0 : 0) + delta;
   if (next < 0) throw badRequest("Insufficient cut-piece stock", 409);
-  if (row) await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, qty: next });
-  else await ds.table("CutPieceStock").insertRow({ design: d, cut_piece_size: c, qty: next });
+  // CR-414: a receipt may carry the piece's weight — set on a fresh row, or back-filled on an unweighed one.
+  const w = entry && entry.weight_kg != null ? Number(entry.weight_kg) : null;
+  const weight = w != null && (!row || row.weight_kg == null) ? { weight_kg: w } : {};
+  if (row) await ds.table("CutPieceStock").updateRow({ ROWID: row.ROWID, qty: next, ...weight });
+  else await ds.table("CutPieceStock").insertRow({ design: d, cut_piece_size: c, qty: next, ...weight });
   // CR-307: every movement leaves a dated ledger row (receipt / adjustment / order_ready / order_dispatch / sample — CR-316).
   if (entry)
     await ds.table("CutStockEntry").insertRow({
@@ -2975,7 +3037,7 @@ async function panelOrderNeeds(catalyst, orderId, lines) {
   const needs = new Map();
   // CR-347: without explicit lines the need is what is still PENDING to load —
   // pieces already on a vehicle left stock with their load.
-  const src = lines || (await panelPending(catalyst, orderId)).filter((r) => r.material !== "Mdf").map((r) => ({ ...r.line, qty: r.pending }));
+  const src = lines || (await panelPending(catalyst, orderId)).filter((r) => r.material === "Item").map((r) => ({ design: r.design, cut_piece_size: r.cut_piece_size, qty: r.pending }));
   const add = (design, cut, need) => {
     if (need <= 0) return;
     const key = `${design}|${cut}`;
@@ -2985,11 +3047,13 @@ async function panelOrderNeeds(catalyst, orderId, lines) {
   };
   for (const ol of src) {
     const lineQty = Number(ol.qty) || 0;
-    if (!rowidParam(ol.panel)) {
-      // CR-346: a loose cut-piece line needs its own pieces, one per unit.
-      if (rowidParam(ol.design) && rowidParam(ol.cut_piece_size)) add(rowidParam(ol.design), rowidParam(ol.cut_piece_size), lineQty);
+    // CR-346: a loose cut-piece line needs its own pieces, one per unit; CR-405: so does a load pick /
+    // load line that names ONE piece kind of a panel ({design, cut_piece_size, qty} — pieces, not panels).
+    if (rowidParam(ol.design) && rowidParam(ol.cut_piece_size)) {
+      add(rowidParam(ol.design), rowidParam(ol.cut_piece_size), lineQty);
       continue;
     }
+    if (!rowidParam(ol.panel)) continue;
     const pieces = rowList(
       await catalyst.zcql().executeZCQLQuery(
         `SELECT design, cut_piece_size, cut_piece_qty FROM PanelLine WHERE panel = ${rowidParam(ol.panel)} AND deleted_at is null`,
@@ -3002,90 +3066,108 @@ async function panelOrderNeeds(catalyst, orderId, lines) {
 
 /* ----------------------------------------------------------------
    CR-347: LOADING ENTRIES — a panel / sample order ships in parts, on
-   several vehicles: the cut-piece "panel" first, the MDF board later, loose
-   cut pieces and samples whenever. One PanelLoad row per order per trip
-   (a multi-order trip shares one LD/FY/NNN) + PanelLoadLine rows
-   {order_line, material Panel|Mdf|Item, qty, weight_kg stamped at load}.
-   A load MOVES the stock it carries (Panel / Item pieces, booking-gated);
-   MDF boards are not stock. "Dispatched" is DERIVED: the last load that
+   several vehicles: pieces first, the MDF board later, loose cut pieces
+   and samples whenever. One PanelLoad row per order per trip (a multi-
+   order trip shares one LD/FY/NNN) + PanelLoadLine rows {order_line,
+   material Item|Mdf, design + cut_piece_size on an Item line (CR-405),
+   qty, weight_kg stamped at load}.
+   CR-405: a load row is ONE CUT PIECE KIND of a line — a panel line has
+   one Item row per piece kind on the panel (pcs × qty) plus its Mdf row
+   (CR-406: ALWAYS, thickness picked or not); a loose cut-piece line one
+   Item row. Legacy rows with material "Panel" (whole panels) are READ as
+   qty × pcs under every piece key of that panel; nothing new writes them.
+   A load MOVES the stock it carries (Item pieces, booking-gated); MDF
+   boards are not stock. "Dispatched" is DERIVED: the last load that
    leaves nothing pending flips the panel order; a sample load is the old
    /panel-load-save (supplied_qty per line, status derived).
    ---------------------------------------------------------------- */
-const LOAD_MATERIALS = new Set(["Panel", "Mdf", "Item"]);
+const LOAD_MATERIALS = new Set(["Mdf", "Item"]); // CR-405: "Panel" is legacy, read-only
 const PANEL_LOAD_COLS = "ROWID, order_number, order_type, panel_order, sample_order, load_date, vehicle_number, driver_name, driver_mobile, note, photos, performed_by"; // CR-351: driver on the load
 async function panelLoadsOf(catalyst, col, orderId) {
   const loads = await zcqlAllRows(catalyst, `SELECT ${PANEL_LOAD_COLS} FROM PanelLoad WHERE ${col} = ${rowidParam(orderId)} AND deleted_at is null`);
   if (!loads.length) return { loads: [], lines: [] };
   const lines = await zcqlAllRows(
     catalyst,
-    `SELECT ROWID, panel_load, order_line, material, qty, weight_kg FROM PanelLoadLine WHERE panel_load IN (${loads.map((l) => rowidParam(l.ROWID)).join(",")}) AND deleted_at is null`,
+    `SELECT ROWID, panel_load, order_line, material, qty, weight_kg, design, cut_piece_size FROM PanelLoadLine WHERE panel_load IN (${loads.map((l) => rowidParam(l.ROWID)).join(",")}) AND deleted_at is null`,
   );
   return { loads, lines };
 }
-/** Σ loaded per "lineRowid|material". */
-function loadedByLine(loadLines) {
+/** The cut pieces on a panel (PanelLine rows), read once per panel per request. */
+async function panelPiecesOf(catalyst, panelId, cache) {
+  const key = rowidParam(panelId);
+  if (!key) return [];
+  if (cache.has(key)) return cache.get(key);
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(`SELECT design, cut_piece_size, cut_piece_qty FROM PanelLine WHERE panel = ${key} AND deleted_at is null`),
+  );
+  cache.set(key, rows);
+  return rows;
+}
+/** CR-405: identity of a load row — line × material × piece kind (blank kind on a board). */
+const loadRowKey = (lineId, material, design, cut) => `${rowidParam(lineId)}|${material}|${material === "Mdf" ? "" : rowidParam(design)}|${material === "Mdf" ? "" : rowidParam(cut)}`;
+/** Σ loaded per load-row key. A legacy "Panel" line spreads qty × pcs over the panel's piece keys;
+    a pre-CR-405 Item line (no design column) takes its loose order line's piece kind. */
+async function loadedByLine(catalyst, loadLines, linesById, cache) {
   const m = new Map();
+  const add = (k, q) => m.set(k, (m.get(k) || 0) + q);
   for (const l of loadLines) {
-    const k = `${l.order_line}|${l.material}`;
-    m.set(k, (m.get(k) || 0) + (Number(l.qty) || 0));
+    const q = Number(l.qty) || 0;
+    const line = linesById.get(String(l.order_line)) || {};
+    const material = String(l.material);
+    if (material === "Panel") {
+      for (const p of await panelPiecesOf(catalyst, line.panel, cache)) add(loadRowKey(l.order_line, "Item", p.design, p.cut_piece_size), q * (Number(p.cut_piece_qty) || 0));
+      continue;
+    }
+    const design = rowidParam(l.design) || rowidParam(line.design);
+    const cut = rowidParam(l.cut_piece_size) || rowidParam(line.cut_piece_size);
+    add(loadRowKey(l.order_line, material, design, cut), q);
   }
   return m;
 }
-/** What a PANEL-order line can ship: Panel line → Panel (+ Mdf when a board is picked); cut-piece line → Item. */
-function panelLineMaterials(line) {
-  if (rowidParam(line.panel)) return rowidParam(line.mdf) ? ["Panel", "Mdf"] : ["Panel"];
-  return ["Item"];
+/** CR-405: the load rows a PANEL-order line ships, nothing loaded yet — mirrors client lineLoadRows.
+    Panel line → one Item row per piece kind on the panel (pcs × qty) + ONE Mdf row (CR-406, always);
+    loose cut-piece line → one Item row. */
+async function panelLineRows(catalyst, line, cache) {
+  const qty = Number(line.qty) || 0;
+  if (rowidParam(line.panel)) {
+    const pieces = await panelPiecesOf(catalyst, line.panel, cache);
+    return [
+      ...pieces.map((p) => ({ line, material: "Item", design: rowidParam(p.design), cut_piece_size: rowidParam(p.cut_piece_size), ordered: (Number(p.cut_piece_qty) || 0) * qty })),
+      { line, material: "Mdf", design: "", cut_piece_size: "", ordered: qty },
+    ];
+  }
+  return [{ line, material: "Item", design: rowidParam(line.design), cut_piece_size: rowidParam(line.cut_piece_size), ordered: qty }];
 }
-/** Pending rows {line, material, ordered, loaded, pending} of one panel order. */
+/** Pending rows {line, material, design, cut_piece_size, ordered, loaded, pending} of one panel order. */
 async function panelPending(catalyst, orderId) {
   const lines = await panelOrderLines(catalyst, orderId);
   const { lines: ll } = await panelLoadsOf(catalyst, "panel_order", orderId);
-  const loaded = loadedByLine(ll);
+  const cache = new Map();
+  const loaded = await loadedByLine(catalyst, ll, new Map(lines.map((l) => [String(l.ROWID), l])), cache);
   const rows = [];
   for (const line of lines)
-    for (const material of panelLineMaterials(line)) {
-      const ordered = Number(line.qty) || 0;
-      const got = loaded.get(`${line.ROWID}|${material}`) || 0;
-      rows.push({ line, material, ordered, loaded: got, pending: Math.max(0, ordered - got) });
+    for (const r of await panelLineRows(catalyst, line, cache)) {
+      const got = loaded.get(loadRowKey(line.ROWID, r.material, r.design, r.cut_piece_size)) || 0;
+      rows.push({ ...r, loaded: got, pending: Math.max(0, r.ordered - got) });
     }
   return rows;
 }
-/** Per-UNIT weight of each material of a panel-order line; null = an input is unweighed. */
-async function lineUnitWeights(catalyst, line) {
-  const out = { Panel: null, Mdf: null, Item: null };
-  const pieceWeight = async (d, c) => {
-    const r = rowList(
-      await catalyst.zcql().executeZCQLQuery(
-        `SELECT weight_kg FROM CutPieceStock WHERE design = ${rowidParam(d)} AND cut_piece_size = ${rowidParam(c)} AND deleted_at is null`,
-      ),
-    )[0];
-    const v = r && r.weight_kg != null && r.weight_kg !== "" ? Number(r.weight_kg) : NaN;
+/** CR-349/405: kg of ONE unit of a load row — a piece of that kind, or the line's board; null = unweighed / no thickness picked. */
+async function unitWeightOf(catalyst, row) {
+  if (row.material === "Mdf") {
+    if (!rowidParam(row.line.mdf)) return null;
+    const m = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT weight_kg FROM Mdf WHERE ROWID = ${rowidParam(row.line.mdf)}`))[0];
+    const v = m && m.weight_kg != null && m.weight_kg !== "" ? Number(m.weight_kg) : NaN;
     return isFinite(v) ? v : null;
-  };
-  if (rowidParam(line.panel)) {
-    const pieces = rowList(
-      await catalyst.zcql().executeZCQLQuery(
-        `SELECT design, cut_piece_size, cut_piece_qty FROM PanelLine WHERE panel = ${rowidParam(line.panel)} AND deleted_at is null`,
-      ),
-    );
-    let sum = 0;
-    let ok = true;
-    for (const p of pieces) {
-      const v = await pieceWeight(p.design, p.cut_piece_size);
-      if (v == null) {
-        ok = false;
-        break;
-      }
-      sum += v * (Number(p.cut_piece_qty) || 0);
-    }
-    out.Panel = ok ? sum : null;
-    if (rowidParam(line.mdf)) {
-      const m = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT weight_kg FROM Mdf WHERE ROWID = ${rowidParam(line.mdf)}`))[0];
-      const v = m && m.weight_kg != null && m.weight_kg !== "" ? Number(m.weight_kg) : NaN;
-      out.Mdf = isFinite(v) ? v : null;
-    }
-  } else if (rowidParam(line.design) && rowidParam(line.cut_piece_size)) out.Item = await pieceWeight(line.design, line.cut_piece_size);
-  return out;
+  }
+  if (!rowidParam(row.design) || !rowidParam(row.cut_piece_size)) return null;
+  const r = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT weight_kg FROM CutPieceStock WHERE design = ${rowidParam(row.design)} AND cut_piece_size = ${rowidParam(row.cut_piece_size)} AND deleted_at is null`,
+    ),
+  )[0];
+  const v = r && r.weight_kg != null && r.weight_kg !== "" ? Number(r.weight_kg) : NaN;
+  return isFinite(v) ? v : null;
 }
 
 const parseJsonCol = (raw) => {
@@ -3102,11 +3184,12 @@ const parseJsonCol = (raw) => {
    JSON for audit but drop out of every sum. Σ bookings ≤ on-hand is the
    invariant: guarded at allocate, negative adjustment and save-clamp; Ready
    adds its output and books it, so it cannot break it. */
-const PANEL_ORDER_OPEN = new Set(["Received", "InCutting", "Ready"]);
+// CR-400: an order is workable from birth — marks, booking and loads need no Accept any more.
+const PANEL_ORDER_OPEN = new Set(["NewRequest", "Received", "InCutting", "Ready"]);
 async function otherAllocations(catalyst, excludeOrderId) {
   const rows = await zcqlAllRows(
     catalyst,
-    `SELECT ROWID, allocation FROM PanelOrder WHERE (status = 'Received' OR status = 'InCutting' OR status = 'Ready') AND deleted_at is null`,
+    `SELECT ROWID, allocation FROM PanelOrder WHERE (status = 'NewRequest' OR status = 'Received' OR status = 'InCutting' OR status = 'Ready') AND deleted_at is null`,
   );
   const sum = new Map();
   for (const r of rows) {
@@ -3122,6 +3205,11 @@ async function cutOnHand(catalyst, designId, cutSizeId) {
     ),
   )[0];
   return row ? Number(row.qty) || 0 : 0;
+}
+/** CR-381: "PANEL-004" for an error message (the id when the panel is gone). */
+async function panelCodeOf(catalyst, panelId) {
+  const p = rowidParam(panelId) && rowList(await catalyst.zcql().executeZCQLQuery(`SELECT panel_code FROM Panel WHERE ROWID = ${rowidParam(panelId)}`))[0];
+  return (p && p.panel_code) || String(panelId || "Panel");
 }
 async function cutPieceLabel(catalyst, designId, cutSizeId) {
   const c = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT name FROM CutPieceSize WHERE ROWID = ${rowidParam(cutSizeId)}`))[0];
@@ -3188,19 +3276,37 @@ app.post("/panel-order-status/:rowid", async (req, res) => {
   }
 });
 
-/* CR-313: production checkpoints — MDF · Vinyl Printing · Cut Pieces: three
-   independent readiness marks per order (they run simultaneously and never
-   gate the lifecycle). Any direction; each save stamps who / when. Overall
-   readiness is derived on the client, never stored. */
+/* CR-313: production checkpoints — MDF · Vinyl Printing · Cut Pieces: readiness
+   marks per order that never gate the lifecycle. Any direction; each save stamps
+   who / when. Overall progress is derived on the client, never stored.
+   CR-381: the marks DO gate LOADING per line × material (/panel-load-save,
+   `materialBlockers` — mirrors client materialReadiness). CR-403 (reverses the
+   CR-380/383 pieces gate): ONLY the MDF board waits for Pasted Ready; a panel's
+   pieces and loose cut pieces = the booking gate alone, so pieces, boards or
+   both can go on any trip. The order-level `cut` mark is dormant (CR-400).
+   CR-366: Vinyl Pasted on MDF can only be Ready once MDF and Vinyl Printing
+   are (mirrored in client pastedAllowed). CR-431 dropped the CR-401 vinyl-after-MDF
+   gate: MDF and Vinyl are marked independently.
+   CR-376: mdf / vinyl / pasted are marked PER PANEL — `checkpoints.panels[panelId][key]`
+   (a panel sits on one line per order, and the panel id survives a line rewrite);
+   `cut` stays order-level. The old order-level mdf/vinyl/pasted marks are the
+   fallback for a panel without its own (no migration). */
 const CHECKPOINTS = {
   mdf: ["Pending", "Ordered", "Received", "Ready"],
   vinyl: ["Pending", "Printing", "Ready"],
   cut: ["Pending", "Ready"],
   pasted: ["Pending", "Ready"], // CR-323: printed vinyl pasted on the MDF
 };
+const lineCp = (cp, panelId, key) => (cp.panels && cp.panels[panelId] && cp.panels[panelId][key]) || cp[key] || null;
+const pastedAllowed = (cp, panelId) => (lineCp(cp, panelId, "mdf") || {}).status === "Ready" && (lineCp(cp, panelId, "vinyl") || {}).status === "Ready";
+/** CR-381/403: what still blocks loading one material of a panel line — same words as the client. */
+const materialBlockers = (cp, panelId, material) => {
+  if (material !== "Mdf") return [];
+  return (lineCp(cp, panelId, "pasted") || {}).status === "Ready" ? [] : ["Not pasted on MDF"];
+};
 const openOrderOr409 = (order) => {
-  if (!PANEL_ORDER_OPEN.has(String(order.status)))
-    throw badRequest(String(order.status) === "Dispatched" ? "Order already dispatched" : "Accept the request first", 409);
+  const st = String(order.status);
+  if (!PANEL_ORDER_OPEN.has(st)) throw badRequest(st === "Cancelled" ? "Order cancelled" : "Order already dispatched", 409);
 };
 app.post("/panel-order-checkpoint/:rowid", async (req, res) => {
   try {
@@ -3209,12 +3315,14 @@ app.post("/panel-order-checkpoint/:rowid", async (req, res) => {
     const orderId = rowidParam(req.params.rowid);
     const key = String((req.body || {}).key || "");
     const status = String((req.body || {}).status || "");
+    const panel = rowidParam((req.body || {}).panel); // CR-376: required for mdf / vinyl / pasted
     const result = await withOpLog(
       catalyst,
-      { table_name: "PanelOrder", operation: "checkpoint", payload: { ROWID: orderId, key, status } },
+      { table_name: "PanelOrder", operation: "checkpoint", payload: { ROWID: orderId, key, status, ...(panel ? { panel } : {}) } },
       async () => {
         if (!CHECKPOINTS[key]) throw badRequest("key must be mdf, vinyl, cut or pasted");
         if (!CHECKPOINTS[key].includes(status)) throw badRequest(`${key} status must be one of ${CHECKPOINTS[key].join(", ")}`);
+        if (key !== "cut" && !panel) throw badRequest(`${key} is marked per panel — send the panel`);
         const order = rowList(
           await catalyst.zcql().executeZCQLQuery(
             `SELECT ROWID, status, sales_order, quote, checkpoints FROM PanelOrder WHERE ROWID = ${orderId} AND deleted_at is null`,
@@ -3222,14 +3330,21 @@ app.post("/panel-order-checkpoint/:rowid", async (req, res) => {
         )[0];
         if (!order) throw badRequest(`Panel order not found: ${orderId}`, 404);
         openOrderOr409(order);
+        if (key !== "cut" && !(await panelOrderLines(catalyst, orderId)).some((l) => String(l.panel || "") === panel)) throw badRequest("That panel is not on this order");
         const next = parseJsonCol(order.checkpoints);
-        next[key] = { status, by: await currentActor(catalyst), at: stampNow() };
+        if (key === "pasted" && status === "Ready" && !pastedAllowed(next, panel)) throw badRequest("Mark MDF and Vinyl Printing Ready first", 409); // CR-366
+        const mark = { status, by: await currentActor(catalyst), at: stampNow() };
+        if (key === "cut") next.cut = mark;
+        else {
+          next.panels = next.panels || {};
+          next.panels[panel] = { ...(next.panels[panel] || {}), [key]: mark };
+        }
         await ds.table("PanelOrder").updateRow({ ROWID: orderId, checkpoints: JSON.stringify(next) });
         await logRelated(
           catalyst,
           [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }],
           "panel-order-checkpoint",
-          { ROWID: orderId, key, status },
+          { ROWID: orderId, key, status, ...(panel ? { panel } : {}) },
         );
         return { rowid: orderId, data: { ROWID: orderId, checkpoints: next } };
       },
@@ -3312,6 +3427,8 @@ app.post("/panel-order-save", async (req, res) => {
       salesperson: String(body.salesperson || "").trim(),
     };
     if (String(body.order_date || "").trim()) header.order_date = String(body.order_date).trim(); // date cols reject ""
+    // CR-413: where the panels will sit (a Warehouse node id). "" clears it; absent leaves it alone.
+    if (body.warehouse !== undefined) header.warehouse = /^\d+$/.test(String(body.warehouse || "")) ? String(body.warehouse) : null;
     const result = await withOpLog(
       catalyst,
       { table_name: "PanelOrder", operation: rowid ? "update" : "insert", payload: body },
@@ -3445,6 +3562,48 @@ app.post("/panel-order-delete/:rowid", async (req, res) => {
         for (const l of await panelOrderLines(catalyst, rid)) await ds.table("PanelOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
         await ds.table("PanelOrder").updateRow({ ROWID: rid, deleted_at: stamp });
         return { rowid: rid, data: { ROWID: rid } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-368: Cancel — any order that has not shipped anything (New … Ready, no loads).
+   Reason mandatory for every role. The booking JSON is cleared so the pieces are
+   free stock again (otherAllocations ignores the status anyway); pieces a Ready
+   order added stay on hand. An order with loads is not cancellable — delete the
+   loads first (each returns its pieces + booking). Status Cancelled is terminal:
+   no transition, save, allocate, checkpoint or load accepts it. */
+const PANEL_ORDER_CANCELLABLE = new Set(["NewRequest", "Received", "InCutting", "Ready"]);
+app.post("/panel-order-cancel/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const reason = requireReason(req, "to cancel the order");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "PanelOrder", operation: "cancel", payload: { ROWID: rid, reason } },
+      async () => {
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, order_number, status, sales_order, quote, customer FROM PanelOrder WHERE ROWID = ${rid} AND deleted_at is null`),
+        )[0];
+        if (!order) throw badRequest(`Panel order not found: ${rid}`, 404);
+        const from = String(order.status);
+        if (!PANEL_ORDER_CANCELLABLE.has(from)) throw badRequest(from === "Cancelled" ? "Order already cancelled" : "Order already dispatched", 409);
+        const n = (await panelLoadsOf(catalyst, "panel_order", rid)).loads.length;
+        if (n) throw badRequest(`Delete the ${n} load${n === 1 ? "" : "s"} in the Dispatch tab first`, 409);
+        await ds.table("PanelOrder").updateRow({ ROWID: rid, status: "Cancelled", allocation: "{}" });
+        await logTransition(catalyst, { entity_type: "PanelOrder", entity_rowid: rid, from_status: from, to_status: "Cancelled", note: reason });
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }, { table: "Customer", rowid: order.customer }],
+          "panel-order-cancel",
+          { ROWID: rid, order_number: order.order_number, reason },
+        );
+        return { rowid: rid, data: { ROWID: rid, status: "Cancelled" } };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -3604,6 +3763,46 @@ app.post("/sample-order-delete/:rowid", async (req, res) => {
   }
 });
 
+/* CR-368: Cancel a sample order — only while nothing has gone out (no supply, no
+   load); reason mandatory for every role. Cancelled is the one STORED status on a
+   sample order (the rest derive from the lines) and it is terminal. */
+app.post("/sample-order-cancel/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const reason = requireReason(req, "to cancel the order");
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SampleOrder", operation: "cancel", payload: { ROWID: rid, reason } },
+      async () => {
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, order_number, status, sales_order, quote, customer FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`),
+        )[0];
+        if (!order) throw badRequest(`Sample order not found: ${rid}`, 404);
+        const from = String(order.status);
+        if (from === "Cancelled") throw badRequest("Order already cancelled", 409);
+        const lines = await sampleOrderLines(catalyst, rid);
+        if (from === "Supplied" || lines.some((l) => (Number(l.supplied_qty) || 0) > 0)) throw badRequest("Samples have been supplied — this order cannot be cancelled", 409);
+        const n = (await panelLoadsOf(catalyst, "sample_order", rid)).loads.length;
+        if (n) throw badRequest(`Delete the ${n} load${n === 1 ? "" : "s"} in the Dispatch tab first`, 409);
+        await ds.table("SampleOrder").updateRow({ ROWID: rid, status: "Cancelled" });
+        await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: rid, from_status: from, to_status: "Cancelled", note: reason });
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }, { table: "Customer", rowid: order.customer }],
+          "sample-order-cancel",
+          { ROWID: rid, order_number: order.order_number, reason },
+        );
+        return { rowid: rid, data: { ROWID: rid, status: "Cancelled" } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 /* CR-316: record what went out — {date, note?, lines:[{line, qty}]}. Every
    quantity is verified (≤ remaining; Cut lines ≤ free cut stock = on hand −
    open panel-order bookings, the /cut-stock-entry removal rule) BEFORE any
@@ -3615,6 +3814,7 @@ app.post("/sample-order-delete/:rowid", async (req, res) => {
    apply → stock, supplied_qty/on, derived status, audit. */
 async function verifySampleSupply(catalyst, order, picksIn) {
   const rid = String(order.ROWID);
+  if (String(order.status) === "Cancelled") throw badRequest(`${order.order_number} is cancelled`, 409); // CR-368
   if (String(order.status) === "Supplied") throw badRequest(`Every line of ${order.order_number} is already supplied`, 409);
   const lines = await sampleOrderLines(catalyst, rid);
   const byId = new Map(lines.map((l) => [String(l.ROWID), l]));
@@ -3682,8 +3882,9 @@ async function applySampleSupply(catalyst, ds, order, { picks, lines }, { date, 
 
 /* CR-347: record ONE vehicle trip for one or several orders. Body
    {load_date, vehicle_number, driver_name?, driver_mobile?, note?, photos?: [{id,name}], orders: [{order_type Panel|Sample,
-   order, lines: [{line, material, qty}]}]}. Verify-all-then-write: every order's
-   picks are checked (pending, booking, stock) before the first row lands. */
+   order, lines: [{line, material Item|Mdf, qty, design?, cut_piece_size?}]}]} — CR-405: an Item pick of a
+   panel line names its piece kind. Verify-all-then-write: every order's picks are checked
+   (pending, marks, booking, stock) before the first row lands. */
 app.post("/panel-load-save", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -3691,7 +3892,7 @@ app.post("/panel-load-save", async (req, res) => {
     const body = req.body || {};
     const date = String(body.load_date || "").trim() || todayDate();
     const vehicle = String(body.vehicle_number || "").trim();
-    const driverName = String(body.driver_name || "").trim(); // CR-351
+    const driverName = titleCase(body.driver_name); // CR-351 · CR-429 Title Case
     const driverMobile = String(body.driver_mobile || "").trim();
     const note = String(body.note || "").trim();
     const photos = (Array.isArray(body.photos) ? body.photos : []).filter((p) => p && rowidParam(p.id)).map((p) => ({ id: String(p.id), name: String(p.name || "") }));
@@ -3725,13 +3926,14 @@ app.post("/panel-load-save", async (req, res) => {
           }
           const order = rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, order_number, customer, sales_order, quote, allocation FROM PanelOrder WHERE ROWID = ${oid} AND deleted_at is null`,
+              `SELECT ROWID, status, order_number, customer, sales_order, quote, allocation, checkpoints FROM PanelOrder WHERE ROWID = ${oid} AND deleted_at is null`,
             ),
           )[0];
           if (!order) throw badRequest(`Panel order not found: ${oid}`, 404);
           const st = String(order.status || "");
           if (!PANEL_ORDER_OPEN.has(st))
-            throw badRequest(st === "Dispatched" ? `${order.order_number} is already dispatched` : `Accept ${order.order_number} before loading it`, 409);
+            throw badRequest(st === "Cancelled" ? `${order.order_number} is cancelled` : `${order.order_number} is already dispatched`, 409);
+          const cp = parseJsonCol(order.checkpoints); // CR-381
           const pending = await panelPending(catalyst, oid);
           const picks = [];
           const seen = new Set();
@@ -3739,23 +3941,32 @@ app.post("/panel-load-save", async (req, res) => {
             const lid = rowidParam(p && p.line);
             const material = String((p && p.material) || "");
             const q = Number(p && p.qty);
-            if (!LOAD_MATERIALS.has(material)) throw badRequest("material must be Panel, Mdf or Item");
+            if (!LOAD_MATERIALS.has(material))
+              throw badRequest(material === "Panel" ? "Load a panel's pieces per cut piece — material Item with design + cut_piece_size" : "material must be Item or Mdf");
             if (!Number.isInteger(q) || q < 0) throw badRequest("qty must be a whole number");
             if (q === 0) continue;
-            const row = pending.find((r) => String(r.line.ROWID) === lid && r.material === material);
-            if (!row) throw badRequest("A line / material is not on this order", 404);
-            if (seen.has(`${lid}|${material}`)) throw badRequest("A line is listed twice");
-            seen.add(`${lid}|${material}`);
-            if (q > row.pending)
-              throw badRequest(`Only ${row.pending} ${material === "Mdf" ? "MDF boards" : material === "Item" ? "pcs" : "panels"} remain to load on ${order.order_number}`);
+            // CR-405: an Item pick names its piece kind; a loose line's single Item row may be picked without it.
+            const design = rowidParam(p && p.design);
+            const cut = rowidParam(p && p.cut_piece_size);
+            const row = pending.find(
+              (r) => String(r.line.ROWID) === lid && r.material === material && (material === "Mdf" || (design ? r.design === design && r.cut_piece_size === cut : !rowidParam(r.line.panel))),
+            );
+            if (!row) throw badRequest("A line / material / cut piece is not on this order", 404);
+            const k = loadRowKey(lid, material, row.design, row.cut_piece_size);
+            if (seen.has(k)) throw badRequest("A line is listed twice");
+            seen.add(k);
+            if (q > row.pending) throw badRequest(`Only ${row.pending} ${material === "Mdf" ? "MDF boards" : "pcs"} remain to load on ${order.order_number}`);
+            // CR-381/403: the board leaves only once pasted; pieces are gated by the booking below.
+            const miss = materialBlockers(cp, String(row.line.panel || ""), material);
+            if (miss.length) throw badRequest(`${await panelCodeOf(catalyst, row.line.panel)} ${material === "Mdf" ? "MDF" : "panel"} on ${order.order_number}: ${miss.join(" · ")}`, 409);
             picks.push({ row, qty: q });
           }
           if (!picks.length) throw badRequest(`Enter a quantity on at least one line of ${order.order_number}`);
-          // The pieces leave with the Panel / Item material — they must be BOOKED to this order (CR-312) and on hand.
+          // The pieces leave with the Item rows — they must be BOOKED to this order (CR-312) and on hand.
           const needs = await panelOrderNeeds(
             catalyst,
             oid,
-            picks.filter((p) => p.row.material !== "Mdf").map((p) => ({ ...p.row.line, qty: p.qty })),
+            picks.filter((p) => p.row.material === "Item").map((p) => ({ design: p.row.design, cut_piece_size: p.row.cut_piece_size, qty: p.qty })),
           );
           const booked = parseJsonCol(order.allocation);
           for (const [k, n] of needs) {
@@ -3783,9 +3994,10 @@ app.post("/panel-load-save", async (req, res) => {
           const rows = [];
           for (const p of j.picks) {
             // CR-349: the weight is STAMPED here — a later master edit never rewrites what shipped.
-            const unit = (await lineUnitWeights(catalyst, p.row.line))[p.row.material];
+            const unit = await unitWeightOf(catalyst, p.row);
             rows.push({
               panel_load: loadId, order_line: String(p.row.line.ROWID), material: p.row.material, qty: p.qty,
+              ...(p.row.material === "Item" && p.row.design ? { design: p.row.design, cut_piece_size: p.row.cut_piece_size } : {}), // CR-405
               ...(unit == null ? {} : { weight_kg: Math.round(unit * p.qty * 1000) / 1000 }),
             });
           }
@@ -3807,7 +4019,7 @@ app.post("/panel-load-save", async (req, res) => {
             catalyst,
             [{ table: "PanelOrder", rowid: oid }, { table: "SalesOrder", rowid: j.order.sales_order }, { table: "Quote", rowid: j.order.quote }, { table: "Customer", rowid: j.order.customer }],
             "panel-order-load",
-            { load: orderNumber, vehicle, date, lines: j.picks.map((p) => ({ line: String(p.row.line.ROWID), material: p.row.material, qty: p.qty })), ...(done ? { status: "Dispatched" } : {}) },
+            { load: orderNumber, vehicle, date, lines: j.picks.map((p) => ({ line: String(p.row.line.ROWID), material: p.row.material, qty: p.qty, ...(p.row.design ? { design: p.row.design, cut_piece_size: p.row.cut_piece_size } : {}) })), ...(done ? { status: "Dispatched" } : {}) },
           );
           out.push({ ROWID: loadId, order: oid, order_type: j.type, status: done ? "Dispatched" : String(j.order.status) });
         }
@@ -3837,7 +4049,7 @@ app.post("/panel-load-delete/:rowid", async (req, res) => {
         const load = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ${PANEL_LOAD_COLS} FROM PanelLoad WHERE ROWID = ${rid} AND deleted_at is null`))[0];
         if (!load) throw badRequest(`Load not found: ${rid}`, 404);
         const lines = rowList(
-          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, order_line, material, qty FROM PanelLoadLine WHERE panel_load = ${rid} AND deleted_at is null`),
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, order_line, material, qty, design, cut_piece_size FROM PanelLoadLine WHERE panel_load = ${rid} AND deleted_at is null`),
         );
         const actor = await currentActor(catalyst);
         const stamp = stampNow();
@@ -3875,10 +4087,13 @@ app.post("/panel-load-delete/:rowid", async (req, res) => {
           if (!order) throw badRequest("Panel order not found", 404);
           if (!PANEL_ORDER_OPEN.has(String(order.status))) throw badRequest(`${order.order_number} is already dispatched — a final load cannot be removed`, 409);
           const byId = new Map((await panelOrderLines(catalyst, oid)).map((l) => [String(l.ROWID), l]));
+          // CR-405: an Item line names its piece kind (older loose-line rows and legacy whole-panel rows fall back to the order line).
           const needs = await panelOrderNeeds(
             catalyst,
             oid,
-            lines.filter((l) => String(l.material) !== "Mdf").map((l) => ({ ...(byId.get(String(l.order_line)) || {}), qty: Number(l.qty) || 0 })),
+            lines
+              .filter((l) => String(l.material) !== "Mdf")
+              .map((l) => (rowidParam(l.design) ? { design: l.design, cut_piece_size: l.cut_piece_size, qty: Number(l.qty) || 0 } : { ...(byId.get(String(l.order_line)) || {}), qty: Number(l.qty) || 0 })),
           );
           const alloc = parseJsonCol(order.allocation);
           for (const [k, n] of needs) {
@@ -3948,6 +4163,90 @@ app.post("/migrate-panel-orders", async (req, res) => {
       },
     );
     res.json({ ok: true, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
+/* CR-373: duplicate customers. The 2026-10-21 CRM imports minted twins (same crm_account_id — 822 rows
+   for ≈530 accounts) and reused CUS- codes: the sync read "existing" customers with an unbounded ZCQL,
+   capped at 300 rows (fixed by CR-372 in lib/customerSync.js). Dry run (default) returns the plan from
+   lib/customerDedupe.js plus, per group, the transactions that would move; {apply:true} repoints
+   Quote / SalesOrder / PanelOrder / SampleOrder at the keeper, copies the Books link onto it, soft-deletes
+   the twins and re-codes survivors that share a code. Same-name customers on DIFFERENT CRM accounts are
+   reported only (CRM is the source — merge them there). Idempotent: a second run plans nothing. */
+/* [table, column] pairs that point at a Customer. CR-392/393 added the item owner / buyer
+   links and the per-customer brand, so a merged twin leaves no dangling reference. */
+const CUSTOMER_FK_COLS = [
+  ["Quote", "customer"], ["SalesOrder", "customer"], ["PanelOrder", "customer"], ["SampleOrder", "customer"],
+  ["PartyBrand", "customer"], ["Design", "design_owner"], ["Design", "design_buyer"],
+];
+app.post("/customer-dedupe", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const u = req.appUser || {};
+    if (String(u.role || "").trim().toLowerCase() !== "admin") throw badRequest("Admin only", 403);
+    const apply = !!(req.body && req.body.apply);
+    const ds = catalyst.datastore();
+    const rows = await zcqlAllRows(catalyst, "SELECT ROWID, code, name, crm_account_id, books_contact_id, CREATEDTIME FROM Customer WHERE deleted_at is null");
+    const plan = require("./lib/customerDedupe").planDedupe(rows);
+    // Live transactions pointing at the rows to drop: table → Map<customer rowid, [rowid]>.
+    const refs = {};
+    const dropIds = plan.groups.flatMap((g) => g.drop.map((d) => d.rowid));
+    for (const [t, c] of CUSTOMER_FK_COLS) {
+      const k = `${t}.${c}`;
+      refs[k] = new Map();
+      for (let i = 0; i < dropIds.length; i += 300) {
+        const hits = await zcqlAllRows(catalyst, `SELECT ROWID, ${c} FROM ${t} WHERE ${c} IN (${dropIds.slice(i, i + 300).join(",")}) AND deleted_at is null`);
+        for (const h of hits) refs[k].set(String(h[c]), [...(refs[k].get(String(h[c])) || []), String(h.ROWID)]);
+      }
+    }
+    for (const g of plan.groups) {
+      g.moves = {};
+      for (const [t, c] of CUSTOMER_FK_COLS) g.moves[`${t}.${c}`] = g.drop.reduce((n, d) => n + (refs[`${t}.${c}`].get(d.rowid) || []).length, 0);
+    }
+    if (!apply) return res.json({ ok: true, applied: false, ...plan });
+
+    const actor = await currentActor(catalyst);
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "Customer", operation: "dedupe", payload: { groups: plan.groups.length, recodes: plan.recodes.length } },
+      async () => {
+        const stamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+        let merged = 0;
+        let repointed = 0;
+        let recoded = 0;
+        for (const g of plan.groups) {
+          for (const d of g.drop) {
+            for (const [t, c] of CUSTOMER_FK_COLS) {
+              for (const id of refs[`${t}.${c}`].get(d.rowid) || []) {
+                await ds.table(t).updateRow({ ROWID: id, [c]: g.keep.rowid });
+                repointed++;
+              }
+            }
+            await ds.table("Customer").updateRow({ ROWID: d.rowid, deleted_at: stamp });
+            await writeOpLog(catalyst, {
+              table_name: "Customer",
+              operation: "dedupe:merge",
+              entity_rowid: d.rowid,
+              status: "success",
+              actor,
+              payload_summary: `${d.code} → ${g.keep.code} (Zoho CRM ${g.crm_account_id})`,
+            });
+            merged++;
+          }
+          if (g.inherit_books) await ds.table("Customer").updateRow({ ROWID: g.keep.rowid, books_contact_id: g.inherit_books });
+        }
+        for (const r of plan.recodes) {
+          await ds.table("Customer").updateRow({ ROWID: r.rowid, code: r.to });
+          await writeOpLog(catalyst, { table_name: "Customer", operation: "dedupe:recode", entity_rowid: r.rowid, status: "success", actor, payload_summary: `${r.name}: ${r.from} → ${r.to}` });
+          recoded++;
+        }
+        _cache.Customer = null; // name → ROWID lookups must not resolve to a merged row
+        return { rowid: null, data: { merged, repointed, recoded } };
+      },
+    );
+    res.json({ ok: true, applied: true, ...plan, ...result.data });
   } catch (err) {
     sendErr(res, err);
   }
@@ -4037,7 +4336,10 @@ async function designLabel(catalyst, designId) {
 
 /* Bulk stock movement (CR-307 receipt / CR-308 adjustment): one dated
    submission, N (design, cut size, qty) lines. Every deduction is verified
-   before any write — all-or-nothing, the /panel-order-status rule. */
+   before any write — all-or-nothing, the /panel-order-status rule.
+   CR-414: a RECEIPT for a (design, cut size) pair that is not defined yet
+   defines it (= imports the design into Panel Craft) with the line's
+   optional weight_kg; a blank cut_piece_size on a receipt = the full size. */
 app.post("/cut-stock-entry", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -4058,26 +4360,41 @@ app.post("/cut-stock-entry", async (req, res) => {
         const meta = await warehouseMeta(catalyst);
         const transferring = kind === "transfer";
         const pair = transferring ? transferPair(meta, body) : null;
-        const warehouse = !transferring && rowidParam(body.warehouse) && meta.byId.has(rowidParam(body.warehouse)) ? rowidParam(body.warehouse) : null;
-        const takeFrom = transferring ? pair.from : warehouse || meta.primary;
-        const merged = new Map(); // design|cut → line (duplicates summed)
+        const validWh = (v) => (rowidParam(v) && meta.byId.has(rowidParam(v)) ? rowidParam(v) : null);
+        const warehouse = !transferring ? validWh(body.warehouse) : null;
+        // CR-438: a line may name its own location; the body's is the fallback (null = primary). Transfers keep the pair.
+        const merged = new Map(); // design|cut|warehouse → line (duplicates summed)
+        const receiving = kind === "receipt";
         for (const l of Array.isArray(body.lines) ? body.lines : []) {
           const d = rowidParam(l && l.design);
-          const c = rowidParam(l && l.cut_piece_size);
-          if (!d || !c) throw badRequest("Every line needs an item and a cut piece size");
+          if (!d) throw badRequest("Every line needs an item");
+          const c = rowidParam(l && l.cut_piece_size) || (receiving ? await fullSizeCutPiece(catalyst, ds, d) : null);
+          if (!c) throw badRequest("Every line needs an item and a cut piece size");
+          const wh = transferring ? null : validWh(l && l.warehouse) || warehouse;
           const q = Number(l.qty);
           if (!Number.isInteger(q) || q === 0 || (kind !== "adjustment" && q < 0))
             throw badRequest(kind !== "adjustment" ? "qty must be a positive whole number" : "qty must be a non-zero whole number");
-          const k = `${d}|${c}`;
-          const cur = merged.get(k) || { d, c, qty: 0, note: "" };
+          const w = !receiving || l.weight_kg === "" || l.weight_kg == null ? null : Number(l.weight_kg);
+          if (w != null && (!isFinite(w) || w < 0)) throw badRequest("weight_kg must be 0 or more");
+          const k = `${d}|${c}|${wh || ""}`;
+          const cur = merged.get(k) || { d, c, wh, qty: 0, note: "", weight: null };
           cur.qty += q;
           if (l.note) cur.note = String(l.note).trim();
+          if (w != null) cur.weight = w;
           merged.set(k, cur);
         }
         if (!merged.size) throw badRequest("Add at least one line");
         // CR-312: a removal may never dip below what open panel orders have booked — booking is the dispatch gate.
         const booked = [...merged.values()].some((m) => m.qty < 0) ? await otherAllocations(catalyst, null) : new Map();
+        // The booking gate is location-agnostic: sum every line of a pair across locations (CR-438).
+        const byPair = new Map();
         for (const m of merged.values()) {
+          const k = `${m.d}|${m.c}`;
+          const cur = byPair.get(k) || { d: m.d, c: m.c, qty: 0 };
+          cur.qty += m.qty;
+          byPair.set(k, cur);
+        }
+        for (const m of byPair.values()) {
           if (m.qty >= 0) continue;
           const row = rowList(
             await catalyst.zcql().executeZCQLQuery(
@@ -4095,6 +4412,7 @@ app.post("/cut-stock-entry", async (req, res) => {
           for (const m of merged.values()) {
             const out = transferring ? m.qty : -m.qty;
             if (out <= 0) continue;
+            const takeFrom = transferring ? pair.from : m.wh || meta.primary;
             const haveAt = Math.max(0, (await serverCutWarehouseOnHand(catalyst, m.d, m.c)).cells.get(`|${takeFrom}`) || 0);
             if (out > haveAt) throw badRequest(`Only ${haveAt} pcs of ${await designLabel(catalyst, m.d)} for that cut size${atWarehouse(meta, takeFrom)}`, 409);
           }
@@ -4102,13 +4420,13 @@ app.post("/cut-stock-entry", async (req, res) => {
         const code = transferring ? await nextTransferNumber(catalyst) : "";
         let n = 0;
         for (const m of merged.values()) {
-          const base = { kind, entry_date: entryDate, reason, note: m.note || note, performed_by: actor };
+          const base = { kind, entry_date: entryDate, reason, note: m.note || note, performed_by: actor, weight_kg: m.weight };
           if (transferring) {
             // A pair of ledger rows (−from / +to) sharing the TRF code; CutPieceStock.qty nets to zero.
             await adjustCutStock(catalyst, ds, m.d, m.c, -m.qty, { ...base, warehouse: pair.from, doc_number: code });
             await adjustCutStock(catalyst, ds, m.d, m.c, m.qty, { ...base, warehouse: pair.to, doc_number: code });
           } else {
-            await adjustCutStock(catalyst, ds, m.d, m.c, m.qty, { ...base, warehouse });
+            await adjustCutStock(catalyst, ds, m.d, m.c, m.qty, { ...base, warehouse: m.wh });
           }
           n++;
         }
@@ -4123,7 +4441,9 @@ app.post("/cut-stock-entry", async (req, res) => {
 
 /* CR-306: the cut-piece ITEM — upsert its weight for (design, cut size).
    A blank cut_piece_size = the design's full size (CR-289 rule). qty is
-   never touched here; stock moves only via /cut-stock-entry and orders. */
+   never touched here; stock moves only via /cut-stock-entry and orders
+   (CR-414: a receipt defines a missing pair itself, so this is the
+   "define at 0 pcs" path only). */
 app.post("/cut-piece-save", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -4240,6 +4560,7 @@ app.post("/panel-save", async (req, res) => {
       panel_size: String(body.panel_size || "").trim(),
       vinyl_size: String(body.vinyl_size || "").trim(),
       mdf_size: String(body.mdf_size || "").trim(), // CR-344: the panel's MDF size — matches Mdf.size on the size-keyed master
+      remarks: String(body.remarks || "").trim(), // CR-425: free text, e.g. the old reference ID
     };
     const result = await withOpLog(
       catalyst,
@@ -4357,7 +4678,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
         const pick = async (id) =>
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
+              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, warehouse FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
             ),
           )[0];
         const target = await pick(targetId);
@@ -4377,6 +4698,8 @@ app.post("/pal-topup/:rowid", async (req, res) => {
           // Whole line rides along — no split needed.
           await ds.table("PalletizationPlanLine").updateRow({
             ROWID: donorId, status: "Palletizing", pallet: String(target.pallet), pallet_group: group,
+            // CR-412: the boxes join the target's physical pallet, so they stand where it stands.
+            ...(target.warehouse ? { warehouse: String(target.warehouse) } : {}),
           });
           await logTransition(catalyst, {
             entity_type: "PalletizationPlanLine", entity_rowid: donorId, from_status: "Planning", to_status: "Palletizing",
@@ -4397,6 +4720,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
             ...(donor.box_brand ? { box_brand: String(donor.box_brand) } : {}),
             pallet_group: group,
             ...(String(donor.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
+            ...(target.warehouse ? { warehouse: String(target.warehouse) } : {}), // CR-412
           });
           try {
             await ds.table("PalletizationPlanLine").updateRow({ ROWID: donorId, boxes: donorBoxes - n });
@@ -4521,7 +4845,9 @@ const LOAD_BOX_FIELDS = [
 ];
 function applyLoadBoxFields(patch, body) {
   for (const f of LOAD_BOX_FIELDS) {
-    if (body[f] !== undefined) patch[f] = String(body[f] || "").trim();
+    if (body[f] === undefined) continue;
+    // CR-429: people's names are stored Title Case; container / seal / LR numbers stay as typed.
+    patch[f] = f === "loading_supervisor" || f === "transporter" ? titleCase(body[f]) : String(body[f] || "").trim();
   }
   // CR-273: the Container Master format this loading uses (FK → ContainerFormat; "" clears).
   if (body.container_format !== undefined) patch.container_format = String(body.container_format || "").trim() || null;
@@ -4818,6 +5144,8 @@ async function writeLineIntoBox(ds, line, boxRowid, n) {
       // pallet_no is deliberately NOT copied — a typed range belongs to one line.
       ...(line.box_brand ? { box_brand: String(line.box_brand) } : {}),
       ...(String(line.manual_edit || "") === "true" ? { manual_edit: "true" } : {}),
+      // CR-412: the un-loaded remainder still stands where the pallet stood.
+      ...(line.warehouse ? { warehouse: String(line.warehouse) } : {}),
     });
     try {
       await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: n, load_box: boxRowid });
@@ -4866,7 +5194,7 @@ app.post("/pal-lines-box", async (req, res) => {
         const byId = new Map(
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
+              `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, warehouse FROM PalletizationPlanLine WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`,
             ),
           ).map((r) => [String(r.ROWID), r]),
         );
@@ -4927,7 +5255,7 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
       async () => {
         const line = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, warehouse FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         )[0];
         if (!line) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -4981,12 +5309,89 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
        allocation is returned through deallocateCore (user decision 2026-10-21).
    A dispatched box is immutable; Planning / Palletizing lines keep their own
    paths (drag back, partial Complete). Reason mandatory unless Admin (CR-270). */
+/* CR-369: the "→ free stock" half of a release, shared by /pal-line-release (any stage),
+   palletization delete (CR-370) and SO cancel (CR-371). line = a live PalletizationPlanLine
+   row with PAL_LINE_RELEASE_COLS; n = boxes to return (≤ line.boxes). Verifies the order
+   item's allocation covers n BEFORE writing; shrinks / soft-deletes the line, recounts (so
+   palletized_qty drops first), then deallocates same-batch-first. A line with no order item
+   holds no allocation — it is simply dropped. */
+const PAL_LINE_RELEASE_COLS = "ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, pallet_group";
+async function releaseLineToStock(catalyst, ds, line, n, reason) {
+  const lineId = String(line.ROWID);
+  const lineBoxes = Number(line.boxes) || 0;
+  const oiId = String(line.order_item || "");
+  const planId = String(line.plan || "");
+  const refs = [{ table: "SalesOrder", rowid: line.sales_order }, { table: "PalletizationPlan", rowid: planId }];
+  const deletedAt = stampNow();
+  const shrink = () => ds.table("PalletizationPlanLine").updateRow(n >= lineBoxes ? { ROWID: lineId, deleted_at: deletedAt } : { ROWID: lineId, boxes: lineBoxes - n });
+  if (!oiId || n <= 0) { await shrink(); return { to: "stock", boxes: n }; }
+  const batch = String(line.batch_number || "");
+  const allocs = (await zcqlAllRows(
+    catalyst,
+    `SELECT ROWID, batch_number, qty_boxes FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'alloc' AND deleted_at is null`,
+  ))
+    .map((a) => ({ id: String(a.ROWID), batch: String(a.batch_number || ""), qty: Number(a.qty_boxes) || 0 }))
+    .filter((a) => a.qty > 0)
+    // same batch first, then the rest; newest (highest ROWID) first within each group
+    .sort((a, b) => (a.batch === batch ? 0 : 1) - (b.batch === batch ? 0 : 1) || (a.id < b.id ? 1 : -1));
+  const allocated = allocs.reduce((s, a) => s + a.qty, 0);
+  if (allocated < n) throw badRequest(`Only ${allocated} boxes of this item are allocated — nothing to return to stock`, 409);
+
+  await shrink();
+  await recountOrderItems(catalyst, ds, [oiId]); // palletized_qty drops before the dealloc check
+  let remaining = n;
+  for (const a of allocs) {
+    if (remaining <= 0) break;
+    const take = Math.min(remaining, a.qty);
+    await deallocateCore(catalyst, ds, a.id, take); // trims auto Planning cards, lowers produced, recounts, logs
+    remaining -= take;
+  }
+  await logTransition(catalyst, { entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: String(line.status), to_status: "Released", note: `released — ${n} boxes to free stock` });
+  await logRelated(catalyst, refs, "released", { boxes: n, to: "stock", reason });
+  return { to: "stock", boxes: n };
+}
+
+/** CR-370: deleting a palletization returns every line's boxes to free stock first —
+    refused while any line still sits in a container (release those first). */
+async function discardPlanLines(catalyst, ds, planId, reason) {
+  const lines = await zcqlAllRows(catalyst, `SELECT ${PAL_LINE_RELEASE_COLS} FROM PalletizationPlanLine WHERE plan = ${planId} AND deleted_at is null`);
+  const boxed = lines.filter((l) => l.load_box).reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+  if (boxed) throw badRequest(`${boxed} boxes of this palletization are in a container — release them first`, 409);
+  for (const l of lines) await releaseLineToStock(catalyst, ds, l, Number(l.boxes) || 0, reason);
+}
+
+/** CR-371: a cancelled sales order leaves nothing on the palletization board — boxes in
+    open containers are taken out, every line returns to free stock, every remaining
+    allocation is handed back. Refused (409, before any write) while a box is already dispatched. */
+async function cancelSoPalletization(catalyst, ds, soId, reason) {
+  const lines = await zcqlAllRows(catalyst, `SELECT ${PAL_LINE_RELEASE_COLS} FROM PalletizationPlanLine WHERE sales_order = ${soId} AND deleted_at is null`);
+  const boxes = new Map();
+  for (const id of new Set(lines.filter((l) => l.load_box).map((l) => String(l.load_box)))) boxes.set(id, await getBox(catalyst, id));
+  const shipped = lines.filter((l) => l.load_box && String(boxes.get(String(l.load_box)).status) !== "Open");
+  if (shipped.length) {
+    const n = shipped.reduce((s, l) => s + (Number(l.boxes) || 0), 0);
+    const codes = [...new Set(shipped.map((l) => boxes.get(String(l.load_box)).load_number || boxes.get(String(l.load_box)).box_number))].filter(Boolean);
+    throw badRequest(`${n} boxes already dispatched${codes.length ? ` in ${codes.join(", ")}` : ""} — cannot cancel`, 409);
+  }
+  const planIds = new Set();
+  for (const l of lines) {
+    if (!l.load_box) continue;
+    await ds.table("PalletizationPlanLine").updateRow({ ROWID: l.ROWID, load_box: null });
+    planIds.add(String(l.plan || ""));
+  }
+  if (planIds.size) await demoteEmptyPlans(catalyst, ds, [...planIds]);
+  for (const l of lines) await releaseLineToStock(catalyst, ds, l, Number(l.boxes) || 0, reason);
+  // Allocated but never planned (or left behind by a trimmed auto card) — hand it back too.
+  const allocs = await zcqlAllRows(catalyst, `SELECT ROWID FROM ProductionLog WHERE sales_order = ${soId} AND entry_type = 'alloc' AND deleted_at is null`);
+  for (const a of allocs) await deallocateCore(catalyst, ds, String(a.ROWID));
+}
+
 app.post("/pal-line-release/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
     const ds = catalyst.datastore();
     const lineId = boxIdParam(req.params.rowid);
-    const reason = deleteReason(req, "PalletizationPlanLine");
+    const reason = requireReason(req, "to release or discard"); // CR-369: every role
     const reqBoxes = (req.body || {}).boxes;
     const result = await withOpLog(
       catalyst,
@@ -4994,7 +5399,7 @@ app.post("/pal-line-release/:rowid", async (req, res) => {
       async () => {
         const line = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, pallet_group FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
+            `SELECT ${PAL_LINE_RELEASE_COLS} FROM PalletizationPlanLine WHERE ROWID = ${lineId} AND deleted_at is null`,
           ),
         )[0];
         if (!line) throw badRequest(`Palletization line not found: ${lineId}`, 404);
@@ -5018,34 +5423,9 @@ app.post("/pal-line-release/:rowid", async (req, res) => {
           return { rowid: lineId, data: { to: "ReadyToLoad", boxes: n } };
         }
 
-        if (String(line.status) !== "ReadyToLoad") throw badRequest("Only palletized or loaded lines can be released", 409);
+        // Palletized (CR-361) or still planned / in palletization (CR-369 Discard) → free stock.
         if (!oiId) throw badRequest("This line is not tied to an order item — nothing to return to stock", 409);
-        // Palletized → free stock. Verify the allocation covers n BEFORE writing.
-        const batch = String(line.batch_number || "");
-        const allocs = (await zcqlAllRows(
-          catalyst,
-          `SELECT ROWID, batch_number, qty_boxes FROM ProductionLog WHERE order_item = ${oiId} AND entry_type = 'alloc' AND deleted_at is null`,
-        ))
-          .map((a) => ({ id: String(a.ROWID), batch: String(a.batch_number || ""), qty: Number(a.qty_boxes) || 0 }))
-          .filter((a) => a.qty > 0)
-          // same batch first, then the rest; newest (highest ROWID) first within each group
-          .sort((a, b) => (a.batch === batch ? 0 : 1) - (b.batch === batch ? 0 : 1) || (a.id < b.id ? 1 : -1));
-        const allocated = allocs.reduce((s, a) => s + a.qty, 0);
-        if (allocated < n) throw badRequest(`Only ${allocated} boxes of this item are allocated — nothing to return to stock`, 409);
-
-        const deletedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
-        await ds.table("PalletizationPlanLine").updateRow(n === lineBoxes ? { ROWID: lineId, deleted_at: deletedAt } : { ROWID: lineId, boxes: lineBoxes - n });
-        await recountOrderItems(catalyst, ds, [oiId]); // palletized_qty drops before the dealloc check
-        let remaining = n;
-        for (const a of allocs) {
-          if (remaining <= 0) break;
-          const take = Math.min(remaining, a.qty);
-          await deallocateCore(catalyst, ds, a.id, take); // trims auto Planning cards, lowers produced, recounts, logs
-          remaining -= take;
-        }
-        await logTransition(catalyst, { entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: "ReadyToLoad", to_status: "Released", note: `released — ${n} boxes to free stock` });
-        await logRelated(catalyst, refs, "released", { boxes: n, to: "stock", reason });
-        return { rowid: lineId, data: { to: "stock", boxes: n } };
+        return { rowid: lineId, data: await releaseLineToStock(catalyst, ds, line, n, reason) };
       },
     );
     res.json({ ok: true, rowid: result.rowid, data: result.data });
@@ -5471,7 +5851,7 @@ app.post("/production-delete/:rowid", async (req, res) => {
 async function zcqlAllRows(catalyst, sqlNoLimit) {
   const out = [];
   for (let off = 0; ; off += 300) {
-    const page = rowList(await catalyst.zcql().executeZCQLQuery(`${sqlNoLimit} LIMIT ${off}, 300`));
+    const page = rowList(await catalyst.zcql().executeZCQLQuery(`${sqlNoLimit}${/order by/i.test(sqlNoLimit) ? "" : " ORDER BY ROWID"} LIMIT ${off}, 300`));
     out.push(...page);
     if (page.length < 300) return out;
   }
@@ -5536,15 +5916,32 @@ async function serverFreeStock(catalyst, designId, opts = {}) {
    // ponytail: warehouseReduce is the JS twin of deriveWarehouseStock — change both.
    ================================================================ */
 async function warehouseMeta(catalyst) {
-  const rows = await zcqlAllRows(catalyst, `SELECT ROWID, name, is_primary, purposes FROM Warehouse WHERE deleted_at is null ORDER BY ROWID`);
-  const list = rows.map((r) => ({
-    id: String(r.ROWID),
-    name: String(r.name || ""),
-    isPrimary: r.is_primary === true || String(r.is_primary) === "true",
-    bay: String(r.purposes || "").split(",").map((s) => s.trim()).includes("Loading Bay"),
-  }));
-  const primary = (list.find((w) => w.isPrimary) || list[0] || { id: "" }).id;
-  return { list, primary, byId: new Map(list.map((w) => [w.id, w])) };
+  const rows = await zcqlAllRows(catalyst, `SELECT ROWID, name, is_primary, purposes, parent FROM Warehouse WHERE deleted_at is null ORDER BY ROWID`);
+  // CR-409: a row with `parent` is a LOCATION inside that warehouse — it inherits the
+  // warehouse's purposes and is never primary. Stock rows point at the leaf node.
+  const pid = (v) => (v == null || v === "" ? "" : String(v));
+  const top = new Map(rows.filter((r) => !pid(r.parent)).map((r) => [String(r.ROWID), r]));
+  const bayOf = (r) => String(r.purposes || "").split(",").map((s) => s.trim()).includes("Loading Bay");
+  const list = rows.map((r) => {
+    const p = pid(r.parent) ? top.get(pid(r.parent)) : null;
+    return {
+      id: String(r.ROWID),
+      name: String(r.name || ""),
+      parent: pid(r.parent),
+      isPrimary: !pid(r.parent) && (r.is_primary === true || String(r.is_primary) === "true"),
+      bay: bayOf(p || r),
+    };
+  });
+  const primary = (list.find((w) => w.isPrimary) || list.find((w) => !w.parent) || { id: "" }).id;
+  const byId = new Map(list.map((w) => [w.id, w]));
+  /** "Main Godown ▸ A1" · "Main Godown" · "Main Godown ▸ Unassigned" (a warehouse that has locations). */
+  const label = (id) => {
+    const w = byId.get(String(id));
+    if (!w) return "";
+    if (w.parent) return `${(byId.get(w.parent) || { name: "—" }).name} ▸ ${w.name}`;
+    return list.some((x) => x.parent === w.id) ? `${w.name} ▸ Unassigned` : w.name;
+  };
+  return { list, primary, byId, label };
 }
 /** Helper for inserts: carry a stated warehouse, else nothing (null = primary). */
 const whField = (v) => (rowidParam(v) ? { warehouse: rowidParam(v) } : {});
@@ -5649,13 +6046,13 @@ async function nextTransferNumber(catalyst) {
 function transferPair(meta, body) {
   const from = rowidParam(body.from_warehouse);
   const to = rowidParam(body.to_warehouse);
-  if (!from || !to) throw badRequest("Pick the warehouse to transfer from and the one to transfer to");
-  if (!meta.byId.has(from) || !meta.byId.has(to)) throw badRequest("Warehouse not found", 404);
-  if (from === to) throw badRequest("From and To must be different warehouses");
+  if (!from || !to) throw badRequest("Pick the location to transfer from and the one to transfer to");
+  if (!meta.byId.has(from) || !meta.byId.has(to)) throw badRequest("Location not found", 404);
+  if (from === to) throw badRequest("From and To must be different locations");
   return { from, to };
 }
-/** "at <warehouse name>" when warehouses exist — for 409 wording. */
-const atWarehouse = (meta, id) => (meta.byId.get(id) ? ` at ${meta.byId.get(id).name}` : "");
+/** "at <Warehouse ▸ Location>" when warehouses exist — for 409 wording (CR-409: the full path). */
+const atWarehouse = (meta, id) => (meta.byId.get(id) ? ` at ${meta.label(id)}` : "");
 
 /* Mark one warehouse primary (CR-329). The rule "null warehouse = the primary"
    is only stable if history is pinned first: every null-warehouse stock row is
@@ -5672,6 +6069,7 @@ app.post("/warehouse-primary/:rowid", async (req, res) => {
       async () => {
         const meta = await warehouseMeta(catalyst);
         if (!rid || !meta.byId.has(rid)) throw badRequest("Warehouse not found", 404);
+        if (meta.byId.get(rid).parent) throw badRequest("A location can't be the primary — mark its warehouse instead", 409); // CR-409
         const old = meta.list.find((w) => w.isPrimary);
         if (old && old.id === rid) return { rowid: rid, data: { stamped: 0 } };
         let stamped = 0;
@@ -5828,17 +6226,19 @@ app.post("/stock-adjust", async (req, res) => {
         const note = String(body.note || "").trim();
         // CR-329: the warehouse the count was taken in (null = primary).
         const meta = await warehouseMeta(catalyst);
-        const warehouse = rowidParam(body.warehouse) && meta.byId.has(rowidParam(body.warehouse)) ? rowidParam(body.warehouse) : null;
-        const whKey = warehouse || meta.primary;
-        const merged = new Map(); // design|batch → line (duplicates summed)
+        const validWh = (v) => (rowidParam(v) && meta.byId.has(rowidParam(v)) ? rowidParam(v) : null);
+        const warehouse = validWh(body.warehouse);
+        // CR-438: a line may name its own location; the body's is the fallback (null = primary).
+        const merged = new Map(); // design|batch|warehouse → line (duplicates summed)
         for (const l of Array.isArray(body.lines) ? body.lines : []) {
           const d = rowidParam(l && l.design);
           if (!d) throw badRequest("Every line needs an item");
           const q = Number(l.qty_boxes);
           if (!Number.isInteger(q) || q === 0) throw badRequest("qty_boxes must be a non-zero whole number");
           const batch = String((l && l.batch_number) || "").trim();
-          const k = `${d}|${batch}`;
-          const cur = merged.get(k) || { d, batch, qty: 0, note: "" };
+          const wh = validWh(l && l.warehouse) || warehouse;
+          const k = `${d}|${batch}|${wh || ""}`;
+          const cur = merged.get(k) || { d, batch, wh, qty: 0, note: "" };
           cur.qty += q;
           if (l.note) cur.note = String(l.note).trim();
           merged.set(k, cur);
@@ -5859,7 +6259,7 @@ app.post("/stock-adjust", async (req, res) => {
         const lines = new Map();
         for (const m of merged.values()) {
           const batch = designs.get(m.d).batched ? m.batch : "";
-          const k = `${m.d}|${batch}`;
+          const k = `${m.d}|${batch}|${m.wh || ""}`;
           const cur = lines.get(k) || { ...m, batch, qty: 0 };
           cur.qty += m.qty;
           lines.set(k, cur);
@@ -5868,6 +6268,7 @@ app.post("/stock-adjust", async (req, res) => {
         for (const m of lines.values()) {
           if (m.qty >= 0) continue;
           if (!onHandOf.has(m.d)) onHandOf.set(m.d, (await serverWarehouseOnHand(catalyst, m.d)).cells);
+          const whKey = m.wh || meta.primary;
           const have = Math.max(0, onHandOf.get(m.d).get(`${m.batch}|${whKey}`) || 0);
           if (-m.qty > have)
             throw badRequest(`Only ${have} boxes on hand in ${m.batch ? `batch ${m.batch}` : "unbatched stock"} of ${designs.get(m.d).name}${atWarehouse(meta, whKey)}`, 409);
@@ -5891,7 +6292,7 @@ app.post("/stock-adjust", async (req, res) => {
               performed_by: String(actor || ""),
               reason,
               note: m.note || note,
-              ...(warehouse ? { warehouse } : {}),
+              ...whField(m.wh),
             });
             inserted.push(String(row.ROWID));
           }
@@ -6299,6 +6700,7 @@ app.post("/production-record-lines/:rowid", async (req, res) => {
             mfg_date: r.mfg_date != null ? String(r.mfg_date) : "",
             note: r.note != null ? String(r.note) : "",
             box_brand: r.box_brand,
+            warehouse: r.warehouse, // CR-438: a row may name its own location; body.warehouse is the fallback
           };
         });
         const sum = lines.reduce((s, l) => s + l.qty, 0);
@@ -6719,9 +7121,10 @@ async function loadContainer(catalyst, ds, body) {
   // Per-batch area/weight derivation — same contract as fit.js/fitSuggest:
   // area = boxes × design.coverage_sqm; weight = boxes × design.box_weight_kg
   // + pallet.empty_pallet_weight_kg, or null when per-box weight uncalibrated.
-  const designs = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`));
+  // CR-397: paged — the bare SELECT stopped at ZCQL's 300-row cap (items past it read 0 m²).
+  const designs = await zcqlAllRows(catalyst, `SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`);
   const dMap = new Map(designs.map((d) => [String(d.ROWID), { cov: Number(d.coverage_sqm) || 0, bw: Number(d.box_weight_kg) || 0 }]));
-  const pals = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, empty_pallet_weight_kg FROM Pallet`));
+  const pals = await zcqlAllRows(catalyst, `SELECT ROWID, empty_pallet_weight_kg FROM Pallet`);
   const pMap = new Map(pals.map((p) => [String(p.ROWID), Number(p.empty_pallet_weight_kg) || 0]));
   const derive = (b) => {
     const d = dMap.get(String(b.design)) || { cov: 0, bw: 0 };
@@ -7262,9 +7665,10 @@ async function fitSuggest(catalyst) {
   const zcql = catalyst.zcql();
 
   // Per-batch derivation lookups: design coverage + per-box weight; pallet empty weight.
-  const designs = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`));
+  // CR-397: paged past ZCQL's 300-row cap (same fix as loadContainer).
+  const designs = await zcqlAllRows(catalyst, `SELECT ROWID, coverage_sqm, box_weight_kg FROM Design`);
   const dMap = new Map(designs.map((d) => [String(d.ROWID), { cov: Number(d.coverage_sqm) || 0, bw: Number(d.box_weight_kg) || 0 }]));
-  const pals = rowList(await zcql.executeZCQLQuery(`SELECT ROWID, empty_pallet_weight_kg FROM Pallet`));
+  const pals = await zcqlAllRows(catalyst, `SELECT ROWID, empty_pallet_weight_kg FROM Pallet`);
   const pMap = new Map(pals.map((p) => [String(p.ROWID), Number(p.empty_pallet_weight_kg) || 0]));
 
   // areaSqm = boxes × coverage. weightKg null when per-box weight uncalibrated (Q1 deferred).
@@ -7452,10 +7856,11 @@ app.get("/:table/:rowid", async (req, res) => {
 /* ----------------------------------------------------------------
    Generic: insert
    ---------------------------------------------------------------- */
-/* One-time (idempotent) re-sync: push every Size's packing data out to its
-   Item + Pallet snapshots. Fixes rows that drifted before propagation existed,
-   and is safe to re-run (e.g. after a bulk Size import). Registered before the
-   generic POST /:table so its single-segment path isn't shadowed by it. */
+/* One-time (idempotent) re-sync: push every Size's packing defaults out to its
+   Pallet snapshots (coverage + weight) and the Items' box weight (CR-391: item
+   pcs/coverage are the item's own, untouched). Overwrites typed weights — warn
+   before running. Registered before the generic POST /:table so its
+   single-segment path isn't shadowed by it. */
 app.post("/resync-size-snapshots", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -7532,7 +7937,15 @@ app.post("/:table", async (req, res) => {
         for (const r of rows) {
           assertNoStateWrite(table, r, true);
           assertNoNegatives(r); // rule #5: no negative numeric values
-          if (nk) await assertUnique(catalyst, table, nk, r[nk]);
+          normalizeNames(table, r); // CR-429: names are stored Title Case (before the natural-key check)
+          if (table === "Design") stampDesignCoverage(r); // CR-391
+          if (table === "Warehouse" && rowidParam(r.parent)) {
+            // CR-409: a Location sits in a top-level warehouse — one level only.
+            const p = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT parent FROM Warehouse WHERE ROWID = ${rowidParam(r.parent)} AND deleted_at is null`))[0];
+            if (!p) throw badRequest("Warehouse not found", 404);
+            if (rowidParam(p.parent)) throw badRequest("A location can't hold locations — pick the warehouse itself");
+          }
+          if (nk) await assertUnique(catalyst, table, nk, r[nk], undefined, table === "Warehouse" ? warehouseSiblingScope(r.parent) : "");
         }
         const inserted = await ds.table(table).insertRows(rows);
         const ids = (Array.isArray(inserted) ? inserted : [inserted]).map((r) => r.ROWID);
@@ -7546,9 +7959,10 @@ app.post("/:table", async (req, res) => {
   }
 });
 
-/* Size owns per-box packing data (box weight, coverage, pcs); Item + Pallet
-   snapshot it. Push a Size edit out to every row referencing that Size so the
-   value stays global instead of frozen on the copy each was saved with.
+/* Size owns the per-box packing DEFAULTS: Pallet snapshots coverage + box
+   weight; the Item takes only the box-weight default (CR-391 — its pcs/box and
+   coverage are its own). Push a Size edit out to every row referencing that
+   Size so the default stays global instead of frozen on the copy.
    Box weight is the one exception (CR 2026-09-10): it's manually overridable
    on Item/Pallet, so when `oldBw` is known the fan-out only rewrites rows
    still carrying the old Size default (or blank) — a manual value survives.
@@ -7560,14 +7974,13 @@ async function propagateSizeSnapshots(catalyst, sizeId, oldBw) {
   const ds = catalyst.datastore();
   const size = rowList(
     await catalyst.zcql().executeZCQLQuery(
-      `SELECT box_weight_kg, sqm_per_box, sqft_per_box, pcs_per_packing FROM Size WHERE ROWID = ${sizeId}`,
+      `SELECT box_weight_kg, sqm_per_box, sqft_per_box FROM Size WHERE ROWID = ${sizeId}`,
     ),
   )[0];
   if (!size) return { designs: 0, pallets: 0 };
   const bw = Number(size.box_weight_kg) || 0;
   const sqm = Number(size.sqm_per_box) || 0;
   const sqft = Number(size.sqft_per_box) || 0;
-  const pcs = Number(size.pcs_per_packing) || 0;
   const keepManualBw = (rowBw) => {
     if (oldBw === undefined) return false; // no old value known → overwrite all
     const cur = Number(rowBw) || 0;
@@ -7576,12 +7989,10 @@ async function propagateSizeSnapshots(catalyst, sizeId, oldBw) {
   const designs = rowList(
     await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, box_weight_kg FROM Design WHERE size = ${sizeId}`),
   );
+  // CR-391: pcs_per_box and coverage_* are the ITEM's own (typed per item; coverage =
+  // its w × l × pcs, see stampDesignCoverage) — only the box-weight default fans out.
   for (const d of designs)
-    await ds.table("Design").updateRow({
-      ROWID: d.ROWID,
-      ...(keepManualBw(d.box_weight_kg) ? {} : { box_weight_kg: bw }),
-      coverage_sqm: sqm, coverage_sqft: sqft, pcs_per_box: pcs,
-    });
+    if (!keepManualBw(d.box_weight_kg)) await ds.table("Design").updateRow({ ROWID: d.ROWID, box_weight_kg: bw });
   const pallets = rowList(
     await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, box_weight_kg FROM Pallet WHERE size = ${sizeId}`),
   );
@@ -7654,9 +8065,19 @@ app.patch("/:table/:rowid", async (req, res) => {
         }
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
+        normalizeNames(table, patch); // CR-429: names are stored Title Case (before the natural-key check)
         const nk = NATURAL_KEY[table];
         if (nk && patch[nk] !== undefined) {
-          await assertUnique(catalyst, table, nk, patch[nk], rid);
+          let scope = "";
+          if (table === "Warehouse") {
+            // CR-409: names are unique among siblings; `parent` itself never moves via PATCH.
+            if (patch.parent !== undefined) throw badRequest("A location stays in its warehouse — delete and recreate it to move it");
+            const cur = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT parent FROM Warehouse WHERE ROWID = ${rid}`))[0];
+            scope = warehouseSiblingScope(cur && cur.parent);
+          }
+          await assertUnique(catalyst, table, nk, patch[nk], rid, scope);
+        } else if (table === "Warehouse" && patch.parent !== undefined) {
+          throw badRequest("A location stays in its warehouse — delete and recreate it to move it"); // CR-409
         }
         // OrderItem stage flips get a StatusTransition row; this PATCH is
         // the one path all client stage writes converge on.
@@ -7679,6 +8100,7 @@ app.patch("/:table/:rowid", async (req, res) => {
           )[0];
           oldSizeBw = Number(prev && prev.box_weight_kg) || 0;
         }
+        if (table === "Design") stampDesignCoverage(patch); // CR-391: coverage from the item's own w × l × pcs
         const row = await ds.table(table).updateRow(patch);
         // Size edits fan out to the Item + Pallet packing-data snapshots.
         if (table === "Size") await propagateSizeSnapshots(catalyst, rid, oldSizeBw);
@@ -7829,7 +8251,7 @@ app.delete("/:table/:rowid", async (req, res) => {
     // QuoteItems, a SalesOrder owns OrderItems, blocking on those would make
     // every quote/SO undeletable). Not bypassable by ?hard=1.
     const rid = String(req.params.rowid).replace(/[^0-9]/g, ""); // ROWIDs are numeric
-    const reason = deleteReason(req, table);
+    const reason = table === "PalletizationPlan" && !hard ? requireReason(req, "to delete a palletization") : deleteReason(req, table); // CR-370: every role
     // Same rule as the SO form (CR-232): once any line has work — allocated,
     // palletised, loaded, dispatched or sitting on a plan — the order is
     // history, not a draft. Cancel it; never delete it.
@@ -7875,6 +8297,7 @@ app.delete("/:table/:rowid", async (req, res) => {
         payload: { rowid: rid, reason },
       },
       async () => {
+        if (!hard && table === "PalletizationPlan") await discardPlanLines(catalyst, ds, rid, reason); // CR-370: lines → free stock first
         if (hard) {
           await ds.table(table).deleteRow(rid);
         } else {

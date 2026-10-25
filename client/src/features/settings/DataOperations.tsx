@@ -19,12 +19,10 @@ export function DataOperations() {
   return (
     <div>
       <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+        <div>
           <BackToSettings />
-          <div>
-            <div className="title">Data Operations</div>
-            <div className="sub">Bulk import / export and data maintenance</div>
-          </div>
+          <div className="title">Data Operations</div>
+          <div className="sub">Bulk import / export and data maintenance</div>
         </div>
       </div>
 

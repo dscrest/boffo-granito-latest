@@ -82,7 +82,7 @@ export function ProductionDetail() {
 
   const { salesPersons, designRows } = useMasters();
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
-  const fields = useColumns("productionDetailFields", FIELDS);
+  const fields = useColumns("productionDetailFields.v2", FIELDS, ["date", "customer", "created", "modified"]); // .v2 (CR-390): title = date, subtitle = customer
   // Per-line on-hand boxes + batch-tracking flag, off the shared derivation
   // (same basis as the SO / production forms).
   const stockFor = useStockLookup();
@@ -309,7 +309,8 @@ export function ProductionDetail() {
             {/* CR-265: the DATE is the title; the PRD number sits small beneath. */}
             <div className="title" style={{ flex: 1, minWidth: 0, fontSize: 28, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }} title={group.code}>
               <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtLocalDate(group.date) || group.code}</span>
-              <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>
+              {/* CR-390: editors get the select below, not a chip saying the same thing */}
+              {!can("stages", "edit") && <span className="chip" style={{ color: stageChip(group.stage).color }}>{stageChip(group.stage).label}</span>}
               {/* This batch's completeness — produced vs what THIS production
                   requested (ignores the wider SO target, which may be part-
                   ordered on purpose). Only while in progress: once fully
@@ -395,7 +396,7 @@ export function ProductionDetail() {
 
             {/* Item lines that make up this production (mirrors the SO items table). */}
             <div className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Items</span>
                 <span className="muted" style={{ fontSize: 14 }}>{group.lineCount} line{group.lineCount > 1 ? "s" : ""}</span>
               </div>
@@ -483,7 +484,7 @@ export function ProductionDetail() {
 
         {tab === "prodlog" && (
           <div className="card" style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+            <div className="card-head">
               <span style={{ fontWeight: 600 }}>Production log</span>
               <span className="muted" style={{ fontSize: 14 }}>{group.records.length} record{group.records.length === 1 ? "" : "s"}</span>
               <div style={{ marginLeft: "auto" }}>

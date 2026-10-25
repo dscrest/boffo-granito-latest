@@ -5,12 +5,14 @@
                   the design picker (blank = all stock; a container may mix customers, CR-252).
                   When the pick has nothing loadable a Note says what to do first (CR-328).
      View         Tabs | Sheet toggle (CR-335; opens on the org default view like the boards, last pick
-                  remembered per browser). SHEET = every container on one grid, TWO STEPS per container
-                  (CR-354): band row = step 1 "Designs & pallets" (C k · status · Add Items in Bulk · Documents
-                  · ✕), its design rows, then the step 2 row "Container & vehicle" (Container pick · Name ·
-                  Container No. · Vehicle · Driver · E-seal · Line seal, "More fields" for the rest, Dispatch)
-                  — one dim line until step 1 has an item. Both views run the same row engine
-                  (`ContainerRows`) over the same drafts.
+                  remembered per browser). SHEET = every container on one grid, DESIGN FIRST (CR-374): band row
+                  = identity only (dot · C k · Documents · ✕), its design rows (Design · Order · Batch · Pallets ·
+                  Boxes · Pallet No. · Pallet type · Box Brand), an "Add Items in Bulk" row under them; once the
+                  container has an item the band's ONE "+" menu (CR-155 style: Container & vehicle… ·
+                  Dispatch · documents) enables "Container & vehicle…" → `ContainerDetailsModal` (the rail's
+                  field set); the typed numbers show beside it. Nothing about the container shows before that
+                  (`lockedOf`). Containers read C1, C2… everywhere; the LOAD codes show ONCE, in the strip on top.
+                  Both views run the same row engine (`ContainerRows`) over the same drafts.
      Tabs         ONE TAB PER CONTAINER: status dot · "C k" / LOAD code · container no.
                   or vehicle · pallets · boxes; "+ Add container" is the last tab. Edit opens the
                   WHOLE group (LoadPlan.group siblings) as tabs — each container has its own
@@ -34,9 +36,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useViewState } from "@/lib/usePersistedState";
-import { formatVehicleNumber } from "@/features/masters/vehiclesApi";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Combobox } from "@/ui/Combobox";
+import { useModalA11y } from "@/ui/useModalA11y";
 import { Icon } from "@/ui/Icon";
 import { NumberInput } from "@/ui/NumberInput";
 import { toast } from "@/ui/Toast";
@@ -196,7 +198,7 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
   // CR-335: Tabs | Sheet. Seeds from the org default view (AppSetting.default_view) like every board.
   const [view, setView] = useViewState<"tabs" | "sheet">("loading.workspace.view", "sheet", "tabs");
   const [sheetPicker, setSheetPicker] = useState<Record<number, string>>({}); // per container: "" | "all" | rowKey
-  const [moreOpen, setMoreOpen] = useState<Set<number>>(new Set()); // band rows with "More fields" open
+  const [detailsFor, setDetailsFor] = useState<number | null>(null); // CR-374: the container whose Container & vehicle modal is open
   const patchDraft = (key: number, p: DraftPatch) =>
     setDrafts((ds) => ds.map((d) => (d.key === key ? { ...d, ...(typeof p === "function" ? p(d) : p) } : d)));
   const addDraft = () =>
@@ -241,10 +243,10 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
   const unloadGroup = async (ls: PalPlanLine[], removed: boolean) => {
     let reason = "";
     if (!removed) {
-      const b = boxes.find((x) => x.id === ls[0].loadBoxId);
+      const di = drafts.findIndex((d) => d.boxId === ls[0].loadBoxId); // CR-374: C k, never the LOAD code
       const r = await confirmDelete({
         title: "Remove from loading",
-        message: `Remove ${ls[0].designLabel} (${fmt(ls.reduce((s, l) => s + l.boxes, 0))} boxes) from ${b ? boxLabel(b) : "this loading"}? It returns to Ready for Loading.`,
+        message: `Remove ${ls[0].designLabel} (${fmt(ls.reduce((s, l) => s + l.boxes, 0))} boxes) from ${di >= 0 ? titleOf(drafts[di], di) : "this loading"}? It returns to Ready for Loading.`,
       });
       if (r == null) return;
       reason = r;
@@ -285,9 +287,10 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
   };
   const dotOf = (key: string) => (key === "Dispatched" ? "var(--fg-2)" : key === "ReadyDispatch" ? "var(--c-green)" : key === "InLoading" ? "var(--accent)" : "var(--faint)");
 
-  // CR-333: a typed container name is the tab title; the LOAD code / "Container k" becomes its subtitle.
-  // CR-354: unsaved containers read C1, C2 … (user 2026-10-19); saved ones keep their LOAD code.
-  const codeOf = (d: ContainerDraft, i: number) => (d.boxId ? boxLabel(boxOf(d)!) : `C${i + 1}`);
+  // CR-333: a typed container name is the tab title; "C k" becomes its subtitle.
+  // CR-354/374: every container reads C1, C2 … — saved ones too (user 2026-10-22: the LOAD code "is not of any
+  // significance", it shows ONCE in the strip on top and otherwise stays in the DB / URL).
+  const codeOf = (_d: ContainerDraft, i: number) => `C${i + 1}`;
   const titleOf = (d: ContainerDraft, i: number) => d.capture.name?.trim() || codeOf(d, i);
   // Plan as a helper (CR-255/336): EVERY planned container of the order for this tab's picker, each marked
   // with who holds it — another tab here, or an Open loading outside this group (the group's own boxes are
@@ -599,7 +602,7 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
       const setMeta = (m: PalletMeta) => patchDraft(d.key, (cur) => ({ meta: new Map(cur.meta).set(rowKeyOf(l0), { ...cur.meta.get(rowKeyOf(l0)), ...m }) }));
       return (
         <tr key={l0.id} style={removed ? { opacity: 0.5 } : undefined}>
-          <td className="mono dim">{indexed ? i + 1 : ""}</td>
+          {indexed && <td className="mono dim">{i + 1}</td>}
           <td><span className="design-name">{l0.designLabel}</span></td>
           <td className="mono nw" title={l0.customerName}>{l0.soNumber || "—"}</td>
           <td className="mono nw" title={batches.join("\n")}>{ls.length === 1 ? l0.batchNumber || "—" : `${ls.length} batches`}{mix && <span className="chip mx" style={{ marginLeft: 6 }}>MXBATCH</span>}</td>
@@ -611,13 +614,13 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
                 aria-label={`Pallets loaded, ${l0.designLabel}`}
                 aria-invalid={!!error}
                 onChange={(e) => setGroupPallets(ls, Number(e.target.value) || 0)}
-                style={{ textAlign: "right", width: 70, ...(error ? { borderColor: "var(--c-red)" } : {}) }}
+                style={{ textAlign: "right", ...(error ? { borderColor: "var(--c-red)" } : {}) }}
               />
             ) : fmt(sumPallets(keptParts))}
           </td>
           <td className="num" title={boxesHint(keptParts) || undefined}>{fmt(keptN)}</td>
-          <td><input value={meta?.palletNo ?? l0.palletNo} placeholder="auto" aria-label="Pallet No." onChange={(e) => setMeta({ palletNo: e.target.value })} style={{ width: 76 }} /></td>
-          <td><input value={meta?.palletType ?? l0.palletType} placeholder="—" aria-label="Pallet type" onChange={(e) => setMeta({ palletType: e.target.value })} style={{ width: 76 }} /></td>
+          <td><input value={meta?.palletNo ?? l0.palletNo} placeholder="auto" aria-label="Pallet No." onChange={(e) => setMeta({ palletNo: e.target.value })} /></td>
+          <td><input value={meta?.palletType ?? l0.palletType} placeholder="—" aria-label="Pallet type" onChange={(e) => setMeta({ palletType: e.target.value })} /></td>
           <td className="dim">{pick.brandName(l0.boxBrandId || l0.soBoxBrandId || l0.customerBoxBrandId) || "—"}</td>
           <td>
             {open && (
@@ -785,16 +788,15 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
             <table className="tbl load-sheet" aria-label="Loading sheet, all containers">
               <thead>
                 <tr>
-                  <th style={{ minWidth: 150 }}>Container</th>
                   <th>Design</th>
-                  <th>Order</th>
-                  <th>Batch</th>
-                  <th className="num" style={{ textAlign: "right" }}>Pallets</th>
-                  <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                  <th>Pallet No.</th>
-                  <th>Pallet type</th>
-                  <th>Box Brand</th>
-                  <th style={{ width: 34 }} />
+                  <th style={{ width: 130 }}>Order</th>
+                  <th style={{ width: 150 }}>Batch</th>
+                  <th className="num" style={{ textAlign: "right", width: 90 }}>Pallets</th>
+                  <th className="num" style={{ textAlign: "right", width: 80 }}>Boxes</th>
+                  <th style={{ width: 110 }}>Pallet No.</th>
+                  <th style={{ width: 110 }}>Pallet type</th>
+                  <th style={{ width: 130 }}>Box Brand</th>
+                  <th style={{ width: 64 }} />
                 </tr>
               </thead>
               <tbody>
@@ -803,87 +805,63 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
                   const open = isOpen(d);
                   const st = statusOf(d, i);
                   const gate = b && open ? dispatchGate(b, keptCount(d)) || (dirty(d) ? "Save your changes first" : null) : null;
-                  const setCap = (k: keyof LoadingCapture, v: string) => patchDraft(d.key, (cur) => ({ capture: { ...cur.capture, [k]: v } }));
-                  const setVeh = (k: keyof VehicleDraft, v: string) => patchDraft(d.key, (cur) => ({ vehicle: { ...cur.vehicle, [k]: v } }));
                   const fillText = totals[i].fill > 0 ? `${Math.round(totals[i].fill * 100)}%` : "";
                   const rm = removeOf(d);
-                  const locked = lockedOf(d, i); // CR-350 gate; CR-354 hides step 2 behind it instead of greying it
-                  // CR-354: the band is STEP 1 — identity, status, "Designs & pallets", Add Items in Bulk. No fields.
+                  const locked = lockedOf(d, i); // CR-350 gate; CR-374: "+ Container & vehicle" waits behind it, nothing else shows
+                  const sum = [d.capture.container_number, d.vehicle.vehicle_number, d.capture.electronic_seal].filter((x) => x && x.trim()).join(" · ");
+                  // CR-374: the band is the container's IDENTITY only — dot · C k · (+ Container & vehicle once it has a design,
+                  // the typed numbers, Dispatch) · Documents · ✕. No status chip, no step chips, no fields (user 2026-10-22).
                   const band = (
                     <tr className={`load-band${open ? "" : " done"}`}>
-                      <td className="nw">
-                        <span className="dot" style={{ width: 8, height: 8, borderRadius: "50%", background: dotOf(st.key), display: "inline-block", marginRight: 8 }} />
-                        <strong>{titleOf(d, i)}</strong>
-                        {d.capture.name?.trim() && <span className="mono dim" style={{ fontWeight: 400, marginLeft: 6 }}>· {codeOf(d, i)}</span>}
-                      </td>
                       <td colSpan={8}>
                         <div className="band-cells">
-                          <span className={`chip ${st.cls}`}>{st.label}</span>
+                          <span className="dot" style={{ width: 8, height: 8, borderRadius: "50%", background: dotOf(st.key), display: "inline-block" }} />
+                          <strong>{titleOf(d, i)}</strong>
+                          {d.capture.name?.trim() && <span className="mono dim">· {codeOf(d, i)}</span>}
                           {open ? (
                             <>
-                              <span className="chip">1</span><strong>Designs &amp; pallets</strong>
-                              <button type="button" className="btn" style={{ height: 26 }} onClick={() => setSheetPicker((p) => ({ ...p, [d.key]: "all" }))}>
-                                <Icon name="plus" size={12} /> Add Items in Bulk
-                              </button>
+                              {sum && <span className="mono dim">{sum}</span>}
+                              {fillText && <span className="mono dim" style={{ color: totals[i].over ? "var(--c-amber)" : undefined }} title="Share of this container">{fillText}</span>}
                             </>
                           ) : (
-                            b && <span className="mono dim" style={{ fontWeight: 400 }}>{[b.containerNumber, b.vehicleNumber, b.electronicSeal].filter(Boolean).join(" · ")}{b.dispatchDate ? ` · dispatched ${b.dispatchDate.slice(0, 10)}` : ""}</span>
+                            b && <span className="mono dim">{[b.containerNumber, b.vehicleNumber, b.electronicSeal].filter(Boolean).join(" · ")}{b.dispatchDate ? ` · dispatched ${b.dispatchDate.slice(0, 10)}` : ""}</span>
                           )}
-                          {b && <MoreMenu label="Documents" items={docItems(b, entriesOf(d), allLines, () => navigate(detailUrl(b.id))).map(({ label, onClick }) => ({ label, onClick }))} />}
                         </div>
                       </td>
-                      <td>
-                        {rm && (
-                          <button type="button" className="btn x" aria-label={d.boxId ? `Delete ${titleOf(d, i)}` : `Remove ${titleOf(d, i)}`} title={d.boxId ? "Delete this loading" : "Remove this container"} onClick={rm}>
-                            <Icon name="x" size={13} />
-                          </button>
-                        )}
+                      {/* ✕ then the "+" (user 2026-10-22: "Add the plus button after the X"), same column as the rows' ✕. */}
+                      <td className="nw">
+                        <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                          {rm && (
+                            <button type="button" className="btn x" aria-label={d.boxId ? `Delete ${titleOf(d, i)}` : `Remove ${titleOf(d, i)}`} title={d.boxId ? "Delete this loading" : "Remove this container"} onClick={rm}>
+                              <Icon name="x" size={13} />
+                            </button>
+                          )}
+                          {/* CR-374 round 2: ONE "+" menu (CR-155 style) — container & vehicle, Dispatch, documents. */}
+                          {(open || b) && (
+                            <MoreMenu
+                              kebab
+                              icon="plus"
+                              title="Container actions"
+                              items={[
+                                ...(open ? [{ label: "Container & vehicle…", disabled: locked, title: locked ? "Pick a design first" : undefined, onClick: () => setDetailsFor(d.key) }] : []),
+                                ...(b && open ? [{ label: "Dispatch", disabled: busy || !!gate, title: gate || undefined, onClick: () => void dispatch(d) }] : []),
+                                ...(b ? docItems(b, entriesOf(d), allLines, () => navigate(detailUrl(b.id))).map(({ label, onClick }) => ({ label, onClick })) : []),
+                              ]}
+                            />
+                          )}
+                        </span>
                       </td>
                     </tr>
                   );
-                  // CR-354: STEP 2 sits UNDER the design rows — container, name, vehicle, driver, seals (+ More fields,
-                  // Dispatch). Hidden behind one line until step 1 has an item (`lockedOf`); saved containers never lock.
+                  // CR-374: Add Items in Bulk sits UNDER the design rows (user 2026-10-22).
                   const after = open && (
-                    <>
-                      <tr className="band-step">
-                        <td colSpan={10}>
-                          <div className="band-cells">
-                            <span className="chip">2</span><strong>Container &amp; vehicle</strong>
-                            {locked ? (
-                              <span className="dim">Pick a design above first</span>
-                            ) : (
-                              <>
-                                <LoadDetailsFields vehicle={d.vehicle} capture={d.capture} setVeh={setVeh} setCap={setCap} part="format" />
-                                <BandCell label="Name" value={d.capture.name || ""} placeholder="Container name" onChange={(v) => setCap("name", v)} />
-                                <BandCell label="Cont." mono value={d.capture.container_number || ""} placeholder="MSCU1234567" onChange={(v) => setCap("container_number", v)} />
-                                <BandCell label="Veh." mono value={d.vehicle.vehicle_number} placeholder="GJ-01-AB-1234" onChange={(v) => setVeh("vehicle_number", formatVehicleNumber(v))} />
-                                <BandCell label="Driver" value={d.vehicle.driver_name} placeholder="Name" onChange={(v) => setVeh("driver_name", v)} />
-                                <BandCell label="E-seal" mono value={d.capture.electronic_seal || ""} placeholder="E-seal no." onChange={(v) => setCap("electronic_seal", v)} />
-                                <BandCell label="Line" mono value={d.capture.line_seal || ""} placeholder="Line seal no." onChange={(v) => setCap("line_seal", v)} />
-                                {fillText && <span className="mono dim" style={{ color: totals[i].over ? "var(--c-amber)" : undefined }} title="Share of this container">{fillText}</span>}
-                                <button type="button" className="btn" style={{ height: 26 }} aria-expanded={moreOpen.has(d.key)} onClick={() => setMoreOpen((p) => { const n = new Set(p); n.has(d.key) ? n.delete(d.key) : n.add(d.key); return n; })}>
-                                  {moreOpen.has(d.key) ? "Fewer fields" : "More fields"}
-                                </button>
-                                {b && (
-                                  <button type="button" className="hbtn sm primary" disabled={busy || !!gate} title={gate || "Dispatch this container"} onClick={() => void dispatch(d)}>
-                                    <Icon name="check" size={12} /> Dispatch
-                                  </button>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                      {!locked && moreOpen.has(d.key) && (
-                        <tr className="band-more">
-                          <td colSpan={10}>
-                            <div className="form-rows">
-                              <LoadDetailsFields vehicle={d.vehicle} capture={d.capture} setVeh={setVeh} setCap={setCap} part="more" />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </>
+                    <tr className="hint-row">
+                      <td colSpan={9}>
+                        <button type="button" className="btn" onClick={() => setSheetPicker((p) => ({ ...p, [d.key]: "all" }))}>
+                          <Icon name="plus" size={12} /> Add Items in Bulk
+                        </button>
+                      </td>
+                    </tr>
                   );
                   return (
                     <ContainerRows
@@ -907,8 +885,8 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
                   );
                 })}
                 <tr>
-                  <td colSpan={10} style={{ height: 44 }}>
-                    <button type="button" className="btn" style={{ borderStyle: "dashed", color: "var(--accent)", fontWeight: 600, background: "var(--panel)" }} onClick={addDraft}>
+                  <td colSpan={9} style={{ height: 44 }}>
+                    <button type="button" className="btn dashed" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={addDraft}>
                       <Icon name="plus" size={12} /> Add container
                     </button>
                   </td>
@@ -916,8 +894,7 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
               </tbody>
               <tfoot>
                 <tr>
-                  <td>Total · {drafts.length} container{drafts.length === 1 ? "" : "s"}</td>
-                  <td>{fmt(drafts.reduce((n, d) => n + new Set(totals[drafts.indexOf(d)].picked.map(rowKeyOf)).size + loadedGroupsOf(d).filter((ls) => ls.some((l) => keptOf(l) > 0)).length, 0))} items</td>
+                  <td>Total · {drafts.length} container{drafts.length === 1 ? "" : "s"} <span className="dim" style={{ fontWeight: 400 }}>· {fmt(drafts.reduce((n, d) => n + new Set(totals[drafts.indexOf(d)].picked.map(rowKeyOf)).size + loadedGroupsOf(d).filter((ls) => ls.some((l) => keptOf(l) > 0)).length, 0))} items</span></td>
                   <td /><td />
                   <td className="num">{fmt(grand.pallets + drafts.reduce((s, d) => s + sumPallets(keptOfDraft(d)), 0))}</td>
                   <td className="num">{fmt(grand.boxes + loadedGrand)}</td>
@@ -947,6 +924,20 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
       </div>
 
       {custSearch && <CustomerSearchModal onPick={(c) => pick.pickCustomer(c.id)} onClose={() => setCustSearch(false)} />}
+      {detailsFor !== null && (() => {
+        const i = drafts.findIndex((d) => d.key === detailsFor);
+        const d = drafts[i];
+        return d ? (
+          <ContainerDetailsModal
+            title={`${titleOf(d, i)} · Container & vehicle`}
+            vehicle={d.vehicle}
+            capture={d.capture}
+            fill={totals[i].fill > 0 ? `${Math.round(totals[i].fill * 100)}% of a container${totals[i].over ? " — over" : ""}` : ""}
+            onDone={(vehicle, capture) => { patchDraft(d.key, { vehicle, capture }); setDetailsFor(null); }}
+            onClose={() => setDetailsFor(null)}
+          />
+        ) : null;
+      })()}
       {entryOverlay && (
         <DispatchEntryOverlay
           box={boxes.find((b) => b.id === entryOverlay.box.id) ?? entryOverlay.box}
@@ -954,6 +945,47 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
           onClose={() => setEntryOverlay(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** CR-374: one container's Container & vehicle details — the tabs rail's field set in a modal, opened from the
+    Sheet band's "+ Container & vehicle". Edits a local copy; Save hands it back, Cancel drops it. */
+function ContainerDetailsModal({ title, vehicle: v0, capture: c0, fill, onDone, onClose }: {
+  title: string;
+  vehicle: VehicleDraft;
+  capture: LoadingCapture;
+  fill: string;
+  onDone: (vehicle: VehicleDraft, capture: LoadingCapture) => void;
+  onClose: () => void;
+}) {
+  // ponytail: local copy so Cancel is free; no dirty prompt.
+  const [vehicle, setVehicle] = useState(v0);
+  const [capture, setCapture] = useState(c0);
+  const setVeh = (k: keyof VehicleDraft, v: string) => setVehicle((c) => ({ ...c, [k]: v }));
+  const setCap = (k: keyof LoadingCapture, v: string) => setCapture((c) => ({ ...c, [k]: v }));
+  const panelRef = useModalA11y(onClose);
+  return (
+    <div className="modal-backdrop">
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="df-head">
+          <div className="ico"><Icon name="truck" size={18} /></div>
+          <div style={{ flex: 1, fontWeight: 600 }}>{title}</div>
+          <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
+        </div>
+        <div className="df-body">
+          <div className="form-rows one">
+            <LoadDetailsFields vehicle={vehicle} capture={capture} setVeh={setVeh} setCap={setCap} part="format" />
+            {fill && <span className="mono dim" style={{ gridColumn: "span 2", fontSize: "var(--t-sm)" }}>{fill}</span>}
+            <LoadDetailsFields vehicle={vehicle} capture={capture} setVeh={setVeh} setCap={setCap} part="rail" />
+          </div>
+        </div>
+        <div className="df-foot">
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="hbtn primary" onClick={() => onDone(vehicle, capture)}><Icon name="check" size={13} /> Save</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -968,21 +1000,11 @@ function docItems(box: LoadBox, entries: Entry[], allLines: PalPlanLine[], onShe
   ];
 }
 
-/** One inline field on a Sheet-mode band row (CR-335): tiny label + input, bound to the draft like the rail. */
-function BandCell({ label, value, placeholder, onChange, mono }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void; mono?: boolean }) {
-  return (
-    <label className="band-cell">
-      <span className="cell-lbl">{label}</span>
-      <input className={mono ? "mono" : undefined} value={value} placeholder={placeholder} aria-label={label} onChange={(e) => onChange(e.target.value)} />
-    </label>
-  );
-}
-
 /** The row engine shared by the tab sheet and Sheet mode (CR-335): pick rows over the stock the OTHER
     containers left, the blank row that appends itself, the per-batch picker and the plan hints. Owns only the
     rows' view state; picks, details and pallet metas live in the parent's draft. Returns <tr>s (+ the picker,
     portaled). `band` = the leading row(s) Sheet mode puts above a container's rows; `after` = the row(s) it
-    puts under them (CR-354: step 2, container & vehicle). */
+    puts right under its design rows, before the plan hints (CR-374: Add Items in Bulk). */
 function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedItems = 0, planFor, onChoose, onFill, picker, setPicker, band, after, indexed = true }: {
   draft: ContainerDraft;
   pick: ReturnType<typeof useSessionPick>;
@@ -1000,7 +1022,7 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
   setPicker: (v: string) => void;
   band?: ReactNode;
   after?: ReactNode;
-  /** First column = running number (tab sheet) or blank (Sheet mode's Container column). */
+  /** Tab sheet: a leading running-number column. Sheet mode (false): no leading column — the band row names the container (CR-374). */
   indexed?: boolean;
 }) {
   // Sheet rows. The boxes live in draft.qty (per line); a row only names its item.
@@ -1089,7 +1111,7 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
         const meta = draft.meta.get(r.rowKey);
         return (
           <tr key={r.key}>
-            <td className="mono dim">{indexed ? loadedItems + i + 1 : ""}</td>
+            {indexed && <td className="mono dim">{loadedItems + i + 1}</td>}
             <td>
               <Combobox
                 value={r.rowKey}
@@ -1110,7 +1132,7 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
                 title={dr ? `Choose batches and pallets${mix ? "\nMXBATCH: a pallet here is shared with another batch/item" : ""}` : undefined}
                 value={dr ? `${batchSummary(openLines(dr), v ? new Set(openLines(dr).filter((l) => !qty.get(l.id)).map((l) => l.id)) : skip)}${mix ? " · MXBATCH" : ""}` : ""}
                 placeholder="—"
-                style={{ cursor: dr ? "pointer" : undefined, width: 120 }}
+                style={{ cursor: dr ? "pointer" : undefined }}
                 onClick={() => dr && setPicker(r.rowKey)}
                 onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && dr && setPicker(r.rowKey)}
               />
@@ -1123,17 +1145,19 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
                 disabled={!dr}
                 aria-label="Pallets"
                 onChange={(e) => dr && setDesignPallets(dr, Number(e.target.value) || 0, skip)}
-                style={{ textAlign: "right", width: 70 }}
+                style={{ textAlign: "right" }}
               />
             </td>
             <td className="num" title={dr && v ? boxesHint(usedParts) : undefined}>{dr && v ? fmt(v) : ""}</td>
-            <td><input value={meta?.palletNo ?? ""} placeholder={dr ? "auto" : ""} disabled={!dr} aria-label="Pallet No." onChange={(e) => setMeta(r.rowKey, { palletNo: e.target.value })} style={{ width: 76 }} /></td>
-            <td><input value={meta?.palletType ?? ""} placeholder={dr ? "—" : ""} disabled={!dr} aria-label="Pallet type" onChange={(e) => setMeta(r.rowKey, { palletType: e.target.value })} style={{ width: 76 }} /></td>
+            <td><input value={meta?.palletNo ?? ""} placeholder={dr ? "auto" : ""} disabled={!dr} aria-label="Pallet No." onChange={(e) => setMeta(r.rowKey, { palletNo: e.target.value })} /></td>
+            <td><input value={meta?.palletType ?? ""} placeholder={dr ? "—" : ""} disabled={!dr} aria-label="Pallet type" onChange={(e) => setMeta(r.rowKey, { palletType: e.target.value })} /></td>
             <td className="dim">{dr ? pick.brandName(dr.brandId) || "—" : ""}</td>
             <td><button className="btn x" title={dr ? "Remove row" : "Clear row"} onClick={() => removeRow(r)}><Icon name="x" size={13} /></button></td>
           </tr>
         );
       })}
+
+      {after}
 
       {/* Container Planning (CR-255/301/336): pick WHICH planned container this one fills — a helper, never a gate.
           Options name the format, pallets and boxes; Sent / claimed containers stay listed, marked. */}
@@ -1145,7 +1169,7 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
         const perDesign = (s: PlanSlice) => s.lines.map((ln) => `${ln.pallets}P${ln.palletName ? ` ${ln.palletName}` : ""} · ${fmt(ln.boxes)} ${ln.design}`).join("  ·  ");
         return [
           <tr key={`hint-${soBand.salesOrderId}`} className="hint-row">
-            <td colSpan={10}>
+            <td colSpan={indexed ? 10 : 9}>
               <span style={{ display: "inline-flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <Icon name="package" size={13} />
                 <span><span className="mono">{bandLabel(soBand)}</span> · container plan ({of}):</span>
@@ -1169,7 +1193,6 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
           </tr>,
         ];
       })}
-      {after}
 
       {picker && createPortal((() => {
         const one = picker === "all" ? undefined : designRows.get(picker);
@@ -1226,8 +1249,6 @@ function ContainerSection({ draft, title, status, box, entries, allLines, open, 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 700, fontSize: "var(--t-lg)" }}>{title}</span>
           <span className={`chip ${status.cls}`}>{status.label}</span>
-          {/* CR-354: step 1 = designs & pallets; the container pick moved to step 2 (the rail). */}
-          {open && <><span className="chip">1</span><strong>Designs &amp; pallets</strong></>}
           {fillText &&<span className="mono nw dim" style={{ color: totals.over ? "var(--c-amber)" : undefined }} title="Share of this container">{fillText}</span>}
           <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
             {open && (
@@ -1244,13 +1265,13 @@ function ContainerSection({ draft, title, status, box, entries, allLines, open, 
               <tr>
                 <th style={{ width: 28 }}>#</th>
                 <th>Design</th>
-                <th>Order</th>
-                <th>Batch</th>
-                <th className="num" style={{ textAlign: "right" }}>Pallets</th>
-                <th className="num" style={{ textAlign: "right" }}>Boxes</th>
-                <th>Pallet No.</th>
-                <th>Pallet type</th>
-                <th>Box Brand</th>
+                <th style={{ width: 130 }}>Order</th>
+                <th style={{ width: 150 }}>Batch</th>
+                <th className="num" style={{ textAlign: "right", width: 90 }}>Pallets</th>
+                <th className="num" style={{ textAlign: "right", width: 80 }}>Boxes</th>
+                <th style={{ width: 110 }}>Pallet No.</th>
+                <th style={{ width: 110 }}>Pallet type</th>
+                <th style={{ width: 130 }}>Box Brand</th>
                 <th style={{ width: 34 }} />
               </tr>
             </thead>
@@ -1283,7 +1304,7 @@ function ContainerSection({ draft, title, status, box, entries, allLines, open, 
           </table>
         </div>
 
-        {box && !open && <Note tone="ok" style={{ margin: 0 }}>Dispatched{box.dispatchDate ? ` on ${box.dispatchDate.slice(0, 10)}` : ""}. Items and vehicle are locked; pallet numbers and documents stay editable.</Note>}
+        {box && !open && <Note tone="ok" style={{ margin: 0 }}>Dispatched{box.dispatchDate ? ` on ${box.dispatchDate.slice(0, 10)}` : ""}.</Note>}
         {box && (
           <div>
             <div className="rail-title" style={{ marginBottom: 6 }}>Documents · {title}</div>
@@ -1297,7 +1318,7 @@ function ContainerSection({ draft, title, status, box, entries, allLines, open, 
       </div>
 
       <div className="load-rail">
-        <span className="rail-title" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span className="chip">2</span>Container &amp; vehicle · {title}</span>
+        <span className="rail-title">Container &amp; vehicle · {title}</span>
         {/* CR-354: step 2 waits for step 1 — hidden (not greyed) until the container has an item; container pick first. */}
         {locked ? (
           <Note tone="info" style={{ margin: 0 }}>Pick a design in the sheet first — container, vehicle and seals come next.</Note>

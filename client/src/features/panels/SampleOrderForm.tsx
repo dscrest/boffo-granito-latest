@@ -23,8 +23,8 @@ import { cachedCustomers, listCustomers, type CustomerRow } from "@/features/mas
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
-import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
+import { InfoDot } from "./pcBits";
 import { SAMPLE_PIECE_LABEL, type SampleOrderInput, type SamplePieceKind } from "./sampleOrdersApi";
 
 type Line = { designId: string; pieceKind: SamplePieceKind; cutSizeId: string; qty: number; note: string };
@@ -228,6 +228,7 @@ export function SampleOrderForm({
             <span>
               Item<span className="req"> *</span>
             </span>
+            <span />
             <span>Piece</span>
             <span>Cut Piece Size</span>
             <span>
@@ -242,12 +243,11 @@ export function SampleOrderForm({
             return (
               <div className="ord-line smp-line" key={i}>
                 <div className="form-field" style={{ gap: 2 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <ImageThumb images={d?.images ?? []} size={28} alt={d?.uniqueName ?? ""} />
-                    <Combobox className="grow" value={l.designId} onChange={(v) => setLine(i, { designId: v })} placeholder="Search item…" options={designOptions} invalid={dup} ariaLabel="Item" />
-                  </div>
+                  <Combobox value={l.designId} onChange={(v) => setLine(i, { designId: v })} placeholder="Search item…" options={designOptions} invalid={dup} ariaLabel="Item" />
                   {dup && <span className="field-err">Already on this order — change its quantity instead</span>}
                 </div>
+                {/* CR-398: photo + details behind the ⓘ, so the Item picker lines up with every other row. */}
+                <InfoDot title={d ? [d.uniqueName || d.designName, d.sizeLabel].filter(Boolean).join("  ·  ") : ""} images={d?.images ?? []} alt={d?.uniqueName || "item"} />
                 <select value={l.pieceKind} onChange={(e) => setLine(i, { pieceKind: e.target.value as SamplePieceKind, cutSizeId: "" })} aria-label="Piece">
                   {(Object.keys(SAMPLE_PIECE_LABEL) as SamplePieceKind[]).map((k) => (
                     <option key={k} value={k}>

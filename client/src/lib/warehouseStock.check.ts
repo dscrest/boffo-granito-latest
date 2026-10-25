@@ -2,7 +2,7 @@
      node src/lib/warehouseStock.check.ts
    ponytail: one self-check, no vitest dep — same idiom as batchStockDerive.check.ts. */
 import assert from "node:assert";
-import { deriveWarehouseStock, parsePurposes, type WarehouseIn, type WhMoveIn } from "./warehouseStock.ts";
+import { codeCollator, deriveWarehouseStock, gridCodes, parsePurposes, toWarehouseIn, type WarehouseIn, type WhMoveIn } from "./warehouseStock.ts";
 
 const W1: WarehouseIn = { id: "W1", isPrimary: true, purposes: ["Production"] };
 const W2: WarehouseIn = { id: "W2", isPrimary: false, purposes: ["Palletization"] };
@@ -104,5 +104,32 @@ const conserve = (ws: WarehouseIn[], moves: WhMoveIn[], key = "D1|B1") => {
 }
 
 assert.deepStrictEqual(parsePurposes(" Production, Loading Bay ,"), ["Production", "Loading Bay"]);
+
+// 10. CR-409 locations: a row with `parent` inherits the warehouse's purposes, is never primary,
+// and the reducer treats it as just another node — a null removal spreads over the LEAVES.
+{
+  const raw = [
+    { ROWID: 1, is_primary: true, purposes: "Production", parent: null },
+    { ROWID: 2, is_primary: true, purposes: "", parent: 1 }, // flag on a location is ignored
+    { ROWID: 3, is_primary: false, purposes: "", parent: 1 },
+    { ROWID: 4, is_primary: false, purposes: "Loading Bay", parent: "" },
+    { ROWID: 5, is_primary: false, purposes: "", parent: "4" },
+  ];
+  const nodes = toWarehouseIn(raw);
+  assert.deepStrictEqual(nodes.map((n) => n.isPrimary), [true, false, false, false, false]);
+  assert.deepStrictEqual(nodes[1].purposes, ["Production"]);
+  assert.deepStrictEqual(nodes[4].purposes, ["Loading Bay"], "a location inherits its warehouse's purposes");
+  const cells = deriveWarehouseStock(nodes, [M(10, "2"), M(10, "3"), M(5, "5"), M(-8, null)]);
+  assert.strictEqual(onHand(cells, "5"), 0, "Loading Bay location drains first");
+  assert.strictEqual(onHand(cells, "2") + onHand(cells, "3"), 17);
+  assert.strictEqual(onHand(cells, "1"), 0, "nothing lands on the warehouse node itself");
+}
+
+// 11. CR-409 grid codes + natural order.
+assert.deepStrictEqual(gridCodes("A", "B", 1, 3), ["A1", "A2", "A3", "B1", "B2", "B3"]);
+assert.strictEqual(gridCodes("a", "f", 1, 12).length, 72);
+assert.deepStrictEqual(gridCodes("B", "A", 1, 3), [], "rows reversed → nothing");
+assert.deepStrictEqual(gridCodes("A", "A", 5, 2), [], "bays reversed → nothing");
+assert.deepStrictEqual(["A10", "B1", "A2", "A1"].sort(codeCollator.compare), ["A1", "A2", "A10", "B1"]);
 
 console.log("warehouseStock.check: all assertions passed");

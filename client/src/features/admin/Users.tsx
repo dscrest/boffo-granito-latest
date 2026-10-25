@@ -202,12 +202,10 @@ export function UsersAdmin() {
   return (
     <div>
       <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+        <div>
           <BackToSettings />
-          <div>
-            <div className="title">Users</div>
-            <div className="sub">{loading ? "Loading…" : "Roles control feature access"}</div>
-          </div>
+          <div className="title">Users</div>
+          <div className="sub">{loading ? "Loading…" : "Roles control feature access"}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">
@@ -315,9 +313,6 @@ export function UsersAdmin() {
               </button>
             </div>
           </label>
-        </div>
-        <div className="muted" style={{ marginTop: 8 }}>
-          Someone from these domains who signs in with Zoho for the first time gets a {DEFAULT_ROLE} account (view and create, no edit or delete). Blank = only accounts created here can sign in.
         </div>
       </div>
 

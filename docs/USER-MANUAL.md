@@ -99,7 +99,7 @@ These work the same on almost every list and detail page, so learn them once:
 
 "Masters" are the reference lists the rest of the app draws from. Set these up well and everything downstream just works.
 
-**Where data comes from:** the **Size Master is the single source of truth** for tile dimensions, coverage per box, and box weight. Items and Pallets *copy* those figures from the Size you pick and show them as read-only. To change a dimension, edit the **Size**, not the Item or Pallet.
+**Where data comes from:** the **Size Master holds the tile dimensions and the packing defaults** (pieces per box, coverage per box, box weight). Pallets *copy* coverage and weight from the Size you pick. Items take the dimensions read-only, and start their **own** Pcs Per Packing and Box Weight from the Size — type over either on the item; its coverage follows the item's own numbers. To change a dimension, edit the **Size**, not the Item or Pallet.
 
 ### 4.1 Items (Design Master)
 
@@ -107,11 +107,13 @@ These work the same on almost every list and detail page, so learn them once:
 
 **Columns:** Name, Size, Finish, Brand, Category, Glaze, Status, SKU. (Created/Modified are hidden by default.)
 
-**To create an item:** click **New Item**, then fill the form:
+**To create an item:** click **New Item**, then fill the form. It has five sections:
 
-- **Required:** Design Name, Size, Finish, Brand.
-- **Optional:** Base Design Name, Customer Brand (you can type a new one — it's saved for next time), Collection, Category, Glaze, Grade, Rate/ft², Rate/m².
-- **Automatic:** Width & Length come from the chosen Size. **Status** starts as **Active**.
+- **Main Information** — Design Name (required), Base Design Name (pick an existing item), Design Owner and Custom Design Buyer (customers; the owner starts on the default set in Settings ▸ Preferences), Custom Design Buyer Brand (the buyer's brands — type a new one and it is filed under that buyer).
+- **Calculations** — Size (required); Width & Length come from the Size; **Pcs Per Packing** and **Box Weight** start from the Size but are this item's own — type to change; Coverage Area ft² / m² and the per-piece / per-m² weights calculate themselves; Rate/ft², Rate/m².
+- **Design Data** — the item images (Front / Rear / other), No. of Random Faces, Finish (required), Category, Surface Application, Punch Type, Glaze, Brand (required), Grade.
+- **Working Data** — Status (new items start **Active**; change it here when editing or from the item's More menu), Batch-tracked item, Opening Stock (edit only).
+- **Marketing Data** — Collection Name, Series Name, Catalogue Name.
 
 A live banner at the top shows three values that build themselves as you type:
 
@@ -157,6 +159,56 @@ The detail page lists **Associated Orders** and offers a **Palletize Order** sho
 ### 4.4 Production
 
 Covered under [Stages → Production](#62-production) because it is part of the production workflow. It appears under the **Items** group in the menu for convenience.
+
+### 4.5 Locations — where stock sits
+
+A **location** is a bay inside a warehouse, written as **Warehouse ▸ Bay** (for example "Production Warehouse ▸ B3"). Boxes, pallets and panels each carry one, so "where is it?" has an answer at every stage.
+
+**Before anyone uses it (Admin, once)**
+
+1. **Create a warehouse** under Settings ▸ Warehouses & Locations. Until one exists, every Location field stays hidden and nothing changes for users.
+2. **Mark one Primary.** The first warehouse saved becomes primary on its own. Stock recorded without a location counts there.
+3. **Add bays.** Open the warehouse row's **+** menu: **Generate grid** creates A1 … F12 in one go; **Single** adds one bay. Pickers offer bays only, never the bare warehouse.
+4. **Tag purposes** on the warehouses: **Production**, **Palletization**, **Loading Bay**. These set the defaults below, so the common path costs no extra click. Without purposes, every default is the primary's first bay.
+5. **Old stock** recorded before the bays existed reads "▸ Unassigned". Move it with a Transfer Order (Inventory ▸ Transfer Orders) when you want it placed.
+
+**Where boxes get a location (production)**
+
+| Screen | What you see |
+|---|---|
+| Record Output (the **+** on a production row) | Location field, preset to the Production bay |
+| Bulk Record Production | One Location in the toolbar for the whole sheet |
+| Complete Production dialog | Location field under Completion |
+| Excel import | Location picker above the preview, applied to every row |
+| Inline quantity in the production sheet's edit mode | No picker; lands in the Production bay |
+| Opening stock · Stock Adjustments · cut-stock sheets | Location in the bar; Transfer Orders take From and To |
+
+**Where pallets get a location**
+
+- **Start Palletization** and **Complete Palletization** dialogs: one Location row at the top covers every item. Start presets the Palletization bay, Complete presets the Loading Bay. Change it if the pallets went elsewhere.
+- **+ ▸ Set Location…** on any card or row of Palletization, Palletizing and Palletized. Ticked items come along with the one you clicked.
+- **Set Location (n)** on the selection bar after ticking items.
+- **Loading and Dispatch** row menu ▸ Set Location…, for Ready for Loading rows only. Once a pallet is in a container the container is its place and the cell reads "—".
+- **Plan page ▸ More ▸ Set Location…** places every un-loaded line of that plan at once.
+
+**Where panels get a location**
+
+- Panel Order form, Location under Order Details, when creating or editing. No preset.
+- Panel Order page ▸ More ▸ Set Location, open orders only.
+
+**Where to see it**
+
+- Palletization sheets: **Location** column and **Group: Location**. Kanban cards show it on the meta line.
+- Loading and Dispatch sheet: **Location** column.
+- Plan page lines table: **Location** column.
+- Item page ▸ **Locations** tab: loose boxes per bay and batch, then **On pallets at**.
+- Panel Item ▸ Locations card. Panel Orders grid **Location** column (hidden by default, turn it on in the column picker).
+- Reports ▸ **Stock Locations**: Boxes · Cut pieces · Panels · Pallets, as a list or an Item × Location grid. Only bays that hold something appear.
+
+**Two rules for the floor**
+
+- A location on a pallet is a label, not a stock move. Loose stock moves only through a Transfer Order.
+- Partial palletizing and partial loading keep the location on both halves. Nothing to redo.
 
 ---
 
@@ -392,7 +444,7 @@ Every calculated number in the app, in plain terms. You never type these — the
 | Value | Formula |
 |---|---|
 | **Size code** | `Width × Length` → e.g. `600x600` |
-| **Coverage per box (SQM)** | `(Width ÷ 1000) × (Length ÷ 1000) × Pcs-per-Box` |
+| **Coverage per box (SQM)** | `(Width ÷ 1000) × (Length ÷ 1000) × Pcs Per Packing` — on an Item, its own Pcs Per Packing; on a Size / Pallet, the Size's |
 | **Coverage per box (SQFT)** | `SQM × 10.7639` |
 
 ### Item

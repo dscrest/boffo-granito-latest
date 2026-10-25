@@ -9,13 +9,19 @@
    from designsApi (no static lists). Field keys match Data Store
    column names for 1:1 API wiring.
    ============================================================ */
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { Combobox, type ComboOption } from "@/ui/Combobox";
 import { NumberInput } from "@/ui/NumberInput";
 import { insert } from "@/lib/dataOps";
 import { isAdmin } from "@/lib/auth";
+import { titleCase } from "@/lib/format";
 import { nextSeqCode } from "@/lib/seq";
+import { ImageManager } from "@/features/common/ImageManager";
+import { CustomerSearchModal } from "./CustomerSearchModal";
+import { ItemSearchModal } from "./ItemSearchModal";
+import { useMasters } from "./useMasters";
 import { cachedDesigns, invalidateDesigns, type DesignImage, type DesignInput, type DesignLookups, type DesignRow, type LookupOption } from "./designsApi";
 
 /* Flat, all-string form state. Lookup fields hold a parent ROWID.
@@ -24,6 +30,8 @@ export interface DesignValues {
   design_name: string;
   seq_code: string; // design short code — first SKU segment
   base_design_name: string;
+  design_owner: string; // CR-392: Customer ROWID
+  design_buyer: string; // CR-392: Customer ROWID
   party_brand_name: string;
   collection_name: string;
   status: string;
@@ -33,6 +41,10 @@ export interface DesignValues {
   glaze: string;
   brand: string;
   grade: string;
+  surface_application: string; // CR-394 lookups
+  punch: string;
+  series: string;
+  catalogue: string;
   width_mm: string;
   length_mm: string;
   pcs_per_box: string;
@@ -47,71 +59,89 @@ export interface DesignValues {
 
 const STATUSES = ["Active", "Inactive"]; // renamed from Continue/Discontinued (2026-07)
 
-/* "datalist" = free-text value with a creatable Combobox over suggestions
-   (party brand: the PartyBrand master ∪ legacy values already on designs). */
-type FieldKind = "text" | "number" | "select" | "datalist";
+/* "datalist" = free-text value with a Combobox over suggestions (party brand:
+   creatable, the PartyBrand master ∪ legacy values; base design: existing item
+   names + the CR-434 item search modal). "customer" = a Customer ROWID picked via Combobox + search modal. */
+type FieldKind = "text" | "number" | "select" | "datalist" | "customer";
 /* Display-only formula fields (not in DesignValues, never in the payload). */
-type CalcKey = "weight_per_pc" | "weight_per_sqm";
+type CalcKey = "weight_per_pc" | "weight_per_sqm" | "coverage_sqft" | "coverage_sqm";
 interface FieldSpec {
   key: keyof DesignValues | CalcKey;
   label: string;
   kind?: FieldKind;
-  lookup?: "sizes" | "finishes" | "categories" | "glazes" | "brands" | "grades"; // dynamic FK options
+  lookup?: "sizes" | "finishes" | "categories" | "glazes" | "brands" | "grades" | "surfaceApplications" | "punches" | "series" | "catalogues"; // dynamic FK options
   options?: string[]; // static select options (e.g. status)
-  suggest?: "partyBrands"; // datalist suggestions (free-text + pick list)
+  suggest?: "partyBrands" | "designNames"; // datalist suggestions
   required?: boolean;
   suffix?: string;
   /** Owned by the Size master — auto-filled from the picked Size, never typed. */
   fromSize?: boolean;
-  /** Size value is only the DEFAULT — typable override per item (CR-190). */
+  /** Size value is only the DEFAULT — typable override per item (CR-190 weight, CR-391 pcs). */
   sizeDefault?: boolean;
   /** ƒx formula field — read-only, computed from the current values. */
   calc?: (v: DesignValues) => string;
 }
 
+/* Section order and names follow the Design Master spec (2026-10-23, CR-396):
+   Main Information · Calculations · Design Data · Working Data · Marketing Data. */
 const SECTIONS: { title: string; fields: FieldSpec[] }[] = [
   {
-    title: "Identity",
+    title: "Main Information",
     fields: [
+      // Design Code (seq_code) is auto-generated — designsApi.createDesign assigns
+      // the next sequence on save; edits keep the stored one. Shown in the SKU banner.
       { key: "design_name", label: "Design Name", required: true },
-      // Short Code (seq_code) is no longer typed — designsApi.createDesign
-      // assigns the next sequence in the background; edits keep the stored one.
-      { key: "base_design_name", label: "Base Design Name" },
-      { key: "party_brand_name", label: "Customer Brand Name", kind: "datalist", suggest: "partyBrands" },
-      { key: "collection_name", label: "Collection" },
+      { key: "base_design_name", label: "Base Design Name", kind: "datalist", suggest: "designNames" }, // CR-395: picked from items
+      { key: "design_owner", label: "Design Owner", kind: "customer" }, // CR-392
+      { key: "design_buyer", label: "Custom Design Buyer", kind: "customer" },
+      { key: "party_brand_name", label: "Custom Design Buyer Brand", kind: "datalist", suggest: "partyBrands" }, // CR-393: buyer's brands
     ],
   },
   {
-    title: "Classification",
+    title: "Calculations",
     fields: [
       { key: "size", label: "Size", kind: "select", lookup: "sizes", required: true },
+      { key: "width_mm", label: "Width", kind: "number", suffix: "mm", fromSize: true },
+      { key: "length_mm", label: "Length", kind: "number", suffix: "mm", fromSize: true },
+      // CR-391: typed per item — the Size value is only the starting default.
+      { key: "pcs_per_box", label: "Pcs Per Packing", kind: "number", sizeDefault: true },
+      { key: "coverage_sqft", label: "Coverage Area", suffix: "ft²", calc: (v) => s(computeCoverage(v).sqft) },
+      { key: "coverage_sqm", label: "Coverage Area", suffix: "m²", calc: (v) => s(computeCoverage(v).sqm) },
+      { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg", sizeDefault: true },
+      { key: "weight_per_pc", label: "Weight / piece", suffix: "kg", calc: (v) => computeWeights(v).perPc },
+      { key: "weight_per_sqm", label: "Weight / m²", suffix: "kg", calc: (v) => computeWeights(v).perSqm },
+      { key: "rate_per_sqft", label: "Rate / ft²", kind: "number" },
+      { key: "rate_per_sqmt", label: "Rate / m²", kind: "number" },
+    ],
+  },
+  {
+    title: "Design Data",
+    fields: [
+      // Design Image renders at the top of this section (ImageManager) — see DesignFields.
+      { key: "random_faces", label: "No. of Random Faces", kind: "number" },
       { key: "finish", label: "Finish", kind: "select", lookup: "finishes", required: true },
       { key: "category", label: "Category", kind: "select", lookup: "categories" },
+      { key: "surface_application", label: "Surface Application", kind: "select", lookup: "surfaceApplications" }, // CR-394
+      { key: "punch", label: "Punch Type", kind: "select", lookup: "punches" },
       { key: "glaze", label: "Glaze", kind: "select", lookup: "glazes" },
-      { key: "brand", label: "Brand", kind: "select", lookup: "brands", required: true },
+      // CR-430: Brand is no longer on the form (kept in the grid / filter / bulk edit / detail; SKU slot = "00").
       { key: "grade", label: "Grade", kind: "select", lookup: "grades" },
     ],
   },
   {
-    // CR-191 regroup: dims + rates + the weight group together; misc below.
-    title: "Dimensions & Coverage",
+    title: "Working Data",
     fields: [
-      { key: "width_mm", label: "Width", kind: "number", suffix: "mm", fromSize: true },
-      { key: "length_mm", label: "Length", kind: "number", suffix: "mm", fromSize: true },
-      { key: "rate_per_sqft", label: "Rate / ft²", kind: "number" },
-      { key: "rate_per_sqmt", label: "Rate / m²", kind: "number" },
-      { key: "box_weight_kg", label: "Box Weight", kind: "number", suffix: "kg", sizeDefault: true },
-      { key: "weight_per_pc", label: "Weight / piece", suffix: "kg", calc: (v) => computeWeights(v).perPc },
-      { key: "weight_per_sqm", label: "Weight / m²", suffix: "kg", calc: (v) => computeWeights(v).perSqm },
-    ],
-  },
-  {
-    title: "Misc",
-    fields: [
-      { key: "random_faces", label: "Random Faces", kind: "number" },
       { key: "status", label: "Status", kind: "select", options: STATUSES },
       { key: "is_batched", label: "Batch-tracked item", kind: "select", options: ["No", "Yes"] },
       { key: "accounting_stock", label: "Opening Stock", kind: "number" },
+    ],
+  },
+  {
+    title: "Marketing Data",
+    fields: [
+      { key: "collection_name", label: "Collection Name" },
+      { key: "series", label: "Series Name", kind: "select", lookup: "series" }, // CR-394
+      { key: "catalogue", label: "Catalogue Name", kind: "select", lookup: "catalogues" },
     ],
   },
 ];
@@ -124,9 +154,6 @@ const REQUIRED = VALUE_FIELDS.filter((f) => f.required).map((f) => f.key);
 export function blankDesign(): DesignValues {
   const v = Object.fromEntries(VALUE_FIELDS.map((f) => [f.key, ""])) as unknown as DesignValues;
   v.seq_code = ""; // no longer a rendered field — assigned on create by designsApi
-  // Pcs/box is not rendered (owned by the Size master) but lives in state —
-  // snapshotted from the chosen Size, drives coverage + weight/piece.
-  v.pcs_per_box = "";
   v.status = "Active"; // #10: new designs default to Active
   v.is_batched = "Yes"; // default batch-tracked; opt out per item
   return v;
@@ -145,6 +172,8 @@ export function rowToValues(r: DesignRow): DesignValues {
     design_name: r.designName,
     seq_code: r.seqCode,
     base_design_name: r.baseDesignName,
+    design_owner: r.designOwnerId,
+    design_buyer: r.designBuyerId,
     party_brand_name: r.partyBrandName,
     collection_name: r.collectionName,
     status: r.status,
@@ -154,6 +183,10 @@ export function rowToValues(r: DesignRow): DesignValues {
     glaze: r.glazeId,
     brand: r.brandId,
     grade: r.gradeId,
+    surface_application: r.surfaceApplicationId,
+    punch: r.punchId,
+    series: r.seriesId,
+    catalogue: r.catalogueId,
     width_mm: s(r.widthMm),
     length_mm: s(r.lengthMm),
     pcs_per_box: s(r.pcsPerBox),
@@ -254,6 +287,12 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: Design
     glaze: v.glaze,
     brand: v.brand,
     grade: v.grade,
+    design_owner: v.design_owner,
+    design_buyer: v.design_buyer,
+    surface_application: v.surface_application,
+    punch: v.punch,
+    series: v.series,
+    catalogue: v.catalogue,
     width_mm: numOr0(v.width_mm),
     length_mm: numOr0(v.length_mm),
     pcs_per_box: numOr0(v.pcs_per_box),
@@ -272,8 +311,10 @@ export function toDesignInput(v: DesignValues, lk: DesignLookups, images: Design
 
 /* Reusable sections grid + computed-key banner.
    Presentational: owns no save logic, just renders fields and reports edits.
-   `mode` drives the creation rules: status locked to Active, no accounting
-   stock at create (images live on the item detail screen now).
+   `mode` drives the creation rules: status locked to Active on create, no
+   accounting stock at create. Images (CR-396) render inside Design Data when
+   the page passes `images` + `onImages` (uploads go to the File Store at once,
+   the id list is saved with the item).
    Pallet association was removed from this form per the 2026-07-04 spec —
    the DesignPallet capability (designsApi.setDesignPallets) is kept for when
    it is reintroduced elsewhere. */
@@ -283,13 +324,39 @@ export function DesignFields({
   lookups,
   showErrors,
   mode,
+  images,
+  onImages,
+  selfId,
 }: {
   value: DesignValues;
   onChange: (k: keyof DesignValues, v: string) => void;
   lookups: DesignLookups;
   showErrors?: boolean;
   mode: "create" | "edit";
+  images?: DesignImage[];
+  onImages?: (next: DesignImage[]) => void;
+  /** The item being edited — excluded from the Base Design Name suggestions. */
+  selfId?: string;
 }) {
+  // CR-392: owner / buyer pickers read the customer master (cache-first).
+  const { customers } = useMasters();
+  const customerOptions = useMemo<ComboOption[]>(
+    () => customers.filter((c) => c.active || c.id === value.design_owner || c.id === value.design_buyer).map((c) => ({ value: c.id, label: c.name, hint: c.code || undefined })),
+    [customers, value.design_owner, value.design_buyer],
+  );
+  const [custSearch, setCustSearch] = useState<"design_owner" | "design_buyer" | null>(null);
+  const [itemSearch, setItemSearch] = useState(false); // CR-434: 🔍 beside Base Design Name
+  // CR-395: Base Design Name is picked from existing item names (distinct, never itself).
+  const designNames = useMemo(
+    () => [...new Set((cachedDesigns() || []).filter((d) => d.id !== selfId).map((d) => d.designName.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selfId, lookups],
+  );
+  // CR-393: the buyer's brands (plus unassigned / legacy names); every brand when no buyer is set.
+  const brandNames = useMemo(
+    () => lookups.partyBrands.filter((b) => !value.design_buyer || !b.customerId || b.customerId === value.design_buyer).map((b) => b.name),
+    [lookups.partyBrands, value.design_buyer],
+  );
   const uniqueName = useMemo(() => computeUniqueName(value, lookups), [value, lookups]);
   // On create/clone the short code is assigned on save; preview the provisional
   // next code so the SKU doesn't read as a duplicate "00-…".
@@ -300,12 +367,12 @@ export function DesignFields({
         : value;
     return computeSku(v, lookups);
   }, [value, lookups, mode]);
-  const cov = useMemo(() => computeCoverage(value), [value]);
   const sizeOpt = lookups.sizes.find((o) => o.id === value.size);
 
-  // Packing data is owned by the Size master — the item snapshots it. Fill any
-  // blank field from the chosen Size (covers edit-load of rows saved before
-  // Size carried this data, and fresh size picks).
+  // Width / length are the Size's (read-only here). Pcs/box and box weight take
+  // the Size value only as a DEFAULT (CR-391 / CR-190): fill them when blank so a
+  // fresh pick or a legacy row starts with the Size's number, never overwrite a
+  // typed value, and the server no longer fans Size edits onto them.
   useEffect(() => {
     if (!value.size) return;
     const opt = lookups.sizes.find((o) => o.id === value.size);
@@ -317,7 +384,8 @@ export function DesignFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.size, lookups.sizes]);
 
-  // On an explicit Size change, overwrite the packing snapshot with that size's.
+  // On an explicit Size change the dimensions follow the new Size; pcs and weight
+  // restart from the new Size's defaults (still typable afterwards).
   const handleField = (key: keyof DesignValues, val: string) => {
     onChange(key, val);
     if (key === "size") {
@@ -330,10 +398,12 @@ export function DesignFields({
   };
 
   // Creatable party brand: set the free-text value, then persist to the
-  // PartyBrand master so it appears in every future pick list.
-  const createPartyBrand = async (name: string) => {
+  // PartyBrand master (under the chosen buyer, CR-393) so it appears in every
+  // future pick list — and under that customer's Brands on their detail page.
+  const createPartyBrand = async (raw: string) => {
+    const name = titleCase(raw); // CR-429: the master stores Title Case; the SKU segment keys on the exact name
     onChange("party_brand_name", name);
-    const res = await insert("PartyBrand", { name });
+    const res = await insert("PartyBrand", { name, ...(value.design_buyer ? { customer: value.design_buyer } : {}) });
     if (!res.ok) toast.error(res.error || "Could not add the customer brand to the master");
     else invalidateDesigns(); // next lookup fetch includes the new brand
   };
@@ -343,9 +413,6 @@ export function DesignFields({
       <div className="df-banner">
         <span className="k">unique_name</span>
         <span className="chip">{uniqueName || "—"}</span>
-        <div style={{ flex: 1 }} />
-        <span className="k">coverage</span>
-        <span className="chip">{cov.sqft ? `${cov.sqft} ft² · ${cov.sqm} m²` : "—"}</span>
         <div style={{ flex: 1 }} />
         <span className="k">sku</span>
         <span className="chip">{sku}</span>
@@ -357,6 +424,19 @@ export function DesignFields({
         return (
         <div key={sec.title} className="form-section">
           <div className="form-section-title">{sec.title}</div>
+          {/* CR-396: Design Image lives in Design Data (spec), uploads land in the File Store at once. */}
+          {sec.title === "Design Data" && images && onImages && (
+            <div style={{ marginBottom: 12 }}>
+              <ImageManager
+                images={images}
+                canEdit
+                onSave={async (next) => {
+                  onImages(next);
+                  return true;
+                }}
+              />
+            </div>
+          )}
           <div className="form-rows">
             {fields.map((f) => {
               const opts = f.lookup ? lookups[f.lookup] : null;
@@ -380,13 +460,36 @@ export function DesignFields({
                       readOnly
                       tabIndex={-1}
                       className="calc"
-                      title={f.key === "weight_per_pc" ? "Formula field: Box Weight ÷ Pcs per box" : "Formula field: Box Weight ÷ Coverage m² per box"}
+                      title={
+                        f.key === "weight_per_pc"
+                          ? "Formula field: Box Weight ÷ Pcs Per Packing"
+                          : f.key === "weight_per_sqm"
+                            ? "Formula field: Box Weight ÷ Coverage m²"
+                            : f.key === "coverage_sqm"
+                              ? "Formula field: (Width ÷ 1000) × (Length ÷ 1000) × Pcs Per Packing"
+                              : "Formula field: Coverage m² × 10.7639"
+                      }
                     />
+                  ) : f.kind === "customer" ? (
+                    // CR-392: Customer picker — Combobox + the house search modal (form-ux rule 12).
+                    <div className="ctl-row">
+                      <Combobox
+                        className="grow"
+                        value={cur}
+                        options={customerOptions}
+                        onChange={(val) => onChange(f.key as keyof DesignValues, val)}
+                        placeholder={`Search ${f.label.toLowerCase()}…`}
+                        ariaLabel={f.label}
+                      />
+                      <button type="button" className="btn" aria-label="Search customers" title="Search customers" onClick={() => setCustSearch(f.key as "design_owner" | "design_buyer")}>
+                        <Icon name="search" size={13} />
+                      </button>
+                    </div>
                   ) : f.kind === "select" ? (
-                    // Status is read-only everywhere — Active/Inactive is changed
-                    // only via the item's More menu, never typed here.
-                    f.key === "status" ? (
-                      <input value={value.status || "Active"} readOnly tabIndex={-1} style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }} title="Change status from the item's More menu" />
+                    // Status: a new item is always Active (set from the detail
+                    // More menu or here once it exists — CR-396 Working Data).
+                    f.key === "status" && mode === "create" ? (
+                      <input value={value.status || "Active"} readOnly tabIndex={-1} style={{ background: "var(--bg-2, transparent)", color: "var(--dim)" }} title="New items start Active" />
                     ) : (
                     (() => {
                       // Lookup FK options (id/label) or static string options.
@@ -410,19 +513,30 @@ export function DesignFields({
                     )
                   ) : f.kind === "datalist" ? (
                     (() => {
-                      // Free-text value + creatable pick list (PartyBrand master).
-                      const vals = f.suggest ? lookups[f.suggest] : [];
+                      // Free-text value + pick list: the buyer's brands (creatable → PartyBrand
+                      // master) or existing item names (Base Design, never creatable).
+                      const vals = f.suggest === "partyBrands" ? brandNames : designNames;
                       const all = cur && !vals.includes(cur) ? [cur, ...vals] : vals;
-                      return (
+                      const combo = (
                         <Combobox
+                          className={f.suggest === "designNames" ? "grow" : undefined}
                           value={cur}
                           options={all.map((o) => ({ value: o, label: o }))}
                           onChange={(val) => onChange(f.key as keyof DesignValues, val)}
-                          onCreate={(name) => void createPartyBrand(name)}
-                          placeholder={`Search ${f.label.toLowerCase()}…`}
+                          onCreate={f.suggest === "partyBrands" ? (name) => void createPartyBrand(name) : undefined}
+                          placeholder={f.suggest === "designNames" ? "Same as Design Name" : `Search ${f.label.toLowerCase()}…`} // CR-437
                           invalid={!!err}
                         />
                       );
+                      // CR-434: Base Design gets the house 🔍 search modal (same control as the Customer pickers).
+                      return f.suggest === "designNames" ? (
+                        <div className="ctl-row">
+                          {combo}
+                          <button type="button" className="btn" aria-label="Search items" title="Search items" onClick={() => setItemSearch(true)}>
+                            <Icon name="search" size={13} />
+                          </button>
+                        </div>
+                      ) : combo;
                     })()
                   ) : stockFieldLocked ? (
                     // Opening stock already set — non-admins see it read-only.
@@ -457,14 +571,16 @@ export function DesignFields({
                         if (f.key === "rate_per_sqmt") onChange("rate_per_sqft", other(n / SQFT_PER_SQM));
                         if (f.key === "rate_per_sqft") onChange("rate_per_sqmt", other(n * SQFT_PER_SQM));
                       }}
-                      placeholder={f.sizeDefault ? String(sizeOpt?.boxWeightKg || "") || f.label : f.label}
-                      title={f.sizeDefault ? "Defaults from the selected Size — type to override for this item" : undefined}
+                      placeholder={f.sizeDefault ? String((f.key === "pcs_per_box" ? sizeOpt?.pcsPerPacking : sizeOpt?.boxWeightKg) || "") || f.label : f.label}
+                      title={f.sizeDefault ? "Starts from the selected Size — this item's own value, type to change it" : undefined}
                     />
                   ) : (
                     <input
                       className={err ? "error" : ""}
                       value={cur}
                       onChange={(e) => onChange(f.key as keyof DesignValues, e.target.value)}
+                      // CR-429: the stored name is Title Case — show it before save so unique_name agrees.
+                      onBlur={(e) => f.key === "design_name" && onChange("design_name", titleCase(e.target.value))}
                       placeholder={f.label}
                     />
                   )}
@@ -477,6 +593,19 @@ export function DesignFields({
         );
       })}
 
+      {custSearch && (
+        <CustomerSearchModal
+          onPick={(c) => onChange(custSearch, c.id)}
+          onClose={() => setCustSearch(null)}
+        />
+      )}
+      {itemSearch && (
+        <ItemSearchModal
+          exclude={selfId}
+          onPick={(d) => onChange("base_design_name", d.designName)}
+          onClose={() => setItemSearch(false)}
+        />
+      )}
     </>
   );
 }

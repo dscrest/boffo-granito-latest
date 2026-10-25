@@ -9,7 +9,7 @@
 import type { Content, ContentText, TDocumentDefinitions } from "pdfmake/interfaces";
 import { downloadPdf } from "@/lib/pdf";
 import { COMPANY, QP, logoDataUrl, prettyDate } from "@/features/quotes/quoteTemplate";
-import { MATERIAL_LABEL, type LoadRow } from "./panelOrdersApi";
+import { MATERIAL_LABEL, pieceLabel, type LoadRow } from "./panelOrdersApi";
 import { lineLabel, type LoadableOrder } from "./PanelLoads";
 
 const M = 33;
@@ -36,7 +36,8 @@ async function buildLoadCopyDoc(order: LoadableOrder, ld: LoadRow): Promise<TDoc
   const lineRow = (l: LoadRow["lines"][number], i: number): Content[] => [
     { ...td(String(i + 1).padStart(2, "0")), color: QP.dim },
     { ...td(lineLabel(order, l.lineId)), bold: true, color: QP.ink },
-    td(MATERIAL_LABEL[l.material]),
+    // CR-405: a panel's pieces print per kind ("Grey · 300x300"); boards and legacy whole-panel lines keep the material word.
+    td(l.material === "Item" && l.designName && order.type === "Panel" && order.lines.find((x) => x.id === l.lineId)?.panelId ? pieceLabel(l) : MATERIAL_LABEL[l.material]),
     { ...td(nfmt(l.qty), true), bold: true, color: QP.ink },
     td(kg(l.weightKg), true),
   ];

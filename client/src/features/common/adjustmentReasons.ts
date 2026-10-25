@@ -1,4 +1,4 @@
-/* CR-308: reasons for an inventory adjustment — a Settings ▸ Masters lookup
+/* CR-308: reasons for an inventory adjustment — a Masters ▸ Export Master lookup
    (AdjustmentReason), read by both the box-stock and cut-stock sheets. */
 import { list } from "@/lib/dataOps";
 import type { ComboOption } from "@/ui/Combobox";

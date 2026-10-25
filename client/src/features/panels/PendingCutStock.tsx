@@ -14,6 +14,7 @@ import { Icon } from "@/ui/Icon";
 import { Chip } from "@/ui/Chip";
 import { KPI } from "@/ui/primitives";
 import { FilterSelect, IconBtn } from "./pcBits";
+import { InfoTag } from "@/ui/InfoCard";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
@@ -57,16 +58,17 @@ const COLUMNS: ColumnDef<Row>[] = [
   {
     key: "orders",
     label: "Orders",
-    // Which orders need this cut piece, and how many each — "PNL/26-27/003 ×4"; click opens the order (row click still opens the item).
+    // Count + (i) → the per-order list ("PNL/26-27/003 ×4", click opens the order) in the InfoTag card (user mandate 2026-10-22: never a list in the cell).
     render: (r) =>
       r.orders.length ? (
-        <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <InfoTag label={`${r.orders.length} order${r.orders.length === 1 ? "" : "s"}`} title={`Orders needing ${r.cutSizeName || r.designName}`} width={300}>
           {r.orders.map((o) => (
-            <Link key={o.id} className="linkish mono" to={`/panel-orders/${encodeURIComponent(o.id)}`} onClick={(e) => e.stopPropagation()} title={`Open ${o.orderNumber || "order"} — needs ${fmt(o.need)} pcs`}>
-              {o.orderNumber || o.id} <span className="dim">×{fmt(o.need)}</span>
+            <Link key={o.id} className="linkish mono" to={`/panel-orders/${encodeURIComponent(o.id)}`} title="Open order" style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <span>{o.orderNumber || o.id}</span>
+              <span className="dim">×{fmt(o.need)} pcs</span>
             </Link>
           ))}
-        </span>
+        </InfoTag>
       ) : (
         dash
       ),
@@ -115,7 +117,7 @@ export function PendingCutStock() {
     const byId = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
     // CR-347: only what is still PENDING to load counts as demand.
-    return demandByKey(orders.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads) })), panelById, stock, stock.keys()).map((r) => {
+    return demandByKey(orders.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads, panelById) })), panelById, stock, stock.keys()).map((r) => {
       const d = byId.get(r.designId);
       return { ...r, design: d, designName: r.designName || (d ? d.uniqueName || d.designName : ""), cutSizeName: r.cutSizeName || cutName.get(r.cutSizeId) || "", sizeLabel: d?.sizeLabel || "" };
     });
@@ -152,7 +154,7 @@ export function PendingCutStock() {
   const pager = usePagination(sort.sorted.length, "pendingCutStockPageSize", `${query}|${designFilter}|${shortOnly}|${zeroOnly}|${sort.sortKey}|${sort.dir}`);
   const pageRows = pager.slice(sort.sorted);
 
-  const openOrders = orders.filter((o) => o.status !== "Dispatched");
+  const openOrders = orders.filter((o) => o.status !== "Dispatched" && o.status !== "Cancelled"); // CR-368
   const sum = (f: (r: Row) => number) => rows.reduce((s, r) => s + f(r), 0);
 
   return (

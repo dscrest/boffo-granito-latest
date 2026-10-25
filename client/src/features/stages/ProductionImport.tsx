@@ -9,11 +9,13 @@
    Completed — mirroring what recording qty = requested does in the grid.
    SheetJS is loaded on demand so it stays out of the main bundle.
    ============================================================ */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/ui/Icon";
+import { Combobox } from "@/ui/Combobox";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { toast } from "@/ui/Toast";
 import { useMasters } from "@/features/masters/useMasters";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { invalidateBatchStock } from "@/features/stages/batchStockApi";
 import { todayISO } from "@/lib/dates";
@@ -21,7 +23,7 @@ import { fmt } from "@/lib/format";
 import type { DesignRow } from "@/features/masters/designsApi";
 import { useBoxBrands } from "@/features/masters/boxBrands";
 import { requestProduction, recordProduction, setProductionStage } from "./productionApi";
-import { designIndex, parseDate } from "./productionLogSheetEdit";
+import { designIndex, parseDate, warehouseIndex } from "./productionLogSheetEdit";
 
 const FIELDS = [
   { key: "sku", label: "SKU / Item", required: true, synonyms: ["sku", "item", "item code", "itemcode", "design", "design name", "product"] },
@@ -31,6 +33,8 @@ const FIELDS = [
   { key: "date", label: "Production Date", required: false, synonyms: ["date", "production date", "mfg date", "mfg. date", "prod date"] },
   { key: "shift", label: "Shift", required: false, synonyms: ["shift"] },
   { key: "note", label: "Note", required: false, synonyms: ["note", "notes", "remark", "remarks", "comment"] },
+  // CR-438: per-row Location ("Warehouse ▸ A1" or the bare code); blank = the Default location picker.
+  { key: "location", label: "Location", required: false, synonyms: ["location", "warehouse", "bay", "bin", "godown"] },
 ] as const;
 type FieldKey = (typeof FIELDS)[number]["key"];
 type Mapping = Record<FieldKey, number>; // header index, -1 = skip
@@ -43,6 +47,8 @@ interface PreviewRow {
   batch: string;
   brandId: string; // Brand ROWID matched by name ("" = none given)
   brandName: string;
+  warehouseId: string; // CR-438: Warehouse node ROWID matched by label / code ("" = the default picker)
+  warehouseName: string;
   date: string;
   shift: string;
   note: string;
@@ -58,6 +64,14 @@ interface RowResult {
 export function ProductionImport({ onDone, onClose }: { onDone: () => void; onClose: () => void }) {
   const { designRows, salesPersons } = useMasters();
   const importedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
+  // CR-411: the Default location for rows without one, default = the Production bay; CR-438: a row's own Location column wins.
+  const { options: whOptions, primaryFor, enabled: whEnabled } = useWarehouses();
+  const whByName = useMemo(() => warehouseIndex(whOptions), [whOptions]);
+  const [warehouse, setWarehouse] = useState("");
+  const whDefault = primaryFor("Production")?.id ?? "";
+  useEffect(() => {
+    if (whDefault) setWarehouse((v) => v || whDefault);
+  }, [whDefault]);
   const panelRef = useModalA11y(onClose);
   const fileRef = useRef<HTMLInputElement>(null);
   const { brands } = useBoxBrands();
@@ -66,7 +80,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<unknown[][]>([]);
-  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, brand: -1, date: -1, shift: -1, note: -1 });
+  const [mapping, setMapping] = useState<Mapping>({ sku: -1, qty: -1, batch: -1, brand: -1, date: -1, shift: -1, note: -1, location: -1 });
   const [busy, setBusy] = useState(false);
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<RowResult[]>([]);
@@ -77,11 +91,11 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
   const downloadTemplate = async () => {
     const XLSX = await import("xlsx");
     const ws = XLSX.utils.aoa_to_sheet([
-      ["SKU", "Qty (boxes)", "Batch Number", "Box Brand", "Production Date", "Shift", "Note"],
-      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", brands[0]?.name || "", todayISO(), "Day", "blank batch = auto-numbered"],
-      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", "", todayISO(), "Night", ""],
+      ["SKU", "Qty (boxes)", "Batch Number", "Box Brand", "Production Date", "Shift", "Note", "Location"],
+      [designRows[0]?.sku || "1001-600X1200-GL", 100, "", brands[0]?.name || "", todayISO(), "Day", "blank batch = auto-numbered", whOptions[0]?.label || ""],
+      [designRows[1]?.sku || "1002-600X1200-MT", 50, "B/26-27/001", "", todayISO(), "Night", "", ""],
     ]);
-    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 15 }, { wch: 8 }, { wch: 30 }];
+    ws["!cols"] = [{ wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 15 }, { wch: 8 }, { wch: 30 }, { wch: 20 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Production");
     XLSX.writeFile(wb, "production-import-template.xlsx");
@@ -130,6 +144,8 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
       const date = parseDate(cell(r, "date"));
       const brandRaw = str(r, "brand");
       const brand = brandRaw ? brands.find((b) => b.name.trim().toLowerCase() === brandRaw.toLowerCase()) : undefined;
+      const whRaw = whEnabled ? str(r, "location") : "";
+      const whId = whRaw ? whByName.get(whRaw.toLowerCase()) ?? "" : "";
       const error = !raw
         ? "Item is blank"
         : !design
@@ -140,7 +156,9 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
               ? `Unrecognised date: ${str(r, "date")}`
               : brandRaw && !brand
                 ? `Box brand not found: ${brandRaw}`
-                : "";
+                : whRaw && !whId
+                  ? `Location not found: ${whRaw}`
+                  : "";
       return {
         rowNum: i + 1,
         design,
@@ -149,13 +167,15 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
         batch: str(r, "batch"),
         brandId: brand?._id ?? "",
         brandName: brand?.name ?? "",
+        warehouseId: whId,
+        warehouseName: whId ? whOptions.find((o) => o.value === whId)?.label ?? "" : "",
         date: date ?? "",
         shift: str(r, "shift"),
         note: str(r, "note"),
         error,
       };
     });
-  }, [rows, mapping, designByKey, brands]);
+  }, [rows, mapping, designByKey, brands, whEnabled, whByName, whOptions]);
   const valid = useMemo(() => preview.filter((p) => !p.error), [preview]);
 
   const runImport = async () => {
@@ -191,6 +211,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
           note: r.note || undefined,
           batch_number: r.batch || undefined,
           box_brand: r.brandId || undefined,
+          warehouse: (whEnabled && (r.warehouseId || warehouse)) || undefined,
         });
         if (res.ok) {
           done.push(id);
@@ -269,6 +290,14 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
           {step === "preview" && (
             <div className="form-section">
               <div className="form-section-title">Preview — {fileName}</div>
+              {whEnabled && (
+                <div className="form-grid" style={{ marginBottom: 10 }}>
+                  <label className="form-field">
+                    <span className="lbl">Default location</span>
+                    <Combobox value={warehouse} options={whOptions} clearable={false} maxVisible={120} ariaLabel="Location for rows without their own" onChange={setWarehouse} />
+                  </label>
+                </div>
+              )}
               <table className="tbl">
                 <thead>
                   <tr>
@@ -280,6 +309,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <th>Date</th>
                     <th>Shift</th>
                     <th>Note</th>
+                    {whEnabled && <th>Location</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -287,7 +317,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                     <tr key={p.rowNum}>
                       <td className="mono dim">{p.rowNum}</td>
                       {p.error ? (
-                        <td colSpan={7} style={{ color: "var(--c-red)" }}>{p.error}</td>
+                        <td colSpan={whEnabled ? 8 : 7} style={{ color: "var(--c-red)" }}>{p.error}</td>
                       ) : (
                         <>
                           <td><span className="design-name">{p.design!.uniqueName || p.design!.designName}</span></td>
@@ -297,6 +327,7 @@ export function ProductionImport({ onDone, onClose }: { onDone: () => void; onCl
                           <td className="mono">{p.date}</td>
                           <td>{p.shift}</td>
                           <td>{p.note}</td>
+                          {whEnabled && <td>{p.warehouseName || <span className="dim">default</span>}</td>}
                         </>
                       )}
                     </tr>

@@ -525,6 +525,8 @@ export interface StockAdjustLine {
   batch_number?: string;
   qty_boxes: number; // signed, ≠ 0
   note?: string;
+  /** CR-438: this line's location; blank → the call-level `warehouse`. */
+  warehouse?: string;
 }
 /** Inventory adjustment (CR-308): signed box corrections, dated, with a reason —
     both modules' "Zoho Books" adjustment. All-or-nothing on the server. */
@@ -566,10 +568,12 @@ export function setProductionStage(
     Completed. `lines` is [{ id, qty_boxes }] per plan line. */
 export function completeProduction(input: {
   /** Per-line production_date / note override the call-level ones (CR-244 sheet). */
-  lines: { id: string; qty_boxes: number; batch_number?: string; production_date?: string; box_brand?: string; note?: string }[];
+  lines: { id: string; qty_boxes: number; batch_number?: string; production_date?: string; box_brand?: string; note?: string; warehouse?: string }[];
   production_date?: string;
   performed_by?: string;
   note?: string;
+  /** Location (Warehouse node ROWID) every line's boxes go into (CR-411); blank → the primary's "Unassigned". */
+  warehouse?: string;
 }) {
   // bust (not bustProd): completion bumps OrderItem.produced + auto-enqueues.
   return bust(op<{ lines: number }>("production-complete", input));

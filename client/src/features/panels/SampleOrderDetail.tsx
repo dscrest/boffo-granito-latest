@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
-import { confirmDelete } from "@/ui/ConfirmDialog";
+import { confirmDelete, promptDialog } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
@@ -23,8 +23,10 @@ import { ImageThumb } from "@/features/common/ImageLightbox";
 import { Chip } from "@/ui/Chip";
 import { LOADING_TONE } from "./pcBits";
 import { loadStatusOf, PanelLoadsTab, RecordLoadModal } from "./PanelLoads";
+import { OrderReadinessTab, type ReadinessRow } from "./OrderReadinessTab";
 import {
   cachedSampleOrders,
+  cancelSampleOrder,
   deleteSampleOrder,
   listSampleOrders,
   remaining,
@@ -41,6 +43,7 @@ const STATUS_CLS: Record<SampleOrderStatus, string> = {
   New: "q-draft",
   PartiallySupplied: "q-partial",
   Supplied: "q-converted",
+  Cancelled: "q-rejected",
 };
 
 export function SampleOrderDetail() {
@@ -76,12 +79,43 @@ export function SampleOrderDetail() {
     navigate("/panel-orders?type=Sample");
   };
 
+  // CR-368: cancel — reason mandatory for every role; only while nothing has gone out.
+  const onCancel = async () => {
+    if (!order) return;
+    const reason = await promptDialog({
+      title: "Cancel order",
+      message: `Cancel sample order ${order.orderNumber || ""} (${order.customerName})?`,
+      placeholder: "Reason for cancelling (required)",
+      required: true,
+      danger: true,
+      confirmLabel: "Cancel order",
+    });
+    if (!reason) return;
+    setBusy(true);
+    const res = await cancelSampleOrder(order.id, reason);
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Could not cancel the order");
+      return;
+    }
+    toast.success("Sample order cancelled");
+    await load();
+  };
+
   const canEdit = can("panel_craft", "edit");
   const editable = !!order && SAMPLE_ORDER_EDITABLE.has(order.status);
   const lockReason = editable ? undefined : SAMPLE_ORDER_LOCK_REASON;
-  const open = !!order && order.status !== "Supplied";
+  const open = !!order && order.status !== "Supplied" && order.status !== "Cancelled"; // CR-368
+  const cancellable = !!order && order.status === "New" && order.loads.length === 0;
   const loadable = order ? ({ ...order, type: "Sample" } as const) : null; // CR-347
   const loadStatus = loadable ? loadStatusOf(loadable) : "Not loaded";
+  // CR-404: Readiness tab — a sample line has no marks or stock; its one stage is Supplied (= loaded).
+  const readinessRows: ReadinessRow[] = (order?.lines ?? []).map((l) => ({
+    key: l.id,
+    code: [l.designName, l.pieceKind === "Cut" ? l.cutSizeName : SAMPLE_PIECE_LABEL[l.pieceKind]].filter(Boolean).join(" · "),
+    qty: l.qty,
+    stages: [{ name: "Supplied", done: remaining(l) === 0, applicable: true }],
+  }));
 
   const railItems = newestFirst(orders).map((o) => ({
     id: o.id,
@@ -147,6 +181,9 @@ export function SampleOrderDetail() {
                 <MoreMenu
                   items={[
                     ...(can("panel_craft", "create") ? [{ label: "Clone", onClick: () => navigate(`/sample-orders/${encodeURIComponent(order.id)}/clone`) }] : []),
+                    ...(canEdit
+                      ? [{ label: "Cancel Order", danger: true, disabled: busy || !cancellable, title: cancellable ? "Cancel this order" : "Samples have gone out — delete the loads first, or the order is already closed", onClick: () => void onCancel() }]
+                      : []),
                     ...(can("panel_craft", "delete")
                       ? [{ label: "Delete", danger: true, disabled: !editable, title: editable ? undefined : "Only a New order can be deleted", onClick: () => void onDelete() }]
                       : []),
@@ -162,11 +199,14 @@ export function SampleOrderDetail() {
             entityId={order.id}
             created={order.createdTime}
             modified={order.modifiedTime}
-            extraTabs={loadable ? [{ id: "dispatch", label: "Dispatch", content: <PanelLoadsTab order={loadable} onChanged={() => void load()} /> }] : []}
+            extraTabs={[
+              { id: "readiness", label: "Readiness", content: <OrderReadinessTab rows={readinessRows} noun="items" /> }, // CR-404
+              ...(loadable ? [{ id: "dispatch", label: "Dispatch", content: <PanelLoadsTab order={loadable} onChanged={() => void load()} /> }] : []),
+            ]}
           >
             {/* Items card — one row per sample line, the SO Items card shape. */}
             <div className="card" style={{ marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+              <div className="card-head">
                 <span style={{ fontWeight: 600 }}>Samples</span>
                 <span className="muted" style={{ fontSize: 14 }}>
                   {order.lines.length} item{order.lines.length === 1 ? "" : "s"}

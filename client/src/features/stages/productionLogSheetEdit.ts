@@ -16,21 +16,23 @@ export type LogRow = {
   qty: string;
   brand: string; // Brand ROWID
   note: string;
+  warehouse: string; // CR-438: Location (Warehouse node ROWID) for this row; "" = the bar's
   /** Set once the job exists (Save step 1) — a retry only re-sends the completion. */
   jobId?: string;
 };
 
 /** Typed columns in sheet order — a paste fills them left to right from the focused one.
-    CR-264: Size · Design · Batch · Box Brand · Qty · Remark; Date is an optional (default hidden) last column. */
-export const LOG_COLS = ["size", "design", "batch", "brand", "qty", "note", "date"] as const;
+    CR-264: Size · Design · Batch · Box Brand · Qty · Remark; Date is an optional (default hidden) column;
+    CR-438: Location last. */
+export const LOG_COLS = ["size", "design", "batch", "brand", "qty", "note", "date", "warehouse"] as const;
 export type LogCol = (typeof LOG_COLS)[number];
 
-export type LogLine = { key: string; jobId?: string; design: string; qty: number; batch: string; date: string; brand: string; note: string };
+export type LogLine = { key: string; jobId?: string; design: string; qty: number; batch: string; date: string; brand: string; note: string; warehouse: string };
 
 let seq = 0;
-export const blankRow = (): LogRow => ({ key: `r${++seq}`, size: "", design: "", unmatched: "", batch: "", date: "", qty: "", brand: "", note: "" });
+export const blankRow = (): LogRow => ({ key: `r${++seq}`, size: "", design: "", unmatched: "", batch: "", date: "", qty: "", brand: "", note: "", warehouse: "" });
 
-const isActive = (r: LogRow) => !!(r.size || r.design || r.unmatched || r.batch.trim() || r.date || r.qty || r.brand || r.note.trim());
+const isActive = (r: LogRow) => !!(r.size || r.design || r.unmatched || r.batch.trim() || r.date || r.qty || r.brand || r.note.trim() || r.warehouse);
 
 /** Blank rows are skipped. errors: row key → the columns at fault. */
 export function resolveLogSheet(rows: LogRow[], defaultDate: string): { lines: LogLine[]; errors: Map<string, Set<LogCol>>; totalBoxes: number } {
@@ -52,7 +54,7 @@ export function resolveLogSheet(rows: LogRow[], defaultDate: string): { lines: L
         flag(r.key, "batch");
       } else seen.set(k, r.key);
     }
-    lines.push({ key: r.key, jobId: r.jobId, design: r.design, qty, batch, date: r.date || defaultDate, brand: r.brand, note: r.note.trim() });
+    lines.push({ key: r.key, jobId: r.jobId, design: r.design, qty, batch, date: r.date || defaultDate, brand: r.brand, note: r.note.trim(), warehouse: r.warehouse });
   }
   return { lines, errors, totalBoxes: lines.reduce((s, l) => s + l.qty, 0) };
 }
@@ -90,13 +92,26 @@ export function parseDate(v: unknown): string | null {
   return null;
 }
 
+/** CR-438: location text → node id. Accepts the full "Warehouse ▸ A1" label or the bare
+    code "A1" (first warehouse with that code wins); case-insensitive. */
+export function warehouseIndex(options: { value: string; label: string }[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const o of options) {
+    const full = o.label.trim().toLowerCase();
+    const leaf = full.split("▸").pop()!.trim();
+    if (!m.has(full)) m.set(full, o.value);
+    if (leaf && !m.has(leaf)) m.set(leaf, o.value);
+  }
+  return m;
+}
+
 /** A copied Excel block (tabs + newlines) → one patch per pasted row, columns
     filled left to right from `startCol`. Unknown item text lands in `unmatched`;
-    an unknown brand or unreadable date is left blank. */
+    an unknown brand, location or unreadable date is left blank. */
 export function parsePaste(
   text: string,
   startCol: LogCol,
-  lookups: { designByKey: Map<string, { id: string; sizeId?: string }>; brandByName: Map<string, string>; sizeByLabel?: Map<string, string> },
+  lookups: { designByKey: Map<string, { id: string; sizeId?: string }>; brandByName: Map<string, string>; sizeByLabel?: Map<string, string>; warehouseByName?: Map<string, string> },
 ): Partial<LogRow>[] {
   const start = LOG_COLS.indexOf(startCol);
   return text
@@ -120,6 +135,7 @@ export function parsePaste(
         } else if (col === "date") patch.date = v ? parseDate(v) ?? "" : "";
         else if (col === "qty") patch.qty = v.replace(/[^\d]/g, "");
         else if (col === "brand") patch.brand = lookups.brandByName.get(v.toLowerCase()) ?? "";
+        else if (col === "warehouse") patch.warehouse = lookups.warehouseByName?.get(v.toLowerCase()) ?? "";
         else patch[col] = v;
       });
       return patch;

@@ -71,11 +71,7 @@
   --font-sans: 'Zoho Puvi', system-ui, sans-serif;
   --font-mono: 'Zoho Puvi', ui-monospace, monospace;
 
-  /* Sizes — body text flat at 12.5px app-wide (2026-08-27 request); headings keep the scale */
-  --t-xs: 12.5px;
-  --t-sm: 12.5px;
-  --t-md: 12.5px;
-  --t-lg: 12.5px;
+  /* Sizes — the body scale (--t-xs…--t-lg) is owned by theme.css (CR-388); headings keep theirs here */
   --t-xl: 18px;
   --t-2xl: 22px;
   --t-3xl: 30px;
@@ -141,6 +137,14 @@ select.pg-size:hover { background-color: var(--hover); color: var(--fg); }
 }
 .hbtn:hover { background: var(--hover); color: var(--fg); }
 .hbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* "‹ Back" text link above a page title (BackToSettings). */
+.back-link {
+  display: inline-flex; align-items: center; gap: 3px;
+  border: 0; padding: 0; background: none; cursor: pointer;
+  font-size: var(--t-sm); font-weight: 500; color: var(--muted);
+}
+.back-link:hover { color: var(--fg); }
+.page-head .back-link { margin-bottom: 6px; }
 .hbtn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
 /* Row-sized variant for dense table cells (stage advance etc.). */
 .hbtn.sm { height: 22px; padding: 0 8px; gap: 5px; font-size: var(--t-sm); border-radius: 5px; }
@@ -232,7 +236,10 @@ a { color: inherit; text-decoration: none; }
 /* Shell is locked to the viewport: sidebar and header never move,
    .main is the single scroll container. */
 .app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; grid-template-rows: var(--header-h) 1fr; height: 100vh; }
-.app > .sidebar { grid-row: 1 / 3; overflow-y: auto; }
+/* CR-379: the nav scrolls, the rail itself doesn't — the user chip stays pinned
+   at the bottom and its upward menu isn't clipped. */
+.app > .sidebar { grid-row: 1 / 3; overflow: visible; }
+.sidebar > .group { flex: 1; min-height: 0; overflow-y: auto; }
 
 /* ---------- header ---------- */
 .header {
@@ -330,11 +337,9 @@ a { color: inherit; text-decoration: none; }
 .hdr-menu-list { max-height: 360px; overflow: auto; }
 .hdr-menu-row { padding: 9px 12px; border-bottom: 1px solid var(--border); }
 .hdr-menu-row:last-child { border-bottom: none; }
-.hdr-menu-row-text { font-size: var(--t-sm); color: var(--fg); line-height: 1.35; }
+.hdr-menu-row-text { font-size: var(--t-sm); color: var(--fg-2); line-height: 1.35; }
+.hdr-menu-row.unread .hdr-menu-row-text { font-weight: 600; color: var(--fg); }
 .hdr-menu-row-time { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-.hdr-menu-user { padding: 12px; border-bottom: 1px solid var(--border); }
-.hdr-menu-user-name { font-size: var(--t-md); font-weight: 600; color: var(--fg); }
-.hdr-menu-user-sub { font-size: var(--t-sm); color: var(--muted); margin-top: 2px; }
 .hdr-menu-item {
   width: 100%; display: flex; align-items: center; gap: 8px;
   padding: 10px 12px; font-size: var(--t-md); color: var(--fg-2);
@@ -356,7 +361,8 @@ a { color: inherit; text-decoration: none; }
   font-weight: 500;
 }
 .sidebar .brand {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  position: relative; /* collapse-btn floats right so the logo centres on the panel */
   padding: 14px 16px;
   border-bottom: 1px solid var(--sb-border);
   height: var(--header-h);
@@ -431,29 +437,42 @@ a { color: inherit; text-decoration: none; }
 .sidebar .item.parent.open { color: var(--sb-fg); }
 .sidebar .subnav { display: flex; flex-direction: column; }
 
-.sidebar .foot {
-  margin-top: auto;
-  padding: 12px;
-  border-top: 1px solid var(--sb-border);
-  font-size: 13px;
-  color: var(--sb-dim);
+/* ---------- rail user chip + menu (CR-379) ----------
+   The sidebar foot: avatar · name · role · ⌄; the menu opens above it. */
+.rail-user { position: relative; margin: auto 8px 8px; flex: none; }
+.rail-user-chip {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 0; border-radius: 12px;
+  background: var(--sb-hover); color: var(--sb-fg);
+  cursor: pointer; text-align: left; font: inherit;
 }
-.sidebar .foot .row { display: flex; align-items: center; gap: 8px; }
-/* Live/online dot stays green — it's a status semantic, not the brand accent. */
-.sidebar .foot .row .dot { width: 6px; height: 6px; border-radius: 50%; background: oklch(0.72 0.17 150); box-shadow: 0 0 0 3px oklch(0.72 0.17 150 / 0.2); }
+.rail-user-chip:hover { background: var(--sb-active); }
+.rail-user .av { position: relative; }
+.rail-user .presence { position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; }
+.rail-user-text { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.rail-user-text b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-user-text small { color: var(--sb-dim); font-size: 12px; }
+.rail-user .chev { margin-left: auto; flex: none; color: var(--sb-dim); }
+.rail-menu { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; width: 232px; }
+.hdr-menu-sep { height: 1px; margin: 6px 4px; background: var(--border); }
+.hdr-menu-item .tail { margin-left: auto; display: inline-flex; color: var(--muted); }
+.hdr-menu-item.danger, .hdr-menu-item.danger .tail { color: var(--danger); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; margin: 14px 0 0; align-items: center; }
+.keys dt, .keys dd { margin: 0; }
+.keys kbd { font: 600 11.5px var(--font-mono); padding: 2px 7px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--border-2); white-space: nowrap; }
 
 /* ---------- collapsible sidebar (icon rail) ---------- */
 .sidebar .brand .collapse-btn {
-  margin-left: auto;
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
   display: grid; place-items: center;
   width: 24px; height: 24px;
   border: 1px solid var(--sb-border); border-radius: 5px;
   background: none; color: var(--sb-muted); cursor: pointer;
 }
 .sidebar .brand .collapse-btn:hover { background: var(--sb-hover); color: var(--sb-fg); }
-/* Dark-surface scrollbar for the sidebar (global thumb is light-theme). */
-.sidebar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-color: var(--sidebar-bg); }
-.sidebar::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+/* Dark-surface scrollbar for the sidebar nav (global thumb is light-theme). */
+.sidebar > .group::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-color: var(--sidebar-bg); }
+.sidebar > .group::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
 
 .app.collapsed { grid-template-columns: 60px 1fr; }
 .app.collapsed .sidebar .brand {
@@ -461,7 +480,7 @@ a { color: inherit; text-decoration: none; }
 }
 .app.collapsed .sidebar .brand .logo-chip { display: none; }
 .app.collapsed .sidebar .brand .mark { display: grid; }
-.app.collapsed .sidebar .brand .collapse-btn { margin-left: 0; }
+.app.collapsed .sidebar .brand .collapse-btn { position: static; transform: none; }
 
 .app.collapsed .sidebar .group { padding: 14px 8px 6px; }
 .app.collapsed .sidebar .item { justify-content: center; gap: 0; padding-left: 0 !important; padding-right: 0; }
@@ -471,9 +490,9 @@ a { color: inherit; text-decoration: none; }
 .app.collapsed .sidebar .subnav { display: none; }
 .app.collapsed .sidebar .item.active::before { left: 0; }
 
-.app.collapsed .sidebar .foot { display: flex; justify-content: center; }
-.app.collapsed .sidebar .foot .row span:not(.dot) { display: none; }
-.app.collapsed .sidebar .foot .row { gap: 0; }
+.app.collapsed .rail-user { margin-inline: 6px; }
+.app.collapsed .rail-user-chip { justify-content: center; padding: 8px 0; }
+.app.collapsed .rail-user-text, .app.collapsed .rail-user .chev { display: none; }
 
 /* ---------- generic ---------- */
 /* Keyboard users get one consistent focus ring everywhere; form fields
@@ -585,6 +604,11 @@ a { color: inherit; text-decoration: none; }
   font-weight: 600;
 }
 .set-group.active .ic { color: var(--accent-ink, var(--accent)); }
+/* CR-439: a rail group with a sub-menu (Masters ▸ Item / Panel / Export). The parent reads
+   "open" (bold, chevron down) and the chosen sub-item carries the .active box. */
+.set-group.open { color: var(--fg); font-weight: 600; }
+.set-group .ic:last-child:not(:first-child) { margin-left: auto; }
+.set-subgroups { display: flex; flex-direction: column; gap: 2px; padding-left: 22px; }
 
 .set-pane { padding: 22px 24px; min-width: 0; }
 .set-pane-head {
@@ -656,6 +680,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--panel-2);
   border: 1px solid var(--border-2);
   color: var(--fg-2);
+  white-space: nowrap; /* CR-385: a pill is one line, always */
 }
 .chip.size      { background: oklch(0.65 0.16 25 / 0.10);  color: oklch(0.42 0.15 25);  border-color: oklch(0.65 0.16 25 / 0.30); }
 .chip.size.b    { background: oklch(0.6 0.13 210 / 0.10); color: oklch(0.4 0.13 210); border-color: oklch(0.6 0.13 210 / 0.30);}
@@ -756,9 +781,12 @@ a { color: inherit; text-decoration: none; }
 .tbl td input:not([type="checkbox"]):not([type="radio"]) { height: 26px; padding-top: 0; padding-bottom: 0; }
 .tbl td select { padding-right: 24px; background-position: right 7px center; }
 .tbl td .btn.x { width: 26px; }
+/* CR-388: compact toolbar button (fbar controls are 26px); dashed = "add a row" affordance */
+.btn.sm, .hbtn.sm { height: 26px; padding: 0 10px; border-radius: 5px; }
+.btn.dashed { border-style: dashed; background: var(--panel); }
 .tbl tr:hover td { background: var(--hover); }
 .tbl tr:last-child td { border-bottom: 0; }
-.tbl td.num { font-family: var(--font-mono); text-align: right; color: var(--fg); }
+.tbl td.num { font-family: var(--font-mono); text-align: right; color: var(--fg); white-space: nowrap; } /* a number and its unit never split lines */
 .tbl td .design-name { color: var(--fg); }
 /* Single-line cells — keep a long value from wrapping the row taller.
    `nw` on the td stops the wrap; `clip` on the VALUE ellipsises it at its own
@@ -1857,9 +1885,15 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 /* Combobox — searchable single-select (customer pickers) */
 .combo { position: relative; width: 100%; }
 .combo.grow { flex: 1; min-width: 0; } /* Combobox sharing a flex row with a preview (Box Brand logo, CR-181) */
-.combo-input { width: 100%; padding-right: 28px; }
+/* CR-375: `input.combo-input` (0,1,1) — the house skin's `input:not([type]) { padding: 0 11px }` is (0,1,1) too
+   and used to beat the bare class, so the text ran under the chevron. Long values ellipsise before it. */
+input.combo-input { width: 100%; padding-right: 28px; text-overflow: ellipsis; }
+/* CR-415: a gated Combobox (e.g. Pasted before MDF + Vinyl are Ready) must LOOK locked wherever it sits —
+   the form-field rule above only reached inputs inside .form-field / .modal-panel, so table cells looked live. */
+input.combo-input[disabled] { color: var(--muted); background-color: var(--panel-2); border-style: dashed; cursor: not-allowed; }
+.combo:has(> input.combo-input[disabled])::after { opacity: .4; }
 /* With a clear × present, leave room for both the × and the chevron. */
-.combo.has-clear .combo-input { padding-right: 46px; }
+.combo.has-clear input.combo-input { padding-right: 46px; }
 /* Dropdown-affordance chevron — reuses the native <select> house chevron so
    comboboxes read as dropdowns. Pseudo-element (not a bg-image on the input) so
    it never collides with the required-field asterisk bg on .combo-input. */
@@ -1948,6 +1982,12 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   border-radius: 2px;
   background: linear-gradient(var(--accent), oklch(0.55 0.16 35));
 }
+
+/* Collapsible transaction sections (CR-384, Customer page) — <details> wearing .form-section-title. */
+details.tx-section > summary { cursor: pointer; list-style: none; margin: 14px 0 8px; }
+details.tx-section > summary::-webkit-details-marker { display: none; }
+details.tx-section > summary::after { content: "›"; margin-left: auto; font-size: 16px; line-height: 1; color: var(--muted); transition: transform 0.15s; }
+details.tx-section[open] > summary::after { transform: rotate(90deg); }
 
 /* ---- New Design modal chrome ---- */
 .df-modal {
@@ -2045,15 +2085,18 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .ord-line.cf-line {
   grid-template-columns: 2.2fr 1fr 1fr 1fr 26px;
 }
-/* Panel Order lines (CR-302) — panel, details (thumb + sizes + designs), qty, remove. */
-/* CR-309: Panel · Details · MDF · Weight · Qty · ✕ */
+/* Panel Order lines (CR-302/309). CR-398: Panel / Item · ⓘ · Cut Size · MDF · Weight · Qty · ✕ —
+   panel rows and cut-piece rows sit on the SAME columns; the photo moved behind the ⓘ. */
 .ord-line.pnl-line {
-  grid-template-columns: 2fr 1.6fr 1.2fr 0.9fr 0.7fr 26px;
+  grid-template-columns: 2fr 26px 1.2fr 1.2fr 0.9fr 0.7fr 26px;
 }
-/* Sample Order lines (CR-315) — Item (thumb + picker) · Piece · Cut Piece Size · Qty · Note · ✕ */
+/* Sample Order lines (CR-315, CR-398) — Item · ⓘ · Piece · Cut Piece Size · Qty · Note · ✕ */
 .ord-line.smp-line {
-  grid-template-columns: 2.2fr 1fr 1.3fr 0.7fr 1.4fr 26px;
+  grid-template-columns: 2.2fr 26px 1fr 1.3fr 0.7fr 1.4fr 26px;
 }
+/* CR-398: the ⓘ cell (hover = details, click = photos) and the "not applicable" dash cell. */
+.ord-info { color: var(--muted); height: 35px; justify-content: center; padding: 0; }
+.ord-dash { color: var(--dim); align-self: center; text-align: center; }
 /* Sales-order lines add a required Pallet column after Design (chosen at
    creation; pre-seeds palletization). Scoped so Quotes keep their 6-col grid. */
 .ord-line.qt-line.so-line {
@@ -2119,6 +2162,11 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .chip.palstatus.p-ready     { background: oklch(0.62 0.16 70 / 0.10); color: oklch(0.45 0.16 70); border-color: oklch(0.62 0.16 70 / 0.30); }
 .chip.palstatus.p-loading   { background: oklch(0.55 0.16 245 / 0.10); color: oklch(0.42 0.16 245); border-color: oklch(0.55 0.16 245 / 0.30); }
 .chip.palstatus.p-completed { background: oklch(0.55 0.16 150 / 0.10); color: oklch(0.4 0.16 150); border-color: oklch(0.55 0.16 150 / 0.30); }
+
+/* CR-436 Masters hub: embedded list pages size themselves to the viewport
+   (min-height: calc(100vh - …)); under the hub head + two tab strips that
+   leaves a dead scroll band, so let them be content-height here. */
+.masters-body > div { min-height: 0 !important; }
 
 /* Segmented control (full / partial convert) */
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
@@ -2236,7 +2284,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .psheet-tbl th, .psheet-tbl td { height: 32px; padding: 0 8px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); white-space: nowrap; text-align: left; }
 .psheet-tbl th:last-child, .psheet-tbl td:last-child { border-right: 0; }
 .psheet-tbl thead th { position: sticky; top: 0; z-index: 3; background: var(--panel-2); font-weight: 600; color: var(--muted); }
-.psheet-tbl .num { text-align: right; }
+.psheet-tbl .num { text-align: right; white-space: nowrap; }
 .psheet-tbl .gapc { width: 10px; min-width: 10px; padding: 0; background: var(--bg); border-bottom: 0; }
 .psheet-tbl th.qtyh { background: var(--accent-soft); color: var(--accent-ink); }
 .psheet-tbl .rn { width: 34px; padding: 0; text-align: center; font-size: 10px; color: var(--muted); background: var(--panel-2); }
@@ -2344,7 +2392,7 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .qp-table th:last-child, .qp-table td:last-child { padding-right: 8px; }
 .qp-table td { font-size: 12.5px; color: #4a4b4e; padding: 9px 4px; border-bottom: 1px solid #e4e2de; vertical-align: middle; }
 .qp-table tr { break-inside: avoid; }
-.qp-table .num { text-align: right; }
+.qp-table .num { text-align: right; white-space: nowrap; }
 .qp-table .sub { color: #8a8b8e; }
 .qp-table .strong { font-size: 13px; font-weight: 600; color: #17181b; }
 .qp-item-name { font-size: 13.5px; font-weight: 600; color: #17181b; line-height: 1.3; }
@@ -2447,7 +2495,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
   .main > div:has(> .session-fill) { height: auto; }
   .session-fill .set-groups, .session-fill .pane-scroll { overflow: visible; }
   .set-rail { border-right: 0; border-bottom: 1px solid var(--border); }
-  .set-groups { flex-direction: row; flex-wrap: wrap; }
+  .set-groups, .set-subgroups { flex-direction: row; flex-wrap: wrap; }
+  .set-subgroups { padding-left: 0; width: 100%; }
   .set-group { width: auto; }
   .set-group span { flex: 0 0 auto; }
   .set-pane { padding: 18px 16px; }
@@ -2614,8 +2663,9 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .load-rail .form-rows { gap: 8px 10px; }
 .load-rail .rail-title { font-size: var(--t-xs); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 @media (max-width: 1280px) { .load-rail { border-left: 0; border-top: 1px solid var(--border); max-width: none; } }
+/* CR-374: controls fill their column so every value starts (or, numeric, ends) under its heading. */
+.load-sheet td .combo, .load-sheet td input:not([type="checkbox"]) { width: 100%; min-width: 0; }
 .load-sheet td .combo { min-width: 180px; }
-.load-sheet td input:not([type="checkbox"]) { min-width: 60px; }
 .load-sheet tfoot td { font-weight: 700; border-top: 1px solid var(--border); background: var(--panel-2); }
 .load-docs { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .load-docs .btn { height: 36px; background: var(--panel); justify-content: flex-start; }
@@ -2627,15 +2677,4 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .tbl tr.load-band:hover td { background: var(--accent-soft); }
 .tbl tr.load-band.done:hover td { background: var(--panel-2); }
 .band-cells { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-weight: 400; }
-.band-cell { display: inline-flex; align-items: center; gap: 6px; height: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); padding: 0 8px; }
-.band-cell input, .tbl td .band-cell input { border: 0; box-shadow: none; background: transparent; height: 26px; width: 118px; padding: 0; min-width: 0; }
-.band-cell .cell-lbl { font-size: var(--t-xs); color: var(--dim); font-weight: 600; white-space: nowrap; }
-/* CR-350: the Container (format) pick sits on the band as a label-left field, not stacked. */
-.band-cells > .form-field { flex-direction: row; align-items: center; gap: 6px; margin: 0; }
-.band-cells > .form-field > .lbl { font-size: var(--t-xs); color: var(--dim); font-weight: 600; white-space: nowrap; margin: 0; }
-.band-cells > .form-field .combo { min-width: 180px; }
-/* CR-354: step 2 (container & vehicle) sits UNDER a container's design rows; locked = one dim line. */
-.band-step td, .band-more td { background: var(--panel-2); padding: 8px 12px; }
-.band-step .band-cells { gap: 8px 10px; }
-.band-more .form-rows { margin: 0; }
 .hint-row td { color: var(--dim); font-size: var(--t-sm); height: 34px; }

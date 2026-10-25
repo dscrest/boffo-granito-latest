@@ -10,7 +10,7 @@ import { Icon } from "@/ui/Icon";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
-import { describeChange, fmt } from "@/lib/format";
+import { describeChange, fmt, opLabel, tableLabel } from "@/lib/format";
 import { list, type DSRow } from "@/lib/dataOps";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -18,8 +18,8 @@ const str = (v: unknown) => (v == null ? "" : String(v));
 // Toggleable + reorderable columns (Time pinned outside the map).
 // occurred_at already carries the row timestamp, so no Created/Modified here.
 const OPS_COLUMNS: ColumnDef<DSRow>[] = [
-  { key: "table", label: "Table", className: "mono", render: (r) => str(r.table_name) },
-  { key: "operation", label: "Operation", render: (r) => str(r.operation) },
+  { key: "table", label: "Record", render: (r) => tableLabel(str(r.table_name)) },
+  { key: "operation", label: "Operation", render: (r) => opLabel(str(r.operation)) },
   {
     key: "status",
     label: "Status",
@@ -77,13 +77,16 @@ export function OperationsLog() {
     return rows.filter((r) => {
       if (opF && str(r.operation) !== opF) return false;
       if (!q) return true;
-      return `${str(r.table_name)} ${str(r.actor)} ${str(r.payload_summary)} ${str(r.error_text)}`
+      return `${tableLabel(str(r.table_name))} ${opLabel(str(r.operation))} ${str(r.actor)} ${str(r.payload_summary)} ${str(r.error_text)}`
         .toLowerCase()
         .includes(q);
     });
   }, [rows, query, opF]);
   const pager = usePagination(filtered.length, "opsPageSize", `${query}|${opF}`);
-  const opOptions = useMemo(() => [...new Set(rows.map((r) => str(r.operation)).filter(Boolean))].sort(), [rows]);
+  const opOptions = useMemo(
+    () => [...new Set(rows.map((r) => str(r.operation)).filter(Boolean))].map((o) => ({ value: o, label: opLabel(o) })).sort((a, b) => a.label.localeCompare(b.label)),
+    [rows],
+  );
 
   return (
     <div>
@@ -109,14 +112,14 @@ export function OperationsLog() {
         <select value={opF} onChange={(e) => setOpF(e.target.value)} title="Filter by operation">
           <option value="">All operations</option>
           {opOptions.map((o) => (
-            <option key={o} value={o}>
-              {o}
+            <option key={o.value} value={o.value}>
+              {o.label}
             </option>
           ))}
         </select>
         <input
           type="text"
-          placeholder="Search table, actor, detail…"
+          placeholder="Search record, actor, detail…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

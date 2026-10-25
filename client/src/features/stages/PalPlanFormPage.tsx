@@ -47,7 +47,7 @@ export function PalPlanFormPage() {
       return;
     }
     const data = res.data as { ROWID?: string; pal_number?: string } | undefined;
-    toast.success(editing ? "Palletization plan updated" : `Palletization plan saved (${data?.pal_number || `#${res.rowid}`})`);
+    toast.success(editing ? "Palletization plan updated" : data?.pal_number ? `Palletization plan saved (${data.pal_number})` : "Palletization plan saved");
     invalidatePalPlans();
     // Land on the saved record; replace so Back never returns to a spent form.
     const savedId = editing ? planId : data?.ROWID || res.rowid;

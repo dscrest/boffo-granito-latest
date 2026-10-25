@@ -96,6 +96,7 @@ async function fetchQuotes(): Promise<{ ok: boolean; quotes: Quote[]; error?: st
       discount: num(it.discount_pct),
       description: str(it.description),
       converted: num(it.converted_qty_boxes),
+      boxWeightKg: num(it.box_weight_kg) || undefined, // CR-427 snapshot; legacy lines → live
     };
     (linesByQuote.get(qid) || linesByQuote.set(qid, []).get(qid)!).push(line);
   });

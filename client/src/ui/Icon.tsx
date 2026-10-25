@@ -49,6 +49,8 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "arrow-down": return <svg {...common}><path d="M12 5v14M5 12l7 7 7-7"/></svg>;
     case "chev-r": return <svg {...common}><path d="m9 6 6 6-6 6"/></svg>;
     case "chev-l": return <svg {...common}><path d="m15 6-6 6 6 6"/></svg>;
+    case "chev-d": return <svg {...common}><path d="m6 9 6 6 6-6"/></svg>;
+    case "keyboard": return <svg {...common}><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/></svg>;
     case "menu": return <svg {...common}><path d="M4 6h16M4 12h10M4 18h16"/></svg>;
     case "edit": return <svg {...common}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>;
     case "check": return <svg {...common}><path d="M5 13l4 4L19 7"/></svg>;
@@ -76,6 +78,9 @@ export function Icon({ name, size = 14, className = "", strokeWidth = 1.75, styl
     case "copy": return <svg {...common}><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>;
     case "refresh": return <svg {...common}><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>;
     case "info": return <svg {...common}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>;
+    case "sun": return <svg {...common}><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>;
+    case "moon": return <svg {...common}><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>;
+    case "monitor": return <svg {...common}><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>;
     default: return null;
   }
 }

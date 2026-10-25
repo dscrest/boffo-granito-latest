@@ -31,7 +31,7 @@ import { listAll, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listPalPlans, subscribePalPlans } from "./palPlansApi";
 import { deriveBatchStock, freeOf, reservedByBatch, type ClaimIn, type ConsumeIn, type LoadedIn, type SupplyIn } from "./batchStockDerive";
-import { deriveWarehouseStock, parsePurposes, type WarehouseIn, type WhCell, type WhMoveIn } from "@/lib/warehouseStock";
+import { deriveWarehouseStock, toWarehouseIn, type WarehouseIn, type WhCell, type WhMoveIn } from "@/lib/warehouseStock";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
@@ -111,7 +111,7 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     listAll("PalletisedBatchLine", { columns: ["batch", "order_item", "boxes", "batch_number"] }),
     listAll("ContainerLoading", { columns: ["batch"] }),
     listAll("OrderItem", { columns: ["design"] }),
-    listAll("Warehouse", { columns: ["is_primary", "purposes"] }),
+    listAll("Warehouse", { columns: ["is_primary", "purposes", "parent"] }), // CR-409: locations carry parent
   ]);
   const fail = (error: string): BatchStockResult => ({ ok: false, rows: [], openingByDesign: new Map(), adjustedByDesign: new Map(), byWarehouse: [], error });
   if (!logs.ok || !designs.ok) return fail(logs.error || designs.error || "Failed to load stock sources");
@@ -253,11 +253,8 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     const committed = r.current - freeOf(r, reserved);
     if (committed > 0) whClaims.push({ key, warehouse: null, qty: committed });
   }
-  const whList: WarehouseIn[] = (warehouses.rows || []).map((w) => ({
-    id: String(w.ROWID),
-    isPrimary: w.is_primary === true || str(w.is_primary) === "true",
-    purposes: parsePurposes(str(w.purposes)),
-  }));
+  // CR-409: one helper with warehousesApi — a location inherits its warehouse's purposes.
+  const whList: WarehouseIn[] = toWarehouseIn((warehouses.rows || []) as { ROWID: unknown; is_primary?: unknown; purposes?: unknown; parent?: unknown }[]);
   const byWarehouse = deriveWarehouseStock(whList, whMoves, whClaims);
   const rows: BatchStockRow[] = derived.map((r) => ({
     designId: r.designId,

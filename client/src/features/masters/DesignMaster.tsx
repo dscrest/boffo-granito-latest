@@ -17,6 +17,7 @@ import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
 import { Combobox } from "@/ui/Combobox";
+import { NumberInput } from "@/ui/NumberInput";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
@@ -25,6 +26,7 @@ import { finishClass, fmtDateTime } from "@/lib/format";
 import { can, canUpdate } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import {
+  EMPTY_LOOKUPS,
   bulkDeleteDesigns,
   bulkUpdateDesigns,
   listDesigns,
@@ -79,20 +81,13 @@ const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
   { key: "modified", label: "Modified", className: "muted mono", render: (d) => fmtDateTime(d.modifiedTime) },
 ];
 
-const EMPTY_LOOKUPS: DesignLookups = {
-  sizes: [],
-  finishes: [],
-  categories: [],
-  glazes: [],
-  brands: [],
-  grades: [],
-  partyBrands: [],
-  partyBrandSeq: {},
-};
 
-/* Bulk-edit is restricted to fields that don't feed the computed
-   unique_name (design_name/size/finish) or sku (size/category/finish/glaze),
-   so a bulk reclassification can't silently desync those keys. */
+/* Bulk-edit fields: Status, Brand, Grade and (CR-427) Box Weight. Never a field
+   that feeds unique_name (design_name/size/finish) — a bulk reclassification
+   must not desync that key. A box-weight patch is safe: the server's
+   stampDesignCoverage ignores it and the Size fan-out treats it as a manual
+   override. Brand/Grade feed the SKU's seq segments; the stored sku is not
+   rebuilt here (Readable-SKU rework owns that). */
 function BulkEditModal({
   count,
   lookups,
@@ -109,11 +104,13 @@ function BulkEditModal({
   const [status, setStatus] = useState("");
   const [brand, setBrand] = useState("");
   const [grade, setGrade] = useState("");
+  const [bw, setBw] = useState(""); // CR-427: Box Weight (kg)
 
   const patch: Record<string, unknown> = {};
   if (status) patch.status = status;
   if (brand) patch.brand = brand;
   if (grade) patch.grade = grade;
+  if (bw.trim() !== "" && Number(bw) >= 0) patch.box_weight_kg = Number(bw);
   const nothing = Object.keys(patch).length === 0;
 
   return (
@@ -169,6 +166,12 @@ function BulkEditModal({
                   onChange={setGrade}
                   placeholder="— leave unchanged —"
                 />
+              </label>
+              <label className="form-field">
+                <span className="lbl">
+                  Box Weight <span className="hint">(kg)</span>
+                </span>
+                <NumberInput value={bw} maxDecimals={3} onChange={(e) => setBw(e.target.value)} placeholder="— leave unchanged —" />
               </label>
             </div>
           </div>
@@ -256,8 +259,9 @@ export function DesignMaster() {
   const pager = usePagination(filtered.length, "designPageSize", `${query}|${JSON.stringify(criteria)}`);
   const pageRows = pager.slice(newestFirst(filtered));
 
-  // ponytail: select-all covers the visible page only; `selected` accumulates across pages.
-  const allShownSelected = pageRows.length > 0 && pageRows.every((r) => selected.has(r.id));
+  // CR-427: select-all covers EVERY filtered row (search → select all → bulk edit is one gesture);
+  // `selected` still accumulates across filters.
+  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.id));
 
   const toggleOne = (id: string) =>
     setSelected((p) => {
@@ -269,8 +273,8 @@ export function DesignMaster() {
   const toggleAll = () =>
     setSelected((p) => {
       const next = new Set(p);
-      if (allShownSelected) pageRows.forEach((r) => next.delete(r.id));
-      else pageRows.forEach((r) => next.add(r.id));
+      if (allShownSelected) filtered.forEach((r) => next.delete(r.id));
+      else filtered.forEach((r) => next.add(r.id));
       return next;
     });
 
@@ -358,7 +362,7 @@ export function DesignMaster() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/design/new")}>
+            <button className="hbtn primary sm" onClick={() => navigate("/design/new")}>
               <Icon name="plus" size={13} />
               New Item
             </button>
@@ -379,7 +383,7 @@ export function DesignMaster() {
                     type="checkbox"
                     checked={allShownSelected}
                     onChange={toggleAll}
-                    title={allShownSelected ? "Deselect all" : "Select all"}
+                    title={allShownSelected ? "Deselect all" : `Select all ${filtered.length}`}
                   />
                 </th>
                 {visible.map((c) => (

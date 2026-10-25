@@ -10,7 +10,7 @@
    through the data-ops business routes and are logged in OperationLog.
    See containersApi.ts (cache) and palletisationApi.ts (op sagas).
    ============================================================ */
-import { listAll, op, remove, type OpResult } from "@/lib/dataOps";
+import { listAll, op, remove, update, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidateOrders } from "@/features/orders/ordersApi";
 
@@ -83,6 +83,7 @@ export interface PalPlanLine {
   palletGroup: string;
   palletNo: string; // manual pallet number/range typed on the Loading Sheet ("" = auto range) — CR-184 // shared physical pallet group ("" = none) — legacy mixed pallets, shows the Mix Batch marker
   palletType: string; // manual pallet type typed on the Loading Sheet ("" = blank) — CR-208
+  warehouseId: string; // CR-412: Warehouse node where this pallet stands ("" = not placed; moot once in a container)
   createdTime: string; // line CREATEDTIME — age anchor (auto-enqueue creates the line right after production)
 }
 
@@ -432,6 +433,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       palletGroup: str(l.pallet_group),
       palletNo: str(l.pallet_no),
       palletType: str(l.pallet_type),
+      warehouseId: str(l.warehouse),
       createdTime: str(l.CREATEDTIME),
     };
     (linesByPlan.get(planId) ?? linesByPlan.set(planId, []).get(planId)!).push(row);
@@ -530,13 +532,30 @@ export function setPalVehicle(rowid: string, vehicle: string) {
     optionally sets the line's pallet in the same call (Palletization drop).
     `boxes` < the line's boxes = partial move: the server splits the line and
     only that slice transitions — the remainder keeps its current stage. */
-export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?: string, boxes?: number) {
+export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?: string, boxes?: number, warehouse?: string) {
   return bust(
     op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, {
       status,
       ...(pallet ? { pallet } : {}),
       ...(boxes && boxes > 0 ? { boxes } : {}),
+      ...(warehouse ? { warehouse } : {}), // CR-412: where the pallet stands
     }),
+  );
+}
+
+/** CR-412: place pallets — the Warehouse node where these lines' pallets stand ("" clears).
+    Plain column, generic PATCH per line (the activity row comes free); a tag, never a stock
+    movement. Stops at the first failure. */
+export function setPalLineLocation(lineIds: string[], warehouse: string): Promise<OpResult> {
+  return bust(
+    (async () => {
+      let last: OpResult = { ok: false, error: "Nothing selected" };
+      for (const id of lineIds) {
+        last = await update("PalletizationPlanLine", id, { warehouse: warehouse || null });
+        if (!last.ok) break;
+      }
+      return last;
+    })(),
   );
 }
 

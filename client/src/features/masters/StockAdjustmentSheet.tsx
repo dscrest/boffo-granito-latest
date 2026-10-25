@@ -70,7 +70,7 @@ export function StockAdjustmentSheet() {
           reason: h.reason,
           note: h.note || undefined,
           warehouse: h.warehouse || undefined,
-          lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined })),
+          lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined })),
         });
         return { ok: res.ok, error: res.error };
       },

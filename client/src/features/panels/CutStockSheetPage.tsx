@@ -1,21 +1,30 @@
 /* ============================================================
    Cut Stock bulk sheets (CR-307/308/330) on the shared StockEntrySheet:
-     /cut-stock/record   → Add Cut Stock   (receipt: Item · Cut Piece Size · Qty)
-     /cut-stock/adjust   → Adjust Cut Stock (signed, reason mandatory)
-     /cut-stock/transfer → Transfer Cut Stock (CR-330: From / To warehouse, reason)
-   Items = the Panel Items (designs with at least one cut-piece row); the
-   Cut Piece Size cell lists that item's cut pieces only — new pieces are
-   defined on /panel-items first (CR-306). CR-329: receipt / adjust carry a
-   Warehouse picker; hints show the pieces in the picked (From) warehouse.
+     /cut-stock/record   → Add Stock       (receipt: Item · Cut Piece Size · Qty)
+     /cut-stock/adjust   → Adjust Stock    (signed, reason mandatory)
+     /cut-stock/transfer → Transfer Stock  (CR-330: From / To location, reason; CR-409: leaf = Warehouse ▸ Location)
+   CR-414: the RECEIPT sheet takes ANY active design from the Item master and
+   ANY cut piece size (the item's pieces first, then the rest of the master,
+   "Create …" for a new name; blank = full size) — saving defines the pair
+   on the server with the ƒx weight (cutPieceWeight), i.e. it imports the
+   design into Panel Craft and receives in one step. Adjust / transfer still
+   offer only Panel Items and their defined pieces. `?design=<id>` prefills
+   the first row (opened from /panel-items/:id) and Save returns there.
+   CR-329: receipt / adjust carry a Warehouse picker; hints show the pieces
+   in the picked (From) warehouse. CR-438: receipt / adjust rows may each pick
+   their own Location (blank = the bar's); the server resolves the fallback.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { EmptyState } from "@/ui/States";
+import { toast } from "@/ui/Toast";
 import { can } from "@/lib/auth";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { StockEntrySheet, type StockEntrySpec } from "@/features/common/StockEntrySheet";
 import { useWarehouses } from "@/features/masters/useWarehouses";
-import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
+import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
 import { cachedCutStockRows, cutWarehouseCells, listCutStock, listCutStockEntries, postCutStockEntry, type CutStockEntryRow, type CutStockRow } from "./panelOrdersApi";
+import { cutPieceWeight, weightPerPc } from "./cutPieceWeight";
 
 export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "transfer" }) {
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
@@ -23,6 +32,8 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
   const [stockRows, setStockRows] = useState<CutStockRow[]>(() => cachedCutStockRows() ?? []);
   const [entries, setEntries] = useState<CutStockEntryRow[]>([]);
   const { warehouses } = useWarehouses();
+  const [params] = useSearchParams();
+  const fromDesign = params.get("design") || "";
 
   useEffect(() => {
     void listDesigns().then((r) => r.ok && setDesigns(r.designs));
@@ -32,35 +43,65 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
   }, []);
 
   const transferring = kind === "transfer";
+  const receiving = kind === "receipt";
   const spec = useMemo<StockEntrySpec>(() => {
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
+    const byId = new Map(designs.map((d) => [d.id, d]));
     const piecesByDesign = new Map<string, CutStockRow[]>();
     for (const r of stockRows) (piecesByDesign.get(r.designId) ?? piecesByDesign.set(r.designId, []).get(r.designId)!).push(r);
     const items = designs
-      .filter((d) => piecesByDesign.has(d.id))
-      .map((d) => ({ id: d.id, sku: d.sku, uniqueName: d.uniqueName, designName: d.designName, hint: d.sizeLabel || undefined }));
+      .filter((d) => (receiving ? d.status !== "Inactive" && d.status !== "Discontinued" : piecesByDesign.has(d.id)))
+      .map((d) => ({
+        id: d.id,
+        sku: d.sku,
+        uniqueName: d.uniqueName,
+        designName: d.designName,
+        hint: [d.sizeLabel, receiving && !piecesByDesign.has(d.id) ? "not in Panel Craft yet" : ""].filter(Boolean).join(" · ") || undefined,
+      }));
     // CR-329: pieces per warehouse (dormant → the plain on-hand).
     const cells = warehouses.length ? cutWarehouseCells(warehouses, entries, stockRows) : [];
     const atWh = (designId: string, cutSizeId: string, wh: string) =>
       wh ? cells.find((c) => c.key === `${designId}|${cutSizeId}` && c.warehouseId === wh)?.onHand ?? 0 : piecesByDesign.get(designId)?.find((r) => r.cutSizeId === cutSizeId)?.qty ?? 0;
     const takeFrom = (h: { warehouse: string; from: string }) => (transferring ? h.from : h.warehouse);
+    // CR-414: the ƒx weight the server stores when the line defines (or first weighs) the pair.
+    const lineWeight = (designId: string, cutSizeId: string) => {
+      const d = byId.get(designId);
+      if (!d) return null;
+      return cutSizeId ? cutPieceWeight(d, cutName.get(cutSizeId) || "") : weightPerPc(d);
+    };
     return {
-      title: kind === "receipt" ? "Add Cut Piece" : kind === "adjustment" ? "Adjust Cut Piece" : "Transfer Cut Piece",
+      title: receiving ? "Add Stock" : kind === "adjustment" ? "Adjust Stock" : "Transfer Stock",
       kind,
       unit: "pcs",
-      dateLabel: kind === "receipt" ? "Entry date" : kind === "adjustment" ? "Adjustment date" : "Transfer date",
+      dateLabel: receiving ? "Entry date" : kind === "adjustment" ? "Adjustment date" : "Transfer date",
       warehouse: transferring ? "pair" : "single",
       items,
       second: {
         label: "Cut Piece Size",
-        required: true,
-        optionsFor: (designId, h) =>
-          (piecesByDesign.get(designId) ?? []).map((r) => ({
+        required: !receiving,
+        placeholder: receiving ? "Full size" : undefined,
+        optionsFor: (designId, h) => {
+          const defined = (piecesByDesign.get(designId) ?? []).map((r) => ({
             value: r.cutSizeId,
             label: cutName.get(r.cutSizeId) || "—",
             hint: takeFrom(h) ? `${atWh(designId, r.cutSizeId, takeFrom(h))} here · ${r.qty} total` : `${r.qty} on hand`,
-          })),
+          }));
+          if (!receiving) return defined;
+          const used = new Set(defined.map((o) => o.value));
+          return [...defined, ...cutSizes.filter((c) => !used.has(c.id)).map((c) => ({ value: c.id, label: c.label, hint: "new cut piece" }))];
+        },
         byName: new Map(cutSizes.map((c) => [c.label.trim().toLowerCase(), c.id])),
+        onCreate: receiving
+          ? async (_designId, text) => {
+              const res = await createCutSize(text);
+              if (!res.ok || !res.rowid) {
+                toast.error(res.error || "Could not add the cut piece size to the master");
+                return undefined;
+              }
+              setCutSizes((prev) => [...prev, { id: res.rowid!, label: text.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
+              return res.rowid;
+            }
+          : undefined,
       },
       warnFor: (l, h) => {
         const out = transferring ? l.qty : -l.qty;
@@ -77,14 +118,22 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
           warehouse: h.warehouse || undefined,
           from_warehouse: h.from || undefined,
           to_warehouse: h.to || undefined,
-          lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined })),
+          lines: lines.map((l) => ({
+            design: l.design,
+            cut_piece_size: l.second,
+            qty: l.qty,
+            note: l.note || undefined,
+            warehouse: l.warehouse || undefined,
+            ...(receiving ? { weight_kg: lineWeight(l.design, l.second) } : {}),
+          })),
         });
         return { ok: res.ok, error: res.error };
       },
-      backTo: transferring ? "/stock-transfers" : "/cut-stock",
-      columnsKey: kind === "receipt" ? "cutStockRecordSheetColumns" : kind === "adjustment" ? "cutStockAdjustSheetColumns" : "cutStockTransferSheetColumns",
+      backTo: fromDesign ? `/panel-items/${encodeURIComponent(fromDesign)}` : transferring ? "/stock-transfers" : "/cut-stock",
+      columnsKey: receiving ? "cutStockRecordSheetColumns" : kind === "adjustment" ? "cutStockAdjustSheetColumns" : "cutStockTransferSheetColumns",
+      initialRows: fromDesign ? [{ design: fromDesign }] : undefined,
     };
-  }, [kind, transferring, designs, cutSizes, stockRows, entries, warehouses]);
+  }, [kind, transferring, receiving, designs, cutSizes, stockRows, entries, warehouses, fromDesign]);
 
   if (!can("panel_craft", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
   return <StockEntrySheet spec={spec} />;

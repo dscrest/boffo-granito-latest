@@ -178,12 +178,10 @@ export function RolesAdmin() {
   return (
     <div>
       <div className="page-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+        <div>
           <BackToSettings />
-          <div>
-            <div className="title">Roles</div>
-            <div className="sub">{loading ? "Loading…" : "Per-module permissions and approval rights"}</div>
-          </div>
+          <div className="title">Roles</div>
+          <div className="sub">{loading ? "Loading…" : "Per-module permissions and approval rights"}</div>
         </div>
         <div className="right">
           <button className="hbtn" onClick={() => void load()} title="Refresh">

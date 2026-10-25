@@ -56,7 +56,7 @@ export function StockTransferSheet() {
       warnFor: (l, h) => {
         if (!h.from) return undefined;
         const have = atWh(l.design, byId.get(l.design)?.isBatched ? l.second : "", h.from);
-        return l.qty > have ? `Only ${fmt(have)} boxes in the From warehouse — this line will be refused` : undefined;
+        return l.qty > have ? `Only ${fmt(have)} boxes at the From location — this line will be refused` : undefined;
       },
       onSave: async (h, lines) => {
         const res = await transferStock({
@@ -75,6 +75,6 @@ export function StockTransferSheet() {
   }, [designs, stock, cells]);
 
   if (!can("items", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
-  if (!enabled) return <EmptyState icon="package" title="No warehouses yet" hint="Add at least two warehouses under Settings ▸ Warehouses before transferring stock" />;
+  if (!enabled) return <EmptyState icon="package" title="No warehouses yet" hint="Add a warehouse and its locations under Settings ▸ Warehouses & Locations before transferring stock" />;
   return <StockEntrySheet spec={spec} />;
 }

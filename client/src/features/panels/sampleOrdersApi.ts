@@ -30,6 +30,7 @@ export const SAMPLE_STATUS_LABEL: Record<SampleOrderStatus, string> = {
   New: "New",
   PartiallySupplied: "Partially Supplied",
   Supplied: "Supplied",
+  Cancelled: "Cancelled",
 };
 
 export type SamplePieceKind = "Full" | "Cut";
@@ -212,6 +213,11 @@ export function saveSampleOrder(input: SampleOrderInput, rowid?: string): Promis
 /** Soft-delete header + lines — New only, reason mandatory (server-enforced). */
 export function deleteSampleOrder(rowid: string, reason?: string): Promise<OpResult> {
   return bust(op(`sample-order-delete/${rowid}`, { reason }));
+}
+
+/** CR-368: cancel — reason mandatory for every role; only while nothing has been supplied or loaded. */
+export function cancelSampleOrder(rowid: string, reason: string): Promise<OpResult> {
+  return bust(op(`sample-order-cancel/${rowid}`, { reason }));
 }
 
 // CR-347: a supply IS a load — see panelLoadsApi.saveLoad (the old /sample-order-supply is gone).

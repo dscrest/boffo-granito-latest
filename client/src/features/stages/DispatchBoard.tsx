@@ -22,7 +22,6 @@ import { confirmDiscard } from "@/ui/ConfirmDialog";
 import { NumberInput } from "@/ui/NumberInput";
 import { Combobox } from "@/ui/Combobox";
 import { fmt } from "@/lib/format";
-import { type ContainerPlan } from "@/data";
 import { isoInfo } from "@/features/masters/customersApi";
 import {
   invalidatePalPlans,
@@ -34,6 +33,7 @@ import {
   palletsOf,
   palTopUp,
   readyPalletsLabel,
+  setPalLineLocation,
   setPalLineStatus,
   type LoadBox,
   type PalPlan,
@@ -41,6 +41,8 @@ import {
   type PalLineStatus,
 } from "./palPlansApi";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { SetLocationModal } from "@/features/common/SetLocationModal";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { codeOf } from "@/ui/statusCode";
 import { TotalsRow } from "@/features/reports/ReportShell";
 import { hasOps, resolvePalSheetEdit, type PalSheetDraft, type PalSheetOps } from "./palSheetEdit";
@@ -65,13 +67,14 @@ type Drag = { lineIds: string[]; from: "Planning" | "Palletizing" | "Ready" } | 
 
 // Swimlane dimensions for the group-by picker (rendered in PalPlans' toolbar,
 // same mechanism as Production). Ordered multi-select → nested lanes.
-export type DispatchGroupBy = "customer" | "so" | "batch" | "item" | "status";
+export type DispatchGroupBy = "customer" | "so" | "batch" | "item" | "status" | "location";
 export const DISPATCH_GROUP_DIMS: Array<{ id: DispatchGroupBy; label: string }> = [
   { id: "customer", label: "Customer" },
   { id: "so", label: "Order" },
   { id: "batch", label: "Batch" },
   { id: "item", label: "Item" },
   { id: "status", label: "Status" },
+  { id: "location", label: "Location" }, // CR-412: where the pallet stands
 ];
 
 /** Board stage of one line — shared with the PalPlans status counts. */
@@ -123,21 +126,19 @@ export function DispatchBoard({
   // In-Palletization line whose open pallet is being topped up (Mix Batch).
   const [topUp, setTopUp] = useState<PalPlanLine | null>(null);
   const [release, setRelease] = useState<PalPlanLine | null>(null); // CR-361
+  // CR-412: lines whose pallet location is being set (one from "+", many from the selection bar).
+  const [locate, setLocate] = useState<PalPlanLine[] | null>(null);
+  const { warehouses, enabled: whEnabled, nameOf: whName, primaryFor } = useWarehouses();
   // Sheet edit mode: staged qty/donor per line, committed on Save (mirrors
   // the Production sheet edit — nothing is written until Save).
   const [editMode, setEditMode] = useState(false);
   const [draft, setDraft] = useState<Record<string, PalSheetDraft>>({});
   const [savingEdits, setSavingEdits] = useState(false);
 
-  // Container plans keyed by SalesOrder ROWID — feeds the card subtitle and
-  // the palletise-time pallet prefill.
-  const { planBySo, defaultPalletFor } = useContainerPlanBySo();
+  // Container plans keyed by SalesOrder ROWID — the palletise-time pallet prefill.
+  const { defaultPalletFor } = useContainerPlanBySo();
   // Shared load flow — Ready-for-Loading cards load into containers from here.
   const flow = useLoadFlow({ plans, boxes, onChanged });
-  const planTitle = (docNo: string, plan: ContainerPlan) =>
-    plan.containers
-      .map((c) => `${docNo} · C${c.no} — ${c.pallets} pallets · ${fmt(c.boxes)} boxes (${c.fillPct}%)\n${c.lines.map((x) => `   ${x.design}: ${x.pallets}P · ${fmt(x.boxes)}B on ${x.palletName}`).join("\n")}`)
-      .join("\n");
 
   // ---- derived ------------------------------------------------
   // Boxed lines + legacy Completed plans live on /loading, not this board
@@ -235,6 +236,13 @@ export function DispatchBoard({
         className: "nw",
         render: ({ l }) => <span title={l.palletName}>{l.palletKind || l.palletName}</span>,
       },
+      // CR-412: where the pallet stands (Warehouse ▸ Location); "—" until placed.
+      {
+        key: "location",
+        label: "Location",
+        className: "nw",
+        render: ({ l }) => (l.warehouseId ? <span className="clip" style={{ maxWidth: 180 }} title={whName(l.warehouseId)}>{whName(l.warehouseId)}</span> : <span className="dim">—</span>),
+      },
       {
         key: "remaining",
         label: "Remaining",
@@ -259,12 +267,13 @@ export function DispatchBoard({
       { key: "age", label: "Age", className: "dim nw", render: ({ p, l }) => `${ageDays(p, l)}d` },
       { key: "pal", label: "PAL", className: "mono nw", style: { fontWeight: 600 }, render: ({ l }) => l.itemCode },
     ],
-    // oiProgress/ageDays are re-derived from plans each render.
+    // oiProgress/ageDays are re-derived from plans each render; warehouses relabel the Location column.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [plans],
+    [plans, warehouses],
   );
   // .v2 (CR-266): Date column added, PAL code hidden by default (ColumnPicker re-shows it).
-  const sheetCols = useColumns("packingSheetColumns.v2", SHEET_COLS, ["pal"]);
+  // .v3 (CR-412): Location column (hidden while no warehouse exists).
+  const sheetCols = useColumns("packingSheetColumns.v3", SHEET_COLS, whEnabled ? ["pal"] : ["pal", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -312,7 +321,7 @@ export function DispatchBoard({
     setBusy(true);
     let ok = 0, err = "";
     for (const e of entries) {
-      const res = await setPalLineStatus(e.lineId, to, e.palletId, e.boxes);
+      const res = await setPalLineStatus(e.lineId, to, e.palletId, e.boxes, e.warehouse);
       if (res.ok) ok++; else err = res.error || "Move failed";
     }
     // No auto-print here: slips print on demand (line/detail buttons) after
@@ -473,6 +482,7 @@ export function DispatchBoard({
     : d === "so" ? e.l.soNumber || "No SO"
     : d === "batch" ? (e.l.batchNumber ? `Batch ${e.l.batchNumber}` : "No batch")
     : d === "status" ? palLineStatusLabel(e.l, boxStatusById.get(e.l.loadBoxId), e.p.status) // same label as the Status column
+    : d === "location" ? (e.l.warehouseId ? whName(e.l.warehouseId) : "No location")
     : e.l.designLabel || "—";
   const groupKeyOf = (e: Entry) => groupBy.map((d) => laneKeyOf(e, d)).join("  ›  ");
   // Sheet rows: stage sections first, group bands nested inside, then pallet
@@ -528,6 +538,14 @@ export function DispatchBoard({
     selected.size ? [...selPlanning.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
   const loadTargets = (l: PalPlanLine) =>
     selected.size ? [...new Set([...selReady.map(({ l: sl }) => sl.id), l.id])] : [l.id];
+  // CR-412: Set Location from a "+" acts on the checked items (any stage) plus the clicked one.
+  const locateTargets = (l: PalPlanLine) =>
+    selected.size ? [...selEntries.map(({ l: sl }) => sl).filter((sl) => sl.id !== l.id), l] : [l];
+  const locateItem = (l: PalPlanLine) => ({
+    label: `Set Location…${locateTargets(l).length > 1 ? ` (${locateTargets(l).length})` : ""}`,
+    title: "Where this pallet stands (Warehouse ▸ Location)",
+    onClick: () => setLocate(locateTargets(l)),
+  });
   // Record Palletised acts on the whole PHYSICAL pallet: a topped-up
   // (pallet_group) line brings its group siblings into the dialog, so the
   // mixed pallet is recorded together (one combined slip when printed).
@@ -547,6 +565,7 @@ export function DispatchBoard({
       title: loadTargets(l).length > 1 ? `Load the ${loadTargets(l).length} selected items into a container` : "Load into a container",
       onClick: () => flow.setPicker({ lineIds: loadTargets(l) }),
     },
+    ...(whEnabled ? [locateItem(l)] : []),
     // CR-361: undo palletization — boxes return to free stock, allocation returned.
     { label: "Release…", disabled: flow.busy, title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease(l) },
   ] : [
@@ -576,6 +595,9 @@ export function DispatchBoard({
         : "Record palletized boxes — they move to Ready for Loading",
       onClick: () => openPalletise(stage === "Palletizing" ? recordTargets(l) : palletiseTargets(l), "ReadyToLoad"),
     },
+    ...(whEnabled ? [locateItem(l)] : []),
+    // CR-369: abandon this palletization task — boxes return to free stock, allocation returned (reason required).
+    { label: "Discard…", danger: true, disabled: flow.busy || l.status === "ReadyToLoad", title: l.status === "ReadyToLoad" ? "Already palletized — release it from Palletization Completed" : "Abandon this task: boxes return to free stock, the order's allocation is returned", onClick: () => setRelease(l) },
   ];
 
   // ---- item card ----------------------------------------------
@@ -663,20 +685,8 @@ export function DispatchBoard({
           </div>
         )}
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {[l.soNumber, l.palletKind || l.palletName].filter((s) => s && s !== "—").join("  ·  ") || "—"}
+          {[l.soNumber, l.palletKind || l.palletName, l.warehouseId ? whName(l.warehouseId) : ""].filter((s) => s && s !== "—").join("  ·  ") || "—"}
         </div>
-        {(() => {
-          const cp = planBySo.get(l.salesOrderId);
-          return cp ? (
-            <div
-              className="dim mono"
-              style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-              title={planTitle(cp.docNo, cp.plan)}
-            >
-              Plan: {cp.plan.containers.length} container{cp.plan.containers.length === 1 ? "" : "s"} · {cp.docNo}
-            </div>
-          ) : null;
-        })()}
         {canEdit && (
           // MoreMenu doesn't stop propagation and the card is draggable +
           // click-navigates, so the wrapper span eats the events.
@@ -847,12 +857,11 @@ export function DispatchBoard({
               {view === "sheet" && canEdit && (
                 editMode ? (
                   <>
-                    <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} disabled={savingEdits} onClick={() => void leaveEdit()}>
+                    <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
                       Cancel
                     </button>
                     <button
-                      className="hbtn primary"
-                      style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                      className="hbtn primary sm"
                       disabled={!editRows.length || editBad || savingEdits}
                       onClick={() => void saveEdits()}
                       title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
@@ -862,8 +871,7 @@ export function DispatchBoard({
                   </>
                 ) : (
                   <button
-                    className="hbtn"
-                    style={{ height: 26, padding: "0 10px", borderRadius: 5 }}
+                    className="hbtn sm"
                     onClick={() => setEditMode(true)}
                     title="Record palletized boxes or a batch top-up across rows, then Save"
                   >
@@ -1112,6 +1120,18 @@ export function DispatchBoard({
                       </button>
                     </>
                   )}
+                  {whEnabled && (
+                    // CR-412: place the selected pallets in one go.
+                    <button
+                      type="button"
+                      className="hbtn"
+                      style={{ height: 26, padding: "0 12px", borderRadius: 5, flex: "0 0 auto" }}
+                      title="Set where the selected pallets stand"
+                      onClick={() => setLocate(selEntries.map(({ l }) => l))}
+                    >
+                      <Icon name="pin" size={12} /> Set Location ({selected.size})
+                    </button>
+                  )}
                   <button type="button" className="btn" style={{ flex: "0 0 auto" }} onClick={() => setSelected(new Set())}>
                     Clear
                   </button>
@@ -1143,6 +1163,8 @@ export function DispatchBoard({
           lines={palletise.lines}
           busy={busy}
           defaultPalletFor={(l) => defaultPalletFor(l.salesOrderId, l.designId)}
+          // CR-412: Start → the Palletization bay, Complete → the Loading Bay (purpose-driven defaults).
+          defaultLocation={primaryFor(palletise.to === "ReadyToLoad" ? "Loading Bay" : "Palletization")?.id}
           toLabel={PAL_LINE_STATUS_LABEL[palletise.to]}
           progress={palletise.to === "ReadyToLoad" ? oiProgress : undefined}
           onConfirm={(entries) => void confirmPalletise(entries)}
@@ -1162,6 +1184,20 @@ export function DispatchBoard({
 
       {release && (
         <ReleaseModal line={release} onDone={() => { invalidatePalPlans(); onChanged(); }} onClose={() => setRelease(null)} />
+      )}
+
+      {locate && (
+        <SetLocationModal
+          value={locate.length === 1 ? locate[0].warehouseId : ""}
+          title={locate.length === 1 ? "Set Location" : `Set Location · ${locate.length} items`}
+          note="Where these pallets stand. Clear it to unset."
+          onSave={async (id) => {
+            const r = await setPalLineLocation(locate.map((l) => l.id), id);
+            setLocate(null);
+            after(r.ok, r.error || "Could not set location", id ? `Location set for ${locate.length} item${locate.length === 1 ? "" : "s"}` : "Location cleared");
+          }}
+          onClose={() => setLocate(null)}
+        />
       )}
 
       {flow.picker && (() => {

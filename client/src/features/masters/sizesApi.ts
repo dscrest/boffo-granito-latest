@@ -1,9 +1,10 @@
 /* ============================================================
    Size master — typed Data Store wrapper over lib/dataOps.
 
-   Size is the single source of truth for per-box packing data.
-   Pallet (coverage/box weight) and Design (dims/pcs/box weight)
-   snapshot their values from the Size picked on the form.
+   Size holds the per-box packing defaults. Pallet (coverage/box weight)
+   snapshots them; Design takes dims from the Size and starts its own
+   pcs/box + box weight from it (CR-391: both typed per item, the server
+   fans only the box-weight default out on a Size edit).
 
    Catalyst has no formula columns, so `code`, `sqm_per_box` and
    `sqft_per_box` are computed here and *stored*, letting ZCQL read

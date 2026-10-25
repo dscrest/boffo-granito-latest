@@ -41,23 +41,32 @@ type Row = {
 };
 
 // Toggleable + reorderable columns. Name leads; the auto CUS-NNNNN code sits LAST, default-hidden (CR-355).
+/* CR-378: two-letter initials on a hue-tinted tile (Kairo-style identity cell). */
+const initialsOf = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+const hueOf = (name: string) => {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 6;
+};
+
 const PARTY_COLUMNS: ColumnDef<Row>[] = [
   {
     key: "name",
-    label: "Name",
+    label: "Customer",
     render: (r) => (
-      <>
-        <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
-          {r.name}
-        </Link>
-        {!r.active && (
-          <span className="chip" style={{ marginLeft: 6 }}>
-            inactive
-          </span>
-        )}
-      </>
+      <span className="ident">
+        <span className={`ini hue-${hueOf(r.name)}`} aria-hidden="true">{initialsOf(r.name)}</span>
+        <span className="ident-text">
+          <Link className="linkish" to={`/parties/${encodeURIComponent(r.code)}`} onClick={(e) => e.stopPropagation()} title="View customer">
+            {r.name}
+          </Link>
+          <span className="ident-sub mono">{r.code}</span>
+        </span>
+      </span>
     ),
   },
+  { key: "status", label: "Status", render: (r) => <Chip tone={r.active ? "green" : "gray"} label={r.active ? "Active" : "Inactive"} /> },
   { key: "country", label: "Country", render: (r) => r.country },
   { key: "currency", label: "Currency", className: "muted", render: (r) => r.currency },
   { key: "paymentTerm", label: "Payment Term", className: "muted", render: (r) => r.paymentTerm },
@@ -101,6 +110,8 @@ export function PartiesView() {
   const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
   const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("parties.criteria", {});
+  // CR-378: segmented Working Status quick filter (All / Active / Inactive) in the toolbar.
+  const [seg, setSeg] = usePersistedState<"all" | "active" | "inactive">("parties.seg", "all");
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("partiesTableColumns.v2", PARTY_COLUMNS, ["created", "modified", "code"]) // .v2 (CR-355);
 
   const load = () => {
@@ -161,22 +172,27 @@ export function PartiesView() {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const quick = base.filter((r) => {
+      if (seg !== "all" && r.active !== (seg === "active")) return false;
       if (filterField && filterValue && String(r[filterField]) !== filterValue) return false;
       if (!q) return true;
       return `${r.name} ${r.code} ${r.country}`.toLowerCase().includes(q);
     });
     return applyFilters(quick, criteria, filterFields);
-  }, [base, query, filterField, filterValue, criteria, filterFields]);
+  }, [base, query, filterField, filterValue, criteria, filterFields, seg]);
 
   // Sort get handles column keys that don't map 1:1 onto Row fields.
   const sort = useSortRows(
     rows,
     (r, k) =>
-      (k === "openOrders" ? r.orders : k === "created" ? r.createdTime : k === "modified" ? r.modifiedTime : (r[k as keyof Row] as string | number)),
+      (k === "openOrders" ? r.orders : k === "status" ? (r.active ? 0 : 1) : k === "created" ? r.createdTime : k === "modified" ? r.modifiedTime : (r[k as keyof Row] as string | number)),
     "created",
     -1, // newest first
   );
-  const pager = usePagination(rows.length, "partiesPageSize", `${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
+  const pager = usePagination(rows.length, "partiesPageSize", `${seg}|${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
+  const segCounts = useMemo(() => {
+    const active = base.filter((r) => r.active).length;
+    return { all: base.length, active, inactive: base.length - active };
+  }, [base]);
 
   const filterValues = useMemo(() => {
     if (!filterField) return [];
@@ -195,65 +211,72 @@ export function PartiesView() {
         />
       )}
 
-      <div className="fbar">
-        <Icon name="filter" size={12} />
-        <select
-          value={filterField}
-          onChange={(e) => {
-            setFilterField(e.target.value as "" | keyof Row);
-            setFilterValue("");
-          }}
-          title="Filter by field"
-        >
-          <option value="">Filter by…</option>
-          {FILTER_FIELDS.map((f) => (
-            <option key={f.key} value={f.key}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-        {filterField && (
-          <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)} title="Filter value">
-            <option value="">All</option>
-            {filterValues.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-        )}
-        <div style={{ flex: 1 }} />
-        <span className="gsearch">
-          <Icon name="search" size={13} />
-          <input
-            type="text"
-            placeholder="Search name, code, country…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </span>
-        <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
-        <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
-        {can("customers", "create") && (
-          <>
-            {/* CR-325/359: pick a Zoho customer → New customer form prefilled from it. */}
-            <button className="hbtn" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => setZohoOpen(true)} title={`Create a customer from a ${ZOHO.label} ${ZOHO.noun}`}>
-              <Icon name="refresh" size={13} />
-              From {ZOHO.label}
-            </button>
-            {/* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */}
-            <button className="hbtn primary" style={{ height: 26, padding: "0 10px", borderRadius: 5 }} onClick={() => navigate("/parties/new")}>
-              <Icon name="plus" size={13} />
-              New customer
-            </button>
-          </>
-        )}
-      </div>
-
       {loading && customers.length === 0 ? (
         <SkeletonRows rows={6} />
       ) : (
       <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        {/* CR-378: the toolbar lives inside the grid card (Kairo pattern). */}
+        <div className="fbar">
+          <Icon name="filter" size={12} />
+          <select
+            value={filterField}
+            onChange={(e) => {
+              setFilterField(e.target.value as "" | keyof Row);
+              setFilterValue("");
+            }}
+            title="Filter by field"
+          >
+            <option value="">Filter by…</option>
+            {FILTER_FIELDS.map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+          {filterField && (
+            <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)} title="Filter value">
+              <option value="">All</option>
+              {filterValues.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          )}
+          <div style={{ flex: 1 }} />
+          <div className="seg" role="group" aria-label="Working status">
+            {(["all", "active", "inactive"] as const).map((k) => (
+              <button key={k} type="button" className={`seg-btn${seg === k ? " on" : ""}`} aria-pressed={seg === k} onClick={() => setSeg(k)}>
+                {k === "all" ? "All" : k === "active" ? "Active" : "Inactive"}
+                <span className="badge">{segCounts[k]}</span>
+              </button>
+            ))}
+          </div>
+          <span className="gsearch">
+            <Icon name="search" size={13} />
+            <input
+              type="text"
+              placeholder="Search name, code, country…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </span>
+          <AdvancedFilterButton title="Customers" fields={filterFields} criteria={criteria} onChange={setCriteria} />
+          <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
+          {can("customers", "create") && (
+            <>
+              {/* CR-325/359: pick a Zoho customer → New customer form prefilled from it. */}
+              <button className="hbtn" onClick={() => setZohoOpen(true)} title={`Create a customer from a ${ZOHO.label} ${ZOHO.noun}`}>
+                <Icon name="refresh" size={13} />
+                From {ZOHO.label}
+              </button>
+              <button className="hbtn primary" onClick={() => navigate("/parties/new")}>
+                <Icon name="plus" size={13} />
+                New customer
+              </button>
+            </>
+          )}
+        </div>
         <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           <table className="tbl">
             <thead>

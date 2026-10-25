@@ -142,6 +142,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       loadedQty: num(it.loaded_qty_boxes),
       dispatchedQty: num(it.dispatched_qty_boxes),
       palletId: str(it.pallet),
+      boxWeightKg: num(it.box_weight_kg) || undefined, // CR-427 snapshot; legacy lines → live
       boxesPerPallet,
       totalBoxes,
       pallets: Math.ceil(totalBoxes / boxesPerPallet),
@@ -256,7 +257,8 @@ export const orderLabel = (o: { poNumber?: string; orderNumber?: string }) => o.
 /** Boxes an order line still needs = Ordered − Allocated (CR-263; Allocate Stock's "to allocate"). */
 export const remainingOf = (o: Pick<Order, "orderQty" | "producedQty">) => Math.max(0, o.orderQty - o.producedQty);
 
-export interface SoChip { key: string; label: string; cls: string; title?: string; ratio: number }
+/** `label` is the bare status word (fits one pill line); `detail` is the count shown BESIDE it (CR-385). */
+export interface SoChip { key: string; label: string; cls: string; title?: string; detail?: string; ratio: number }
 const sumOf = (items: Order[], f: (o: Order) => number) => items.reduce((s, o) => s + f(o), 0);
 
 /** THE status an SO reads by — one function for the grid AND the detail header
@@ -273,8 +275,8 @@ export function soLiveStatus(status: string, items: Order[]): SoChip {
   const key = active && dispatched > 0 ? (left <= 0 ? "Completed" : "PartiallyCompleted")
     : status === "InPalletization" || status === "InLoading" ? "InProgress" // CR-230-window rows
     : status;
-  const label = soStatusLabel(key) + (key === "PartiallyCompleted" && left > 0 ? ` — ${left} left` : "");
-  return { key, label, cls: SO_STATUS_CHIP[key] || "q-draft", ratio: ordered ? dispatched / ordered : 0 };
+  const detail = key === "PartiallyCompleted" && left > 0 ? `${left} left` : undefined;
+  return { key, label: soStatusLabel(key), cls: SO_STATUS_CHIP[key] || "q-draft", detail, ratio: ordered ? dispatched / ordered : 0 };
 }
 
 /** Palletization progress of an SO (grid column + detail field): palletised vs ordered boxes. */
@@ -284,7 +286,7 @@ export function palStatus(items: Order[]): SoChip {
   const ratio = ordered ? done / ordered : 0;
   const title = `${done} of ${ordered} boxes palletized`;
   if (done <= 0) return { key: "Not Started", label: "Not Started", cls: "q-draft", title, ratio };
-  if (done < ordered) return { key: "Partial", label: `Partial — ${done} of ${ordered}`, cls: "q-sent", title, ratio };
+  if (done < ordered) return { key: "Partial", label: "Partial", cls: "q-sent", title, detail: `${done} of ${ordered}`, ratio };
   return { key: "Completed", label: "Completed", cls: "q-converted", title, ratio };
 }
 
@@ -296,7 +298,7 @@ export function loadStatus(items: Order[]): SoChip {
   const ratio = ordered ? (loaded + dispatched) / (2 * ordered) : 0; // dispatched sorts after merely loaded
   const title = `${loaded} of ${ordered} boxes loaded · ${dispatched} dispatched`;
   if (loaded <= 0) return { key: "Not Started", label: "Not Started", cls: "q-draft", title, ratio };
-  if (loaded < ordered) return { key: "Partial", label: `Partial — ${loaded} of ${ordered}`, cls: "q-sent", title, ratio };
+  if (loaded < ordered) return { key: "Partial", label: "Partial", cls: "q-sent", title, detail: `${loaded} of ${ordered}`, ratio };
   return dispatched >= ordered
     ? { key: "Dispatched", label: "Dispatched", cls: "q-converted", title, ratio }
     : { key: "Loaded", label: "Loaded", cls: "q-accepted", title, ratio };

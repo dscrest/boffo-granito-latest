@@ -1,6 +1,6 @@
 /* ============================================================
    MDF master (CR-309) — the boards showcase panels are mounted on:
-   Size · Thickness · Weight (kg). Edited in Settings ▸ Masters; read
+   Size · Thickness · Weight (kg). Edited in Masters ▸ Panel Master; read
    here for the panel-order line pick list and the auto weight.
    ============================================================ */
 import { listAll } from "@/lib/dataOps";

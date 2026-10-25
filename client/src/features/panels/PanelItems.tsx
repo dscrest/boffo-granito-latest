@@ -5,10 +5,12 @@
    Grid: Image · Item · Size · Cut Pieces · On Hand · Stock Wt; whole row
    opens /panel-items/:designId where the cut pieces are managed.
    "Add Item" picks a design from the master → its full-size cut piece is
-   created with the item's weight per piece (CR-190 formula).
+   created at 0 pcs with the item's weight per piece (CR-190 formula).
+   CR-414: "Add Stock" (the bulk receipt sheet) takes ANY master design +
+   any cut size and defines the piece while receiving — import + stock in one.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
@@ -135,8 +137,18 @@ export function PanelItems() {
           <input type="text" placeholder="Search item or size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
+        <Link className="hbtn" to="/cut-piece-sizes" title="The cut piece size list (CR-426)">
+          <Icon name="tile" size={13} />
+          Cut Piece Sizes
+        </Link>
         {canEdit && (
-          <button className="hbtn primary" onClick={() => setAdding(true)}>
+          <Link className="hbtn" to="/cut-stock/record" title="Receive cut pieces — any item from the master, any size; new items join Panel Craft">
+            <Icon name="plus" size={13} />
+            Add Stock
+          </Link>
+        )}
+        {canEdit && (
+          <button className="hbtn primary" onClick={() => setAdding(true)} title="Add an item from the master with 0 pcs on hand">
             <Icon name="plus" size={13} />
             Add Item
           </button>
@@ -178,7 +190,7 @@ export function PanelItems() {
                         <EmptyState
                           icon="tile"
                           title="No items in Panel Craft yet"
-                          hint="Pick items from the Item master — each gets its full-size cut piece; add smaller cut pieces on the item"
+                          hint="Add Stock receives pieces for any item from the Item master and brings it in; Add Item just defines it at 0 pcs"
                           action={canEdit ? <button className="hbtn primary" onClick={() => setAdding(true)}>Add Item</button> : undefined}
                         />
                       )}
@@ -236,7 +248,7 @@ function AddPanelItemModal({ designs, onClose, onAdded }: { designs: DesignRow[]
             </label>
             <label className="form-field span2">
               <span className="lbl">Full-size weight</span>
-              <input className="calc" readOnly tabIndex={-1} value={pc != null ? `${pc} kg / pc` : picked ? "Set box weight on the item first" : ""} placeholder="ƒx box weight ÷ pcs per box" />
+              <input className="calc" readOnly tabIndex={-1} value={pc != null ? `${pc} kg / pc` : picked ? "Set box weight on the item first" : ""} placeholder="Auto: box weight ÷ pcs per box" />
             </label>
           </div>
         </div>

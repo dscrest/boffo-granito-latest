@@ -1,7 +1,7 @@
 /* Self-check for productionLogSheetEdit — run with:  npx tsx client/src/features/stages/productionLogSheetEdit.test.ts
    Plain asserts, no framework (same style as productionSheetEdit.test.ts). */
 import assert from "node:assert";
-import { blankRow, designIndex, parsePaste, resolveLogSheet, type LogRow } from "./productionLogSheetEdit";
+import { blankRow, designIndex, parsePaste, resolveLogSheet, warehouseIndex, type LogRow } from "./productionLogSheetEdit";
 
 const row = (over: Partial<LogRow>): LogRow => ({ ...blankRow(), ...over });
 
@@ -49,6 +49,15 @@ const row = (over: Partial<LogRow>): LogRow => ({ ...blankRow(), ...over });
   assert.deepEqual(parsePaste("no such size", "size", lookups), [{ size: "" }]);
   // Pasting a qty column only.
   assert.deepEqual(parsePaste("10\n20", "qty", lookups), [{ qty: "10" }, { qty: "20" }]);
+}
+
+// CR-438: the Location column (last) pastes by full label or bare code; unknown text → blank; the line carries it.
+{
+  const warehouseByName = warehouseIndex([{ value: "w1", label: "Main ▸ A1" }, { value: "w2", label: "Main ▸ B7" }, { value: "w3", label: "Annex ▸ A1" }]);
+  const lookups = { designByKey: new Map(), brandByName: new Map(), warehouseByName };
+  assert.deepEqual(parsePaste("main ▸ a1\nb7\nAnnex ▸ A1\nnowhere", "warehouse", lookups), [{ warehouse: "w1" }, { warehouse: "w2" }, { warehouse: "w3" }, { warehouse: "" }]);
+  const { lines } = resolveLogSheet([row({ design: "11", qty: "4", warehouse: "w2" }), row({ design: "12", qty: "1" })], "2026-09-21");
+  assert.deepEqual(lines.map((l) => l.warehouse), ["w2", ""]);
 }
 
 console.log("productionLogSheet ok");
