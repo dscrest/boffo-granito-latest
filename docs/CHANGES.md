@@ -3,7 +3,7 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
-## 2026-10-26 — Stock history order, Stock tree, Adjust Stock in the Zoho Books shape with Location Transfer (CR-455…458) — BUILT, live client deploy pending
+## 2026-10-26 — Stock history order, Stock tree, Adjust Stock in the Zoho Books shape with Location Transfer (CR-455…458) — LIVE 2026-10-26
 
 - **Stock history in date order (CR-455).** The Panel Item page's Stock History and the Item master's Production tab list
   entries by the date shown in the Date column (newest first), then by when they were saved. Back-dated adjustments used to

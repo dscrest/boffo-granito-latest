@@ -84,14 +84,14 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   company name (required), legal name, GSTIN / PAN / IEC, address / phone / email / website, bank details — stored as
   `org_*` settings (Admin-only), read through one public route, and used on the sidebar, login, tab title, every PDF /
   print and the shared pages; the old hard-coded BOFFO branding is the fallback. ≈ 2.5 h.
-- **Stock history in date order** (CR-455, 2026-10-26). Panel Item Stock History and the Item master Production tab are
+- **Stock history in date order** (CR-455, 2026-10-26, LIVE 2026-10-26). Panel Item Stock History and the Item master Production tab are
   ordered by the date they show, then by save time. ≈ 0.2 h.
-- **Stock tree: ↳ rows only for special cut sizes** (CR-456, 2026-10-26). A full-size-only item is one row; the chevron and
+- **Stock tree: ↳ rows only for special cut sizes** (CR-456, 2026-10-26, LIVE 2026-10-26). A full-size-only item is one row; the chevron and
   cut-piece rows appear only when the item has another cut size. ≈ 0.3 h.
-- **Adjust Stock in the Zoho Books shape, both modules** (CR-457, 2026-10-26). Header Mode · Date · Reason · Description over
+- **Adjust Stock in the Zoho Books shape, both modules** (CR-457, 2026-10-26, LIVE 2026-10-26). Header Mode · Date · Reason · Description over
   an Item Table with Available, New on hand (live) and one signed Qty adjusted field; date + reason once per adjustment
   (replaces the CR-446 per-line cells). Recorded ≈ 1.5 h · conventional ≈ 5 h.
-- **Location Transfer from the Adjust Stock screen** (CR-458, 2026-10-26). Mode radio Quantity Adjustment | Location
+- **Location Transfer from the Adjust Stock screen** (CR-458, 2026-10-26, LIVE 2026-10-26). Mode radio Quantity Adjustment | Location
   Transfer; From → To in the header, Available at From + Qty to move per line; saves one Transfer Order (TRF number) through
   the existing routes, total unchanged. Recorded ≈ 0.5 h · conventional ≈ 3 h.
 - **Demo build shows no BOFFO branding** (CR-454, 2026-10-26). With `VITE_DEMO=1` the fallback profile is "Demo / Demo
