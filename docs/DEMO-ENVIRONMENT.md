@@ -11,7 +11,7 @@ the live project** (`boffo-granito-export-tracker`, 69851000000043001) or its Da
 | Functions URL | `https://export-tracker-demo-925638796.development.catalystserverless.com/server` |
 | Same-origin client (no CORS needed) | **https://export-tracker-demo-925638796.development.catalystserverless.com/app/index.html** — the demo project's own Web Client Hosting, deployed with `catalyst deploy --only client -p 69851000000395215 --org 925638796` after a plain `npm --prefix client run build` (no `VITE_API_BASE`). Same layout as live; works without any Authorized-Domain step. |
 | Demo logins | `demo.admin@octfis.com` and `dhiraj.s@octfis.com`, both Admin, password `Demo@1234` (change in Users). |
-| Zoho sign-in on the demo | Redirect URI = **`https://export-tracker-demo-kfpljfsy.onslate.com/`** (set by `scripts/deploy-demo.sh`). It must be added as an Authorized Redirect URI on the Zoho API console client `ZOHO_CLIENT_ID` (the same client live uses; a client may list several URIs) — "Invalid Redirect Uri" until then. Cross-origin sign-in works since CR-443 (signed state, no cookie needed). Starting Zoho sign-in from the same-origin `/app/` page also lands on the Slate page afterwards. |
+| Zoho sign-in on the demo | Redirect URI = **`https://export-tracker-demo--tuuvqwyr.onslate.com/`** (set by `scripts/deploy-demo.sh`; was the kfpljfsy host until 2026-10-26). It must be added as an Authorized Redirect URI on the Zoho API console client `ZOHO_CLIENT_ID` (the same client live uses; a client may list several URIs) — "Invalid Redirect Uri" until then. Cross-origin sign-in works since CR-443 (signed state, no cookie needed). Starting Zoho sign-in from the same-origin `/app/` page also lands on the Slate page afterwards. |
 | Data | dummy only — masters from `scripts/seed-demo-masters.mjs`, flows from `scripts/seed-multi.mjs` + `scripts/seed-panel-stages.mjs` (`SEED_HOST` = the functions host above) |
 
 ## Deploying the client to Slate
@@ -48,18 +48,19 @@ If you prefer auto-deploy on push, create the deployment from the Git repo (not 
 `VITE_API_BASE` is what points the demo client at the demo backend instead of the
 same-origin `/server` the live app uses (`client/src/lib/api.ts`).
 
-## Cross-origin: TWO gates, both required for every Slate host
+## Cross-origin: the Catalyst gateway owns CORS for Slate hosts (settled 2026-10-26)
 
 The Slate page and the functions live on different hosts, so every API call is
-cross-origin and the browser sends an OPTIONS preflight first.
-1. **Function allow-list** — `APP_CORS_ORIGINS` written by `scripts/deploy-demo.sh`; the
-   real response carries `Access-Control-Allow-Origin` only for listed hosts. New Slate
-   app ⇒ add its host there + `bash scripts/deploy-demo.sh`.
-2. **Catalyst gateway** — it answers the preflight ITSELF, with no CORS headers, until the
-   origin is an Authorized Domain in the console. Proven 2026-10-26 with headless Chrome
-   (`Network.loadingFailed` → `PreflightMissingAllowOriginHeader`) for BOTH Slate hosts,
-   listed or not. A signed-in developer's own browser may sail through (seen on kfpljfsy);
-   a clean browser does not — test in a private window.
+cross-origin and the browser sends an OPTIONS preflight first. The gateway answers
+that preflight ITSELF, with no CORS headers, until the origin is an **Authorized Domain**
+(console ▸ Cloud Scale ▸ Authentication ▸ Whitelisting, CORS on; the tab appears only
+after Hosted Auth is set up with defaults — our DB login is untouched). Once whitelisted,
+the gateway adds `Access-Control-Allow-Origin` + `-Credentials` on the preflight AND on
+the real response — so the function must NOT add them too, or Chrome fails with
+`MultipleAllowOriginValues`. Hence `APP_CORS_ORIGINS` in `deploy-demo.sh` holds only
+`http://localhost:5173`; Slate hosts go in the console whitelist, nowhere else.
+Verified with headless Chrome over CDP (`Network.loadingFailed.corsErrorStatus`);
+a signed-in developer's browser is not a valid test — use a private window.
 
 Catalyst console → project **export-tracker-demo** → **Cloud Scale ▸ Authentication ▸
 Whitelisting ▸ Authorized Domains** → *Add Domain* `https://export-tracker-demo-kfpljfsy.onslate.com`
