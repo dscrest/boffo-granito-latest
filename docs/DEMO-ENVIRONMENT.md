@@ -24,8 +24,9 @@ bash scripts/deploy-demo-client.sh "what changed"
 
 It copies `client/` to a temp dir (no node_modules / dist), writes
 `.env.production` with `VITE_API_BASE` = the demo functions URL and `VITE_DEMO=1`
-(skips the fallback BOFFO logo on the login page — since CR-445 the logo comes from Settings ▸ Organization
-once an Admin saves one; `VITE_DEMO` only matters while nothing is saved), runs `catalyst slate:link`
+(CR-454: the build then carries no BOFFO branding — fallback profile "Demo / Demo Company", no logo, text-only
+"Processing…" busy indicator; since CR-445 the real logo / name come from Settings ▸ Organization once an Admin
+saves one, and `VITE_DEMO` only matters while nothing is saved), runs `catalyst slate:link`
 + `catalyst deploy slate export-tracker-demo -p 69851000000395215 --org 925638796`, and Slate
 installs + builds remotely (`npm install`, `npm run build`, `/dist`). The repo's
 `catalyst.json` and `.catalystrc` are never touched.

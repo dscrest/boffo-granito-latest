@@ -56,9 +56,13 @@ export const EMPTY_ORG: OrgProfile = {
   bankBeneficiary: "", bankName: "", bankAccount: "", bankIfsc: "", bankSwift: "",
 };
 
+/** Demo build (VITE_DEMO=1, Slate): neutral branding, no BOFFO word, logo or wordmark loader (CR-454). */
+export const IS_DEMO = !!import.meta.env.VITE_DEMO;
+
 // ponytail: the fallback is yesterday's hard-coded branding, so live looks the
 // same until an Admin saves a profile. Bank rows are the template placeholders.
-const DEFAULT_ORG: OrgProfile = {
+// The demo build falls back to a neutral "Demo" profile instead (CR-454).
+const DEFAULT_ORG: OrgProfile = IS_DEMO ? { ...EMPTY_ORG, name: "Demo", legalName: "Demo Company" } : {
   ...EMPTY_ORG,
   name: "BOFFO",
   legalName: "BOFFO GRANITO LLP",
@@ -115,7 +119,7 @@ export function useOrg(): OrgProfile {
 /** Logo URL for <img>/fetch; null when the demo build has no saved logo (CR-444 keeps the demo login logo-free). */
 export function orgLogoUrl(): string | null {
   if (saved.logo) return designImageUrl(saved.logo);
-  return import.meta.env.VITE_DEMO ? null : boffoLogo;
+  return IS_DEMO ? null : boffoLogo;
 }
 
 export const orgLegalName = (): string => merged.legalName || merged.name;

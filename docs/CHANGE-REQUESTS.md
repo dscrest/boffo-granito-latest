@@ -1163,6 +1163,15 @@ setting say back."
 Verified: tsc, vite build. **Deployed 2026-10-24** (`catalyst deploy --project boffo-granito-export-tracker --org 925638796`,
 client + both functions; smoke: app 200 serving the new bundle, api-health ok). Browser walk and commit pending.
 
+## CR-454 · Demo build carries no BOFFO branding; text-only "Processing…" busy indicator (2026-10-26)
+
+User: "For boffo it is Boffo Uploading. For the demo. Remove anything that is associated with Boffo. Including the
+progress bar. Say different thing instead boffo processing when progress." Live keeps the wordmark loader (CR-293).
+
+| CR | Change | Status | Where |
+|---|---|---|---|
+| 454 | **Demo = neutral branding, label-only loader.** `lib/org.ts` exports `IS_DEMO` (= `VITE_DEMO`); `DEFAULT_ORG` on the demo is `{ name: "Demo", legalName: "Demo Company" }` with every other field blank (contact / tax / bank helpers already drop blanks), so sidebar mark, tab title, tour, `pdfHeader`, `COMPANY` getters all follow. `BoffoLoader`: live wordmark = `getOrg().name.toUpperCase()` (no literal "BOFFO"); demo renders only `<span class="boffo-loader-label pulse">` with `label ?? "Processing…"` (new `.pulse` rule reuses the `boffo-fade` keyframes, now outside the reduced-motion block). `logoDataUrl()` resolves "" when `orgLogoUrl()` is null (no bundled-logo fallback, `boffoLogo` import removed from `quoteTemplate.ts`); the three PDF builders (`quotePdf`, `dispatchCopyPdf`, `panelLoadCopyPdf`) print `COMPANY.brand` in the logo band when the data URL is empty. `index.html` title "Order OS" until the profile loads. Server `appauth.js` sign-in errors drop the word BOFFO ("No account for …", "The account for … was removed / is disabled"). Demo seeds (`seed-demo-masters.mjs`, `seed-demo-flows.mjs`) create brand "Stonecraft"; Users.tsx domain placeholder = "example.com, yourcompany.com". Left alone: accent colour, `.boffo-*` class names, localStorage keys, GlassKit. Demo-only deploy; live rides the next live deploy. | Built 2026-10-26 | `client/src/lib/org.ts`, `ui/BoffoLoader.tsx`, `styles/theme.css`, `features/quotes/quoteTemplate.ts` + `quotePdf.ts`, `stages/dispatchCopyPdf.ts`, `panels/panelLoadCopyPdf.ts`, `client/index.html`, `functions/data-ops/lib/appauth.js`, `scripts/seed-demo-*.mjs` |
+
 ## CR-451…453 · Item bulk upload · Panel Items multi-add · Location mandatory on SO + Panel Order (2026-10-26)
 
 User (meeting notes 2026-10-24): "Main item master - Bulk upload Excel. Show sample download." · "Panel Items: Bulk item for

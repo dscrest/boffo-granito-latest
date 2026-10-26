@@ -133,7 +133,7 @@ async function items(m) {
     const hit = await byName("Design", "unique_name", unique(k));
     S.items[k] = String(hit ? hit.ROWID : (await post("Design", {
       design_name: it.name, base_design_name: it.name, unique_name: unique(k), sku: it.sku, size: m[it.size],
-      finish: await idOf("Finish", "name", it.finish), category: await idOf("Category", "name", it.cat), brand: await idOf("Brand", "name", "Boffo"),
+      finish: await idOf("Finish", "name", it.finish), category: await idOf("Category", "name", it.cat), brand: await idOf("Brand", "name", "Stonecraft"),
       is_batched: true, status: "Active", box_weight_kg: it.kg, pcs_per_box: it.pcs,
     })).rowid); save();
     log(`· item ${unique(k)} ${S.items[k]}`);

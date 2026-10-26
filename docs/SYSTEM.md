@@ -1008,8 +1008,10 @@ shared `ImageThumb` / `ImageLightbox` in
 [`features/common/ImageLightbox.tsx`](../client/src/features/common/ImageLightbox.tsx), which
 `ImageManager` (Item/Panel detail) also uses. While a file uploads, the tile shows the house
 processing indicator `BoffoLoader` ([`ui/BoffoLoader.tsx`](../client/src/ui/BoffoLoader.tsx), the
-BOFFO wordmark with letters pulsing in sequence, CR-293) — never a bare glyph or the raw filename.
-`ImageUploader` (Box Brand logo) and the sign-in "checking" screen use the same loader.
+organization's name (`getOrg().name`, BOFFO by default) as a wordmark with letters pulsing in sequence,
+CR-293) — never a bare glyph or the raw filename. `ImageUploader` (Box Brand logo) and the sign-in
+"checking" screen use the same loader. On the demo build (`IS_DEMO`, CR-454) the loader renders no
+wordmark — only its label pulsing, "Processing…" when the caller passes none.
 
 **One order, several panels — header + lines (CR-302, 2026-10-07; reverses CR-193).** A
 `PanelOrder` is a HEADER (customer, server-minted `order_number` `PNL/FY/NNN` via the shared
@@ -1490,8 +1492,10 @@ helpers), loaded once in `main.tsx` from the public route. Settings ▸ Organiza
 15 `org_*` AppSetting rows (Logo + Company Name required; Admin-only on the server). Every renderer —
 `pdfHeader`, `quoteTemplate.COMPANY` getters + `bankRows()`, `logoDataUrl()`, sidebar, login, tour, shared
 pages — reads it. A new place that shows the company name or logo imports `lib/org.ts`; never a string literal.
-Fallback (nothing saved) = the bundled BOFFO logo and the old constants; the demo build (`VITE_DEMO`) skips
-the fallback logo only.
+Fallback (nothing saved) = the bundled BOFFO logo and the old constants on live. The demo build (`IS_DEMO` =
+`VITE_DEMO=1`, CR-454) falls back to a neutral "Demo / Demo Company" profile with no logo, contact or bank rows;
+`logoDataUrl()` then resolves to "" and the three PDF builders (quote, dispatch copy, panel load copy) print the
+brand name in the logo band instead. Server sign-in errors name no company ("No account for …").
 
 **ColumnPicker Apply is locked.** Checkbox changes and reorder both *stage*; nothing applies
 until **Apply**. Never make it immediate. Detail-page Fields pickers use the same component.

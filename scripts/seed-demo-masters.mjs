@@ -88,7 +88,7 @@ const ITEM = (name, size, finish, cat, pcs, kg, rate) => {
   const [w, l] = size.split("x").map(Number);
   const sqm = (w / 1000) * (l / 1000) * pcs;
   return {
-    design_name: name, unique_name: `${name} - ${size} - ${finish}`, size, finish, brand: "Boffo", category: cat,
+    design_name: name, unique_name: `${name} - ${size} - ${finish}`, size, finish, brand: "Stonecraft", category: cat,
     glaze: "Full Body", grade: "Premium", pcs_per_box: pcs, box_weight_kg: kg, coverage_sqm: +sqm.toFixed(4),
     coverage_sqft: +(sqm * 10.7639).toFixed(4), rate_per_sqft: rate, rate_per_sqmt: +(rate * 10.7639).toFixed(2),
   };
@@ -96,7 +96,7 @@ const ITEM = (name, size, finish, cat, pcs, kg, rate) => {
 async function lookupsCustomersItems() {
   const r = await post("seed/masters", {
     finishes: ["Glossy", "Matt", "Carving", "Satin"],
-    brands: ["Boffo", "Granito Select"],
+    brands: ["Stonecraft", "Granito Select"],
     categories: ["Marble", "Wood", "Stone", "Cement", "Concrete"],
     glazes: ["Full Body", "Double Charge", "Glazed"],
     grades: ["Premium", "Standard", "Commercial"],

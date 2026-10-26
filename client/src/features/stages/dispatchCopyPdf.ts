@@ -67,7 +67,7 @@ async function buildDispatchCopyDoc(box: LoadBox, entries: Array<{ p: PalPlan; l
       table: {
         widths: ["*", "auto"],
         body: [[
-          { image: logo, width: 100, fillColor: QP.ink, border: [false, false, false, false], margin: [M, 18, 0, 16] },
+          { ...(logo ? { image: logo, width: 100 } : { text: COMPANY.brand, color: "#fff", bold: true, fontSize: 18 }), fillColor: QP.ink, border: [false, false, false, false], margin: [M, 18, 0, 16] },
           {
             stack: [
               { text: "DISPATCH COPY", fontSize: 19, bold: true, color: "#fff", characterSpacing: 4.5 },

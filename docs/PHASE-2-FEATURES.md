@@ -84,6 +84,11 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   company name (required), legal name, GSTIN / PAN / IEC, address / phone / email / website, bank details — stored as
   `org_*` settings (Admin-only), read through one public route, and used on the sidebar, login, tab title, every PDF /
   print and the shared pages; the old hard-coded BOFFO branding is the fallback. ≈ 2.5 h.
+- **Demo build shows no BOFFO branding** (CR-454, 2026-10-26). With `VITE_DEMO=1` the fallback profile is "Demo / Demo
+  Company" (no address / contact / bank rows), PDFs print the brand name where the logo band would be, the login stays
+  logo-free, sign-in errors say "No account for …", and the busy indicator is the label alone pulsing ("Processing…" by
+  default) — no wordmark. Live keeps the wordmark, spelling the organization's name. Demo seeds use the brand "Stonecraft".
+  ≈ 1 h.
 
 ## 2 · Masters (Inventory)
 

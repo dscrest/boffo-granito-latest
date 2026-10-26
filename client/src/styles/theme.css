@@ -399,11 +399,13 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .boffo-loader.sm .boffo-loader-word { font-size: 14px; }
 .boffo-loader-word span { display: inline-block; animation: boffo-wave 1.2s ease-in-out infinite; }
 .boffo-loader-label { font-size: var(--t-sm); color: var(--dim); }
+/* CR-454: demo build = label only, pulsing (no wordmark). */
+.boffo-loader-label.pulse { animation: boffo-fade 1.2s ease-in-out infinite; }
 @keyframes boffo-wave {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
   30% { transform: translateY(-3px); opacity: 1; }
 }
+@keyframes boffo-fade { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .boffo-loader-word span { animation: boffo-fade 1.2s ease-in-out infinite; }
-  @keyframes boffo-fade { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 }

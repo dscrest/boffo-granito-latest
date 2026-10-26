@@ -304,7 +304,7 @@ export function UsersAdmin() {
                 type="text"
                 value={domains}
                 onChange={(e) => setDomains(e.target.value)}
-                placeholder="octfis.com, boffogranito.com"
+                placeholder="example.com, yourcompany.com"
                 style={{ flex: 1 }}
               />
               <button className="hbtn primary" disabled={busy || domains.trim().toLowerCase() === savedDomains} onClick={() => void onSaveDomains()}>

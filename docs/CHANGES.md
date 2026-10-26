@@ -3,6 +3,18 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-26 — Demo build carries no BOFFO branding; plain "Processing…" instead of the wordmark (CR-454) — BUILT, demo deploy pending
+
+- **Demo = neutral branding (CR-454).** On the demo build (`VITE_DEMO=1`) nothing says Boffo: the fallback organization
+  profile is "Demo / Demo Company" with no address, phone, email or bank rows (sidebar mark D, tab title "Demo Order OS",
+  tour, PDF letterheads), PDFs print the brand name in the logo band when no logo is saved, the login page stays logo-free,
+  and sign-in errors no longer name BOFFO ("No account for …"). The browser tab reads "Order OS" until the profile loads.
+  The demo seed scripts create the brand "Stonecraft" instead of "Boffo". Live is unchanged: it still falls back to BOFFO
+  until Settings ▸ Organization is saved.
+- **Processing indicator on the demo (CR-454).** The busy state shows only its label pulsing — "Processing…" by default,
+  "Uploading…" / "Loading…" / "Searching…" where the screen says so — with no wordmark. Live keeps the wordmark, which now
+  spells the organization's name from Settings ▸ Organization ("BOFFO" by default) rather than a fixed word.
+
 ## 2026-10-26 — Item Bulk Upload, add many Panel Items, Location mandatory on orders (CR-451…453) — BUILT, deploy pending
 
 - **Item master ▸ Bulk Upload (CR-451).** A Bulk Upload button beside New Item takes an Excel / CSV file. Download the sample

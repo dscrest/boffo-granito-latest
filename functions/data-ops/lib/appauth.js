@@ -574,10 +574,10 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
     const gone = rowList(
       await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM AppUser WHERE email = '${safe}'`),
     )[0];
-    if (gone) throw httpErr(`The BOFFO account for ${me.email} was removed. Ask your administrator.`, 401);
+    if (gone) throw httpErr(`The account for ${me.email} was removed. Ask your administrator.`, 401);
     const domain = me.email.split("@")[1] || "";
     if (!domain || !(await loginDomains(catalyst)).includes(domain))
-      throw httpErr(`No BOFFO account for ${me.email}. Ask your administrator.`, 401);
+      throw httpErr(`No account for ${me.email}. Ask your administrator.`, 401);
     const role = await defaultRoleId(catalyst);
     const row = await catalyst.datastore().table("AppUser").insertRow({
       email: me.email,
@@ -690,7 +690,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
       if (!me.email) throw httpErr("Your Zoho account has no email address", 401);
       let user = await findUser(catalyst, me.email);
       if (user) {
-        if (!isActive(user)) throw httpErr(`The BOFFO account for ${me.email} is disabled. Ask your administrator.`, 401);
+        if (!isActive(user)) throw httpErr(`The account for ${me.email} is disabled. Ask your administrator.`, 401);
         // CR-337: remember that this account signs in with Zoho (first time only).
         // ponytail: the ZUID is a record, not a lock — Zoho's verified email is the
         // identity; refuse on a ZUID mismatch if that ever matters.

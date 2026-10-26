@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 161 |
+| Completed | 162 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **206** |
+| **Total** | **207** |
 
 ## Foundation & workspace
 
@@ -109,7 +109,6 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
-| Location mandatory on a Sales Order | The SO form asks where the order's stock will sit (Warehouse ▸ Bay); no SO is created, edited or converted from a quote without it; shown on the order page. | Completed | 2026-10-26 | CR-453 |
 | Convert to Sales Order | From an Accepted quote, full or partial (quote becomes Partially converted and can be converted again); the quote's container plan is copied and the order owns its editable copy. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Sales Order form (page) | Same layout family as the quote; PO number; editable after work has started (a line with pallets or loads keeps its item and cannot drop below what was done). | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Allocate Stock | Hand free boxes of chosen batches to an order line (one flat table item → batch rows, with search). Allocation is a claim, not a movement. | Completed | Phase 1 (by 01-Oct-2026) | CR-194…200 |
@@ -216,8 +215,6 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
-| Add many items to Panel Craft at once | Search and tick items from the Item master, one Add; each gets its full-size cut piece. | Completed | 2026-10-26 | CR-452 |
-| Location mandatory on a Panel Order | A panel order cannot be saved without saying where its panels will sit. | Completed | 2026-10-26 | CR-453 |
 | Panel Master | Showcase panel master with one image, PANEL-001 numbering by the server, full-page New / Edit form; grid opens as photo tiles with a toggle to the column grid; row / tile click opens the panel. | Completed | 2026-10-08 | CR-283…285, 291, 319 |
 | Remarks on a panel | Free-text Remarks on New / Edit Panel for the old reference ID; shown on the panel page and searchable in the panel list. | In progress |  | CR-425 |
 | Cut Piece Size master under Panel Items | The cut piece size list is maintained from the Panel Items page (Cut Piece Sizes button) instead of Settings ▸ Masters. | In progress |  | CR-426 |
@@ -269,7 +266,6 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
-| Bulk Upload items from Excel | Download a sample template, fill it, upload: columns matched, every row checked (unknown Size / Finish, duplicates, items that already exist), valid rows created with SKUs and unique names as the form would. | Completed | 2026-10-26 | CR-451 |
 | Base Design Name defaults to the Design Name | Leave Base Design Name blank and the item is saved with its Design Name as the base; the field stays clearable while editing. | Completed | 2026-10-24 | CR-437 |
 
 ## Documentation & process
@@ -284,3 +280,4 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Locations guide | User-manual chapter: what to set up before using locations (warehouses, primary, bays, purposes), every screen where a location is picked or shown for boxes, pallets and panels, and the two rules for the floor. | Completed | 2026-10-24 | CR-411…413 |
 | Deliverables list (this workbook) | Feature-wise list of Completed / In progress / Future deliverables, maintained in Excel from here on. | Completed | 2026-10-22 |  |
 | Demo / test environment | A second, fully separate copy of the system (own database with the same 60 tables, own server functions, public web address) filled with dummy data for demos and testing; live data is never touched. Runbook: docs/DEMO-ENVIRONMENT.md. | Completed | 2026-10-25 | CR-441 |
+| Demo carries no BOFFO branding | The demo shows a neutral "Demo" company everywhere (sidebar, tab title, PDFs, sign-in), no BOFFO logo, and a plain pulsing "Processing…" / "Uploading…" text while it works instead of the BOFFO wordmark; the live system is unchanged. | Completed | 2026-10-26 | CR-454 |

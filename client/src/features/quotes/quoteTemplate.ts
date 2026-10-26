@@ -4,7 +4,6 @@
    Used by both renderings: QuotePrint.tsx (HTML sheet) and
    quotePdf.ts (pdfmake), so copy and palette never drift apart.
    ============================================================ */
-import boffoLogo from "@/assets/boffo-logo.png";
 import { getOrg, orgBankRows, orgContactLine, orgLegalName, orgLogoUrl, orgTaxLine } from "@/lib/org";
 
 /** Template palette. */
@@ -119,12 +118,14 @@ export function termsList(terms?: string): string[] {
   return own.length ? own : DEFAULT_TERMS;
 }
 
-/* Logo as a data URL for pdfmake — the org logo (CR-445) or the bundled one.
+/* Logo as a data URL for pdfmake — the org logo (CR-445), or "" when there is
+   none (demo build with no saved logo, CR-454: builders print the brand name).
    Cached per URL, so a newly uploaded logo is picked up; FileReader keeps the
    real MIME (PNG or JPEG). */
 let logoCache: { url: string; promise: Promise<string> } | null = null;
 export function logoDataUrl(): Promise<string> {
-  const url = orgLogoUrl() ?? boffoLogo;
+  const url = orgLogoUrl();
+  if (!url) return Promise.resolve("");
   if (!logoCache || logoCache.url !== url) {
     logoCache = {
       url,
