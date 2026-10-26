@@ -48,15 +48,18 @@ If you prefer auto-deploy on push, create the deployment from the Git repo (not 
 `VITE_API_BASE` is what points the demo client at the demo backend instead of the
 same-origin `/server` the live app uses (`client/src/lib/api.ts`).
 
-## Cross-origin: every Slate host must be in `APP_CORS_ORIGINS`
+## Cross-origin: TWO gates, both required for every Slate host
 
 The Slate page and the functions live on different hosts, so every API call is
-cross-origin. **What actually gates it is the function's own allow-list**
-(`APP_CORS_ORIGINS`, written by `scripts/deploy-demo.sh`): 2026-10-26 the kfpljfsy host
-(listed) signed in fine while the new Git-app host (not listed) got "Failed to fetch";
-adding it to the script + `bash scripts/deploy-demo.sh` is the fix. A new Slate app =
-add its host there and redeploy the functions. The console step below was NOT needed
-for either host; kept for reference in case a gateway ever starts blocking preflights:
+cross-origin and the browser sends an OPTIONS preflight first.
+1. **Function allow-list** — `APP_CORS_ORIGINS` written by `scripts/deploy-demo.sh`; the
+   real response carries `Access-Control-Allow-Origin` only for listed hosts. New Slate
+   app ⇒ add its host there + `bash scripts/deploy-demo.sh`.
+2. **Catalyst gateway** — it answers the preflight ITSELF, with no CORS headers, until the
+   origin is an Authorized Domain in the console. Proven 2026-10-26 with headless Chrome
+   (`Network.loadingFailed` → `PreflightMissingAllowOriginHeader`) for BOTH Slate hosts,
+   listed or not. A signed-in developer's own browser may sail through (seen on kfpljfsy);
+   a clean browser does not — test in a private window.
 
 Catalyst console → project **export-tracker-demo** → **Cloud Scale ▸ Authentication ▸
 Whitelisting ▸ Authorized Domains** → *Add Domain* `https://export-tracker-demo-kfpljfsy.onslate.com`
