@@ -806,7 +806,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
   app.post("/auth/roles", async (req, res) => {
     try {
       assertAdmin(req);
-      const name = String((req.body || {}).name || "").trim();
+      const name = titleCase((req.body || {}).name); // CR-447
       if (!name) throw httpErr("Role name is required", 400);
       if (isAdminName(name)) throw httpErr('"Admin" is reserved', 400);
       const catalyst = init(req);
@@ -839,7 +839,7 @@ module.exports.register = function register(app, { init, rowList, sendErr, write
       const patch = { ROWID: role.ROWID };
       const body = req.body || {};
       if (body.name !== undefined) {
-        const name = String(body.name || "").trim();
+        const name = titleCase(body.name); // CR-447
         if (!name) throw httpErr("Role name is required", 400);
         if (isAdminName(name)) throw httpErr('"Admin" is reserved', 400);
         const safe = name.replace(/'/g, "");

@@ -12,6 +12,7 @@
      <prefix><sep>YYYY-MM<sep>NNN; read server-side by nextBatchNumber.
    ============================================================ */
 import { listAll, insert, update, type DSRow } from "@/lib/dataOps";
+import { getOrgSaved, loadOrg, ORG_KEYS, type OrgProfile } from "@/lib/org";
 import { createListCache } from "@/lib/cache";
 
 export const ALLOW_DUP_BATCHES = "allow_duplicate_batches";
@@ -52,6 +53,21 @@ async function putSetting(key: string, value: string): Promise<{ ok: boolean; er
     : await insert("AppSetting", { setting_key: key, setting_value: value });
   cache.invalidate();
   return { ok: res.ok, error: res.error };
+}
+
+/* ---------- CR-445 Organization profile (org_* keys, Admin-only on the server) ---------- */
+
+/** Write only the keys that changed, then refresh the public profile every reader holds. */
+export async function setOrgProfile(next: OrgProfile): Promise<{ ok: boolean; error?: string }> {
+  const prev = getOrgSaved();
+  for (const f of Object.keys(ORG_KEYS) as (keyof OrgProfile)[]) {
+    const v = String(next[f] ?? "").trim();
+    if (v === prev[f]) continue;
+    const res = await putSetting(ORG_KEYS[f], v);
+    if (!res.ok) return res;
+  }
+  await loadOrg();
+  return { ok: true };
 }
 
 /* ---------- allow_duplicate_batches (default true) ---------- */

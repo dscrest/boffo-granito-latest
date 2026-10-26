@@ -10,7 +10,7 @@ import { downloadPdf } from "@/lib/pdf";
 import { listDesigns } from "@/features/masters/designsApi";
 import type { Content, ContentText, TDocumentDefinitions, TableCell } from "pdfmake/interfaces";
 import {
-  BANK,
+  bankRows,
   COMPANY,
   QP,
   amountInWords,
@@ -170,7 +170,7 @@ export async function buildQuoteDoc(quote: Quote): Promise<TDocumentDefinitions>
             widths: ["auto", "*", "auto"],
             body: [[
               { text: COMPANY.name, fontSize: 7, bold: true, color: QP.ink, characterSpacing: 0.9, fillColor: QP.paper, border: [false, false, false, false], margin: [M, 8, 0, 8] },
-              { text: COMPANY.address, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
+              { text: COMPANY.addressTax, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
               { text: COMPANY.contact, fontSize: 7, color: QP.dim, fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, M, 8] },
             ]],
           },
@@ -293,7 +293,7 @@ export async function buildQuoteDoc(quote: Quote): Promise<TDocumentDefinitions>
             width: 190,
             stack: [
               secTitle("Bank Details"),
-              ...BANK.map(([k, v]) => ({ text: [{ text: `${k}: `, bold: true, color: QP.ink }, { text: v }], fontSize: 8, margin: [0, 1.5, 0, 1.5] } as Content)),
+              ...bankRows().map(([k, v]) => ({ text: [{ text: `${k}: `, bold: true, color: QP.ink }, { text: v }], fontSize: 8, margin: [0, 1.5, 0, 1.5] } as Content)),
             ],
           },
         ],

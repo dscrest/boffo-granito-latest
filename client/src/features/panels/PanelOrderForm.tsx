@@ -234,7 +234,7 @@ export function PanelOrderForm({
   const covered = preview.length > 0 && preview.every((p) => !p.short);
 
   const lineOk = (l: Line) => l.qty > 0 && (l.kind === "panel" ? !!l.panelId && !mdfMissing(l) : !!l.designId);
-  const canSave = !!customer && lines.length > 0 && lines.every(lineOk) && dupIds.size === 0;
+  const canSave = !!customer && lines.length > 0 && lines.every(lineOk) && dupIds.size === 0 && (!whEnabled || !!warehouse); // CR-453: Location mandatory
 
   const submit = () => {
     if (!canSave) return;
@@ -308,7 +308,7 @@ export function PanelOrderForm({
           </label>
           {whEnabled && (
             <label className="form-field">
-              <span className="lbl">Location</span>
+              <span className="lbl">Location<span className="req"> *</span></span>
               <Combobox
                 value={warehouse}
                 options={whOptions}

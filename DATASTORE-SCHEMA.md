@@ -493,6 +493,7 @@ largest `total_boxes`.
 | payment_term | FK → PaymentTerm | SET-NULL |
 | address | text(10000) | |
 | shipping_address | text(10000) | CR-221 — edited on the SO form; carried from the quote on convert. Created 2026-09-19 (column id 69851000000291143). |
+| warehouse | bigint | **CR-453 — created on live 2026-10-26 via the Catalyst MCP (col 69851000000421082).** Logical FK → Warehouse node (a location, or a warehouse without locations) where the order's stock will sit. **Mandatory** once any Warehouse row exists: `requireLocation` in `createSalesOrder` (`/so-with-items`, `/convert-quote`) and `/update-so-with-items` refuses a blank (400 "Location is required") or unknown (404) node; null only on orders created before the column / before the first warehouse. Shown as **Location** on the SO form (\*) and detail header; `BLOCK_DELETE.Warehouse`. |
 | manual_so_number | varchar(50) | blank→copy auto, set→never overwrite |
 | shipment_date | date | |
 | salesperson | varchar(160) | |

@@ -13,7 +13,7 @@ import { SkeletonRows } from "@/ui/States";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
 import { canApprove, checkSession, hasFeature, type SessionUser } from "@/lib/auth";
 import { NotificationBell, UserMenu } from "@/features/shell/HeaderMenus";
-import boffoLogo from "@/assets/boffo-logo.png";
+import { orgLogoUrl, useOrg } from "@/lib/org";
 import { GlobalSearch } from "@/features/search/GlobalSearch";
 import { TourHost } from "@/features/tour/Tour";
 import { loadDefaultView } from "@/features/settings/settingsApi";
@@ -171,7 +171,7 @@ function navTree(): NavNode[] {
         // pieces + stock → panels assembled from them → orders dispatch against it.
         { id: "panel-dashboard", label: "Dashboard", icon: "dashboard" },
         // CR-436: Panel Items + Panels live on the Masters page (Panel Master tab).
-        { id: "cut-stock", label: "Cut Piece", icon: "tile" },
+        { id: "cut-stock", label: "Stock", icon: "tile" }, // CR-448: items with their cut pieces beneath
         { id: "pending-cut-stock", label: "Pending Cut Piece", icon: "tile" },
         { id: "panel-orders", label: "Orders", icon: "orders" }, // CR-345: Panel + Sample orders in one register
         { id: "panel-loading", label: "Loading", icon: "truck" }, // CR-348: what is pending to load, record vehicle trips
@@ -329,6 +329,8 @@ export default function App() {
 
   // Whole-sidebar collapse (icon rail ↔ full). Persisted across sessions.
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem("sidebar-collapsed") === "1");
+  const org = useOrg(); // CR-445 branding
+  const logoUrl = orgLogoUrl();
   useEffect(() => {
     localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
@@ -366,10 +368,12 @@ export default function App() {
         <div className="brand">
           {/* Expanded: full white+orange logo on a dark chip (it needs a dark
               ground). Collapsed: the compact "B" mark (CSS swaps them). */}
-          <div className="mark">B</div>
-          <div className="logo-chip">
-            <img src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
-          </div>
+          <div className="mark">{org.name.charAt(0).toUpperCase()}</div>
+          {logoUrl && (
+            <div className="logo-chip">
+              <img src={logoUrl} alt={org.name} />
+            </div>
+          )}
           <button
             type="button"
             className="collapse-btn"

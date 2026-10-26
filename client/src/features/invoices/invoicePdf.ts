@@ -10,6 +10,7 @@ import { list } from "@/lib/dataOps";
 import { downloadPdf, metaLines, money, PDF_STYLES, pdfHeader } from "@/lib/pdf";
 import type { Content, TDocumentDefinitions } from "pdfmake/interfaces";
 import type { InvoiceRow } from "./invoicesApi";
+import { COMPANY } from "@/features/quotes/quoteTemplate";
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
@@ -82,6 +83,8 @@ export async function downloadInvoicePdf(inv: InvoiceRow): Promise<void> {
     styles: PDF_STYLES,
     content: [
       pdfHeader("EXPORT INVOICE", inv.invoiceNumber),
+      // CR-445: exporter tax ids from Settings ▸ Organization (blank when none set).
+      ...(COMPANY.tax ? [{ text: COMPANY.tax, style: "fine", margin: [0, -10, 0, 12] } as Content] : []),
       {
         columns: [
           metaLines([

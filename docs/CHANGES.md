@@ -3,6 +3,45 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-26 — Item Bulk Upload, add many Panel Items, Location mandatory on orders (CR-451…453) — BUILT, deploy pending
+
+- **Item master ▸ Bulk Upload (CR-451).** A Bulk Upload button beside New Item takes an Excel / CSV file. Download the sample
+  template first, fill it, upload: the columns are matched automatically, every row is checked (unknown Size / Finish / Category /
+  Glaze / Grade / Party Brand, a bad number, a duplicate inside the file, an item that already exists) and the valid rows are
+  created in one go with the same SKU and unique name the Item form would give them. Blank packing figures take the Size's defaults.
+- **Panel Items ▸ Add Items (CR-452).** Add Item now lists every active item not yet in Panel Craft with a search box and a
+  checkbox per row; tick several and press Add N items. Each gets its full-size cut piece as before.
+- **No order without a Location (CR-453).** The Sales Order form has a mandatory Location (Warehouse ▸ Bay), the same picker the
+  Panel Order form uses; the Panel Order's Location is mandatory too. The server refuses an order without one on create, edit and
+  convert-from-quote as soon as at least one warehouse exists. The order page shows the Location.
+
+## 2026-10-25 — Panel Craft walk: adjustment form, Title Case gaps, Stock tree, Details-vs-Actions split (CR-446…450) — LIVE 2026-10-25
+
+- **Stock adjustment is a line form (CR-446).** Adjust Stock (Panel Craft) and New Stock Adjustment (Inventory) open with ONE
+  line and "+ Add line" below, like Zoho Books. Each line shows the **current stock** at the chosen location and carries its own
+  Location, Add / Remove, Qty, **Date**, **Reason** and Remark — nothing in a top bar any more. Add Stock and Transfer Orders keep
+  the bulk sheet, so the two screens no longer look alike. The server stores each line's own date and reason and still refuses a
+  removal that would take a location below what it holds, even when split across reasons.
+- **Collection Name and other names save as Title Case (CR-447).** The Item form's Collection Name, a container's vessel name, extra
+  address attention names and role names now follow the CR-429 rule.
+- **Panel Craft ▸ Stock (CR-448).** The "Cut Piece" menu entry is now **Stock**, and the list shows each item as a row with its cut
+  pieces beneath it (↳), totals on the item row; fold an item with the chevron, search by item, size or cut size.
+- **Panel Item page: weight is never typed; editing moved to Actions (CR-449).** The Details tab shows cut pieces read-only; the
+  Actions tab holds the "+ Cut piece" row, remove ✕ and Add Stock · Adjust · Transfer. The weight per piece is the formula value.
+- **Panel Order page: Details informative only (CR-450).** The Requirements card (need, in stock, allocated, short, the Available
+  tick, Allocate Stock) lives on the Actions tab; Details shows the order's fields and items.
+
+## 2026-10-25 — Organization profile: your logo, name, tax and bank details on everything (CR-445) — LIVE + DEMO 2026-10-25
+
+- **Settings ▸ Organization (CR-445).** A new first entry in Settings where an Admin uploads the company logo (PNG/JPG)
+  and types the company name — both required — plus, optionally, legal name, GSTIN / PAN / IEC, address, phone,
+  email, website and bank details. Save any time; the app picks it up at once: sidebar and login logo, the browser
+  tab title, every PDF and print (quotes, dispatch and panel load copies, packing report, pallet and batch slips,
+  invoices) and the shared quote / batch / pallet pages. Until a profile is saved everything looks as before.
+- **Demo builds (CR-441…444, 2026-10-25).** A separate demo stack (own database, own server, own web address) with
+  dummy data; Zoho sign-in works from it; the "Plant Morbi" label is gone app-wide; the demo login shows no logo
+  until one is saved in Settings ▸ Organization.
+
 ## 2026-10-24 — Masters out of the main menu, clearer master tabs (CR-440) — LIVE 2026-10-24
 
 - **Masters only under Settings (CR-440).** The sidebar no longer lists Masters; the menu lives in Settings (gear) ▸

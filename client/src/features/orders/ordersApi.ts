@@ -175,6 +175,7 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       customerNotes: so ? str(so.customer_notes) : "",
       address: so ? str(so.address) : "",
       shippingAddress: so ? str(so.shipping_address) : "",
+      warehouseId: so ? str(so.warehouse) : "", // CR-453
       terms: so ? str(so.terms) : "",
       totalAmount: so ? num(so.total_amount) : 0,
       containerPlan: so ? str(so.container_plan) : "",
@@ -206,6 +207,8 @@ export interface NewSalesOrderInput {
   /** Billing / shipping address (CR-221). Omit to leave the stored value untouched. */
   address?: string;
   shipping_address?: string;
+  /** CR-453: Warehouse ▸ Bay node ROWID where the order's stock will sit — required once a warehouse exists. */
+  warehouse: string;
   salesperson: string;
   /** Brand ROWID from the Box Brand master ("" = none). */
   box_brand: string;

@@ -1,11 +1,12 @@
 /* ============================================================
-   New Stock Adjustment (CR-308) — /stock-adjustments/new. Box stock, the
-   Zoho Books shape on the shared StockEntrySheet: one dated submission
-   with a reason, N lines of Item · Batch · Add/Remove · Qty (boxes).
-   Batch cell = that item's batches with on-hand / free (batch-tracked
-   items); singular items have no batch. A removal may dip below what
-   sales orders reserved (warning), never below physical on-hand (server
-   409). Saves as signed entry_type="adjust" ProductionLog rows.
+   New Stock Adjustment (CR-308, CR-446) — /stock-adjustments/new. Box stock on
+   the shared StockAdjustForm (Zoho Books shape): one line by default, each
+   line Item · Batch · Location · Current stock · Add/Remove · Qty · Date ·
+   Reason · Remark. Batch cell = that item's batches with on-hand / free
+   (batch-tracked items); singular items have no batch. A removal may dip
+   below what sales orders reserved (warning), never below physical on-hand
+   (server 409). Saves as signed entry_type="adjust" ProductionLog rows, one
+   per line (date + reason per row).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/ui/States";
@@ -15,7 +16,7 @@ import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/d
 import { cachedBatchStock, cachedWarehouseStock, listBatchStock, warehouseStockKey, type BatchStockRow } from "@/features/stages/batchStockApi";
 import type { WhCell } from "@/lib/warehouseStock";
 import { adjustStock } from "@/features/stages/productionApi";
-import { StockEntrySheet, type StockEntrySpec } from "@/features/common/StockEntrySheet";
+import { StockAdjustForm, type StockAdjustSpec } from "@/features/common/StockAdjustForm";
 
 export function StockAdjustmentSheet() {
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
@@ -26,7 +27,7 @@ export function StockAdjustmentSheet() {
     void listBatchStock().then((r) => { if (r.ok) { setStock(r.rows); setCells(r.byWarehouse); } });
   }, []);
 
-  const spec = useMemo<StockEntrySpec>(() => {
+  const spec = useMemo<StockAdjustSpec>(() => {
     const byId = new Map(designs.map((d) => [d.id, d]));
     const batchesOf = new Map<string, BatchStockRow[]>();
     for (const r of stock) (batchesOf.get(r.designId) ?? batchesOf.set(r.designId, []).get(r.designId)!).push(r);
@@ -34,12 +35,10 @@ export function StockAdjustmentSheet() {
     // CR-329: on-hand in the picked warehouse (falls back to the batch total while dormant).
     const atWh = (designId: string, batch: string, wh: string) =>
       wh ? cells.find((c) => c.key === warehouseStockKey(designId, batch) && c.warehouseId === wh)?.onHand ?? 0 : rowFor(designId, batch)?.current ?? 0;
+    const batchOf = (designId: string, second: string) => (byId.get(designId)?.isBatched ? second : "");
     return {
       title: "New Stock Adjustment",
-      kind: "adjustment",
       unit: "boxes",
-      dateLabel: "Adjustment date",
-      warehouse: "single",
       items: designs
         .filter((d) => d.status !== "Inactive" && d.status !== "Discontinued")
         .map((d) => ({ id: d.id, sku: d.sku, uniqueName: d.uniqueName, designName: d.designName, hint: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || undefined })),
@@ -55,30 +54,26 @@ export function StockAdjustmentSheet() {
         onCreate: async (_designId, text) => text.trim() || undefined,
         disabledFor: (designId) => !byId.get(designId)?.isBatched,
       },
+      onHand: (designId, second, wh) => atWh(designId, batchOf(designId, second), wh),
       warnFor: (l, h) => {
         if (l.qty >= 0) return undefined;
-        const batch = byId.get(l.design)?.isBatched ? l.second : "";
+        const batch = batchOf(l.design, l.second);
         const r = rowFor(l.design, batch);
         const have = atWh(l.design, batch, h.warehouse);
-        if (-l.qty > have) return `Only ${fmt(have)} boxes on hand${h.warehouse ? " in this warehouse" : ""} — this line will be refused`;
+        if (-l.qty > have) return `Only ${fmt(have)} boxes on hand${h.warehouse ? " at this location" : ""} — this line will be refused`;
         const reserved = r ? r.current - r.free : 0;
         return r && -l.qty > r.free ? `${fmt(Math.min(reserved, -l.qty - r.free))} of these boxes are reserved by sales orders` : undefined;
       },
-      onSave: async (h, lines) => {
+      onSave: async (lines) => {
         const res = await adjustStock({
-          date: h.date,
-          reason: h.reason,
-          note: h.note || undefined,
-          warehouse: h.warehouse || undefined,
-          lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined })),
+          lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, date: l.date, reason: l.reason })),
         });
         return { ok: res.ok, error: res.error };
       },
       backTo: "/stock-adjustments",
-      columnsKey: "stockAdjustSheetColumns",
     };
   }, [designs, stock, cells]);
 
   if (!can("items", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
-  return <StockEntrySheet spec={spec} />;
+  return <StockAdjustForm spec={spec} />;
 }

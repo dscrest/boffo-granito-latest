@@ -245,6 +245,7 @@ export function convertQuote(
     salesperson?: string;
     address?: string;
     shipping_address?: string;
+    warehouse?: string; // CR-453
     customer_notes?: string;
     terms?: string;
     remarks?: string;

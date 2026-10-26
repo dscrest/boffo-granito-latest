@@ -46,7 +46,7 @@ async function buildDoc(rec: ProductionRecordRow, url: string): Promise<TDocumen
     pageMargins: [M, M, M, M],
     defaultStyle: { fontSize: 8, color: QP.body },
     content: [
-      { text: "BOFFO", fontSize: 16, bold: true, color: QP.ink, characterSpacing: 2 },
+      { text: COMPANY.brand, fontSize: 16, bold: true, color: QP.ink, characterSpacing: 2 },
       {
         columns: [
           { width: "*", text: `Batch ${rec.batchNumber || "—"}`, fontSize: 11, bold: true, color: QP.ink },

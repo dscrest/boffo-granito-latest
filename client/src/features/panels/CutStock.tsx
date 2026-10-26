@@ -1,11 +1,13 @@
 /* ============================================================
-   Cut Stock (Panel Craft) — one row per cut-piece ITEM (CR-307): the
-   Item-master look (image, item, size) + Cut Piece Size · Weight/pc ·
-   On Hand · Booked · Free (CR-312: what open panel orders hold vs what
-   anyone may still book) · Stock Wt. Read-only grid over CutPieceStock; stock moves ONLY
-   through the two bulk sheets (Add Stock = /cut-stock/record, Adjust
-   Stock = /cut-stock/adjust) and the panel-order lifecycle. A row click
-   opens the item's Panel Items detail, where cut pieces + weights live.
+   Stock (Panel Craft) — CR-448: the Item-master look as a two-level list:
+   one row per ITEM (image, item, size, Σ on hand / booked / free / stock
+   weight) with its CUT PIECES beneath (↳ cut size · weight/pc · on hand ·
+   booked · free · stock wt), every item open by default, a chevron folds one.
+   Booked / Free (CR-312) = what open panel orders hold vs what anyone may
+   still book. Read-only grid over CutPieceStock; stock moves ONLY through
+   the bulk sheets (Add Stock = /cut-stock/record, Adjust Stock =
+   /cut-stock/adjust) and the panel-order lifecycle. A row click opens the
+   item's Panel Items detail, where cut pieces live.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -21,54 +23,53 @@ import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { allocatedByKey, cachedCutStockRows, cachedPanelOrders, listCutStock, listPanelOrders, type CutStockRow, type PanelOrderRow } from "./panelOrdersApi";
+import { weightPerPc } from "./cutPieceWeight";
 
 const dash = <span className="dim">—</span>;
 const kg2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Grid row = stock row + hydrated item (from the design/cut-size caches). */
-interface StockGridRow extends CutStockRow {
+/** One grid line — an ITEM (Σ of its pieces, `pieces` = how many) or a cut PIECE of it. */
+interface GridRow {
+  kind: "item" | "piece";
+  id: string;
+  designId: string;
   design?: DesignRow;
   designName: string;
   sizeLabel: string;
-  cutSizeName: string;
+  cutSizeName: string; // "" on an item line
+  weightKg: number | null; // item: the full-piece ƒx; piece: stored weight
+  qty: number;
   booked: number; // CR-312: Σ open panel orders' booking
   free: number; // qty − booked
+  stockKg: number | null; // null while any piece is unweighed
+  modifiedTime: string;
+  pieces: number;
 }
 
-const STOCK_COLUMNS: ColumnDef<StockGridRow>[] = [
-  { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.design?.images ?? []} alt={r.designName} /> },
-  { key: "design", label: "Item", render: (r) => <span className="design-name">{r.designName || "—"}</span> },
-  { key: "size", label: "Size", render: (r) => (r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : dash) },
-  { key: "cutSize", label: "Cut Piece Size", className: "mono", render: (r) => r.cutSizeName || dash },
+const num = { className: "num mono", style: { textAlign: "right" as const } };
+// CR-448: Cut Piece Size rides in the Item cell (↳) — the own column is gone; key bumped to v4.
+const STOCK_COLUMNS: ColumnDef<GridRow>[] = [
+  { key: "image", label: "Image", style: { width: 44 }, render: (r) => (r.kind === "item" ? <ImageThumb images={r.design?.images ?? []} alt={r.designName} /> : null) },
   {
-    key: "weight",
-    label: "Weight / pc",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => (r.weightKg == null ? <span className="dim" title="Set on the Panel Item">—</span> : `${r.weightKg} kg`),
+    key: "design",
+    label: "Item",
+    render: (r) =>
+      r.kind === "item" ? (
+        <span className="design-name">
+          {r.designName || "—"}
+          <span className="dim" style={{ fontWeight: 400 }}> · {r.pieces} cut piece{r.pieces === 1 ? "" : "s"}</span>
+        </span>
+      ) : (
+        // ponytail: inline indent like Warehouses; promote to a .sub-row class if a third tree grid appears.
+        <span className="mono" style={{ paddingLeft: 26 }}>↳ {r.cutSizeName || "—"}</span>
+      ),
   },
-  {
-    key: "qty",
-    label: "On Hand (pcs)",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => <span style={r.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(r.qty)}</span>,
-  },
-  { key: "booked", label: "Booked", className: "num mono", style: { textAlign: "right" }, render: (r) => (r.booked ? <span title="Held by open panel orders">{fmt(r.booked)}</span> : dash) },
-  {
-    key: "free",
-    label: "Free",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => <span style={r.free === 0 && r.qty > 0 ? { color: "var(--c-amber)" } : undefined} title="On hand not booked by any order">{fmt(r.free)}</span>,
-  },
-  {
-    key: "stockKg",
-    label: "Stock Wt",
-    className: "num mono",
-    style: { textAlign: "right" },
-    render: (r) => (r.weightKg == null ? dash : `${kg2(r.weightKg * r.qty)} kg`),
-  },
+  { key: "size", label: "Size", render: (r) => (r.kind === "item" && r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : r.kind === "item" ? dash : null) },
+  { key: "weight", label: "Weight / pc", ...num, render: (r) => (r.weightKg == null ? <span className="dim" title={r.kind === "item" ? "Needs box weight and pcs / box" : "Not weighed"}>—</span> : `${r.weightKg} kg`) },
+  { key: "qty", label: "On Hand (pcs)", ...num, render: (r) => <span style={r.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(r.qty)}</span> },
+  { key: "booked", label: "Booked", ...num, render: (r) => (r.booked ? <span title="Held by open panel orders">{fmt(r.booked)}</span> : dash) },
+  { key: "free", label: "Free", ...num, render: (r) => <span style={r.free === 0 && r.qty > 0 ? { color: "var(--c-amber)" } : undefined} title="On hand not booked by any order">{fmt(r.free)}</span> },
+  { key: "stockKg", label: "Stock Wt", ...num, render: (r) => (r.stockKg == null ? dash : `${kg2(r.stockKg)} kg`) },
   { key: "modified", label: "Modified", className: "muted mono", render: (r) => fmtDateTime(r.modifiedTime) },
 ];
 
@@ -82,8 +83,8 @@ export function CutStock() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("cutStock.query", "");
   const [designFilter, setDesignFilter] = useState("");
-  // Key bumped (CR-312): Booked / Free columns.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("cutStockColumns.v3", STOCK_COLUMNS, ["modified"]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // every item open unless folded here
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("cutStockColumns.v4", STOCK_COLUMNS, ["modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -103,43 +104,110 @@ export function CutStock() {
     void load();
   }, []);
 
-  const grid = useMemo(() => {
+  /** Items (Σ) with their pieces, pieces in cut-size order. */
+  const items = useMemo(() => {
     const byId = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
     const booked = allocatedByKey(orders);
-    return rows.map((r): StockGridRow => {
+    const byDesign = new Map<string, GridRow[]>();
+    for (const r of rows) {
       const d = byId.get(r.designId);
       const b = booked.get(`${r.designId}|${r.cutSizeId}`) ?? 0;
-      return { ...r, design: d, designName: d ? d.uniqueName || d.designName : "", sizeLabel: d?.sizeLabel || "", cutSizeName: cutName.get(r.cutSizeId) || "", booked: b, free: Math.max(0, r.qty - b) };
+      const piece: GridRow = {
+        kind: "piece",
+        id: r.id,
+        designId: r.designId,
+        design: d,
+        designName: d ? d.uniqueName || d.designName : "",
+        sizeLabel: d?.sizeLabel || "",
+        cutSizeName: cutName.get(r.cutSizeId) || "",
+        weightKg: r.weightKg,
+        qty: r.qty,
+        booked: b,
+        free: Math.max(0, r.qty - b),
+        stockKg: r.weightKg == null ? null : r.weightKg * r.qty,
+        modifiedTime: r.modifiedTime,
+        pieces: 1,
+      };
+      (byDesign.get(r.designId) ?? byDesign.set(r.designId, []).get(r.designId)!).push(piece);
+    }
+    return [...byDesign.entries()].map(([designId, pieces]): { item: GridRow; pieces: GridRow[] } => {
+      pieces.sort((a, b) => a.cutSizeName.localeCompare(b.cutSizeName));
+      const p0 = pieces[0];
+      return {
+        item: {
+          kind: "item",
+          id: designId,
+          designId,
+          design: p0.design,
+          designName: p0.designName,
+          sizeLabel: p0.sizeLabel,
+          cutSizeName: "",
+          weightKg: p0.design ? weightPerPc(p0.design) : null,
+          qty: pieces.reduce((s, r) => s + r.qty, 0),
+          booked: pieces.reduce((s, r) => s + r.booked, 0),
+          free: pieces.reduce((s, r) => s + r.free, 0),
+          stockKg: pieces.some((r) => r.stockKg == null) ? null : pieces.reduce((s, r) => s + (r.stockKg ?? 0), 0),
+          modifiedTime: pieces.map((r) => r.modifiedTime).sort()[pieces.length - 1] || "",
+          pieces: pieces.length,
+        },
+        pieces,
+      };
     });
   }, [rows, designs, cutSizes, orders]);
 
+  // Search: an item matching by name / size shows every piece; otherwise only the pieces whose cut size matches.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return grid.filter(
-      (r) => (!designFilter || r.designName === designFilter) && (!q || r.designName.toLowerCase().includes(q) || r.cutSizeName.toLowerCase().includes(q) || r.sizeLabel.toLowerCase().includes(q)),
-    );
-  }, [grid, query, designFilter]);
-  const designOptions = useMemo(() => [...new Set(grid.map((r) => r.designName).filter(Boolean))].sort(), [grid]);
+    return items
+      .filter(({ item }) => !designFilter || item.designName === designFilter)
+      .map(({ item, pieces }) => {
+        const itemHit = !q || item.designName.toLowerCase().includes(q) || item.sizeLabel.toLowerCase().includes(q);
+        const kids = itemHit ? pieces : pieces.filter((p) => p.cutSizeName.toLowerCase().includes(q));
+        return { item, pieces: kids, hit: itemHit || kids.length > 0 };
+      })
+      .filter((g) => g.hit);
+  }, [items, query, designFilter]);
+  const designOptions = useMemo(() => [...new Set(items.map(({ item }) => item.designName).filter(Boolean))].sort(), [items]);
 
+  // Sort applies to the ITEM lines; each item's pieces follow it.
   const sort = useSortRows(
-    filtered,
+    filtered.map((g) => g.item),
     (r, k) =>
       k === "qty" ? r.qty
       : k === "booked" ? r.booked
       : k === "free" ? r.free
       : k === "weight" ? r.weightKg ?? -1
-      : k === "stockKg" ? (r.weightKg ?? 0) * r.qty
-      : k === "cutSize" ? r.cutSizeName
+      : k === "stockKg" ? r.stockKg ?? 0
       : k === "size" ? r.sizeLabel
       : k === "modified" ? r.modifiedTime
       : r.designName,
     "design",
   );
-  const pager = usePagination(sort.sorted.length, "cutStockPageSize", `${query}|${designFilter}|${sort.sortKey}|${sort.dir}`);
-  const pageRows = pager.slice(sort.sorted);
-  const totals = useMemo(() => ({ pcs: filtered.reduce((s, r) => s + r.qty, 0), kg: filtered.reduce((s, r) => s + (r.weightKg ?? 0) * r.qty, 0) }), [filtered]);
+  const lines = useMemo(() => {
+    const q = query.trim();
+    const piecesOf = new Map(filtered.map((g) => [g.item.id, g.pieces]));
+    const out: GridRow[] = [];
+    for (const item of sort.sorted) {
+      out.push(item);
+      if (q || !collapsed.has(item.id)) out.push(...(piecesOf.get(item.id) ?? []));
+    }
+    return out;
+  }, [sort.sorted, filtered, collapsed, query]);
+  const pager = usePagination(lines.length, "cutStockPageSize", `${query}|${designFilter}|${sort.sortKey}|${sort.dir}`);
+  const pageRows = pager.slice(lines);
+  const totals = useMemo(() => {
+    const pieces = filtered.flatMap((g) => g.pieces);
+    return { pcs: pieces.reduce((s, r) => s + r.qty, 0), kg: pieces.reduce((s, r) => s + (r.stockKg ?? 0), 0) };
+  }, [filtered]);
   const canEdit = can("panel_craft", "edit");
+  const fold = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
@@ -190,19 +258,35 @@ export function CutStock() {
               </thead>
               <tbody>
                 {pageRows.map((r) => {
-                  // Whole row opens the item's cut pieces (weights live there); no row icons (CR-279).
+                  // Whole row opens the item's cut pieces; no row icons (CR-279).
                   const open = () => navigate(`/panel-items/${encodeURIComponent(r.designId)}`);
+                  const folded = collapsed.has(r.id);
                   return (
-                    <tr key={r.id} tabIndex={0} style={{ cursor: "pointer" }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & history">
+                    <tr key={`${r.kind}|${r.id}`} tabIndex={0} style={{ cursor: "pointer", fontWeight: r.kind === "item" ? 500 : undefined }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & history">
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
+                          {c.key === "design" && r.kind === "item" && (
+                            <button
+                              type="button"
+                              className="btn x"
+                              style={{ marginRight: 6, padding: "0 4px" }}
+                              title={folded ? "Show cut pieces" : "Hide cut pieces"}
+                              aria-expanded={!folded}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                fold(r.id);
+                              }}
+                            >
+                              <Icon name={folded ? "chev-r" : "chev-d"} size={13} />
+                            </button>
+                          )}
                           {c.render!(r)}
                         </td>
                       ))}
                     </tr>
                   );
                 })}
-                {!loading && !error && filtered.length === 0 && (
+                {!loading && !error && lines.length === 0 && (
                   <tr>
                     <td colSpan={visible.length}>
                       {rows.length > 0 ? (
@@ -210,7 +294,7 @@ export function CutStock() {
                       ) : (
                         <EmptyState
                           icon="tile"
-                          title="No cut pieces yet"
+                          title="No stock yet"
                           hint="Add items on Panel Items first, then record stock with Add Stock"
                           action={canEdit ? <button className="hbtn primary" onClick={() => navigate("/panel-items")}>Panel Items</button> : undefined}
                         />

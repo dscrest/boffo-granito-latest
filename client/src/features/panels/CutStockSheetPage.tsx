@@ -1,7 +1,8 @@
 /* ============================================================
-   Cut Stock bulk sheets (CR-307/308/330) on the shared StockEntrySheet:
-     /cut-stock/record   → Add Stock       (receipt: Item · Cut Piece Size · Qty)
-     /cut-stock/adjust   → Adjust Stock    (signed, reason mandatory)
+   Cut Stock bulk pages (CR-307/308/330):
+     /cut-stock/record   → Add Stock       (receipt: Item · Cut Piece Size · Qty — the bulk StockEntrySheet)
+     /cut-stock/adjust   → Adjust Stock    (CR-446: the Zoho-style StockAdjustForm — one line by default,
+                                            Location · Current stock · Add/Remove · Qty · Date · Reason per line)
      /cut-stock/transfer → Transfer Stock  (CR-330: From / To location, reason; CR-409: leaf = Warehouse ▸ Location)
    CR-414: the RECEIPT sheet takes ANY active design from the Item master and
    ANY cut piece size (the item's pieces first, then the rest of the master,
@@ -10,9 +11,9 @@
    design into Panel Craft and receives in one step. Adjust / transfer still
    offer only Panel Items and their defined pieces. `?design=<id>` prefills
    the first row (opened from /panel-items/:id) and Save returns there.
-   CR-329: receipt / adjust carry a Warehouse picker; hints show the pieces
-   in the picked (From) warehouse. CR-438: receipt / adjust rows may each pick
-   their own Location (blank = the bar's); the server resolves the fallback.
+   CR-329: receipt / adjust carry a Location; hints show the pieces in the
+   picked (From) location. CR-438: receipt rows may each pick their own
+   Location (blank = the bar's); the server resolves the fallback.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -21,6 +22,7 @@ import { toast } from "@/ui/Toast";
 import { can } from "@/lib/auth";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { StockEntrySheet, type StockEntrySpec } from "@/features/common/StockEntrySheet";
+import { StockAdjustForm, type StockAdjustSpec } from "@/features/common/StockAdjustForm";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
 import { cachedCutStockRows, cutWarehouseCells, listCutStock, listCutStockEntries, postCutStockEntry, type CutStockEntryRow, type CutStockRow } from "./panelOrdersApi";
@@ -44,7 +46,9 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
 
   const transferring = kind === "transfer";
   const receiving = kind === "receipt";
-  const spec = useMemo<StockEntrySpec>(() => {
+  const adjusting = kind === "adjustment";
+  // The bits both the sheet (receipt / transfer) and the adjustment form share.
+  const shared = useMemo(() => {
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
     const byId = new Map(designs.map((d) => [d.id, d]));
     const piecesByDesign = new Map<string, CutStockRow[]>();
@@ -69,50 +73,57 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
       if (!d) return null;
       return cutSizeId ? cutPieceWeight(d, cutName.get(cutSizeId) || "") : weightPerPc(d);
     };
-    return {
-      title: receiving ? "Add Stock" : kind === "adjustment" ? "Adjust Stock" : "Transfer Stock",
-      kind,
-      unit: "pcs",
-      dateLabel: receiving ? "Entry date" : kind === "adjustment" ? "Adjustment date" : "Transfer date",
-      warehouse: transferring ? "pair" : "single",
-      items,
-      second: {
-        label: "Cut Piece Size",
-        required: !receiving,
-        placeholder: receiving ? "Full size" : undefined,
-        optionsFor: (designId, h) => {
-          const defined = (piecesByDesign.get(designId) ?? []).map((r) => ({
-            value: r.cutSizeId,
-            label: cutName.get(r.cutSizeId) || "—",
-            hint: takeFrom(h) ? `${atWh(designId, r.cutSizeId, takeFrom(h))} here · ${r.qty} total` : `${r.qty} on hand`,
-          }));
-          if (!receiving) return defined;
-          const used = new Set(defined.map((o) => o.value));
-          return [...defined, ...cutSizes.filter((c) => !used.has(c.id)).map((c) => ({ value: c.id, label: c.label, hint: "new cut piece" }))];
-        },
-        byName: new Map(cutSizes.map((c) => [c.label.trim().toLowerCase(), c.id])),
-        onCreate: receiving
-          ? async (_designId, text) => {
-              const res = await createCutSize(text);
-              if (!res.ok || !res.rowid) {
-                toast.error(res.error || "Could not add the cut piece size to the master");
-                return undefined;
-              }
-              setCutSizes((prev) => [...prev, { id: res.rowid!, label: text.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-              return res.rowid;
+    const second: StockEntrySpec["second"] = {
+      label: "Cut Piece Size",
+      required: !receiving,
+      placeholder: receiving ? "Full size" : undefined,
+      optionsFor: (designId, h) => {
+        const defined = (piecesByDesign.get(designId) ?? []).map((r) => ({
+          value: r.cutSizeId,
+          label: cutName.get(r.cutSizeId) || "—",
+          hint: takeFrom(h) ? `${atWh(designId, r.cutSizeId, takeFrom(h))} here · ${r.qty} total` : `${r.qty} on hand`,
+        }));
+        if (!receiving) return defined;
+        const used = new Set(defined.map((o) => o.value));
+        return [...defined, ...cutSizes.filter((c) => !used.has(c.id)).map((c) => ({ value: c.id, label: c.label, hint: "new cut piece" }))];
+      },
+      byName: new Map(cutSizes.map((c) => [c.label.trim().toLowerCase(), c.id])),
+      onCreate: receiving
+        ? async (_designId, text) => {
+            const res = await createCutSize(text);
+            if (!res.ok || !res.rowid) {
+              toast.error(res.error || "Could not add the cut piece size to the master");
+              return undefined;
             }
-          : undefined,
-      },
-      warnFor: (l, h) => {
-        const out = transferring ? l.qty : -l.qty;
-        if (out <= 0) return undefined;
-        const have = atWh(l.design, l.second, takeFrom(h));
-        return out > have ? `Only ${have} pcs on hand${takeFrom(h) ? " in that warehouse" : ""} — this line will be refused` : undefined;
-      },
+            setCutSizes((prev) => [...prev, { id: res.rowid!, label: text.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
+            return res.rowid;
+          }
+        : undefined,
+    };
+    const warnFor: StockEntrySpec["warnFor"] = (l, h) => {
+      const out = transferring ? l.qty : -l.qty;
+      if (out <= 0) return undefined;
+      const have = atWh(l.design, l.second, takeFrom(h));
+      return out > have ? `Only ${have} pcs on hand${takeFrom(h) ? " at that location" : ""} — this line will be refused` : undefined;
+    };
+    const backTo = fromDesign ? `/panel-items/${encodeURIComponent(fromDesign)}` : transferring ? "/stock-transfers" : "/cut-stock";
+    return { items, second, warnFor, backTo, atWh, lineWeight };
+  }, [transferring, receiving, designs, cutSizes, stockRows, entries, warehouses, fromDesign]);
+
+  const sheetSpec = useMemo<StockEntrySpec>(
+    () => ({
+      title: receiving ? "Add Stock" : "Transfer Stock",
+      kind: receiving ? "receipt" : "transfer",
+      unit: "pcs",
+      dateLabel: receiving ? "Entry date" : "Transfer date",
+      warehouse: transferring ? "pair" : "single",
+      items: shared.items,
+      second: shared.second,
+      warnFor: shared.warnFor,
       onSave: async (h, lines) => {
         const res = await postCutStockEntry({
           entry_date: h.date,
-          kind,
+          kind: receiving ? "receipt" : "transfer",
           reason: h.reason || undefined,
           note: h.note || undefined,
           warehouse: h.warehouse || undefined,
@@ -124,17 +135,40 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
             qty: l.qty,
             note: l.note || undefined,
             warehouse: l.warehouse || undefined,
-            ...(receiving ? { weight_kg: lineWeight(l.design, l.second) } : {}),
+            ...(receiving ? { weight_kg: shared.lineWeight(l.design, l.second) } : {}),
           })),
         });
         return { ok: res.ok, error: res.error };
       },
-      backTo: fromDesign ? `/panel-items/${encodeURIComponent(fromDesign)}` : transferring ? "/stock-transfers" : "/cut-stock",
-      columnsKey: receiving ? "cutStockRecordSheetColumns" : kind === "adjustment" ? "cutStockAdjustSheetColumns" : "cutStockTransferSheetColumns",
+      backTo: shared.backTo,
+      columnsKey: receiving ? "cutStockRecordSheetColumns" : "cutStockTransferSheetColumns",
       initialRows: fromDesign ? [{ design: fromDesign }] : undefined,
-    };
-  }, [kind, transferring, receiving, designs, cutSizes, stockRows, entries, warehouses, fromDesign]);
+    }),
+    [receiving, transferring, shared, fromDesign],
+  );
+
+  // CR-446: the adjustment is a line form — every line carries its own date · location · reason.
+  const adjustSpec = useMemo<StockAdjustSpec>(
+    () => ({
+      title: "Adjust Stock",
+      unit: "pcs",
+      items: shared.items,
+      second: shared.second,
+      warnFor: shared.warnFor,
+      onHand: (designId, cutSizeId, wh) => (cutSizeId ? shared.atWh(designId, cutSizeId, wh) : undefined),
+      onSave: async (lines) => {
+        const res = await postCutStockEntry({
+          kind: "adjustment",
+          lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, entry_date: l.date, reason: l.reason })),
+        });
+        return { ok: res.ok, error: res.error };
+      },
+      backTo: shared.backTo,
+      initialDesign: fromDesign || undefined,
+    }),
+    [shared, fromDesign],
+  );
 
   if (!can("panel_craft", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
-  return <StockEntrySheet spec={spec} />;
+  return adjusting ? <StockAdjustForm spec={adjustSpec} /> : <StockEntrySheet spec={sheetSpec} />;
 }

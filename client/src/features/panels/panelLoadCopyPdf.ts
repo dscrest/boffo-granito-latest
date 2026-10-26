@@ -71,7 +71,7 @@ async function buildLoadCopyDoc(order: LoadableOrder, ld: LoadRow): Promise<TDoc
             widths: ["auto", "*", "auto"],
             body: [[
               { text: COMPANY.name, fontSize: 7, bold: true, color: QP.ink, characterSpacing: 0.9, fillColor: QP.paper, border: [false, false, false, false], margin: [M, 8, 0, 8] },
-              { text: COMPANY.address, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
+              { text: COMPANY.addressTax, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
               { text: COMPANY.contact, fontSize: 7, color: QP.dim, fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, M, 8] },
             ]],
           },

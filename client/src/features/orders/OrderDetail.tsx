@@ -30,6 +30,7 @@ import { useOrders } from "./useOrders";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { lineSupplies } from "@/lib/needProduction";
 import { useMasters } from "@/features/masters/useMasters";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 
 /** Detail-row text for a progress chip: `Partial · 760 of 900` (CR-385). */
 const chipText = (c: SoChip) => (c.detail ? `${c.label} · ${c.detail}` : c.label);
@@ -322,6 +323,7 @@ export function OrderDetail() {
   const supplyById = lineSupplies(everyOrder, stockFor);
   const [listQ, setListQ] = useState("");
   const { customers } = useMasters();
+  const { enabled: whEnabled, nameOf: whName } = useWarehouses(); // CR-453
 
   const load = async () => {
     const res = await listOrders();
@@ -483,6 +485,8 @@ export function OrderDetail() {
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
     { key: "boxBrand", label: "Box Brand", value: head.boxBrandLabel || head.boxBranding || "—" },
     // Same commercial facts the Quote detail shows (detail-page consistency).
+    // CR-453: where the order's stock sits — "Warehouse ▸ Location"; hidden while no warehouse exists.
+    ...(whEnabled ? [{ key: "location", label: "Location", value: head.warehouseId ? whName(head.warehouseId) : "Not set" }] : []),
     { key: "paymentTerm", label: "Payment Term", value: head.paymentTerm || "—" },
     { key: "currency", label: "Currency", value: head.currency || "—" },
     { key: "totalBoxes", label: "Total Boxes", value: fmt(items.reduce((s, o) => s + o.orderQty, 0)) },

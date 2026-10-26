@@ -527,10 +527,14 @@ export interface StockAdjustLine {
   note?: string;
   /** CR-438: this line's location; blank → the call-level `warehouse`. */
   warehouse?: string;
+  /** CR-446: this line's own date / reason; blank → the call-level ones. */
+  date?: string;
+  reason?: string;
 }
 /** Inventory adjustment (CR-308): signed box corrections, dated, with a reason —
-    both modules' "Zoho Books" adjustment. All-or-nothing on the server. */
-export function adjustStock(input: { date: string; reason: string; note?: string; warehouse?: string; lines: StockAdjustLine[] }) {
+    both modules' "Zoho Books" adjustment. All-or-nothing on the server.
+    CR-446: date / reason / note / warehouse are per LINE; the call-level ones are fallbacks. */
+export function adjustStock(input: { date?: string; reason?: string; note?: string; warehouse?: string; lines: StockAdjustLine[] }) {
   return bustStock(op<{ request_group: string; lines: number }>("stock-adjust", input));
 }
 

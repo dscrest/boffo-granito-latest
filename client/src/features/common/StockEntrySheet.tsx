@@ -1,11 +1,11 @@
 /* ============================================================
    StockEntrySheet (CR-307/308) — ONE ruled sheet (the /prod/record .psheet
-   skin) behind three bulk stock pages:
+   skin) behind the bulk stock pages:
      · Cut Stock ▸ Add Stock      (kind receipt,    Item · Cut Piece Size · Qty · Remark)
-     · Cut Stock ▸ Adjust Stock   (kind adjustment, + Add/Remove column, Reason in the bar)
-     · Inventory ▸ Stock Adjustments ▸ New (kind adjustment, Item · Batch · Add/Remove · Qty)
      · Transfer Orders (kind transfer, CR-330: From / To warehouse in the bar, free-text
        reason, positive qty) — box stock on /stock-transfers/new, cut stock on /cut-stock/transfer
+   CR-446: the two ADJUSTMENT pages left the sheet for the Zoho-style line form
+   (common/StockAdjustForm — one line by default, date · location · reason per line).
    CR-329: receipt / adjustment sheets carry a Warehouse picker (default = primary);
    every picker hides while no warehouse exists. CR-438: on those sheets each row
    may pick its own Location (last column); a blank cell = the bar's.
@@ -25,7 +25,6 @@ import { toast } from "@/ui/Toast";
 import { todayISO } from "@/lib/dates";
 import { fmt } from "@/lib/format";
 import { designIndex, warehouseIndex } from "@/features/stages/productionLogSheetEdit";
-import { listAdjustmentReasons } from "./adjustmentReasons";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { blankRow, parseEntryPaste, resolveEntrySheet, type EntryCol, type EntryLine, type EntryRow } from "./stockEntrySheetEdit";
 
@@ -46,7 +45,7 @@ export interface SheetHeader {
 
 export interface StockEntrySpec {
   title: string;
-  kind: "receipt" | "adjustment" | "transfer";
+  kind: "receipt" | "transfer";
   unit: "pcs" | "boxes";
   dateLabel: string;
   /** CR-329: "single" = the warehouse the count was taken in (default primary); "pair" = From / To of a transfer. */
@@ -66,7 +65,7 @@ export interface StockEntrySpec {
     /** Items for which the cell is read-only (e.g. singular items have no batch). */
     disabledFor?: (designId: string) => boolean;
   };
-  /** Non-blocking warning under a line (e.g. "4 boxes of this batch are reserved"). */
+  /** Non-blocking warning under a line (e.g. "only 4 boxes on hand in that warehouse"). */
   warnFor?: (line: EntryLine, h: SheetHeader) => string | undefined;
   /** Persist one submission. Resolve with ok=false + error to keep the sheet open.
       CR-438: `line.warehouse` is the row's own ("" = send the header's). */
@@ -100,7 +99,6 @@ const walkColumn = (e: KeyboardEvent<HTMLTableSectionElement>) => {
 export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   const navigate = useNavigate();
   const form = useFormSave(() => navigate(spec.backTo));
-  const adjusting = spec.kind === "adjustment";
   const transferring = spec.kind === "transfer";
 
   const [rows, setRows] = useState<EntryRow[]>(() => {
@@ -110,7 +108,6 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   });
   const [date, setDate] = useState(todayISO());
   const [reason, setReason] = useState("");
-  const [reasons, setReasons] = useState<ComboOption[]>([]);
   const [note, setNote] = useState("");
   // CR-329: warehouse bar — single (default primary) or From / To pair.
   const { options: whOptions, primary, enabled: whEnabled } = useWarehouses();
@@ -143,10 +140,6 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
   const whBarLabel = whOptions.find((o) => o.value === wh)?.label || "";
   /** The header as THIS row sees it — its own Location when picked (CR-438). */
   const headerFor = (r: EntryRow): SheetHeader => (rowWh && r.warehouse ? { ...header, warehouse: r.warehouse } : header);
-
-  useEffect(() => {
-    if (adjusting) void listAdjustmentReasons().then(setReasons);
-  }, [adjusting]);
 
   const itemOptions = useMemo<ComboOption[]>(
     () => spec.items.map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.hint })),
@@ -182,13 +175,10 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
     patchRows(at, parseEntryPaste(text, td.dataset.col as EntryCol, lookups));
   };
 
-  const { lines, errors, totalIn, totalOut } = useMemo(
-    () => resolveEntrySheet(rows, { signed: adjusting, secondRequired: spec.second.required }),
-    [rows, adjusting, spec.second.required],
-  );
+  const { lines, errors, total } = useMemo(() => resolveEntrySheet(rows, { secondRequired: spec.second.required }), [rows, spec.second.required]);
   const bad = (r: EntryRow, col: EntryCol) => showErrors && !!errors.get(r.key)?.has(col);
   const lineByKey = useMemo(() => new Map(lines.map((l) => [l.key, l])), [lines]);
-  const reasonMissing = (adjusting || transferring) && !reason.trim();
+  const reasonMissing = transferring && !reason.trim();
 
   const save = () =>
     form.run(async () => {
@@ -251,21 +241,6 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
               <input id="ses-treason" value={reason} style={{ width: 220 }} placeholder="Why is stock moving?" aria-invalid={showErrors && reasonMissing} onChange={(e) => { form.touch(); setReason(e.target.value); }} />
             </>
           )}
-          {adjusting && (
-            <>
-              <label className="dim nw" htmlFor="ses-reason">Reason <span className="req">*</span></label>
-              <div style={{ width: 220 }}>
-                <Combobox
-                  value={reason}
-                  options={reasons}
-                  placeholder="Reason…"
-                  invalid={showErrors && reasonMissing}
-                  ariaLabel="Adjustment reason"
-                  onChange={(v) => { form.touch(); setReason(v); }}
-                />
-              </div>
-            </>
-          )}
           <label className="dim nw" htmlFor="ses-note">Note</label>
           <input id="ses-note" value={note} style={{ width: 240 }} placeholder="Applies to every line" onChange={(e) => { form.touch(); setNote(e.target.value); }} />
           <span style={{ flex: 1 }} />
@@ -280,7 +255,6 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                 <th className="rn" />
                 <th className="cust">Item <span className="req">*</span></th>
                 <th>{spec.second.label}{spec.second.required && <> <span className="req">*</span></>}</th>
-                {adjusting && <th>Add / Remove</th>}
                 <th className="num qtyh">Qty ({spec.unit}) <span className="req">*</span></th>
                 {shows("note") && <th>Remark</th>}
                 {shows("warehouse") && <th>Location</th>}
@@ -330,14 +304,6 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
                         />
                       )}
                     </td>
-                    {adjusting && (
-                      <td className="cellin" data-col="dir" style={{ width: 120 }}>
-                        <select value={r.dir} aria-label={`Add or remove, row ${i + 1}`} onChange={(e) => setCell(i, { dir: e.target.value as EntryRow["dir"] })}>
-                          <option value="in">Add</option>
-                          <option value="out">Remove</option>
-                        </select>
-                      </td>
-                    )}
                     <td className={`qty ${bad(r, "qty") ? "bad" : ""}`} data-col="qty">
                       <NumberInput maxDecimals={0} value={r.qty} placeholder="0" aria-label={`Quantity, row ${i + 1}`} onChange={(e) => setCell(i, { qty: e.target.value })} />
                     </td>
@@ -364,8 +330,8 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
               <tr>
                 <td className="rn" />
                 <td className="cust">Total <span className="dim" style={{ fontWeight: 400 }}>· {lines.length} line{lines.length === 1 ? "" : "s"}</span></td>
-                <td colSpan={adjusting ? 2 : 1} />
-                <td className="num mono">{adjusting ? `+${fmt(totalIn)} / −${fmt(totalOut)}` : fmt(totalIn)}</td>
+                <td />
+                <td className="num mono">{fmt(total)}</td>
                 <td colSpan={(shows("note") ? 1 : 0) + (shows("warehouse") ? 1 : 0) + 1} />
               </tr>
             </tfoot>
@@ -376,21 +342,14 @@ export function StockEntrySheet({ spec }: { spec: StockEntrySpec }) {
       <div className="session-foot">
         <div className="psheet-stats">
           <span><i>Lines</i><b className="mono">{lines.length}</b></span>
-          {adjusting ? (
-            <>
-              <span><i>Added</i><b className="mono">{fmt(totalIn)}</b></span>
-              <span><i>Removed</i><b className="mono">{fmt(totalOut)}</b></span>
-            </>
-          ) : (
-            <span><i>{spec.unit === "pcs" ? "Pieces" : "Boxes"}</i><b className="mono">{fmt(totalIn)}</b></span>
-          )}
+          <span><i>{spec.unit === "pcs" ? "Pieces" : "Boxes"}</i><b className="mono">{fmt(total)}</b></span>
         </div>
         <button className="btn" onClick={() => setRows((prev) => [...prev, ...blanks(GROW_BY)])} disabled={form.busy} title="Add 10 more rows">
           <Icon name="plus" size={12} /> {GROW_BY} rows
         </button>
         <span role="alert" style={{ color: "var(--c-red)" }}>
           {showErrors && (errors.size > 0 || reasonMissing || pairBad)
-            ? [errors.size > 0 ? `${errors.size} row${errors.size === 1 ? "" : "s"} to fix` : "", reasonMissing ? (transferring ? "give a reason" : "pick a reason") : "", pairBad ? "pick two different warehouses" : ""].filter(Boolean).join(" · ")
+            ? [errors.size > 0 ? `${errors.size} row${errors.size === 1 ? "" : "s"} to fix` : "", reasonMissing ? "give a reason" : "", pairBad ? "pick two different warehouses" : ""].filter(Boolean).join(" · ")
             : saveError}
         </span>
         <span style={{ flex: 1 }} />

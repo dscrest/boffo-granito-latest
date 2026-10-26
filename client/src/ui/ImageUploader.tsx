@@ -15,9 +15,12 @@ const SIZE = 120;
 export function ImageUploader({
   value,
   onChange,
+  accept = "image/*",
 }: {
   value: DesignImage | null;
   onChange: (next: DesignImage | null) => void;
+  /** CR-445: narrow the allowed types (the org logo must be PNG/JPEG — pdfmake renders nothing else). */
+  accept?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -26,8 +29,9 @@ export function ImageUploader({
   const onPick = async (files: FileList | null) => {
     const f = files?.[0];
     if (!f) return;
-    if (!f.type.startsWith("image/")) {
-      toast.error(`${f.name} is not an image`);
+    const allowed = accept === "image/*" ? f.type.startsWith("image/") : accept.split(",").map((t) => t.trim()).includes(f.type);
+    if (!allowed) {
+      toast.error(accept === "image/*" ? `${f.name} is not an image` : `${f.name} must be PNG or JPG`);
       return;
     }
     setBusy(true);
@@ -100,7 +104,7 @@ export function ImageUploader({
           <span className="dim" style={{ fontSize: "var(--t-sm)" }}>PNG or JPG. Drag &amp; drop or click.</span>
         )}
       </div>
-      <input ref={inputRef} type="file" accept="image/*" disabled={busy} style={{ display: "none" }} onChange={(e) => void onPick(e.target.files)} />
+      <input ref={inputRef} type="file" accept={accept} disabled={busy} style={{ display: "none" }} onChange={(e) => void onPick(e.target.files)} />
     </div>
   );
 }

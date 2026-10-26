@@ -8,6 +8,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { useOrg } from "@/lib/org";
 
 interface BatchData {
   batchNumber: string;
@@ -26,6 +27,7 @@ function tokenFromHash(hash: string): string {
 }
 
 export function SharedBatch() {
+  const org = useOrg();
   const token = tokenFromHash(window.location.hash);
   const [batch, setBatch] = useState<BatchData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export function SharedBatch() {
       <div className="card" style={{ maxWidth: 560, margin: "0 auto", padding: 22 }}>
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{org.name}</div>
             <div className="muted" style={{ fontSize: 14 }}>Batch</div>
           </div>
           {batch && (
@@ -110,7 +112,7 @@ export function SharedBatch() {
             </div>
 
             <div className="muted" style={{ fontSize: 13, marginTop: 18 }}>
-              Read-only batch slip shared by BOFFO.
+              Read-only batch slip shared by {org.name}.
             </div>
           </>
         )}

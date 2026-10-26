@@ -1,10 +1,11 @@
 /* ============================================================
    Panel Item detail (CR-306) — /panel-items/:designId on the shared
    RecordDetail (DetailRail of panel items on the left). The ONE place a
-   design's cut pieces are managed: Cut Pieces card (size · weight/pc,
-   editable inline · on hand · stock weight · ✕), "+ Cut piece" row with
-   the ƒx weight default (cutPieceWeight), the panels that use the design
-   (PanelsPanel, design scope) and the stock history (CutStockEntry).
+   design's cut pieces are managed. CR-449: the Details tab is informative
+   (Cut Pieces read-only · panels · locations · history); the ACTIONS tab
+   carries the controls — the "+ Cut piece" row, ✕ per piece, Add Stock /
+   Adjust / Transfer. Weight / pc is never typed: it is the ƒx
+   cutPieceWeight stored when the piece is defined (CR-414).
    Stock itself moves only through /cut-stock-entry (Add / Adjust sheets,
    opened prefilled with this item) and orders. CR-414: the "+ Cut piece" row
    has an On Hand qty — with a qty it posts a receipt (defines the piece AND
@@ -55,13 +56,9 @@ export function PanelItemDetail() {
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
   const [entries, setEntries] = useState<CutStockEntryRow[]>([]);
   const [busy, setBusy] = useState(false);
-  // "+ Cut piece" draft
+  // "+ Cut piece" draft (Actions tab)
   const [newSize, setNewSize] = useState("");
-  const [newWeight, setNewWeight] = useState("");
   const [newQty, setNewQty] = useState("");
-  const [weightTouched, setWeightTouched] = useState(false);
-  // inline weight edits, keyed by stock row id
-  const [weightDraft, setWeightDraft] = useState<Record<string, string>>({});
 
   const reload = () => {
     void listCutStock().then((r) => r.ok && setStock(r.rows));
@@ -95,10 +92,9 @@ export function PanelItemDetail() {
     [designs, stock],
   );
 
-  // ƒx default for the new cut piece: the item's weight scaled by the cut's face.
+  // ƒx weight of the new cut piece: the item's weight scaled by the cut's face (CR-449: never typed).
   const newSizeName = cutName.get(newSize) || "";
   const fxWeight = design ? cutPieceWeight(design, newSizeName) : null;
-  const shownNewWeight = weightTouched ? newWeight : kg3(fxWeight);
   const usedSizes = new Set(pieces.map((p) => p.cutSizeId));
   const sizeOptions = useMemo(() => cutSizes.filter((c) => !usedSizes.has(c.id)).map((c) => ({ value: c.id, label: c.label })), [cutSizes, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -107,22 +103,19 @@ export function PanelItemDetail() {
   const addPiece = async () => {
     if (!design || !newSize) return;
     setBusy(true);
-    const w = shownNewWeight.trim() === "" ? null : Number(shownNewWeight);
     const qty = parseInt(newQty, 10) || 0;
     // CR-414: a qty makes this a receipt — the server defines the pair with the weight and writes the ledger row.
     const res =
       qty > 0
-        ? await postCutStockEntry({ entry_date: todayISO(), kind: "receipt", lines: [{ design: design.id, cut_piece_size: newSize, qty, weight_kg: w }] })
-        : await saveCutPiece({ design: design.id, cut_piece_size: newSize, weight_kg: w });
+        ? await postCutStockEntry({ entry_date: todayISO(), kind: "receipt", lines: [{ design: design.id, cut_piece_size: newSize, qty, weight_kg: fxWeight }] })
+        : await saveCutPiece({ design: design.id, cut_piece_size: newSize, weight_kg: fxWeight });
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not add the cut piece");
       return;
     }
     setNewSize("");
-    setNewWeight("");
     setNewQty("");
-    setWeightTouched(false);
     toast.success(qty > 0 ? `Cut piece added · ${fmt(qty)} pcs received` : "Cut piece added");
     reload();
   };
@@ -134,19 +127,6 @@ export function PanelItemDetail() {
     }
     setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
     setNewSize(res.rowid);
-  };
-  const saveWeight = async (row: CutStockRow) => {
-    const raw = weightDraft[row.id];
-    if (raw === undefined) return;
-    const w = raw.trim() === "" ? null : Number(raw);
-    if (w === row.weightKg || (w == null && row.weightKg == null)) return;
-    const res = await saveCutPiece({ design: row.designId, cut_piece_size: row.cutSizeId, weight_kg: w });
-    if (!res.ok) {
-      toast.error(res.error || "Could not save the weight");
-      return;
-    }
-    setWeightDraft((d) => { const n = { ...d }; delete n[row.id]; return n; });
-    reload();
   };
   const removePiece = async (row: CutStockRow) => {
     const reason = await confirmDelete({ title: "Remove cut piece?", message: `Remove ${cutName.get(row.cutSizeId) || "this cut piece"} from ${design?.uniqueName || design?.designName}? Only possible with 0 on hand and no panel using it.` });
@@ -195,6 +175,89 @@ export function PanelItemDetail() {
       ]
     : [];
 
+  /** The Cut Pieces card — read-only on Details, with the controls on Actions (CR-449). */
+  const cutPiecesCard = (editable: boolean) =>
+    design && (
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card-head">
+          <span style={{ fontWeight: 600 }}>Cut Pieces</span>
+          <span className="muted" style={{ fontSize: 14 }}>{pieces.length}</span>
+          {editable && canEdit && (
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <Link className="btn" to={`/cut-stock/record?design=${encodeURIComponent(design.id)}`} title="Receive pieces of this item — any cut size, new sizes are defined as you go"><Icon name="plus" size={12} /> Add Stock</Link>
+              <Link className="btn" to={`/cut-stock/adjust?design=${encodeURIComponent(design.id)}`} title="Adjust stock (breakage, count…)"><Icon name="edit" size={12} /> Adjust</Link>
+              {whEnabled && <Link className="btn" to="/cut-stock/transfer" title="Move pieces between locations"><Icon name="truck" size={12} /> Transfer pieces</Link>}
+            </span>
+          )}
+        </div>
+        <div style={{ overflow: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Cut Piece Size</th>
+                <th className="num" style={{ textAlign: "right", width: 150 }}>Weight / pc (kg)</th>
+                <th className="num" style={{ textAlign: "right" }}>On Hand (pcs)</th>
+                <th className="num" style={{ textAlign: "right" }}>Stock Wt (kg)</th>
+                {editable && <th style={{ width: 40 }} />}
+              </tr>
+            </thead>
+            <tbody>
+              {pieces.map((p) => (
+                <tr key={p.id}>
+                  <td className="mono">{cutName.get(p.cutSizeId) || <span className="dim">—</span>}</td>
+                  <td className="num mono">{p.weightKg == null ? <span className="dim">—</span> : p.weightKg}</td>
+                  <td className="num mono" style={p.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(p.qty)}</td>
+                  <td className="num mono">{p.weightKg == null ? <span className="dim">—</span> : Math.round(p.weightKg * p.qty * 100) / 100}</td>
+                  {editable && (
+                    <td>
+                      {can("panel_craft", "delete") && (
+                        <button className="btn ord-rm" title="Remove cut piece" aria-label="Remove cut piece" disabled={busy} onClick={() => void removePiece(p)}>✕</button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {editable && canEdit && (
+                <tr>
+                  <td style={{ minWidth: 220 }}>
+                    <Combobox value={newSize} options={sizeOptions} onChange={setNewSize} onCreate={(n) => void onCreateSize(n)} placeholder="+ Cut piece size…" ariaLabel="New cut piece size" />
+                  </td>
+                  <td className="num">
+                    <input
+                      readOnly
+                      tabIndex={-1}
+                      className="calc"
+                      value={kg3(fxWeight)}
+                      placeholder="—"
+                      style={{ width: 110, textAlign: "right" }}
+                      title="Formula field: box weight ÷ pcs per box × cut face ÷ full face"
+                      aria-label="New cut piece weight"
+                    />
+                  </td>
+                  <td className="num">
+                    <NumberInput
+                      maxDecimals={0}
+                      value={newQty}
+                      placeholder="0"
+                      style={{ width: 90, textAlign: "right" }}
+                      title="Pieces on hand now — a qty records a receipt; blank defines the cut piece at 0"
+                      aria-label="New cut piece on hand"
+                      onChange={(e) => setNewQty(e.target.value)}
+                    />
+                  </td>
+                  <td colSpan={2}>
+                    <button className="hbtn primary" disabled={!newSize || busy} onClick={() => void addPiece()}>
+                      <Icon name="plus" size={12} /> Add cut piece
+                    </button>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
       <DetailRail placeholder="Search panel items…" currentId={designId} items={railItems} />
@@ -226,99 +289,10 @@ export function PanelItemDetail() {
             activityTable="CutPieceStock"
             created={design.createdTime}
             modified={design.modifiedTime}
+            extraTabs={[{ id: "actions", label: "Actions", content: cutPiecesCard(true) }]} // CR-449
           >
-            {/* Cut pieces — the item's pieces, each with its own weight and on-hand. */}
-            <div className="card" style={{ marginBottom: 12 }}>
-              <div className="card-head">
-                <span style={{ fontWeight: 600 }}>Cut Pieces</span>
-                <span className="muted" style={{ fontSize: 14 }}>{pieces.length}</span>
-                <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                  {canEdit && <Link className="btn" to={`/cut-stock/record?design=${encodeURIComponent(design.id)}`} title="Receive pieces of this item — any cut size, new sizes are defined as you go"><Icon name="plus" size={12} /> Add Stock</Link>}
-                  {canEdit && <Link className="btn" to={`/cut-stock/adjust?design=${encodeURIComponent(design.id)}`} title="Adjust stock (breakage, count…)"><Icon name="edit" size={12} /> Adjust</Link>}
-                </span>
-              </div>
-              <div style={{ overflow: "auto" }}>
-                <table className="tbl">
-                  <thead>
-                    <tr>
-                      <th>Cut Piece Size</th>
-                      <th className="num" style={{ textAlign: "right", width: 150 }}>Weight / pc (kg)</th>
-                      <th className="num" style={{ textAlign: "right" }}>On Hand (pcs)</th>
-                      <th className="num" style={{ textAlign: "right" }}>Stock Wt (kg)</th>
-                      <th style={{ width: 40 }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pieces.map((p) => {
-                      const draft = weightDraft[p.id] ?? kg3(p.weightKg);
-                      return (
-                        <tr key={p.id}>
-                          <td className="mono">{cutName.get(p.cutSizeId) || <span className="dim">—</span>}</td>
-                          <td className="num">
-                            {canEdit ? (
-                              <NumberInput
-                                maxDecimals={3}
-                                value={draft}
-                                placeholder="kg"
-                                style={{ width: 110, textAlign: "right" }}
-                                aria-label={`Weight per piece, ${cutName.get(p.cutSizeId) || ""}`}
-                                onChange={(e) => setWeightDraft((d) => ({ ...d, [p.id]: e.target.value }))}
-                                onBlur={() => void saveWeight(p)}
-                                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                              />
-                            ) : (
-                              <span className="mono">{p.weightKg == null ? <span className="dim">—</span> : p.weightKg}</span>
-                            )}
-                          </td>
-                          <td className="num mono" style={p.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(p.qty)}</td>
-                          <td className="num mono">{p.weightKg == null ? <span className="dim" title="Set the weight first">—</span> : Math.round(p.weightKg * p.qty * 100) / 100}</td>
-                          <td>
-                            {can("panel_craft", "delete") && (
-                              <button className="btn ord-rm" title="Remove cut piece" aria-label="Remove cut piece" disabled={busy} onClick={() => void removePiece(p)}>✕</button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {canEdit && (
-                      <tr>
-                        <td style={{ minWidth: 220 }}>
-                          <Combobox value={newSize} options={sizeOptions} onChange={(v) => { setNewSize(v); setWeightTouched(false); }} onCreate={(n) => void onCreateSize(n)} placeholder="+ Cut piece size…" ariaLabel="New cut piece size" />
-                        </td>
-                        <td className="num">
-                          <NumberInput
-                            maxDecimals={3}
-                            value={shownNewWeight}
-                            placeholder="Auto"
-                            className={weightTouched ? undefined : "calc"}
-                            style={{ width: 110, textAlign: "right" }}
-                            title="Auto: item weight per piece × cut face share — type to override"
-                            aria-label="New cut piece weight"
-                            onChange={(e) => { setWeightTouched(true); setNewWeight(e.target.value); }}
-                          />
-                        </td>
-                        <td className="num">
-                          <NumberInput
-                            maxDecimals={0}
-                            value={newQty}
-                            placeholder="0"
-                            style={{ width: 90, textAlign: "right" }}
-                            title="Pieces on hand now — a qty records a receipt; blank defines the cut piece at 0"
-                            aria-label="New cut piece on hand"
-                            onChange={(e) => setNewQty(e.target.value)}
-                          />
-                        </td>
-                        <td colSpan={2}>
-                          <button className="hbtn primary" disabled={!newSize || busy} onClick={() => void addPiece()}>
-                            <Icon name="plus" size={12} /> Add cut piece
-                          </button>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            {/* Cut pieces — read-only here; the controls live on the Actions tab (CR-449). */}
+            {cutPiecesCard(false)}
 
             {/* Panels carrying this design (shared section, design scope). */}
             <div style={{ marginBottom: 12 }}>
@@ -331,7 +305,6 @@ export function PanelItemDetail() {
                 <div className="card-head">
                   <span style={{ fontWeight: 600 }}>Locations</span>
                   <span className="muted" style={{ fontSize: 14 }}>pieces per location</span>
-                  <Link className="linkish" style={{ marginLeft: "auto", fontSize: "var(--t-sm)" }} to="/cut-stock/transfer">Transfer pieces</Link>
                 </div>
                 <div style={{ overflow: "auto" }}>
                   <table className="tbl">

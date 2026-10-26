@@ -1,11 +1,11 @@
 /* ============================================================
-   Stock entry sheet (CR-307/308) — the pure half shared by the three bulk
-   sheets: cut-stock Add Stock (receipt), cut-stock Adjust and box-stock
-   Adjust. Row shape, validation and Excel paste mapping; no React.
+   Stock entry — the pure half shared by the bulk sheets (cut-stock Add Stock
+   = receipt, Transfer Orders) and, since CR-446, the Stock Adjustment FORM
+   (both modules: one line by default, every line with its own date · location
+   · reason). Row shape, validation and Excel paste mapping; no React.
    Self-check: stockEntrySheetEdit.test.ts. The design matcher + date
    parser are the production sheet's (productionLogSheetEdit).
    ============================================================ */
-export type EntryDir = "in" | "out";
 
 /** One sheet row. Everything is the typed string; "" = blank. */
 export type EntryRow = {
@@ -13,39 +13,35 @@ export type EntryRow = {
   design: string; // Design ROWID
   unmatched: string; // pasted item text that matched no item — shown as the invalid placeholder
   second: string; // cut-piece size ROWID (cut sheets) or batch number text (box sheet); "" = blank
-  dir: EntryDir; // adjustment sheets only: in = add, out = remove
   qty: string;
   note: string;
   warehouse: string; // CR-438: Location (Warehouse node ROWID) for this row; "" = the bar's
 };
 
 /** Typed columns in sheet order — a paste fills them left to right from the focused one (CR-438: Location last). */
-export const ENTRY_COLS = ["design", "second", "dir", "qty", "note", "warehouse"] as const;
+export const ENTRY_COLS = ["design", "second", "qty", "note", "warehouse"] as const;
 export type EntryCol = (typeof ENTRY_COLS)[number];
 
-/** A validated line: `qty` is SIGNED on an adjustment sheet, positive on a receipt. `warehouse` "" = the bar's. */
+/** A validated line: positive qty. `warehouse` "" = the bar's. */
 export type EntryLine = { key: string; design: string; second: string; qty: number; note: string; warehouse: string };
 
 let seq = 0;
-export const blankRow = (): EntryRow => ({ key: `e${++seq}`, design: "", unmatched: "", second: "", dir: "in", qty: "", note: "", warehouse: "" });
+export const blankRow = (): EntryRow => ({ key: `e${++seq}`, design: "", unmatched: "", second: "", qty: "", note: "", warehouse: "" });
 
 const isActive = (r: EntryRow) => !!(r.design || r.unmatched || r.second.trim() || r.qty || r.note.trim() || r.warehouse);
 
 export interface ResolveOpts {
-  /** true = adjustment sheet: `dir` applies and lines come back signed. */
-  signed: boolean;
   /** The second column (cut size) must be filled. Batch on the box sheet is optional. */
   secondRequired: boolean;
 }
 
 /** Blank rows are skipped. errors: row key → the columns at fault. */
-export function resolveEntrySheet(rows: EntryRow[], opts: ResolveOpts): { lines: EntryLine[]; errors: Map<string, Set<EntryCol>>; totalIn: number; totalOut: number } {
+export function resolveEntrySheet(rows: EntryRow[], opts: ResolveOpts): { lines: EntryLine[]; errors: Map<string, Set<EntryCol>>; total: number } {
   const errors = new Map<string, Set<EntryCol>>();
   const flag = (key: string, col: EntryCol) => (errors.get(key) ?? errors.set(key, new Set()).get(key)!).add(col);
   const lines: EntryLine[] = [];
   const seen = new Map<string, string>(); // design|second|warehouse → first row key (CR-438: one pair at two bays is fine)
-  let totalIn = 0;
-  let totalOut = 0;
+  let total = 0;
   for (const r of rows.filter(isActive)) {
     const q = parseInt(r.qty, 10) || 0;
     if (!r.design) flag(r.key, "design");
@@ -61,20 +57,85 @@ export function resolveEntrySheet(rows: EntryRow[], opts: ResolveOpts): { lines:
         flag(r.key, opts.secondRequired ? "second" : "design");
       } else seen.set(k, r.key);
     }
-    const qty = opts.signed && r.dir === "out" ? -q : q;
+    total += q;
+    lines.push({ key: r.key, design: r.design, second, qty: q, note: r.note.trim(), warehouse: r.warehouse });
+  }
+  return { lines, errors, total };
+}
+
+/* ---------- CR-446: the adjustment FORM's rows (Zoho Books shape — no filler rows, every row counts) ---------- */
+
+export type AdjustRow = {
+  key: string;
+  design: string;
+  second: string; // batch number text (box) or cut-piece size ROWID (cut)
+  warehouse: string; // Location node ROWID; "" only while warehouses are dormant
+  out: boolean; // true = Remove (the default — breakage, theft, count…), false = Add
+  qty: string;
+  date: string; // yyyy-mm-dd
+  reason: string; // AdjustmentReason name
+  note: string;
+};
+export type AdjustCol = "design" | "second" | "warehouse" | "qty" | "date" | "reason";
+/** A validated line: `qty` is SIGNED. */
+export type AdjustLine = { key: string; design: string; second: string; warehouse: string; qty: number; date: string; reason: string; note: string };
+
+export const blankAdjustRow = (seed?: Partial<Pick<AdjustRow, "design" | "date" | "warehouse" | "reason">>): AdjustRow => ({
+  key: `a${++seq}`,
+  design: "",
+  second: "",
+  warehouse: "",
+  out: true,
+  qty: "",
+  date: "",
+  reason: "",
+  note: "",
+  ...seed,
+});
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Every row counts. errors: row key → the columns at fault. The same item · size/batch · location · date · reason
+    twice is a typo (both rows flagged); the same pair with a DIFFERENT reason is a legitimate second line. */
+export function resolveAdjustLines(
+  rows: AdjustRow[],
+  opts: { secondRequired: boolean; warehouseRequired: boolean },
+): { lines: AdjustLine[]; errors: Map<string, Set<AdjustCol>>; totalIn: number; totalOut: number } {
+  const errors = new Map<string, Set<AdjustCol>>();
+  const flag = (key: string, col: AdjustCol) => (errors.get(key) ?? errors.set(key, new Set()).get(key)!).add(col);
+  const lines: AdjustLine[] = [];
+  const seen = new Map<string, string>();
+  let totalIn = 0;
+  let totalOut = 0;
+  for (const r of rows) {
+    const q = parseInt(r.qty, 10) || 0;
+    const second = r.second.trim();
+    const reason = r.reason.trim();
+    if (!r.design) flag(r.key, "design");
+    if (opts.secondRequired && !second) flag(r.key, "second");
+    if (opts.warehouseRequired && !r.warehouse) flag(r.key, "warehouse");
+    if (q <= 0) flag(r.key, "qty");
+    if (!DATE_RE.test(r.date)) flag(r.key, "date");
+    if (!reason) flag(r.key, "reason");
+    if (r.design) {
+      const k = `${r.design}|${second.toLowerCase()}|${r.warehouse}|${r.date}|${reason.toLowerCase()}`;
+      const first = seen.get(k);
+      if (first) {
+        flag(first, opts.secondRequired ? "second" : "design");
+        flag(r.key, opts.secondRequired ? "second" : "design");
+      } else seen.set(k, r.key);
+    }
+    const qty = r.out ? -q : q;
     if (qty > 0) totalIn += qty;
     else totalOut += -qty;
-    lines.push({ key: r.key, design: r.design, second, qty, note: r.note.trim(), warehouse: r.warehouse });
+    lines.push({ key: r.key, design: r.design, second, warehouse: r.warehouse, qty, date: r.date, reason, note: r.note.trim() });
   }
   return { lines, errors, totalIn, totalOut };
 }
 
-const DIR_WORDS: Record<string, EntryDir> = { in: "in", add: "in", "+": "in", plus: "in", out: "out", remove: "out", "-": "out", minus: "out", less: "out" };
-
 /** A copied Excel block → one patch per pasted row, columns left to right from `startCol`.
     Unknown item text lands in `unmatched`; the second column maps through `secondByName`
-    when given (cut sizes), else is kept as typed (batch numbers). A leading "-" on the
-    qty flips the direction. */
+    when given (cut sizes), else is kept as typed (batch numbers). */
 export function parseEntryPaste(
   text: string,
   startCol: EntryCol,
@@ -96,11 +157,8 @@ export function parseEntryPaste(
           patch.design = hit?.id ?? "";
           patch.unmatched = hit ? "" : v;
         } else if (col === "second") patch.second = lookups.secondByName ? (lookups.secondByName.get(v.toLowerCase()) ?? "") : v;
-        else if (col === "dir") patch.dir = DIR_WORDS[v.toLowerCase()] ?? "in";
-        else if (col === "qty") {
-          if (v.startsWith("-")) patch.dir = "out";
-          patch.qty = v.replace(/[^\d]/g, "");
-        } else if (col === "warehouse") patch.warehouse = lookups.warehouseByName?.get(v.toLowerCase()) ?? "";
+        else if (col === "qty") patch.qty = v.replace(/[^\d]/g, "");
+        else if (col === "warehouse") patch.warehouse = lookups.warehouseByName?.get(v.toLowerCase()) ?? "";
         else patch.note = v;
       });
       return patch;

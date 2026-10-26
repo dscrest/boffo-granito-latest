@@ -5,6 +5,7 @@
    quotePdf.ts (pdfmake), so copy and palette never drift apart.
    ============================================================ */
 import boffoLogo from "@/assets/boffo-logo.png";
+import { getOrg, orgBankRows, orgContactLine, orgLegalName, orgLogoUrl, orgTaxLine } from "@/lib/org";
 
 /** Template palette. */
 export const QP = {
@@ -49,20 +50,21 @@ export const DEFAULT_TERMS = [
   "All disputes are subject to Morbi jurisdiction only.",
 ];
 
-// ponytail: bank details are static template copy from the design — swap in
-// the real account before customer-facing use.
-export const BANK: [string, string][] = [
-  ["Beneficiary", "Boffo Granito LLP"],
-  ["Bank", "HDFC Bank, Morbi Branch"],
-  ["A/C No.", "5020 0045 6789 01"],
-  ["IFSC", "HDFC0001234"],
-  ["SWIFT", "HDFCINBB"],
-];
+/* CR-445: company block + bank rows come from Settings ▸ Organization (lib/org.ts);
+   getters so every renderer reads the CURRENT profile, not a copy taken at import. */
+export const bankRows = (): [string, string][] => orgBankRows();
 
 export const COMPANY = {
-  name: "BOFFO GRANITO LLP",
-  address: "8-A National Highway, Morbi, Gujarat, India",
-  contact: "+91 99256 45674 · info@boffogranito.com · boffogranito.com",
+  /** Legal name on the letterhead strip + "FOR …" signature line. */
+  get name() { return orgLegalName(); },
+  /** Short brand name (slips, headers). */
+  get brand() { return getOrg().name; },
+  get address() { return getOrg().address; },
+  get contact() { return orgContactLine(); },
+  /** "GSTIN … · PAN … · IEC …" — only the ids that are set; "" when none. */
+  get tax() { return orgTaxLine(); },
+  /** Address + tax line for the letterhead strip cell. */
+  get addressTax() { return [getOrg().address, orgTaxLine()].filter(Boolean).join("\n"); },
 };
 
 export const SYMBOL: Record<string, string> = { INR: "₹", USD: "$", EUR: "€" };
@@ -117,21 +119,24 @@ export function termsList(terms?: string): string[] {
   return own.length ? own : DEFAULT_TERMS;
 }
 
-/* Logo as a data URL for pdfmake (fetched once, cached). Chunked btoa keeps
-   the 90KB PNG off the call stack. */
-let logoPromise: Promise<string> | null = null;
+/* Logo as a data URL for pdfmake — the org logo (CR-445) or the bundled one.
+   Cached per URL, so a newly uploaded logo is picked up; FileReader keeps the
+   real MIME (PNG or JPEG). */
+let logoCache: { url: string; promise: Promise<string> } | null = null;
 export function logoDataUrl(): Promise<string> {
-  if (!logoPromise) {
-    logoPromise = fetch(boffoLogo)
-      .then((r) => r.arrayBuffer())
-      .then((buf) => {
-        const bytes = new Uint8Array(buf);
-        let bin = "";
-        for (let i = 0; i < bytes.length; i += 0x8000) {
-          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-        }
-        return `data:image/png;base64,${btoa(bin)}`;
-      });
+  const url = orgLogoUrl() ?? boffoLogo;
+  if (!logoCache || logoCache.url !== url) {
+    logoCache = {
+      url,
+      promise: fetch(url)
+        .then((r) => r.blob())
+        .then((blob) => new Promise<string>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result));
+          fr.onerror = () => reject(new Error("Could not read logo"));
+          fr.readAsDataURL(blob);
+        })),
+    };
   }
-  return logoPromise;
+  return logoCache.promise;
 }

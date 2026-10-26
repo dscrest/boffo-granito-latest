@@ -19,6 +19,7 @@ import { hubRailLabel, MastersPane, visibleHubGroups } from "@/features/masters/
 import { usePersistedState } from "@/lib/usePersistedState";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
+import { OrgProfile } from "./OrgProfile";
 import { useMasters } from "@/features/masters/useMasters";
 import {
   loadAllowDupBatches,
@@ -53,14 +54,23 @@ export interface SettingGroup {
   heading: string;
   sub: string;
   /** "prefs" renders <Preferences/>; "masters" (CR-439) is the Masters menu — rail sub-items
-      Item / Panel / Export, pane = <MastersPane/>; its `items` are the ⌘K / search index only. */
-  kind?: "prefs" | "masters";
+      Item / Panel / Export, pane = <MastersPane/>; its `items` are the ⌘K / search index only;
+      "org" (CR-445) renders <OrgProfile/>. */
+  kind?: "prefs" | "masters" | "org";
   items: SettingItem[];
   /** Optional right-aligned pane action. */
   action?: { label: string; route: string };
 }
 
 const GROUPS: SettingGroup[] = [
+  {
+    title: "Organization",
+    icon: "flag",
+    heading: "Organization profile",
+    sub: "Logo, company name, tax and bank details used on every document.",
+    kind: "org",
+    items: [],
+  },
   {
     title: "Users & Roles",
     icon: "users",
@@ -135,6 +145,15 @@ const GROUPS: SettingGroup[] = [
 
 /* CR-408: the Preferences rows are settings too — searchable, and a hit opens the
    Preferences pane (they have no route of their own). Keep in step with <Preferences/>. */
+/* CR-445: the Organization fields are searchable too — a hit opens that pane. */
+const ORG_ITEMS: SettingItem[] = [
+  { label: "Logo", icon: "flag", route: "/settings", pane: "Organization", desc: "The company logo on the app and every document", keywords: "brand image organisation organization profile" },
+  { label: "Company name", icon: "flag", route: "/settings", pane: "Organization", desc: "Brand and legal name", keywords: "organisation organization profile title" },
+  { label: "Tax details", icon: "flag", route: "/settings", pane: "Organization", desc: "GSTIN, PAN and IEC printed on documents", keywords: "gst gstin pan iec tax" },
+  { label: "Address & contact", icon: "flag", route: "/settings", pane: "Organization", desc: "Address, phone, email and website on the letterhead", keywords: "organisation organization profile" },
+  { label: "Bank details", icon: "flag", route: "/settings", pane: "Organization", desc: "Beneficiary, bank, account, IFSC and SWIFT on quotes", keywords: "account ifsc swift" },
+];
+
 const PREF_ITEMS: SettingItem[] = [
   { label: "Allow duplicate batch numbers", icon: "columns", route: "/settings", pane: "Preferences", desc: "Whether two batches may share a number", keywords: "batch duplicate" },
   { label: "Default design owner", icon: "columns", route: "/settings", pane: "Preferences", desc: "The customer a new item's Design Owner starts on", keywords: "item owner customer boffo" },
@@ -154,8 +173,10 @@ export function searchSettings(q: string): SettingHit[] {
   if (!tokens.length) return [];
   const hay = (it: SettingItem) => `${it.label} ${it.desc} ${it.keywords ?? ""}`.toLowerCase();
   const prefs = GROUPS.find((g) => g.kind === "prefs")!;
+  const orgGroup = GROUPS.find((g) => g.kind === "org")!;
   return [
     ...GROUPS.flatMap((g) => g.items.map((item) => ({ group: g, item }))),
+    ...ORG_ITEMS.map((item) => ({ group: orgGroup, item })),
     ...PREF_ITEMS.map((item) => ({ group: prefs, item })),
   ].filter(({ item }) => {
     const h = hay(item);
@@ -474,6 +495,8 @@ export function SettingsHome() {
             </div>
             {group.kind === "prefs" ? (
               <Preferences />
+            ) : group.kind === "org" ? (
+              <OrgProfile />
             ) : (
               <div className="set-cards">{group.items.map((it) => card(it, it.desc))}</div>
             )}

@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 155 |
+| Completed | 161 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **200** |
+| **Total** | **206** |
 
 ## Foundation & workspace
 
@@ -16,6 +16,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 |---|---|---|---|---|
 | Sign-in and sessions | Email + password sign-in; sessions last 7 days; sign-out from the user menu. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Roles and permissions | A role says, per module, who can view, create, edit, delete and export, and which document types they may approve. Admin is the superuser. Enforced on the server, not just hidden in the menu. | Completed | Phase 1 (by 01-Oct-2026) |  |
+| Organization profile | Settings ▸ Organization: upload the company logo and enter the company name (both required), legal name, GSTIN / PAN / IEC, address, phone, email, website and bank details. Used on the sidebar, login, browser tab, every PDF / print (quotes, dispatch and load copies, packing report, pallet and batch slips, invoices) and the shared pages. Change it any time. | Completed | 2026-10-25 | CR-445 |
 | Security hardening | Image uploads accept real images only; query injection closed; secure cookies; allowed-origin list; statuses cannot be changed through generic saves. Two review passes (Jul and Sep 2026). | Completed | Phase 1 (by 01-Oct-2026) | CR-205…207 |
 | App shell | Sidebar grouped Dashboard · Inventory · Sales · Reports, filtered by role; global search; user menu; settings gear for admins. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Settings workspace | Two-pane page: Preferences, Masters, Users, Roles, Currencies, Data operations (admin repair tools). | Completed | Phase 1 (by 01-Oct-2026) |  |
@@ -41,6 +42,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Masters only under Settings, clearer tabs | The sidebar no longer lists Masters; the menu is Settings ▸ Masters ▸ Item / Panel / Export and the selected master tab is a highlighted pill. Old links and search still open it. | Completed | 2026-10-24 | CR-440 |
 | Names save as Title Case | Item, customer, contact, driver, transporter, supervisor, user and master names are stored as "Dhiraj Shah Of ABC Exports LLP" however typed — on every form, import and Zoho sync; short acronyms and LLP / LTD / PVT keep their capitals. | In progress |  | CR-429 |
 | Settings search everywhere | The header search (⌘K) finds settings pages and preferences for admins; the Settings search matches every typed word plus synonyms (godown, truck, login) and the Preferences rows. | Completed | 2026-10-24 | CR-408 |
+| Title Case for the remaining name fields | Collection Name on the Item form, a container's vessel name, extra-address attention names and role names save as Title Case like every other name. | Completed | 2026-10-25 | CR-447 |
 | No long helper notes | Thirteen how-to paragraphs removed from under tables and cards; what blocks a row is said in its Status cell and tooltips. Standing rule: no multi-sentence instructions in the app. | Completed | 2026-10-24 | CR-416 |
 | Kanban hidden app-wide | Packing, Panel Orders, Sales Orders and Production show the Sheet only; the Default view setting is hidden with it. | Completed | 2026-10-24 | CR-418 |
 | Notifications read / unread | Bell rows stay bold until Mark all read; the marker survives new tabs. Sidebar logo centred; Settings sub-pages open with a small Back link above the title. | Completed | 2026-10-24 | CR-419…421 |
@@ -107,6 +109,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
+| Location mandatory on a Sales Order | The SO form asks where the order's stock will sit (Warehouse ▸ Bay); no SO is created, edited or converted from a quote without it; shown on the order page. | Completed | 2026-10-26 | CR-453 |
 | Convert to Sales Order | From an Accepted quote, full or partial (quote becomes Partially converted and can be converted again); the quote's container plan is copied and the order owns its editable copy. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Sales Order form (page) | Same layout family as the quote; PO number; editable after work has started (a line with pallets or loads keeps its item and cannot drop below what was done). | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Allocate Stock | Hand free boxes of chosen batches to an order line (one flat table item → batch rows, with search). Allocation is a claim, not a movement. | Completed | Phase 1 (by 01-Oct-2026) | CR-194…200 |
@@ -196,6 +199,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Transfer Orders | Inventory ▸ Transfer Orders: dated TRF/FY/NNN moving boxes or cut pieces between warehouses with a reason; a line cannot exceed what the From warehouse holds. | Completed | 2026-10-12 | CR-330 |
 | Locations on items | Item detail ▸ Locations tab (warehouse → batches, on hand · committed · available); Panel Item detail ▸ Locations card. | Completed | 2026-10-12 | CR-332 |
 | Stock keyed by the item | Live stock, opening / adjustment / allocation sums and To Produce demand key on the item, not its shared design name; Item detail agrees with Allocate Stock. | Completed | 2026-10-13 | CR-341 |
+| Stock adjustment as a line form | Adjust Stock (Panel Craft) and New Stock Adjustment (Inventory) open with one line and '+ Add line' like Zoho Books; each line shows the current stock at its location and carries its own Location, Add / Remove, Qty, Date, Reason and Remark; Add Stock and Transfers keep the bulk sheet. | Completed | 2026-10-25 | CR-446 |
 
 ## Reports & audit
 
@@ -212,6 +216,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
+| Add many items to Panel Craft at once | Search and tick items from the Item master, one Add; each gets its full-size cut piece. | Completed | 2026-10-26 | CR-452 |
+| Location mandatory on a Panel Order | A panel order cannot be saved without saying where its panels will sit. | Completed | 2026-10-26 | CR-453 |
 | Panel Master | Showcase panel master with one image, PANEL-001 numbering by the server, full-page New / Edit form; grid opens as photo tiles with a toggle to the column grid; row / tile click opens the panel. | Completed | 2026-10-08 | CR-283…285, 291, 319 |
 | Remarks on a panel | Free-text Remarks on New / Edit Panel for the old reference ID; shown on the panel page and searchable in the panel list. | In progress |  | CR-425 |
 | Cut Piece Size master under Panel Items | The cut piece size list is maintained from the Panel Items page (Cut Piece Sizes button) instead of Settings ▸ Masters. | In progress |  | CR-426 |
@@ -244,6 +250,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Load part of a panel | Each panel lists its cut pieces one kind per row; any count can leave on a trip, the rest later. Stock and booking move per piece kind. | In progress |  | CR-405 |
 | MDF row on every panel | Every panel line has an MDF board row, thickness picked or not; it loads once the vinyl is pasted. | In progress |  | CR-406 |
 | Load whole panel in one click | A panel's + menu loads all its ready pieces and its pasted board on one vehicle; Allocate Stock sits on the Actions tab. | In progress |  | CR-407 |
+| Stock list: items with their cut pieces beneath | Panel Craft ▸ Stock (was 'Cut Piece'): one row per item with totals, its cut pieces listed beneath; fold an item, search by item, size or cut size. | Completed | 2026-10-25 | CR-448 |
+| Panel Item page: read-only weight, Actions tab | The item's Details tab shows cut pieces read-only; adding a cut piece, removing one and the Add Stock / Adjust / Transfer buttons sit on an Actions tab; the weight per piece is the formula value, never typed. | Completed | 2026-10-25 | CR-449 |
+| Panel Order page: Details informative, Requirements on Actions | The Requirements card (need, in stock, allocated, short, Available tick, Allocate Stock) lives on the Actions tab; Details shows the order's fields and items only. | Completed | 2026-10-25 | CR-450 |
 | Panel location | Set where a panel order's panels sit (More ▸ Set Location); shown on the order, as a grid column and in the Stock Locations report's Panels view. | Completed | 2026-10-24 | CR-410 |
 | Actions tab: panels on top, cut pieces below | One row per panel with its marks, its MDF board and a status; click a panel to see its cut pieces underneath with their own Load boxes. Pending counts amber, loaded ones say Loaded; no empty spanning cells. | Completed | 2026-10-24 | CR-419 |
 | Actions tab reads at a glance | Material cell = cut size (150x150) or MDF — the design sits behind the Line ⓘ; Status on one line; Vinyl / Pasted dropdowns visibly greyed until their gate is met, with the reason on hover. | Completed | 2026-10-24 | CR-415 |
@@ -260,6 +269,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
+| Bulk Upload items from Excel | Download a sample template, fill it, upload: columns matched, every row checked (unknown Size / Finish, duplicates, items that already exist), valid rows created with SKUs and unique names as the form would. | Completed | 2026-10-26 | CR-451 |
 | Base Design Name defaults to the Design Name | Leave Base Design Name blank and the item is saved with its Design Name as the base; the field stays clearable while editing. | Completed | 2026-10-24 | CR-437 |
 
 ## Documentation & process

@@ -69,6 +69,7 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     remarks: dr.remarks,
     address: dr.address,
     shipping_address: dr.shipping_address,
+    warehouse: dr.warehouse, // CR-453
     salesperson: dr.salesperson,
     box_brand: dr.box_brand,
     customer_notes: dr.customer_notes,

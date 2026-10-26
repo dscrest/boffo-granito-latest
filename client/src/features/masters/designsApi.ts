@@ -463,18 +463,20 @@ function bust<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-export async function createDesign(input: DesignInput) {
-  // Short code is assigned here, not typed. The SKU's first segment is always
-  // the design short code ("00" while blank) — swap in the generated one.
-  if (!input.seq_code.trim()) {
-    const res = await listDesigns();
-    const existing = res.designs ?? [];
+/** CR-451: create many items in one go. Short codes are assigned here, not typed —
+    the SKU's first segment is always the design short code ("00" while blank), so
+    swap in the generated one against ONE snapshot of the master (bumping until the
+    assembled SKU is unique closes the client-side nextSeqCode race). Rows go to the
+    generic rows[] insert in chunks of 100; `done` = rows in before the first failure.
+    ponytail: a chunk is all-or-nothing — per-row fallback only if 409s show up in practice. */
+export async function createDesigns(inputs: DesignInput[]): Promise<{ ok: boolean; done: number; rowids: string[]; error?: string }> {
+  const res = await listDesigns();
+  const existing = res.designs ?? [];
+  const takenSku = new Set(existing.map((d) => d.sku));
+  let n = Number(nextSeqCode(existing.map((d) => d.seqCode)));
+  const rows = inputs.map((input) => {
+    if (input.seq_code.trim()) return toPayload(input);
     const tail = input.sku.split("-").slice(1);
-    const takenSku = new Set(existing.map((d) => d.sku));
-    // Assign the next short code, then keep bumping until the assembled SKU is
-    // unique — closes the client-side nextSeqCode race that could otherwise
-    // mint two identical SKUs.
-    let n = Number(nextSeqCode(existing.map((d) => d.seqCode)));
     let seq = String(n).padStart(2, "0");
     let sku = [seq, ...tail].join("-");
     while (takenSku.has(sku)) {
@@ -482,9 +484,26 @@ export async function createDesign(input: DesignInput) {
       seq = String(n).padStart(2, "0");
       sku = [seq, ...tail].join("-");
     }
-    input = { ...input, seq_code: seq, sku };
+    takenSku.add(sku);
+    n += 1;
+    return toPayload({ ...input, seq_code: seq, sku });
+  });
+  const rowids: string[] = [];
+  try {
+    for (let i = 0; i < rows.length; i += 100) {
+      const r = await insert("Design", { rows: rows.slice(i, i + 100) });
+      if (!r.ok) return { ok: false, done: rowids.length, rowids, error: r.error };
+      rowids.push(...((r.data as { rowids?: string[] } | undefined)?.rowids ?? []));
+    }
+    return { ok: true, done: rowids.length, rowids };
+  } finally {
+    cache.invalidate();
   }
-  return bust(insert("Design", toPayload(input)));
+}
+
+export async function createDesign(input: DesignInput): Promise<OpResult> {
+  const r = await createDesigns([input]);
+  return r.ok ? { ok: true, rowid: r.rowids[0] } : { ok: false, error: r.error };
 }
 
 export function updateDesign(rowid: string, input: DesignInput) {

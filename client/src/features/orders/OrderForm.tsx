@@ -14,6 +14,7 @@ import { AddressPair, defaultAddresses } from "@/features/common/AddressPair";
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { docTotals, type Order, type Quote, type TaxType } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
+import { useWarehouses } from "@/features/masters/useWarehouses";
 import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
@@ -45,6 +46,8 @@ export interface OrderDraft {
   _id: string;
   customer: string;
   po_number: string;
+  /** CR-453: Warehouse ▸ Bay node ROWID where the order's stock will sit ("" while no warehouse exists). */
+  warehouse: string;
   order_date: string;
   shipment_date: string;
   payment_term: string;
@@ -124,6 +127,7 @@ export function OrderForm({
     po_number: ed?.poNumber ?? "",
     order_date: ed?.orderDate || todayISO(), // #13 default to today on new SO
     shipment_date: ed?.shipmentDate ?? "",
+    warehouse: ed?.warehouseId ?? "", // CR-453
     payment_term: q?.paymentTerm ?? ed?.paymentTerm ?? "",
     port_of_discharge: ed?.portOfDischarge ?? "", // hidden app-wide; carries silently
     currency: q?.currency ?? ed?.currency ?? "INR",
@@ -285,9 +289,12 @@ export function OrderForm({
     }
     return null;
   }, [q, lines, maxByDesign]);
+  // CR-453: Location is mandatory once a warehouse exists (the server refuses without one too).
+  const { options: whOptions, enabled: whEnabled } = useWarehouses();
   const missing =
     !h.customer.trim() ||
     !h.po_number.trim() ||
+    (whEnabled && !h.warehouse) ||
     validLines.length === 0 ||
     rateMissing ||
     lines.some(belowFloor) ||
@@ -297,6 +304,7 @@ export function OrderForm({
   const [showErrors, setShowErrors] = useState(false);
   const customerErr = showErrors && !h.customer.trim() ? "Customer is required" : null;
   const poErr = showErrors && !h.po_number.trim() ? "PO Number is required" : null;
+  const locErr = showErrors && whEnabled && !h.warehouse ? "Location is required" : null; // CR-453
   const [custSearch, setCustSearch] = useState(false);
   // Convert mode: customer + currency are fixed by the source quote.
   const locked = !!q;
@@ -381,6 +389,24 @@ export function OrderForm({
                 <span className="lbl">Shipment Date</span>
                 <DateInput value={h.shipment_date} onChange={(e) => setHead("shipment_date", e.target.value)} />
               </label>
+              {/* CR-453: no order without a place for its stock — same picker as the Panel Order form. */}
+              {whEnabled && (
+                <label className="form-field">
+                  <span className="lbl">
+                    Location<span className="req"> *</span>
+                  </span>
+                  <Combobox
+                    value={h.warehouse}
+                    options={whOptions}
+                    maxVisible={120}
+                    placeholder="Where the stock for this order will sit…"
+                    ariaLabel="Location"
+                    invalid={!!locErr}
+                    onChange={(v) => setHead("warehouse", v)}
+                  />
+                  {locErr && <span className="field-err">{locErr}</span>}
+                </label>
+              )}
               <label className="form-field">
                 <span className="lbl">Salesperson</span>
                 <Combobox

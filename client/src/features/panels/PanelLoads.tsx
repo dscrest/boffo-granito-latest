@@ -39,7 +39,7 @@ import type { DesignImage } from "@/features/masters/designsApi";
 import { formatVehicleNumber } from "@/features/masters/vehiclesApi";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { AllocateCutStockModal } from "./AllocateCutStockModal";
+import { RequirementsCard } from "./RequirementsCard";
 import { mdfLabel, type PanelRow } from "./panelsApi";
 import { cachedMdfs } from "./mdfApi";
 import { checkpointTone, LOADING_TONE } from "./pcBits";
@@ -460,9 +460,7 @@ export function PanelActionsTab({
   const [qty, setQty] = useState<Record<string, number>>({});
   /** CR-382/407: `only` = the rows the "+" menu picked (one row, or a whole panel); everything else goes to the modal at 0. */
   const [recording, setRecording] = useState<false | { only?: Set<string> }>(false);
-  const [allocating, setAllocating] = useState(false); // CR-407: Allocate Stock from here too
   const [busy, setBusy] = useState(false);
-  const unbookedPcs = reqs.reduce((s, r) => s + Math.max(0, r.need - r.allocated), 0);
   // CR-313/376: one per-panel mark; the server stamps who / when and mirrors it on the source sale.
   const mark = async (key: LineCheckpointKey, status: string, panelId: string) => {
     if (status === lineCheckpoint(cp, panelId, key)) return;
@@ -636,17 +634,6 @@ export function PanelActionsTab({
                 label={`${selPieces.filter((r) => r.pending > 0 && r.rd.ready).length} of ${selPieces.filter((r) => r.pending > 0).length} ready`}
               />
             )}
-            <span style={{ flex: 1 }} />
-            {canEdit && (
-              <button
-                className="hbtn"
-                disabled={busy || !open || reqs.length === 0}
-                title={!open ? "Order is closed" : reqs.length === 0 ? "No cut pieces required" : unbookedPcs ? `Book free cut pieces to this order — ${fmt(unbookedPcs)} pcs still unbooked` : "Every piece is booked — open to release pieces"}
-                onClick={() => setAllocating(true)}
-              >
-                <Icon name="package" size={13} /> Allocate Stock
-              </button>
-            )}
           </div>
           <div style={{ overflow: "auto" }}>
             <table className="tbl">
@@ -697,9 +684,8 @@ export function PanelActionsTab({
           onClose={() => setRecording(false)}
         />
       )}
-      {allocating && (
-        <AllocateCutStockModal orderId={order.id} title={`${order.orderNumber || "Panel Order"} · ${order.customerName}`} reqs={reqs} onDone={onChanged} onClose={() => setAllocating(false)} />
-      )}
+      {/* CR-450: the Requirements card (need · in stock · allocated · short · Available tick · Allocate Stock) lives here, not on Details. */}
+      <RequirementsCard order={order} reqs={reqs} onChanged={onChanged} />
     </div>
   );
 }

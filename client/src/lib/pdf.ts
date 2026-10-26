@@ -6,6 +6,7 @@
    fetch, later ones reuse the cached module.
    ============================================================ */
 import type { TDocumentDefinitions, Content, StyleDictionary } from "pdfmake/interfaces";
+import { getOrg } from "@/lib/org";
 
 let pdfMakePromise: Promise<typeof import("pdfmake/build/pdfmake")> | null = null;
 
@@ -68,11 +69,11 @@ export const PDF_STYLES: StyleDictionary = {
   fine: { fontSize: 8, color: "#777" },
 };
 
-/** Standard BOFFO letterhead row: brand left, doc title + number right. */
+/** Standard letterhead row: brand (Settings ▸ Organization, CR-445) left, doc title + number right. */
 export function pdfHeader(docTitle: string, docNumber: string): Content {
   return {
     columns: [
-      { stack: [{ text: "BOFFO", style: "brand" }, { text: "Order OS", style: "fine" }] },
+      { stack: [{ text: getOrg().name, style: "brand" }, { text: "Order OS", style: "fine" }] },
       {
         stack: [
           { text: docTitle, style: "docTitle", alignment: "right" },

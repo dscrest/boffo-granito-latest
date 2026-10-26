@@ -10,6 +10,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { docTotals, lineTotals, type Quote, type QuoteLine } from "@/data";
 import { fmt } from "@/lib/format";
 import { list } from "@/lib/dataOps";
+import { useOrg } from "@/lib/org";
 import { groupQuoteLines, itemSuffix } from "./quoteTemplate";
 
 type SharedDesign = { name: string; uniqueName: string };
@@ -87,6 +88,7 @@ async function fetchSharedQuote(token: string): Promise<{ quote: Quote | null; d
 }
 
 export function SharedQuote() {
+  const org = useOrg();
   const token = shareTokenFromHash(window.location.hash);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [designs, setDesigns] = useState<SharedDesign[]>([]);
@@ -137,7 +139,7 @@ export function SharedQuote() {
       <div className="card" style={{ maxWidth: 760, margin: "0 auto", padding: 28 }}>
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 18 }}>
           <div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{org.name}</div>
             <div className="muted" style={{ fontSize: 14 }}>Order OS</div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -261,7 +263,7 @@ export function SharedQuote() {
 
             <div className="row" style={{ marginTop: 22, justifyContent: "space-between" }}>
               <span className="muted" style={{ fontSize: 13 }}>
-                Read-only quotation shared by BOFFO. Contact your salesperson to accept or amend.
+                Read-only quotation shared by {org.name}. Contact your salesperson to accept or amend.
               </span>
               <button className="hbtn" onClick={() => void onPdf()}>Download PDF</button>
             </div>

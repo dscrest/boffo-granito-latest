@@ -165,7 +165,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 |---|---|
 | **Dashboard** | Dashboard |
 | **Inventory** | Items · Stock Details · Stock Adjustments (CR-308) · Transfer Orders (CR-330) · Production |
-| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading and Dispatch · **Panel Craft** (Dashboard · Cut Piece · Pending Cut Piece · Orders · Loading) |
+| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading and Dispatch · **Panel Craft** (Dashboard · **Stock** (CR-448, was "Cut Piece") · Pending Cut Piece · Orders · Loading) |
 | **Masters** (CR-436; CR-439 layout; **CR-440: NO sidebar entry** — reached from Settings ▸ Masters; `/masters` is only the redirect / ⌘K / tile landing) | `/masters` = the **Settings workspace (`SettingsHome`) opened on its Masters menu**. **CR-439 (2026-10-24): the Settings rail carries Masters ▸ Item · Panel · Export as a menu + sub-menu (`.set-subgroups`); the pane (`MastersPane`, `Masters.tsx`) = the group title + horizontal `.fbar .btn` pill tabs of its masters (CR-440: pills, not the faint underline), master rendered in place; Item first; non-admins see the Masters menu only.** Groups: **Export Master** (Pallet Master · Container Master · Vehicles · Payment Terms · Adjustment Reason · Currencies · Warehouses & Locations) · **Item Master** (Items · Size Master · Finish · Category · Glaze · Box Brand · Customer Brand · Grade · Surface Application · Punch Type · Series · Catalogue) · **Panel Master** (Panel Items · Cut Piece Size · MDF · Panels); each master declares the nav id it needs (or Admin). Visible to Admin and any role whose matrix grants Items or Panel Craft view (`MODULE_NAV` adds `masters` to both) |
 | **Reports** | Reports · Audit Log |
 | *header gear* | Settings (admin only) |
@@ -180,7 +180,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/design` · `/design/:id` | `masters/DesignMaster` · `ItemDetail` | Item master |
 | `/design/new` · `/design/:id/edit` · `/design/:id/clone` | `masters/DesignEdit.tsx` | CR-220: the one Item form page |
 | `/stock` | `masters/StockDetails.tsx` | Batch-wise on-hand (hidden Adjusted column since CR-308) |
-| `/stock-adjustments` · `/stock-adjustments/new` | `masters/StockAdjustments.tsx` · `StockAdjustmentSheet.tsx` | CR-308: box-stock inventory adjustments — list of adjusted lines + the bulk sheet (date, reason, **Warehouse (CR-329)**, Item · Batch · Add / Remove · Qty) |
+| `/stock-adjustments` · `/stock-adjustments/new` | `masters/StockAdjustments.tsx` · `StockAdjustmentSheet.tsx` → `common/StockAdjustForm.tsx` | CR-308: box-stock inventory adjustments — list of adjusted lines + (CR-446) the Zoho-style LINE FORM: one line by default, each line Item · Batch · Location · Current stock · Add / Remove · Qty · Date · Reason · Remark |
 | `/stock-transfers` · `/stock-transfers/new` · `/cut-stock/transfer` | `masters/StockTransfers.tsx` · `StockTransferSheet.tsx` · `panels/CutStockSheetPage.tsx` (kind transfer) | CR-330: Transfer Orders — every transferred line (boxes + cut pieces) with TRF # · From → To · reason; the bulk sheet with From / To / Reason in the bar |
 | `/warehouses` → redirect `/masters?g=export&m=warehouses` | `masters/Warehouses.tsx` (Admin, inside the hub) | CR-329: Warehouse master — Name · Primary ★ · Purposes · Note; the Primary tick → `/warehouse-primary` |
 | `/sizes` → redirect `/masters?g=item&m=sizes` · `/sizes/:id` | `masters/Sizes` (inside the hub) · `SizeDetail` | CR-436 |
@@ -209,7 +209,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/panel-orders` (ONE register, Type = Panel \| Sample, CR-345) · `/panel-orders/new` + `/sample-orders/new` (`OrderFormPage`, type first) · `/sample-orders` → redirect `?type=Sample` · `/sample-orders/:id/edit` · `/sample-orders/:id/clone` · `/sample-orders/:id` · **`/panel-loading`** (CR-348) | `panels/Orders` · `OrderFormPage` · `SampleOrderFormPage` · `SampleOrderDetail` · `PanelLoading` · `PanelLoads` (Dispatch tab + Record Load) | Orders + Loading (CR-315…317, 345…348) |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
 | `/ops` | `ops/OperationsLog.tsx` | Audit log |
-| `/settings` · `/users` · `/roles` · `/data-operations` | `settings/*`, `admin/*` | **Rail groups since CR-436 (2026-10-24): Users & Roles · **Masters ▸ Item · Panel · Export (CR-439: menu + sub-menu in the rail, masters render in the pane as horizontal tabs; the tiles are the search / ⌘K index only, deep-linking `/masters?g=…&m=…` = this page)** · Data Operations · Preferences.** **Admin only** — non-admins redirect to `/dashboard` |
+| `/settings` · `/users` · `/roles` · `/data-operations` | `settings/*`, `admin/*` | **Rail groups since CR-436 (2026-10-24): **Organization (CR-445: logo, company name, tax, contact, bank — the branding source for the whole app)** · Users & Roles · **Masters ▸ Item · Panel · Export (CR-439: menu + sub-menu in the rail, masters render in the pane as horizontal tabs; the tiles are the search / ⌘K index only, deep-linking `/masters?g=…&m=…` = this page)** · Data Operations · Preferences.** **Admin only** — non-admins redirect to `/dashboard` |
 | `/masters?g=<export\|item\|panel>&m=<key>` · `/currencies` → redirect `…g=export&m=currencies` | `masters/Masters.tsx` (`HUB_GROUPS`, `hubPick.ts`; big pages lazy-loaded inside; `admin/Currencies.tsx` rendered there) | **CR-436 Masters hub** — the query string IS the selection (`?g=` wins, a lone legacy `?m=` infers its tab); Admin or `hasFeature("masters")` |
 
 **Registered but hidden.** The "Stages" nav block is commented out
@@ -221,7 +221,8 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 
 | Route | Serves |
 |---|---|
-| `GET /public/design-image/:fileId` | Item images |
+| `GET /public/design-image/:fileId` | Item images + the org logo |
+| `GET /public/org-profile` | Organization profile (CR-445) — explicit `org_*` allowlist; login page, shared pages and PDF builders read it without a token |
 | `GET /public/pallet/:token` | Pallet QR scan page (`SharedPallet.tsx`) |
 | `GET /public/batch/:token` | Batch QR slip (`SharedBatch.tsx`) |
 
@@ -911,14 +912,19 @@ item's weight per piece; **Add Stock** beside it, CR-414 = the receipt sheet ove
 design, any size, blank = full size, Create … for a new size — defining the pair with the ƒx weight while
 receiving, so import + stock is one Save); `/panel-items/:designId` is the ONE place cut pieces are added (the
 "+ Cut piece" row has an On Hand qty since CR-414: with a qty it posts a receipt, blank defines at 0), weighed
-(ƒx default `cutPieceWeight` = weight per piece × the cut's share of the tile face when the name reads
-`W x H`, typable) and removed (server: qty 0 and no `PanelLine` uses the pair). `/cut-stock` shows one
-row per cut-piece item in the Item-master look (image · item · size · cut size · weight / pc · on hand ·
-stock weight) and moves stock ONLY through two bulk sheets on the shared `StockEntrySheet`
+(ƒx `cutPieceWeight` = weight per piece × the cut's share of the tile face when the name reads
+`W x H` — **CR-449: never typed**, the add row shows it read-only and stores it) and removed (server: qty 0 and no
+`PanelLine` uses the pair). **CR-449:** the item page's Details tab is informative (cut pieces read-only · panels ·
+locations · history); the add row, ✕ and Add Stock · Adjust · Transfer sit on its **Actions** tab. `/cut-stock`
+(**sidebar "Stock" since CR-448**) is a two-level list: one row per ITEM (image · item · size · Σ on hand / booked /
+free / stock weight) with its cut pieces beneath (`↳ <cut size>` rows, their own figures), every item open by
+default, chevron folds, search by item / size / cut size. Stock moves ONLY through the bulk `StockEntrySheet`
 ([`features/common/StockEntrySheet.tsx`](../client/src/features/common/StockEntrySheet.tsx), the
-`/prod/record` skin; pure `stockEntrySheetEdit.ts` with a self-check): **Add Stock** (`/cut-stock/record`,
+`/prod/record` skin; pure `stockEntrySheetEdit.ts` with a self-check) for **Add Stock** (`/cut-stock/record`,
 receipt with an Entry date; CR-414: a line's missing pair is created with its `weight_kg`, an unweighed one
-back-filled) and **Adjust Stock** (`/cut-stock/adjust`, signed, reason mandatory). Both open prefilled from
+back-filled) and Transfer Orders, and through the **Adjust Stock** line form (`/cut-stock/adjust`, CR-446:
+`common/StockAdjustForm.tsx` — one line by default, each line Location · Current stock · Add / Remove · Qty ·
+Date · Reason · Remark, signed). Both open prefilled from
 the item page (`?design=`). Both post `/cut-stock-entry`, which verifies every deduction before any write and, through `adjustCutStock`,
 writes a dated **`CutStockEntry`** ledger row (kinds `receipt` · `adjustment` · `order_ready` ·
 `order_dispatch`, with reason, note, the panel order as `ref_rowid`, performed_by) while
@@ -1061,7 +1067,7 @@ at `/panel-order-save` (an edit clamps the booking to the new need); `Ready` add
 and books it, so it cannot break the invariant. **Dispatch requires every piece booked** (409 "Book N
 more pcs … before dispatch") — the on-hand check stays as a sanity 409. Client maths is pure
 (`panelOrderNeeds.ts`): free = on hand − Σ booked; an order's Short = need − allocated − free; the
-Requirements card shows Allocated · Short and one "Allocate Stock" modal that sets the booked figure in
+Requirements card (**on the Actions tab since CR-450** — `panels/RequirementsCard.tsx`, with the Available tick; Details = fields + Items only) shows Allocated · Short and one "Allocate Stock" modal that sets the booked figure in
 both directions (the manual Available tick stays beside it). `PanelOrder.checkpoints` holds four
 independent marks — MDF (Pending · Ordered · Received · Ready), Vinyl Printing (Pending · Printing ·
 Ready), Cut Pieces (Pending · Ready), Vinyl Pasted on MDF (Pending · Ready, CR-323) — set via `/panel-order-checkpoint` (who / when stamped from
@@ -1173,8 +1179,10 @@ list* on `designName` for display grouping.
 ### 6.2b Inventory adjustments (CR-308)
 
 Breakage, theft, a count correction: a **signed `entry_type="adjust"` ProductionLog row** per
-(item, batch), written only by `POST /stock-adjust` (date, reason from the `AdjustmentReason`
-master, note, N lines; one `request_group` `adj-<stamp>` per submission; `reason` column). The
+(item, batch), written only by `POST /stock-adjust` (N lines, one `request_group` `adj-<stamp>` per
+submission; **CR-446: `date` and `reason` (from the `AdjustmentReason` master) travel PER LINE — the body-level
+ones are fallbacks for older callers — and the on-hand floor is netted per `design|batch|warehouse` across the
+finer `…|date|reason` lines; the client is the `StockAdjustForm` line form, one line by default). The
 server verifies every removal against that batch's **physical on-hand** (`serverFreeStock(…, { onHand:
 true })` — supply minus loaded, no claim netting) before any insert and rolls back on failure; a
 removal MAY dip below what sales orders reserved (the sheet warns; `free` clamps at 0) because
@@ -1476,6 +1484,15 @@ board code is kept. The Settings → Preferences *Default view* row is hidden wi
 stay in place, so a board still goes through `useViewState` and the toggle can return by
 un-commenting one line.
 
+**Organization profile (CR-445, 2026-10-25).** Branding is data, never a constant: `client/src/lib/org.ts`
+holds the profile (`getOrg()` sync for pdfmake, `useOrg()` for React, `orgLogoUrl()`, tax / contact / bank
+helpers), loaded once in `main.tsx` from the public route. Settings ▸ Organization (`OrgProfile.tsx`) edits the
+15 `org_*` AppSetting rows (Logo + Company Name required; Admin-only on the server). Every renderer —
+`pdfHeader`, `quoteTemplate.COMPANY` getters + `bankRows()`, `logoDataUrl()`, sidebar, login, tour, shared
+pages — reads it. A new place that shows the company name or logo imports `lib/org.ts`; never a string literal.
+Fallback (nothing saved) = the bundled BOFFO logo and the old constants; the demo build (`VITE_DEMO`) skips
+the fallback logo only.
+
 **ColumnPicker Apply is locked.** Checkbox changes and reorder both *stage*; nothing applies
 until **Apply**. Never make it immediate. Detail-page Fields pickers use the same component.
 The button lights up (`.btn.active`, same as an applied Search) when the view is non-default:
@@ -1724,7 +1741,7 @@ is allowlisted by origin with credentials.
 
 **Hardened 2026-09-19** (CR-205…207):
 
-- **Uploads** — `/upload/design-image` accepts raster images only, judged by magic bytes
+- **Uploads** — `/upload/design-image` (item images and, since CR-445, the org logo; the File Store folder `design_images` is found by name or created on first use) accepts raster images only, judged by magic bytes
   ([`lib/sniffImage.js`](../functions/data-ops/lib/sniffImage.js)); the stored extension is made
   to match the bytes. The public `design-image` route is same-origin with the app, so every
   response carries `X-Content-Type-Options: nosniff` and a sandboxing CSP — a legacy SVG renders

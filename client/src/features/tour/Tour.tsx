@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { storedAuth } from "@/lib/auth";
+import { getOrg } from "@/lib/org";
 
 export interface TourStep {
   /** Matches a data-tour="…" attribute in the DOM. Omit → centered card, no
@@ -215,7 +216,7 @@ function WelcomeModal({ onStart, onSkip }: { onStart: () => void; onSkip: () => 
     <div className="modal-backdrop" style={{ zIndex: 1100, alignItems: "center" }}>
       <div ref={panelRef} className="modal-panel card" role="dialog" aria-modal="true" aria-label="Welcome" style={{ maxWidth: 440 }}>
         <div className="confirm-head">
-          <span className="confirm-ttl">Welcome to Boffo Order OS</span>
+          <span className="confirm-ttl">Welcome to {getOrg().name} Order OS</span>
         </div>
         <div className="confirm-msg">
           This app takes an order from quote to dispatched container. Take a two-minute tour to see

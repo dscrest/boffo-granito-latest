@@ -98,6 +98,7 @@ export function OrderFormPage() {
       salesperson: d.salesperson,
       address: d.address,
       shipping_address: d.shipping_address,
+      warehouse: d.warehouse, // CR-453
       customer_notes: d.customer_notes,
       terms: d.terms,
       remarks: d.remarks,

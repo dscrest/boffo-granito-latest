@@ -98,6 +98,8 @@ export interface Order {
   /** SalesOrder.address (billing) / shipping_address — edited on the SO form since CR-221. */
   address?: string;
   shippingAddress?: string;
+  /** SalesOrder.warehouse → Warehouse node ROWID ("" = not set) — CR-453. */
+  warehouseId?: string;
   terms?: string;
   totalAmount?: number;
   /** SalesOrder.container_plan — the SO's own plan JSON (snapshotted from the

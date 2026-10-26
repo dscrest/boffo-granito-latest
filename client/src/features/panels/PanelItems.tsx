@@ -12,7 +12,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
-import { Combobox } from "@/ui/Combobox";
 import { toast } from "@/ui/Toast";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
@@ -120,9 +119,11 @@ export function PanelItems() {
         <AddPanelItemModal
           designs={designs.filter((d) => !inModule.has(d.id) && d.status !== "Inactive" && d.status !== "Discontinued")}
           onClose={() => setAdding(false)}
-          onAdded={(id) => {
+          onAdded={(ids) => {
             setAdding(false);
-            navigate(`/panel-items/${encodeURIComponent(id)}`);
+            // CR-452: one item opens its detail as before; several just refresh the grid.
+            if (ids.length === 1) navigate(`/panel-items/${encodeURIComponent(ids[0])}`);
+            else void load();
           }}
         />
       )}
@@ -207,56 +208,99 @@ export function PanelItems() {
   );
 }
 
-/** Pick one design from the master; its full-size cut piece is created (weight = item weight / pc). */
-function AddPanelItemModal({ designs, onClose, onAdded }: { designs: DesignRow[]; onClose: () => void; onAdded: (designId: string) => void }) {
-  const [design, setDesign] = useState("");
+/** CR-452: pick MANY designs from the master in one go; each gets its full-size cut
+    piece (weight = item weight / pc, CR-190). Search + checkbox list, one Add. */
+function AddPanelItemModal({ designs, onClose, onAdded }: { designs: DesignRow[]; onClose: () => void; onAdded: (designIds: string[]) => void }) {
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const panelRef = useModalA11y(onClose);
-  const options = useMemo(
-    () => designs.map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: [d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || undefined })),
-    [designs],
-  );
-  const picked = designs.find((d) => d.id === design);
-  const pc = picked ? weightPerPc(picked) : null;
+  // Every typed word must appear somewhere in the row (same token rule as ItemSearchModal).
+  const rows = useMemo(() => {
+    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = (d: DesignRow) => `${d.designName} ${d.uniqueName} ${d.sku} ${d.sizeLabel} ${d.finishLabel} ${d.collectionName}`.toLowerCase();
+    return designs.filter((d) => tokens.every((t) => hay(d).includes(t))).sort((a, b) => a.designName.localeCompare(b.designName));
+  }, [designs, q]);
+  const allOn = rows.length > 0 && rows.every((d) => selected.has(d.id));
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelected((s) => {
+      const n = new Set(s);
+      for (const d of rows) allOn ? n.delete(d.id) : n.add(d.id);
+      return n;
+    });
 
   const add = async () => {
-    if (!picked) return;
+    const picked = designs.filter((d) => selected.has(d.id));
+    if (!picked.length) return;
     setBusy(true);
-    const res = await saveCutPiece({ design: picked.id, weight_kg: pc });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not add the item");
-      return;
+    const done: string[] = [];
+    const failed: string[] = [];
+    // Sequential on purpose — one row per item, no need to race the server.
+    for (const d of picked) {
+      const res = await saveCutPiece({ design: d.id, weight_kg: weightPerPc(d) });
+      if (res.ok) done.push(d.id);
+      else failed.push(`${d.uniqueName || d.designName}: ${res.error || "failed"}`);
     }
-    toast.success(`${picked.uniqueName || picked.designName} added to Panel Craft`);
-    onAdded(picked.id);
+    setBusy(false);
+    if (done.length) toast.success(done.length === 1 ? `${picked[0].uniqueName || picked[0].designName} added to Panel Craft` : `${done.length} items added to Panel Craft`);
+    if (failed.length) toast.error(`Could not add ${failed.length}: ${failed.join("; ")}`);
+    if (done.length) onAdded(done);
   };
 
   return (
     <div className="modal-backdrop">
-      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ width: 520 }} onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} role="dialog" aria-modal="true" className="modal-panel card df-modal" style={{ width: 680 }} onClick={(e) => e.stopPropagation()}>
         <div className="df-head">
           <div className="ico"><Icon name="tile" size={18} /></div>
-          <div><div className="ttl">Add Item to Panel Craft</div></div>
+          <div><div className="ttl">Add Items to Panel Craft</div></div>
           <button className="btn x" onClick={onClose} title="Close" tabIndex={-1}>✕</button>
         </div>
         <div className="df-body">
-          <div className="form-rows">
-            <label className="form-field span2">
-              <span className="lbl">Item<span className="req"> *</span></span>
-              <Combobox value={design} options={options} onChange={setDesign} placeholder="Search the item master…" ariaLabel="Item" />
-            </label>
-            <label className="form-field span2">
-              <span className="lbl">Full-size weight</span>
-              <input className="calc" readOnly tabIndex={-1} value={pc != null ? `${pc} kg / pc` : picked ? "Set box weight on the item first" : ""} placeholder="Auto: box weight ÷ pcs per box" />
-            </label>
+          <span className="gsearch" style={{ marginBottom: 10 }}>
+            <Icon name="search" size={13} />
+            <input type="text" autoFocus placeholder="Search the item master…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </span>
+          <div style={{ maxHeight: "50vh", overflow: "auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: 30 }}><input type="checkbox" checked={allOn} onChange={toggleAll} aria-label="Select all shown" /></th>
+                  <th>Item</th>
+                  <th>Size · Finish</th>
+                  <th className="num" style={{ textAlign: "right" }}>Weight / pc</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr><td colSpan={4} className="dim">{designs.length ? "No items match" : "Every active item is already in Panel Craft"}</td></tr>
+                )}
+                {rows.map((d) => {
+                  const pc = weightPerPc(d);
+                  return (
+                    <tr key={d.id} onClick={() => toggle(d.id)} style={{ cursor: "pointer" }}>
+                      <td><input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} onClick={(e) => e.stopPropagation()} aria-label={d.uniqueName || d.designName} /></td>
+                      <td><span className="design-name">{d.uniqueName || d.designName}</span></td>
+                      <td className="dim">{[d.sizeLabel, d.finishLabel].filter(Boolean).join(" · ") || dash}</td>
+                      <td className="num mono">{pc != null ? `${pc} kg` : <span className="dim" title="Set box weight on the item first">—</span>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
         <div className="df-foot">
-          <span className="spacer" />
+          <span className="df-req-note">{selected.size ? `${selected.size} selected` : "Tick the items to bring into Panel Craft"}</span>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="hbtn primary" onClick={() => void add()} disabled={!picked || busy}>
-            <Icon name="check" size={13} /> {busy ? "Adding…" : "Add"}
+          <button className="hbtn primary" onClick={() => void add()} disabled={selected.size === 0 || busy}>
+            <Icon name="check" size={13} /> {busy ? "Adding…" : selected.size > 1 ? `Add ${selected.size} items` : "Add"}
           </button>
         </div>
       </div>

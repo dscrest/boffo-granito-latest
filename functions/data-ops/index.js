@@ -31,6 +31,21 @@ const crypto = require("crypto");
    (project 69851000000043001, org OCTFIS 925638796) — the live project
    since 2026-07-04; boffo-latest-project was deleted. */
 const DESIGN_IMAGES_FOLDER = "69851000000059622";
+// CR-445: resolve the folder BY NAME once per instance (find or create), so the demo
+// project — and any future clone — needs no console step; the live id is the fallback.
+let designFolderIdP = null;
+function designImagesFolder(catalyst) {
+  if (!designFolderIdP) {
+    designFolderIdP = (async () => {
+      const fs_ = catalyst.filestore();
+      const all = await fs_.getAllFolders();
+      const hit = (all || []).map((f) => f.toJSON()).find((f) => String(f.folder_name) === "design_images");
+      const id = hit ? String(hit.id) : String((await fs_.createFolder("design_images")).toJSON().id);
+      return id;
+    })().catch(() => { designFolderIdP = null; return DESIGN_IMAGES_FOLDER; }); // retry next request
+  }
+  return designFolderIdP.then((id) => catalyst.filestore().folder(id));
+}
 
 const app = express();
 // 10mb so a base64-encoded photo (one per upload request) fits the body.
@@ -460,6 +475,7 @@ const BLOCK_DELETE = {
     ["CutStockEntry", "warehouse", "cut stock entry"],
     ["Warehouse", "parent", "location"],
     ["PanelOrder", "warehouse", "panel order"],
+    ["SalesOrder", "warehouse", "sales order"], // CR-453
     ["PalletizationPlanLine", "warehouse", "palletized line"], // CR-412
   ],
 };
@@ -530,6 +546,20 @@ function assertDateOrder(start, end, startLabel, endLabel) {
 }
 
 /** Throw 409 if `value` already exists in table.field (optionally excluding one ROWID). */
+/* CR-453: Location = a live Warehouse node id (a warehouse, or a bay inside one).
+   Required whenever at least one warehouse exists — before that the rule is
+   dormant, mirroring the client's useWarehouses().enabled. One query either way. */
+async function requireLocation(catalyst, raw) {
+  const id = rowidParam(raw);
+  const q = id
+    ? `SELECT ROWID FROM Warehouse WHERE ROWID = ${id} AND deleted_at is null`
+    : `SELECT ROWID FROM Warehouse WHERE deleted_at is null LIMIT 1`;
+  const hit = rowList(await catalyst.zcql().executeZCQLQuery(q)).length > 0;
+  if (id && !hit) throw badRequest("Location not found", 404);
+  if (!id && hit) throw badRequest("Location is required");
+  return id || null;
+}
+
 async function assertUnique(catalyst, table, field, value, excludeRowid, extraWhere = "") {
   if (value == null || String(value).trim() === "") return;
   const safe = String(value).replace(/'/g, "''"); // ZCQL string-literal escape
@@ -649,7 +679,7 @@ const { titleCase, normalizeNames } = require("./lib/names"); // CR-429
 app.get("/public/design-image/:fileId", async (req, res) => {
   try {
     const catalyst = init(req);
-    const folder = catalyst.filestore().folder(DESIGN_IMAGES_FOLDER);
+    const folder = await designImagesFolder(catalyst);
     let mime = "image/jpeg";
     try {
       const details = await folder.getFileDetails(req.params.fileId);
@@ -668,6 +698,24 @@ app.get("/public/design-image/:fileId", async (req, res) => {
     stream.pipe(res);
   } catch (err) {
     res.status(404).json({ ok: false, error: "Image not found" });
+  }
+});
+
+/* CR-445 PUBLIC: Organization profile (logo id, company name, tax, contact,
+   bank) — read by the login page, the shared batch/pallet pages and PDF
+   builders, none of which hold a token. Explicit key allowlist; never the
+   generic /AppSetting list (secret rows). */
+const { ORG_KEYS, isOrgKey, profileFromRows } = require("./lib/orgProfile");
+app.get("/public/org-profile", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const keys = ORG_KEYS.map((k) => `'${k}'`).join(", ");
+    const rows = rowList(await catalyst.zcql().executeZCQLQuery(
+      `SELECT setting_key, setting_value, deleted_at FROM AppSetting WHERE setting_key IN (${keys}) LIMIT 50`,
+    ));
+    res.json({ ok: true, profile: profileFromRows(rows) });
+  } catch (err) {
+    sendErr(res, err);
   }
 });
 
@@ -929,9 +977,7 @@ app.post("/upload/design-image", async (req, res) => {
     tmpPath = pathlib.join(os.tmpdir(), `${crypto.randomBytes(8).toString("hex")}-${safeName}`);
     fs.writeFileSync(tmpPath, buf);
     const catalyst = init(req);
-    const uploaded = await catalyst
-      .filestore()
-      .folder(DESIGN_IMAGES_FOLDER)
+    const uploaded = await (await designImagesFolder(catalyst))
       .uploadFile({ code: fs.createReadStream(tmpPath), name: safeName });
     res.json({ ok: true, id: String(uploaded.id), name: safeName });
   } catch (err) {
@@ -1476,6 +1522,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
         const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
+        const warehouse = await requireLocation(catalyst, body.warehouse); // CR-453
 
         // Line rules, checked before any write: a line with work keeps its
         // design, can't drop below what is already palletised/loaded/dispatched,
@@ -1519,6 +1566,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         await ds.table("SalesOrder").updateRow({
           ROWID: soId,
           customer,
+          warehouse, // CR-453
           po_number: body.po_number || "",
           order_date: body.order_date || undefined,
           shipment_date: body.shipment_date || undefined,
@@ -1641,6 +1689,8 @@ async function createSalesOrder(ds, body, maps) {
   const { items, total } = computeLines(body.lines);
   const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
   const bwMap = await designBoxWeights(maps.catalyst, designIds); // CR-427 (was a bare `catalyst` → ReferenceError on every SO create)
+  // CR-453: an order always says where its stock will sit (Warehouse ▸ Bay node).
+  const warehouse = maps.catalyst ? await requireLocation(maps.catalyst, body.warehouse) : rowidParam(body.warehouse) || null;
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
@@ -1663,6 +1713,7 @@ async function createSalesOrder(ds, body, maps) {
     remarks: body.remarks || "",
     address: body.address || "",
     shipping_address: body.shipping_address || "",
+    warehouse, // CR-453
     manual_so_number: body.manual_so_number || "",
     // Box Brand master pick (Brand FK, CR-162) — replaces the free-text box_branding.
     box_brand: body.box_brand || null,
@@ -1787,6 +1838,7 @@ app.post("/convert-quote/:rowid", async (req, res) => {
             shipment_date: body.shipment_date || "",
             payment_term: body.payment_term,
             port_of_discharge: q.port_of_discharge,
+            warehouse: body.warehouse, // CR-453: the convert form asks for it
             currency: q.currency,
             exchange_rate: q.exchange_rate,
             remarks: body.remarks || `Converted from ${q.quote_number}${body.mode === "Partial" ? " (partial)" : ""}`,
@@ -3427,8 +3479,6 @@ app.post("/panel-order-save", async (req, res) => {
       salesperson: String(body.salesperson || "").trim(),
     };
     if (String(body.order_date || "").trim()) header.order_date = String(body.order_date).trim(); // date cols reject ""
-    // CR-413: where the panels will sit (a Warehouse node id). "" clears it; absent leaves it alone.
-    if (body.warehouse !== undefined) header.warehouse = /^\d+$/.test(String(body.warehouse || "")) ? String(body.warehouse) : null;
     const result = await withOpLog(
       catalyst,
       { table_name: "PanelOrder", operation: rowid ? "update" : "insert", payload: body },
@@ -3436,6 +3486,8 @@ app.post("/panel-order-save", async (req, res) => {
         // Validate everything up front — never write a header then fail on a line.
         if (!header.customer) throw badRequest("Customer is required");
         if (!lines.length) throw badRequest("Add at least one panel or cut piece");
+        // CR-413 → CR-453: where the panels will sit (a Warehouse node id) — mandatory on create and edit.
+        header.warehouse = await requireLocation(catalyst, body.warehouse);
         const seen = new Set();
         const seenCut = new Set();
         for (const l of lines) {
@@ -4351,10 +4403,10 @@ app.post("/cut-stock-entry", async (req, res) => {
       { table_name: "CutPieceStock", operation: `entry-${kind}`, payload: body },
       async () => {
         if (!CUT_ENTRY_KINDS.has(kind)) throw badRequest("kind must be receipt, adjustment or transfer");
-        const entryDate = String(body.entry_date || "").trim() || todayDate();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) throw badRequest("entry_date must be yyyy-mm-dd");
-        const reason = String(body.reason || "").trim();
-        if (kind !== "receipt" && !reason) throw badRequest(kind === "transfer" ? "A reason is required" : "A reason is required for an adjustment");
+        // CR-446: entry_date / reason are PER LINE (the adjustment form); the body's are the fallbacks (receipts, transfers, older callers).
+        const date0 = String(body.entry_date || "").trim() || todayDate();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date0)) throw badRequest("entry_date must be yyyy-mm-dd");
+        const reason0 = String(body.reason || "").trim();
         const note = String(body.note || "").trim();
         // CR-329/330: warehouse of the count (null = primary), or the From / To pair of a transfer.
         const meta = await warehouseMeta(catalyst);
@@ -4363,7 +4415,7 @@ app.post("/cut-stock-entry", async (req, res) => {
         const validWh = (v) => (rowidParam(v) && meta.byId.has(rowidParam(v)) ? rowidParam(v) : null);
         const warehouse = !transferring ? validWh(body.warehouse) : null;
         // CR-438: a line may name its own location; the body's is the fallback (null = primary). Transfers keep the pair.
-        const merged = new Map(); // design|cut|warehouse → line (duplicates summed)
+        const merged = new Map(); // design|cut|warehouse|date|reason → line (duplicates summed)
         const receiving = kind === "receipt";
         for (const l of Array.isArray(body.lines) ? body.lines : []) {
           const d = rowidParam(l && l.design);
@@ -4371,13 +4423,17 @@ app.post("/cut-stock-entry", async (req, res) => {
           const c = rowidParam(l && l.cut_piece_size) || (receiving ? await fullSizeCutPiece(catalyst, ds, d) : null);
           if (!c) throw badRequest("Every line needs an item and a cut piece size");
           const wh = transferring ? null : validWh(l && l.warehouse) || warehouse;
+          const date = String((l && l.entry_date) || "").trim() || date0;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("entry_date must be yyyy-mm-dd");
+          const reason = String((l && l.reason) || "").trim() || reason0;
+          if (!receiving && !reason) throw badRequest(transferring ? "A reason is required" : "Every line needs a reason");
           const q = Number(l.qty);
           if (!Number.isInteger(q) || q === 0 || (kind !== "adjustment" && q < 0))
             throw badRequest(kind !== "adjustment" ? "qty must be a positive whole number" : "qty must be a non-zero whole number");
           const w = !receiving || l.weight_kg === "" || l.weight_kg == null ? null : Number(l.weight_kg);
           if (w != null && (!isFinite(w) || w < 0)) throw badRequest("weight_kg must be 0 or more");
-          const k = `${d}|${c}|${wh || ""}`;
-          const cur = merged.get(k) || { d, c, wh, qty: 0, note: "", weight: null };
+          const k = `${d}|${c}|${wh || ""}|${date}|${reason}`;
+          const cur = merged.get(k) || { d, c, wh, date, reason, qty: 0, note: "", weight: null };
           cur.qty += q;
           if (l.note) cur.note = String(l.note).trim();
           if (w != null) cur.weight = w;
@@ -4408,8 +4464,16 @@ app.post("/cut-stock-entry", async (req, res) => {
             throw badRequest(`Only ${have - b} pcs free of ${await designLabel(catalyst, m.d)} for that cut size — ${b} are booked by open panel orders`, 409);
         }
         // CR-329/330: a removal or a transfer may not exceed what THAT warehouse holds.
+        // CR-446: netted PER BAY across the finer (date · reason) lines.
+        const bays = new Map();
+        for (const m of merged.values()) {
+          const k = `${m.d}|${m.c}|${m.wh || ""}`;
+          const cur = bays.get(k) || { d: m.d, c: m.c, wh: m.wh, qty: 0 };
+          cur.qty += m.qty;
+          bays.set(k, cur);
+        }
         if (meta.list.length)
-          for (const m of merged.values()) {
+          for (const m of bays.values()) {
             const out = transferring ? m.qty : -m.qty;
             if (out <= 0) continue;
             const takeFrom = transferring ? pair.from : m.wh || meta.primary;
@@ -4420,7 +4484,7 @@ app.post("/cut-stock-entry", async (req, res) => {
         const code = transferring ? await nextTransferNumber(catalyst) : "";
         let n = 0;
         for (const m of merged.values()) {
-          const base = { kind, entry_date: entryDate, reason, note: m.note || note, performed_by: actor, weight_kg: m.weight };
+          const base = { kind, entry_date: m.date, reason: m.reason, note: m.note || note, performed_by: actor, weight_kg: m.weight };
           if (transferring) {
             // A pair of ledger rows (−from / +to) sharing the TRF code; CutPieceStock.qty nets to zero.
             await adjustCutStock(catalyst, ds, m.d, m.c, -m.qty, { ...base, warehouse: pair.from, doc_number: code });
@@ -6219,17 +6283,17 @@ app.post("/stock-adjust", async (req, res) => {
       catalyst,
       { table_name: "ProductionLog", operation: "stock-adjust", payload: body },
       async () => {
-        const date = String(body.date || "").trim() || new Date().toISOString().slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("date must be yyyy-mm-dd");
-        const reason = String(body.reason || "").trim();
-        if (!reason) throw badRequest("A reason is required");
+        // CR-446: date / reason are PER LINE (the form); the body's are the fallbacks for older callers.
+        const date0 = String(body.date || "").trim() || new Date().toISOString().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date0)) throw badRequest("date must be yyyy-mm-dd");
+        const reason0 = String(body.reason || "").trim();
         const note = String(body.note || "").trim();
         // CR-329: the warehouse the count was taken in (null = primary).
         const meta = await warehouseMeta(catalyst);
         const validWh = (v) => (rowidParam(v) && meta.byId.has(rowidParam(v)) ? rowidParam(v) : null);
         const warehouse = validWh(body.warehouse);
         // CR-438: a line may name its own location; the body's is the fallback (null = primary).
-        const merged = new Map(); // design|batch|warehouse → line (duplicates summed)
+        const merged = new Map(); // design|batch|warehouse|date|reason → line (duplicates summed)
         for (const l of Array.isArray(body.lines) ? body.lines : []) {
           const d = rowidParam(l && l.design);
           if (!d) throw badRequest("Every line needs an item");
@@ -6237,8 +6301,12 @@ app.post("/stock-adjust", async (req, res) => {
           if (!Number.isInteger(q) || q === 0) throw badRequest("qty_boxes must be a non-zero whole number");
           const batch = String((l && l.batch_number) || "").trim();
           const wh = validWh(l && l.warehouse) || warehouse;
-          const k = `${d}|${batch}|${wh || ""}`;
-          const cur = merged.get(k) || { d, batch, wh, qty: 0, note: "" };
+          const date = String((l && l.date) || "").trim() || date0;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw badRequest("date must be yyyy-mm-dd");
+          const reason = String((l && l.reason) || "").trim() || reason0;
+          if (!reason) throw badRequest("Every line needs a reason");
+          const k = `${d}|${batch}|${wh || ""}|${date}|${reason}`;
+          const cur = merged.get(k) || { d, batch, wh, date, reason, qty: 0, note: "" };
           cur.qty += q;
           if (l.note) cur.note = String(l.note).trim();
           merged.set(k, cur);
@@ -6259,13 +6327,22 @@ app.post("/stock-adjust", async (req, res) => {
         const lines = new Map();
         for (const m of merged.values()) {
           const batch = designs.get(m.d).batched ? m.batch : "";
-          const k = `${m.d}|${batch}|${m.wh || ""}`;
+          const k = `${m.d}|${batch}|${m.wh || ""}|${m.date}|${m.reason}`;
           const cur = lines.get(k) || { ...m, batch, qty: 0 };
           cur.qty += m.qty;
           lines.set(k, cur);
         }
-        const onHandOf = new Map();
+        // CR-446: the floor nets PER BAY across the finer (date · reason) lines — two removals at one bay may not
+        // each pass on their own.
+        const bays = new Map();
         for (const m of lines.values()) {
+          const k = `${m.d}|${m.batch}|${m.wh || ""}`;
+          const cur = bays.get(k) || { d: m.d, batch: m.batch, wh: m.wh, qty: 0 };
+          cur.qty += m.qty;
+          bays.set(k, cur);
+        }
+        const onHandOf = new Map();
+        for (const m of bays.values()) {
           if (m.qty >= 0) continue;
           if (!onHandOf.has(m.d)) onHandOf.set(m.d, (await serverWarehouseOnHand(catalyst, m.d)).cells);
           const whKey = m.wh || meta.primary;
@@ -6288,9 +6365,9 @@ app.post("/stock-adjust", async (req, res) => {
               status: "Adjusted",
               stage: "Completed",
               request_group: group,
-              production_date: date,
+              production_date: m.date,
               performed_by: String(actor || ""),
-              reason,
+              reason: m.reason,
               note: m.note || note,
               ...whField(m.wh),
             });
@@ -7830,7 +7907,8 @@ const ZOHO_SETTING_PREFIX = require("./lib/zoho").SETTING_PREFIX;
 function assertSettingWrite(req, key) {
   const role = String((req.appUser && req.appUser.role) || "").trim().toLowerCase();
   const k = String(key || "");
-  if (role !== "admin" && (ADMIN_SETTINGS.has(k) || k.startsWith(ZOHO_SETTING_PREFIX))) throw badRequest("Admin role required", 403);
+  // CR-445: org_* (branding / tax / bank) is Admin-only too.
+  if (role !== "admin" && (ADMIN_SETTINGS.has(k) || k.startsWith(ZOHO_SETTING_PREFIX) || isOrgKey(k))) throw badRequest("Admin role required", 403);
 }
 
 /* ----------------------------------------------------------------

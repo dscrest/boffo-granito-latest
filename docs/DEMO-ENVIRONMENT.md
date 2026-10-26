@@ -24,7 +24,8 @@ bash scripts/deploy-demo-client.sh "what changed"
 
 It copies `client/` to a temp dir (no node_modules / dist), writes
 `.env.production` with `VITE_API_BASE` = the demo functions URL and `VITE_DEMO=1`
-(hides the BOFFO logo on the login page — `client/src/AuthGate.tsx`), runs `catalyst slate:link`
+(skips the fallback BOFFO logo on the login page — since CR-445 the logo comes from Settings ▸ Organization
+once an Admin saves one; `VITE_DEMO` only matters while nothing is saved), runs `catalyst slate:link`
 + `catalyst deploy slate export-tracker-demo -p 69851000000395215 --org 925638796`, and Slate
 installs + builds remotely (`npm install`, `npm run build`, `/dist`). The repo's
 `catalyst.json` and `.catalystrc` are never touched.
@@ -63,6 +64,9 @@ Without this the demo page loads but every request fails in the browser.
 
 ## Deploying the functions to the demo
 
+**Uploads (CR-445):** the functions find the File Store folder `design_images` by name on first use
+and create it when missing, so the demo (or any clone) needs no console step for the org logo / item images.
+
 ```bash
 bash scripts/deploy-demo.sh
 ```
@@ -81,6 +85,13 @@ copied from the live file; `ZOHO_REDIRECT_URI` → the Slate origin, `APP_CORS_O
    (idempotent; refuses the live host).
 3. **Flows** — `SEED_HOST=https://export-tracker-demo-925638796.development.catalystserverless.com BOFFO_EMAIL=… BOFFO_PASSWORD=… node scripts/seed-multi.mjs`
    and the same for `scripts/seed-panel-stages.mjs`. Both have `--teardown`.
+4. **Everything else** — `BOFFO_EMAIL=… BOFFO_PASSWORD=… node scripts/seed-demo-flows.mjs`
+   (Admin; resumable via `scripts/.seed-flow-state-demo.json`, no teardown — reset by wiping
+   the demo tables). Adds the Sales role + `sales.demo@octfis.com` / `Demo@1234`, three
+   batched items, quotes in every status, sales orders from Pending Approval to Completed
+   (one full container loaded and dispatched), production jobs in progress / at QC / to
+   stock, box and cut-piece adjustments and transfers, a part-supplied sample order and
+   two shipping-container records. Invoices stay empty (legacy container path).
    The scripts resume from `scripts/.seed-flow-state-*.json`; those files now belong to
    the DEMO run. The earlier live-run state files were renamed
    `scripts/.seed-flow-state-live-*.json` (gitignored, kept only for a live `--teardown`).

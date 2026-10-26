@@ -181,7 +181,8 @@ A **location** is a bay inside a warehouse, written as **Warehouse ▸ Bay** (fo
 | Complete Production dialog | Location field under Completion |
 | Excel import | Location picker above the preview, applied to every row |
 | Inline quantity in the production sheet's edit mode | No picker; lands in the Production bay |
-| Opening stock · Stock Adjustments · cut-stock sheets | Location in the bar; Transfer Orders take From and To |
+| Opening stock · cut-stock Add Stock sheet | Location in the bar; Transfer Orders take From and To |
+| Stock Adjustments (Inventory and Panel Craft ▸ Stock) | Location on every line, with the current stock at that location beside it (CR-446) |
 
 **Where pallets get a location**
 

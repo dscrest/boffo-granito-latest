@@ -33,6 +33,7 @@ import {
   type DesignLookups,
   type DesignRow,
 } from "./designsApi";
+import { ItemImport } from "./ItemImport";
 
 const dash = <span className="dim">—</span>;
 
@@ -202,6 +203,7 @@ export function DesignMaster() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("designTableColumns.v2", DESIGN_COLUMNS, ["created", "modified", "sku"]) // .v2 (CR-355): auto SKU hidden by default;
   const [showBulk, setShowBulk] = useState(false);
+  const [importing, setImporting] = useState(false); // CR-451: Excel bulk upload
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -327,6 +329,7 @@ export function DesignMaster() {
         />
       )}
 
+      {importing && <ItemImport designs={rows} lookups={lookups} onDone={() => void load()} onClose={() => setImporting(false)} />}
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
 
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
@@ -362,10 +365,16 @@ export function DesignMaster() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("items", "create") && (
             /* fbar controls are 26px tall; the 30px .hbtn default would stretch the bar. */
-            <button className="hbtn primary sm" onClick={() => navigate("/design/new")}>
-              <Icon name="plus" size={13} />
-              New Item
-            </button>
+            <>
+              <button className="hbtn sm" onClick={() => setImporting(true)} title="Create many items from an Excel file">
+                <Icon name="upload" size={13} />
+                Bulk Upload
+              </button>
+              <button className="hbtn primary sm" onClick={() => navigate("/design/new")}>
+                <Icon name="plus" size={13} />
+                New Item
+              </button>
+            </>
           )}
         </div>
       )}

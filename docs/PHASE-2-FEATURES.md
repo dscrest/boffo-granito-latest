@@ -12,7 +12,7 @@ history is `CHANGE-REQUESTS.md` (Phase 2 heading). Phase 1 figures are frozen an
 
 | # | Module | Phase 2 so far | Effort recorded (h) | Conventional build (h) |
 |---|---|---|---|---|
-| 1 | Foundation & workspace | Staff default role (view + create, never edit / delete) + guard hardening; Zoho-linked account status, Zoho-only accounts, self-provisioning for company domains; discard prompt is a Yes / No question; delete asks for a reason (Admin exempt); Zoho-style label-left layout on every form page, tightened (label gap, one-control-wide rows, notes boxes); every grid leads Customer → Design, system numbers hidden, whole-row click | 12 | 37 |
+| 1 | Foundation & workspace | Organization profile (logo, name, tax, contact, bank on every screen and document); Staff default role (view + create, never edit / delete) + guard hardening; Zoho-linked account status, Zoho-only accounts, self-provisioning for company domains; discard prompt is a Yes / No question; delete asks for a reason (Admin exempt); Zoho-style label-left layout on every form page, tightened (label gap, one-control-wide rows, notes boxes); every grid leads Customer → Design, system numbers hidden, whole-row click | 14.5 | 44.5 |
 | 2 | Masters (Inventory) | Container Master; Pallet Master boxes only; Warehouse master (primary, purposes); Design Master to the new spec — Pcs Per Packing typed per item with its own coverage, Design Owner / Custom Design Buyer, buyer-filtered brands, Base Design picked from items, four new lookups (Surface Application, Punch with image, Series, Catalogue), form in five spec sections with the image on it | 13 | 40 |
 | 3 | Customers | Sign in with Zoho on the login page; Zoho Books connection + hand-mapping of customers to Books contacts (From Zoho Books, Map / Re-pull / Unmap); two-way Books sync (event-driven pull via Catalyst Signals, Import all, Push) + the Books tax / credit / notes fields; Zoho CRM Accounts as the customer source (Books hidden); Zoho link status per customer (CRM & Books / CRM only / Books only); Customer Brands list per customer | 13 | 46 |
 | 4 | Quotes & Approvals | Suitable Containers panel; planner picks the container per item row, narrowed by pallet; Customer search modal | 8 | 27 |
@@ -24,7 +24,7 @@ history is `CHANGE-REQUESTS.md` (Phase 2 heading). Phase 1 figures are frozen an
 | 10 | Reports & audit | Warehouse Stock report (boxes / cut pieces, matrix) | 1 | 3 |
 | 11 | Panel Craft | Add Stock wording; row-click grid + Photo \| Grid view; PANEL-001 numbering; New / Edit Panel as a page; Request Panels from Quote / SO (New Request stage); Panel Order page with status steps + requirements checklist; full-size cut piece default; one image per panel; BOFFO loader on image upload; Panel Items with weighed cut pieces; Cut Stock as cut-piece items + bulk Add / Adjust sheets + ledger; MDF master + per-line MDF and auto weight; picker filters; Panel Craft dashboard; cut-piece booking per order (Dispatch = fully booked); MDF / Vinyl / Cut Pieces checkpoints + readiness; Pending Cut Stock page; Sample Orders (separate order type, per-line supply, cut-stock deduction, Request Samples, Customer Samples section); vehicle + driver on the load, Load Copy print, line (i) cards; Remarks on a panel; Cut Piece Size master under Panel Items | 21.3 | 64.5 |
 | 12 | Documentation & process | Phase 2 inventory, register, schema, Data Flow reference | 3 | 9 |
-| | **Total** | | **≈ 105.3** | **≈ 328.5** |
+| | **Total** | | **≈ 107.8** | **≈ 336** |
 
 Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 3×, rounded).
 
@@ -80,9 +80,16 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Sidebar logo centred · bell read/unread · "‹ Back" above Settings titles** (CR-419…421, 2026-10-24, LIVE 2026-10-24).
   Logo at the true centre of the rail; notification rows bold until Mark all read (marker survives new tabs);
   Settings sub-pages open with a small "‹ Back" link above the title instead of a button beside it. ≈ 0.5 h.
+- **Organization profile** (CR-445, 2026-10-25, LIVE + DEMO 2026-10-25). Settings ▸ Organization: logo (PNG/JPG, required),
+  company name (required), legal name, GSTIN / PAN / IEC, address / phone / email / website, bank details — stored as
+  `org_*` settings (Admin-only), read through one public route, and used on the sidebar, login, tab title, every PDF /
+  print and the shared pages; the old hard-coded BOFFO branding is the fallback. ≈ 2.5 h.
 
 ## 2 · Masters (Inventory)
 
+- **Item master Bulk Upload** (CR-451, 2026-10-26). Excel / CSV upload beside New Item with a downloadable sample
+  template: match columns, preview every row (unknown master names, duplicates in the file, items that already
+  exist are flagged), create the valid ones in one go with SKUs and unique names exactly as the Item form would.
 - **Container Master** (CR-261, 2026-10-03). A new master under Inventory, after Pallet Master. A
   record says what one container of a size holds: which pallet formats and how many of each; total
   pallets and total boxes follow (one per size at first; several since CR-273, lines since CR-269). Pick the size, add the pallet lines, Save. Grid, form
@@ -185,6 +192,9 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 ## 5 · Sales Orders
 
+- **Location is mandatory on a Sales Order** (CR-453, 2026-10-26). The SO form asks where the order's stock will
+  sit (Warehouse ▸ Bay, the same picker as the Panel Order); create, edit and convert-from-quote all refuse
+  without it once a warehouse exists; the SO detail header shows it.
 - **Remaining and totals** (CR-263, 2026-10-03). The Items table shows Remaining = Ordered − Allocated and
   a totals row.
 - **Deallocate Stock** (CR-263). A ✕ on each allocated line (and "Deallocate Stock" in More) lists that
@@ -238,6 +248,20 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   horizontal tabs opening in place; /masters opens the same page on Masters (non-admins see Masters only). ≈ 0.6 h · conventional ≈ 2 h.
 - **Masters out of the main menu, clearer tabs** (CR-440, 2026-10-24, LIVE 2026-10-24). No sidebar Masters entry; the
   menu is Settings ▸ Masters only; master tabs are highlighted pills. ≈ 0.2 h.
+- **Stock adjustment as a Zoho-style line form, both modules** (CR-446, 2026-10-25, LIVE 2026-10-25). One line by
+  default + "Add line"; each line shows the current stock at its location and carries its own Location, Add / Remove, Qty,
+  Date, Reason, Remark (no top bar); Add Stock / Transfers keep the bulk sheet. Server takes date + reason per line and nets
+  the on-hand floor per bay. Recorded ≈ 1.5 h · conventional ≈ 6 h.
+- **Title Case for the Name columns CR-429 missed** (CR-447, 2026-10-25, LIVE 2026-10-25). Collection Name, vessel
+  name, extra-address attention, role names. Recorded ≈ 0.2 h · conventional ≈ 1 h.
+- **Panel Craft ▸ Stock — items with their cut pieces beneath** (CR-448, 2026-10-25, LIVE 2026-10-25). Menu entry
+  renamed; the list is item rows (totals) with ↳ cut-piece rows, fold / search / sort over items. Recorded ≈ 0.6 h ·
+  conventional ≈ 3 h.
+- **Panel Item page: read-only weight, editing on an Actions tab** (CR-449, 2026-10-25, LIVE 2026-10-25). Details
+  informative; "+ Cut piece", ✕ and the stock buttons on Actions; weight = the formula value. Recorded ≈ 0.4 h · conventional ≈ 2 h.
+- **Panel Order page: Requirements on Actions, Details informative** (CR-450, 2026-10-25, LIVE 2026-10-25). The
+  Requirements card (tick + Allocate Stock) moved whole to the Actions tab; card 2's duplicate Allocate removed. Recorded
+  ≈ 0.4 h · conventional ≈ 2 h.
 - **MDF and Vinyl marked independently** (CR-431, 2026-10-24, LIVE 2026-10-24 — REVERSES CR-401). The Vinyl
   dropdown is never greyed by MDF any more; Pasted still needs both Ready. Client gate + server 409 removed. ≈ 0.2 h.
 - **Load Copy from the Actions tab** (CR-433, 2026-10-24, LIVE 2026-10-24). A Load Copy menu on the Actions tab
@@ -482,6 +506,10 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   Set Location from the boards, the loading row menu or the plan; Location column + group-by, Item ▸ On pallets
   at, Pallets view on Stock Locations. Splits keep it; a tag, never a stock movement. One live column. ≈ 3 h.
 - **Panel order form Location** (CR-413, 2026-10-24). Optional Location on create / edit. ≈ 0.25 h.
+- **Panel order Location is mandatory** (CR-453, 2026-10-26). Save waits for it; the server refuses a panel order
+  without one on create and edit.
+- **Add Items to Panel Craft — many at once** (CR-452, 2026-10-26). Search + tick list of items not yet in Panel
+  Craft, one Add; each gets its full-size cut piece.
 - **Add Stock brings the item into Panel Craft** (CR-414, 2026-10-24). The Add Stock sheet takes any item from
   the Item master and any cut size (blank = full size, Create … for a new one) and defines the piece with its
   weight while receiving — import + stock in one Save, bulk / paste as before. Add Stock sits beside Add Item on

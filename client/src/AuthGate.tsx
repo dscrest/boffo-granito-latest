@@ -9,7 +9,7 @@
    exchanges the code before the usual session check. */
 import { useEffect, useState } from "react";
 import { checkSession, exchangeZohoCode, signIn, startZohoSignIn, takeOauthState, type SessionUser } from "./lib/auth";
-import boffoLogo from "./assets/boffo-logo.png";
+import { orgLogoUrl, useOrg } from "./lib/org";
 import { BoffoLoader } from "./ui/BoffoLoader";
 import "./styles/login.css";
 
@@ -17,6 +17,8 @@ type Status = "checking" | "anon" | "authed";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("checking");
+  const org = useOrg(); // CR-445: logo + name from Settings ▸ Organization
+  const logoUrl = orgLogoUrl();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -117,12 +119,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           <div className="boffo-auth-pane">
             <form className="boffo-auth-form" onSubmit={onSubmit}>
               <div className="boffo-auth-brand">
-                {/* White + orange brand logo (boffogranito.com asset) — the
-                    login theme is dark so the white wordmark reads.
-                    Demo build (VITE_DEMO, set by scripts/deploy-demo-client.sh) hides it. */}
-                {!import.meta.env.VITE_DEMO && (
-                  <img className="logo" src={boffoLogo} alt="BOFFO — Adorable Surfaces" />
-                )}
+                {/* CR-445: the org logo from Settings ▸ Organization; the bundled
+                    BOFFO logo is the fallback (skipped on the demo build, CR-444). */}
+                {logoUrl && <img className="logo" src={logoUrl} alt={org.name} />}
                 <span className="sub">Order OS</span>
               </div>
 

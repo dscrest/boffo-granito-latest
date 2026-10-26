@@ -2067,6 +2067,15 @@ details.tx-section[open] > summary::after { transform: rotate(90deg); }
 .ord-line-head span { padding-left: 2px; }
 .ord-rm { color: var(--c-red); height: 35px; justify-content: center; line-height: 1; }
 .ord-rm:disabled { opacity: 0.35; cursor: not-allowed; }
+/* CR-446: Stock adjustment form — one line = two rows of labelled cells, ✕ spans both.
+   Row 1 Item · Batch / Cut Piece Size · Location · Current stock · Add / Remove · Qty; row 2 Date · Reason · Remark. */
+.adj-line { display: grid; grid-template-columns: 2fr 1.2fr 1.2fr 0.8fr 0.9fr 0.7fr 26px; gap: 10px 12px; align-items: start; }
+.adj-line + .adj-line { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.adj-line .date { grid-column: 1; } /* opens row 2 even when Location is hidden */
+.adj-line .reason { grid-column: span 2; }
+.adj-line .remark { grid-column: span 3; }
+.adj-line .rm { grid-column: 7; grid-row: 1 / span 2; align-self: center; }
+.adj-line .warn { grid-column: 1 / -1; font-size: var(--t-sm); color: var(--c-amber); }
 
 /* ============================================================
    Sales: Quotes + QC additions

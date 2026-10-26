@@ -12,8 +12,8 @@ import { createPortal } from "react-dom";
 import { Icon } from "@/ui/Icon";
 import { docTotals, lineTotals, type Quote } from "@/data";
 import { useMasters } from "@/features/masters/useMasters";
-import boffoLogo from "@/assets/boffo-logo.png";
-import { BANK, COMPANY, amountInWords, groupQuoteLines, itemSuffix, moneyFor, prettyDate, termsList } from "./quoteTemplate";
+import { orgLogoUrl } from "@/lib/org";
+import { bankRows, COMPANY, amountInWords, groupQuoteLines, itemSuffix, moneyFor, prettyDate, termsList } from "./quoteTemplate";
 
 /** Doc-type labels — defaults render the quotation; OrderDetail passes the
     Sales Order set and reuses the whole sheet unchanged. */
@@ -62,7 +62,7 @@ export function QuotePrint({ quote, onClose, doc = QUOTE_LABELS }: { quote: Quot
 
       <div className="qprint-sheet" onClick={(e) => e.stopPropagation()}>
         <header className="qp-head">
-          <img src={boffoLogo} alt="Boffo Granito — Adorable Surfaces" />
+          {orgLogoUrl() && <img src={orgLogoUrl()!} alt={COMPANY.name} />}
           <div className="qp-doctitle">
             <div className="qp-doc">{doc.title}</div>
             <div className="qp-doc-rule" />
@@ -176,7 +176,7 @@ export function QuotePrint({ quote, onClose, doc = QUOTE_LABELS }: { quote: Quot
           <div>
             <div className="qp-sec-title">Bank Details</div>
             <div className="qp-bank">
-              {BANK.map(([k, v]) => (
+              {bankRows().map(([k, v]) => (
                 <div key={k}><b>{k}:</b> {v}</div>
               ))}
             </div>
@@ -189,14 +189,14 @@ export function QuotePrint({ quote, onClose, doc = QUOTE_LABELS }: { quote: Quot
             <div className="qp-sign-line">Signature &amp; company stamp</div>
           </div>
           <div>
-            <div className="qp-sign-label ink">FOR BOFFO GRANITO LLP</div>
+            <div className="qp-sign-label ink">FOR {COMPANY.name}</div>
             <div className="qp-sign-line">Authorised signatory</div>
           </div>
         </section>
 
         <footer className="qp-foot">
           <b>{COMPANY.name}</b>
-          <div>{COMPANY.address}</div>
+          <div>{COMPANY.addressTax}</div>
           <div>{COMPANY.contact}</div>
         </footer>
       </div>

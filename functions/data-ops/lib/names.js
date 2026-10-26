@@ -28,9 +28,11 @@ function titleCase(s) {
    LoadBox.name / destination, performed_by. Warehouse locations (A1…F12) pass
    through `keep`. */
 const NAME_COLUMNS = {
-  Customer: ["name", "company_name", "contact_first_name", "contact_last_name", "billing_attention", "shipping_attention"],
-  Design: ["design_name", "base_design_name", "party_brand_name"],
+  Customer: ["name", "company_name", "main_party_name", "contact_first_name", "contact_last_name", "billing_attention", "shipping_attention"],
+  // CR-447: collection_name (Marketing data) was missed by CR-429.
+  Design: ["design_name", "base_design_name", "party_brand_name", "collection_name"],
   Vehicle: ["driver_name"],
+  Container: ["vessel_name"],
   AppUser: ["name"],
   SalesPerson: ["name"],
   Brand: ["name"],
@@ -50,23 +52,27 @@ const NAME_COLUMNS = {
 };
 
 const PERSON_KEYS = ["name", "first_name", "last_name"];
+// Customer JSON columns whose entries carry a name key (CR-447: additional_addresses.attention joined contact_persons).
+const JSON_NAME_KEYS = { contact_persons: PERSON_KEYS, additional_addresses: ["attention"] };
+
+/** Title-case the name keys inside a JSON-array column, in place; a non-JSON value is left as typed. */
+function normalizeJsonNames(row, col, keys) {
+  if (typeof row[col] !== "string" || !row[col].trim()) return;
+  try {
+    const arr = JSON.parse(row[col]);
+    if (!Array.isArray(arr)) return;
+    for (const p of arr) if (p && typeof p === "object") for (const k of keys) if (typeof p[k] === "string") p[k] = titleCase(p[k]);
+    row[col] = JSON.stringify(arr);
+  } catch (_) {
+    /* not JSON — leave as typed */
+  }
+}
 
 /** Title-case the name columns of `row` in place (only string values present on the row). */
 function normalizeNames(table, row) {
   if (!row || typeof row !== "object") return row;
   for (const c of NAME_COLUMNS[table] || []) if (typeof row[c] === "string") row[c] = titleCase(row[c]);
-  // Customer.contact_persons = JSON array of extra contacts — same rule on their name keys.
-  if (table === "Customer" && typeof row.contact_persons === "string" && row.contact_persons.trim()) {
-    try {
-      const arr = JSON.parse(row.contact_persons);
-      if (Array.isArray(arr)) {
-        for (const p of arr) if (p && typeof p === "object") for (const k of PERSON_KEYS) if (typeof p[k] === "string") p[k] = titleCase(p[k]);
-        row.contact_persons = JSON.stringify(arr);
-      }
-    } catch (_) {
-      /* not JSON — leave as typed */
-    }
-  }
+  if (table === "Customer") for (const [col, keys] of Object.entries(JSON_NAME_KEYS)) normalizeJsonNames(row, col, keys);
   return row;
 }
 
@@ -85,6 +91,11 @@ if (require.main === module) {
   assert.strictEqual(r.code, "bg01");
   assert.deepStrictEqual(JSON.parse(r.contact_persons), [{ first_name: "Ravi", last_name: "Patel" }]);
   assert.strictEqual(normalizeNames("Size", { name: "600x600" }).name, "600x600");
+  // CR-447
+  assert.strictEqual(normalizeNames("Design", { collection_name: "summer COLLECTION", sku: "ab-01" }).collection_name, "Summer Collection");
+  assert.strictEqual(normalizeNames("Container", { vessel_name: "maersk hangzhou", container_number: "MSKU1234567" }).vessel_name, "Maersk Hangzhou");
+  const a = normalizeNames("Customer", { additional_addresses: JSON.stringify([{ type: "shipping", attention: "ravi PATEL", city: "morbi" }]) });
+  assert.deepStrictEqual(JSON.parse(a.additional_addresses), [{ type: "shipping", attention: "Ravi Patel", city: "morbi" }]);
   console.log("names.js ok");
 }
 

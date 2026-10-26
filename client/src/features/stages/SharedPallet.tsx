@@ -10,6 +10,7 @@
    ============================================================ */
 import { useEffect, useState } from "react";
 import { API_BASE } from "@/lib/api";
+import { useOrg } from "@/lib/org";
 
 interface Item {
   item: string;
@@ -42,6 +43,7 @@ function tokenFromHash(hash: string): string {
 }
 
 export function SharedPallet() {
+  const org = useOrg();
   const token = tokenFromHash(window.location.hash);
   const [box, setBox] = useState<BoxData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export function SharedPallet() {
       <div className="card" style={{ maxWidth: 560, margin: "0 auto", padding: 22 }}>
         <div style={{ ...row, alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>BOFFO</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{org.name}</div>
             <div className="muted" style={{ fontSize: 14 }}>Pallet</div>
           </div>
           {box && (
@@ -180,7 +182,7 @@ export function SharedPallet() {
             )}
 
             <div className="muted" style={{ fontSize: 13, marginTop: 18 }}>
-              Read-only pallet label shared by BOFFO.
+              Read-only pallet label shared by {org.name}.
             </div>
           </>
         )}

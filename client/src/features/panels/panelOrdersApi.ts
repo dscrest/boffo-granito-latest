@@ -539,11 +539,14 @@ export interface CutStockEntryLine {
   weight_kg?: number | null;
   /** CR-438: this line's location; blank → the call-level `warehouse`. */
   warehouse?: string;
+  /** CR-446 (adjustment form): this line's own date / reason; blank → the call-level ones. */
+  entry_date?: string;
+  reason?: string;
 }
 /** One dated bulk movement: Add Stock (receipt), Adjust Stock (adjustment, reason required)
     or a Transfer Order between warehouses (transfer: from/to + reason, CR-330). */
 export function postCutStockEntry(input: {
-  entry_date: string;
+  entry_date?: string;
   kind: "receipt" | "adjustment" | "transfer";
   reason?: string;
   note?: string;
