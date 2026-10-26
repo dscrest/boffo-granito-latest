@@ -1,8 +1,8 @@
 /* ============================================================
    Stock entry — the pure half shared by the bulk sheets (cut-stock Add Stock
    = receipt, Transfer Orders) and, since CR-446, the Stock Adjustment FORM
-   (both modules: one line by default, every line with its own date · location
-   · reason). Row shape, validation and Excel paste mapping; no React.
+   (both modules: one line by default, header date · reason over an Item Table, CR-457;
+   Location Transfer mode CR-458). Row shape, validation and Excel paste mapping; no React.
    Self-check: stockEntrySheetEdit.test.ts. The design matcher + date
    parser are the production sheet's (productionLogSheetEdit).
    ============================================================ */
@@ -63,74 +63,87 @@ export function resolveEntrySheet(rows: EntryRow[], opts: ResolveOpts): { lines:
   return { lines, errors, total };
 }
 
-/* ---------- CR-446: the adjustment FORM's rows (Zoho Books shape — no filler rows, every row counts) ---------- */
+/* ---------- CR-446/457: the adjustment FORM — Zoho Books shape: ONE header (mode · date · reason · note, From → To
+   in transfer mode) over an Item Table whose rows carry a SIGNED qty. No filler rows, every row counts. ---------- */
 
+export type AdjustMode = "quantity" | "transfer";
+/** The form's header — one date · reason · note for every line; `from` / `to` only in transfer mode (CR-458). */
+export type AdjustHeader = { mode: AdjustMode; date: string; reason: string; note: string; from: string; to: string };
 export type AdjustRow = {
   key: string;
   design: string;
   second: string; // batch number text (box) or cut-piece size ROWID (cut)
-  warehouse: string; // Location node ROWID; "" only while warehouses are dormant
-  out: boolean; // true = Remove (the default — breakage, theft, count…), false = Add
-  qty: string;
-  date: string; // yyyy-mm-dd
-  reason: string; // AdjustmentReason name
+  warehouse: string; // Location node ROWID (quantity mode); "" only while warehouses are dormant
+  qty: string; // SIGNED text — "+10" / "10" = add, "-10" / "−10" = remove; transfer mode: > 0
   note: string;
 };
-export type AdjustCol = "design" | "second" | "warehouse" | "qty" | "date" | "reason";
-/** A validated line: `qty` is SIGNED. */
+export type AdjustCol = "design" | "second" | "warehouse" | "qty";
+export type AdjustHdrCol = "date" | "reason" | "from" | "to";
+/** A validated line: `qty` SIGNED (quantity) or > 0 (transfer); date / reason copied from the header — the pages' save bodies are unchanged. */
 export type AdjustLine = { key: string; design: string; second: string; warehouse: string; qty: number; date: string; reason: string; note: string };
 
-export const blankAdjustRow = (seed?: Partial<Pick<AdjustRow, "design" | "date" | "warehouse" | "reason">>): AdjustRow => ({
+export const blankAdjustRow = (seed?: Partial<Pick<AdjustRow, "design" | "warehouse">>): AdjustRow => ({
   key: `a${++seq}`,
   design: "",
   second: "",
   warehouse: "",
-  out: true,
   qty: "",
-  date: "",
-  reason: "",
   note: "",
   ...seed,
 });
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Every row counts. errors: row key → the columns at fault. The same item · size/batch · location · date · reason
-    twice is a typo (both rows flagged); the same pair with a DIFFERENT reason is a legitimate second line. */
+/** "+10" / "10" → 10 · "-10" / "−10" (unicode minus) → -10 · anything else → NaN. */
+export const parseSignedQty = (s: string): number => {
+  const m = /^\s*([+\-−]?)\s*(\d+)\s*$/.exec(s);
+  return m ? (m[1] === "-" || m[1] === "−" ? -1 : 1) * parseInt(m[2], 10) : NaN;
+};
+
+/** Every row counts. errors: row key → the columns at fault; hdrErrors: header fields at fault. The same item ·
+    size/batch · location twice is a typo (both rows flagged). Transfer lines are POSITIVE and sit at `hdr.from`. */
 export function resolveAdjustLines(
   rows: AdjustRow[],
+  hdr: AdjustHeader,
   opts: { secondRequired: boolean; warehouseRequired: boolean },
-): { lines: AdjustLine[]; errors: Map<string, Set<AdjustCol>>; totalIn: number; totalOut: number } {
+): { lines: AdjustLine[]; errors: Map<string, Set<AdjustCol>>; hdrErrors: Set<AdjustHdrCol>; totalIn: number; totalOut: number } {
+  const transfer = hdr.mode === "transfer";
   const errors = new Map<string, Set<AdjustCol>>();
   const flag = (key: string, col: AdjustCol) => (errors.get(key) ?? errors.set(key, new Set()).get(key)!).add(col);
+  const hdrErrors = new Set<AdjustHdrCol>();
+  const reason = hdr.reason.trim();
+  if (!DATE_RE.test(hdr.date)) hdrErrors.add("date");
+  if (!reason) hdrErrors.add("reason");
+  if (transfer) {
+    if (!hdr.from) hdrErrors.add("from");
+    if (!hdr.to || hdr.to === hdr.from) hdrErrors.add("to");
+  }
   const lines: AdjustLine[] = [];
   const seen = new Map<string, string>();
   let totalIn = 0;
   let totalOut = 0;
   for (const r of rows) {
-    const q = parseInt(r.qty, 10) || 0;
+    const q = parseSignedQty(r.qty);
     const second = r.second.trim();
-    const reason = r.reason.trim();
+    const warehouse = transfer ? hdr.from : r.warehouse;
     if (!r.design) flag(r.key, "design");
     if (opts.secondRequired && !second) flag(r.key, "second");
-    if (opts.warehouseRequired && !r.warehouse) flag(r.key, "warehouse");
-    if (q <= 0) flag(r.key, "qty");
-    if (!DATE_RE.test(r.date)) flag(r.key, "date");
-    if (!reason) flag(r.key, "reason");
+    if (!transfer && opts.warehouseRequired && !r.warehouse) flag(r.key, "warehouse");
+    if (!Number.isFinite(q) || q === 0 || (transfer && q < 0)) flag(r.key, "qty");
     if (r.design) {
-      const k = `${r.design}|${second.toLowerCase()}|${r.warehouse}|${r.date}|${reason.toLowerCase()}`;
+      const k = `${r.design}|${second.toLowerCase()}|${warehouse}`;
       const first = seen.get(k);
       if (first) {
         flag(first, opts.secondRequired ? "second" : "design");
         flag(r.key, opts.secondRequired ? "second" : "design");
       } else seen.set(k, r.key);
     }
-    const qty = r.out ? -q : q;
-    if (qty > 0) totalIn += qty;
-    else totalOut += -qty;
-    lines.push({ key: r.key, design: r.design, second, warehouse: r.warehouse, qty, date: r.date, reason, note: r.note.trim() });
+    const qty = Number.isFinite(q) ? q : 0;
+    if (qty > 0 && !transfer) totalIn += qty;
+    else totalOut += Math.abs(qty);
+    lines.push({ key: r.key, design: r.design, second, warehouse, qty, date: hdr.date, reason, note: r.note.trim() });
   }
-  return { lines, errors, totalIn, totalOut };
+  return { lines, errors, hdrErrors, totalIn, totalOut };
 }
 
 /** A copied Excel block → one patch per pasted row, columns left to right from `startCol`.

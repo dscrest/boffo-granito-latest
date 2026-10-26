@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 162 |
+| Completed | 166 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **207** |
+| **Total** | **211** |
 
 ## Foundation & workspace
 
@@ -199,6 +199,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Locations on items | Item detail ▸ Locations tab (warehouse → batches, on hand · committed · available); Panel Item detail ▸ Locations card. | Completed | 2026-10-12 | CR-332 |
 | Stock keyed by the item | Live stock, opening / adjustment / allocation sums and To Produce demand key on the item, not its shared design name; Item detail agrees with Allocate Stock. | Completed | 2026-10-13 | CR-341 |
 | Stock adjustment as a line form | Adjust Stock (Panel Craft) and New Stock Adjustment (Inventory) open with one line and '+ Add line' like Zoho Books; each line shows the current stock at its location and carries its own Location, Add / Remove, Qty, Date, Reason and Remark; Add Stock and Transfers keep the bulk sheet. | Completed | 2026-10-25 | CR-446 |
+| Adjust Stock in the Zoho Books shape | Both Adjust Stock pages open with a header (Mode of adjustment, Date, Reason, Description) over an Item Table showing Available, New on hand and one signed Qty adjusted field per line; date and reason are entered once per adjustment. | Completed | 2026-10-26 | CR-457 |
+| Location Transfer from the Adjust Stock screen | Mode switch Quantity Adjustment / Location Transfer: pick From and To, list items and the quantity to move, save one Transfer Order (TRF number); total stock unchanged. Boxes and cut pieces. | Completed | 2026-10-26 | CR-458 |
+| Stock history in date order | The Panel Item Stock History and the Item master Production tab list entries by the date shown, newest first, then by when they were saved. | Completed | 2026-10-26 | CR-455 |
 
 ## Reports & audit
 
@@ -248,6 +251,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | MDF row on every panel | Every panel line has an MDF board row, thickness picked or not; it loads once the vinyl is pasted. | In progress |  | CR-406 |
 | Load whole panel in one click | A panel's + menu loads all its ready pieces and its pasted board on one vehicle; Allocate Stock sits on the Actions tab. | In progress |  | CR-407 |
 | Stock list: items with their cut pieces beneath | Panel Craft ▸ Stock (was 'Cut Piece'): one row per item with totals, its cut pieces listed beneath; fold an item, search by item, size or cut size. | Completed | 2026-10-25 | CR-448 |
+| Stock list: cut-piece rows only for special sizes | An item whose stock is only its full size is one plain row; the chevron and cut-piece rows appear only for items that also have another cut size. | Completed | 2026-10-26 | CR-456 |
 | Panel Item page: read-only weight, Actions tab | The item's Details tab shows cut pieces read-only; adding a cut piece, removing one and the Add Stock / Adjust / Transfer buttons sit on an Actions tab; the weight per piece is the formula value, never typed. | Completed | 2026-10-25 | CR-449 |
 | Panel Order page: Details informative, Requirements on Actions | The Requirements card (need, in stock, allocated, short, Available tick, Allocate Stock) lives on the Actions tab; Details shows the order's fields and items only. | Completed | 2026-10-25 | CR-450 |
 | Panel location | Set where a panel order's panels sit (More ▸ Set Location); shown on the order, as a grid column and in the Stock Locations report's Panels view. | Completed | 2026-10-24 | CR-410 |

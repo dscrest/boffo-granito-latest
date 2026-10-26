@@ -44,6 +44,7 @@ interface GridRow {
   stockKg: number | null; // null while any piece is unweighed
   modifiedTime: string;
   pieces: number;
+  hasSpecial: boolean; // CR-456: item has a cut size other than its full size → shows ↳ rows + chevron
 }
 
 const num = { className: "num mono", style: { textAlign: "right" as const } };
@@ -57,7 +58,7 @@ const STOCK_COLUMNS: ColumnDef<GridRow>[] = [
       r.kind === "item" ? (
         <span className="design-name">
           {r.designName || "—"}
-          <span className="dim" style={{ fontWeight: 400 }}> · {r.pieces} cut piece{r.pieces === 1 ? "" : "s"}</span>
+          {r.hasSpecial && <span className="dim" style={{ fontWeight: 400 }}> · {r.pieces} cut piece{r.pieces === 1 ? "" : "s"}</span>}
         </span>
       ) : (
         // ponytail: inline indent like Warehouses; promote to a .sub-row class if a third tree grid appears.
@@ -128,6 +129,7 @@ export function CutStock() {
         stockKg: r.weightKg == null ? null : r.weightKg * r.qty,
         modifiedTime: r.modifiedTime,
         pieces: 1,
+        hasSpecial: false,
       };
       (byDesign.get(r.designId) ?? byDesign.set(r.designId, []).get(r.designId)!).push(piece);
     }
@@ -150,6 +152,8 @@ export function CutStock() {
           stockKg: pieces.some((r) => r.stockKg == null) ? null : pieces.reduce((s, r) => s + (r.stockKg ?? 0), 0),
           modifiedTime: pieces.map((r) => r.modifiedTime).sort()[pieces.length - 1] || "",
           pieces: pieces.length,
+          // The full-size piece is the CutPieceSize named after the Size code (server fullSizeCutPiece) — that row IS the item.
+          hasSpecial: pieces.some((r) => r.cutSizeName !== r.sizeLabel),
         },
         pieces,
       };
@@ -190,7 +194,7 @@ export function CutStock() {
     const out: GridRow[] = [];
     for (const item of sort.sorted) {
       out.push(item);
-      if (q || !collapsed.has(item.id)) out.push(...(piecesOf.get(item.id) ?? []));
+      if (item.hasSpecial && (q || !collapsed.has(item.id))) out.push(...(piecesOf.get(item.id) ?? []));
     }
     return out;
   }, [sort.sorted, filtered, collapsed, query]);
@@ -265,7 +269,7 @@ export function CutStock() {
                     <tr key={`${r.kind}|${r.id}`} tabIndex={0} style={{ cursor: "pointer", fontWeight: r.kind === "item" ? 500 : undefined }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & history">
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
-                          {c.key === "design" && r.kind === "item" && (
+                          {c.key === "design" && r.kind === "item" && r.hasSpecial && (
                             <button
                               type="button"
                               className="btn x"

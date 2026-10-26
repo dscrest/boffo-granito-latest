@@ -193,7 +193,9 @@ export function ItemDetail() {
         id: a.id, parentId: "", design: a.design, size: a.size, finish: a.finish, qtyBoxes: a.qtyBoxes, productionDate: a.adjDate, shift: "",
         performedBy: a.performedBy, note: [a.reason, a.note].filter(Boolean).join(" — "), batchNumber: a.batchNumber, boxBrandId: "", orderItemId: "", createdTime: a.createdTime, kind: "adjust",
       }));
-    return [...opens, ...recs, ...adjusts].sort((a, b) => (a.createdTime < b.createdTime ? 1 : -1));
+    // CR-455: ordered by the date the column shows (Mfg date), then by when it was saved.
+    const day = (r: { productionDate: string }) => (r.productionDate || "").slice(0, 10);
+    return [...opens, ...recs, ...adjusts].sort((a, b) => day(b).localeCompare(day(a)) || (a.createdTime < b.createdTime ? 1 : -1));
   }, [design, prodLogs, openingEntries, adjustEntries]);
   if (designs === null) return <SkeletonRows rows={6} />;
 

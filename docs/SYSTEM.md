@@ -180,7 +180,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/design` · `/design/:id` | `masters/DesignMaster` · `ItemDetail` | Item master |
 | `/design/new` · `/design/:id/edit` · `/design/:id/clone` | `masters/DesignEdit.tsx` | CR-220: the one Item form page |
 | `/stock` | `masters/StockDetails.tsx` | Batch-wise on-hand (hidden Adjusted column since CR-308) |
-| `/stock-adjustments` · `/stock-adjustments/new` | `masters/StockAdjustments.tsx` · `StockAdjustmentSheet.tsx` → `common/StockAdjustForm.tsx` | CR-308: box-stock inventory adjustments — list of adjusted lines + (CR-446) the Zoho-style LINE FORM: one line by default, each line Item · Batch · Location · Current stock · Add / Remove · Qty · Date · Reason · Remark |
+| `/stock-adjustments` · `/stock-adjustments/new` | `masters/StockAdjustments.tsx` · `StockAdjustmentSheet.tsx` → `common/StockAdjustForm.tsx` | CR-308: box-stock inventory adjustments — list of adjusted lines + (CR-446/457) the Zoho Books FORM: header Mode of adjustment · Date · Reason · Description over an Item Table (Item · Batch · Location · Available · New on hand · signed Qty adjusted · Remark), one line by default; CR-458 mode **Location Transfer** (From → To in the header, `?mode=transfer`) saves ONE Transfer Order via `/stock-transfer` |
 | `/stock-transfers` · `/stock-transfers/new` · `/cut-stock/transfer` | `masters/StockTransfers.tsx` · `StockTransferSheet.tsx` · `panels/CutStockSheetPage.tsx` (kind transfer) | CR-330: Transfer Orders — every transferred line (boxes + cut pieces) with TRF # · From → To · reason; the bulk sheet with From / To / Reason in the bar |
 | `/warehouses` → redirect `/masters?g=export&m=warehouses` | `masters/Warehouses.tsx` (Admin, inside the hub) | CR-329: Warehouse master — Name · Primary ★ · Purposes · Note; the Primary tick → `/warehouse-primary` |
 | `/sizes` → redirect `/masters?g=item&m=sizes` · `/sizes/:id` | `masters/Sizes` (inside the hub) · `SizeDetail` | CR-436 |
@@ -918,13 +918,15 @@ receiving, so import + stock is one Save); `/panel-items/:designId` is the ONE p
 locations · history); the add row, ✕ and Add Stock · Adjust · Transfer sit on its **Actions** tab. `/cut-stock`
 (**sidebar "Stock" since CR-448**) is a two-level list: one row per ITEM (image · item · size · Σ on hand / booked /
 free / stock weight) with its cut pieces beneath (`↳ <cut size>` rows, their own figures), every item open by
-default, chevron folds, search by item / size / cut size. Stock moves ONLY through the bulk `StockEntrySheet`
+default, chevron folds, search by item / size / cut size; CR-456: an item whose only piece is its full size is ONE
+plain row — chevron and ↳ rows appear only when it has another cut size. Stock moves ONLY through the bulk `StockEntrySheet`
 ([`features/common/StockEntrySheet.tsx`](../client/src/features/common/StockEntrySheet.tsx), the
 `/prod/record` skin; pure `stockEntrySheetEdit.ts` with a self-check) for **Add Stock** (`/cut-stock/record`,
 receipt with an Entry date; CR-414: a line's missing pair is created with its `weight_kg`, an unweighed one
-back-filled) and Transfer Orders, and through the **Adjust Stock** line form (`/cut-stock/adjust`, CR-446:
-`common/StockAdjustForm.tsx` — one line by default, each line Location · Current stock · Add / Remove · Qty ·
-Date · Reason · Remark, signed). Both open prefilled from
+back-filled) and Transfer Orders, and through the **Adjust Stock** form (`/cut-stock/adjust`, CR-446/457:
+`common/StockAdjustForm.tsx` — Zoho Books shape: header Mode · Date · Reason · Description over an Item Table of
+Item · Cut Piece Size · Location · Available · New on hand · signed Qty adjusted · Remark, one line by default;
+CR-458: the **Location Transfer** mode (From → To) posts `kind:"transfer"` = one TRF document). Both open prefilled from
 the item page (`?design=`). Both post `/cut-stock-entry`, which verifies every deduction before any write and, through `adjustCutStock`,
 writes a dated **`CutStockEntry`** ledger row (kinds `receipt` · `adjustment` · `order_ready` ·
 `order_dispatch`, with reason, note, the panel order as `ref_rowid`, performed_by) while
@@ -1184,7 +1186,8 @@ Breakage, theft, a count correction: a **signed `entry_type="adjust"` Production
 (item, batch), written only by `POST /stock-adjust` (N lines, one `request_group` `adj-<stamp>` per
 submission; **CR-446: `date` and `reason` (from the `AdjustmentReason` master) travel PER LINE — the body-level
 ones are fallbacks for older callers — and the on-hand floor is netted per `design|batch|warehouse` across the
-finer `…|date|reason` lines; the client is the `StockAdjustForm` line form, one line by default). The
+finer `…|date|reason` lines; since CR-457 the client `StockAdjustForm` enters date + reason ONCE in its header and
+stamps them on every line — the route is unchanged; its CR-458 Location Transfer mode posts `/stock-transfer` instead). The
 server verifies every removal against that batch's **physical on-hand** (`serverFreeStock(…, { onHand:
 true })` — supply minus loaded, no claim netting) before any insert and rolls back on failure; a
 removal MAY dip below what sales orders reserved (the sheet warns; `free` clamps at 0) because

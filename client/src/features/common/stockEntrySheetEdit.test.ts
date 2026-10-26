@@ -1,9 +1,10 @@
 /* Self-check for stockEntrySheetEdit — run with:  npx tsx client/src/features/common/stockEntrySheetEdit.test.ts */
 import assert from "node:assert";
-import { blankAdjustRow, blankRow, parseEntryPaste, resolveAdjustLines, resolveEntrySheet, type AdjustRow, type EntryRow } from "./stockEntrySheetEdit";
+import { blankAdjustRow, blankRow, parseEntryPaste, parseSignedQty, resolveAdjustLines, resolveEntrySheet, type AdjustHeader, type AdjustRow, type EntryRow } from "./stockEntrySheetEdit";
 
 const row = (over: Partial<EntryRow>): EntryRow => ({ ...blankRow(), ...over });
-const adj = (over: Partial<AdjustRow>): AdjustRow => ({ ...blankAdjustRow({ date: "2026-10-25", warehouse: "w1", reason: "Breakage" }), ...over });
+const adj = (over: Partial<AdjustRow>): AdjustRow => ({ ...blankAdjustRow({ warehouse: "w1" }), ...over });
+const H: AdjustHeader = { mode: "quantity", date: "2026-10-25", reason: "Breakage", note: "", from: "", to: "" };
 
 // Receipt: positive lines, blank rows skipped, cut size required.
 {
@@ -17,26 +18,45 @@ const adj = (over: Partial<AdjustRow>): AdjustRow => ({ ...blankAdjustRow({ date
   assert.deepStrictEqual([...errors.get(lines[2].key)!].sort(), ["design", "qty"]);
 }
 
-// CR-446 adjustment form: Remove signs the qty; totals split; every row counts; date / reason / location required.
+// CR-457 adjustment form: signed qty text; header date / reason on every line; totals split; every row counts.
 {
+  assert.deepStrictEqual(["10", "+10", "-5", "−5"].map(parseSignedQty), [10, 10, -5, -5]);
+  assert.ok(["", "5-", "abc", "1.5"].every((s) => Number.isNaN(parseSignedQty(s))), "anything but an optionally signed integer is NaN");
   const a = adj({ design: "d1", second: "B1", qty: "4" });
-  const b = adj({ design: "d1", second: "b1", out: false, qty: "6", reason: "Count correction" });
-  const c = adj({ design: "d2", qty: "2" });
-  const { lines, errors, totalIn, totalOut } = resolveAdjustLines([a, b, c], { secondRequired: false, warehouseRequired: true });
-  assert.deepStrictEqual(lines.map((l) => l.qty), [-4, 6, -2]);
+  const b = adj({ design: "d1", second: "b1", qty: "-6", warehouse: "w2" });
+  const c = adj({ design: "d2", qty: "+2" });
+  const { lines, errors, hdrErrors, totalIn, totalOut } = resolveAdjustLines([a, b, c], H, { secondRequired: false, warehouseRequired: true });
+  assert.deepStrictEqual(lines.map((l) => l.qty), [4, -6, 2]);
   assert.strictEqual(totalIn, 6);
   assert.strictEqual(totalOut, 6);
-  assert.strictEqual(errors.size, 0, "same pair with a different reason is a legitimate second line");
-  assert.deepStrictEqual(lines.map((l) => l.reason), ["Breakage", "Count correction", "Breakage"]);
+  assert.strictEqual(errors.size + hdrErrors.size, 0, "same pair at two locations is fine");
+  assert.ok(lines.every((l) => l.date === "2026-10-25" && l.reason === "Breakage"), "header date + reason stamped on every line");
   const dup = adj({ design: "d1", second: "b1", qty: "1" });
-  const r2 = resolveAdjustLines([a, dup], { secondRequired: false, warehouseRequired: true });
-  assert.ok(r2.errors.get(a.key)!.has("design") && r2.errors.get(dup.key)!.has("design"), "same item · batch · location · date · reason twice flagged on both");
-  const bad = adj({ design: "", second: "", qty: "0", date: "25/10/2026", reason: " ", warehouse: "" });
-  const r3 = resolveAdjustLines([bad], { secondRequired: true, warehouseRequired: true });
-  assert.deepStrictEqual([...r3.errors.get(bad.key)!].sort(), ["date", "design", "qty", "reason", "second", "warehouse"]);
-  assert.strictEqual(r3.lines.length, 1, "no blank-row skipping on the form");
-  const r4 = resolveAdjustLines([adj({ design: "d1", qty: "1", warehouse: "" })], { secondRequired: false, warehouseRequired: false });
+  const r2 = resolveAdjustLines([a, dup], H, { secondRequired: false, warehouseRequired: true });
+  assert.ok(r2.errors.get(a.key)!.has("design") && r2.errors.get(dup.key)!.has("design"), "same item · batch · location twice flagged on both");
+  const bad = adj({ design: "", second: "", qty: "0", warehouse: "" });
+  const r3 = resolveAdjustLines([bad, adj({ design: "d1", second: "c1", qty: "abc" })], { ...H, date: "25/10/2026", reason: " " }, { secondRequired: true, warehouseRequired: true });
+  assert.deepStrictEqual([...r3.errors.get(bad.key)!].sort(), ["design", "qty", "second", "warehouse"]);
+  assert.deepStrictEqual([...r3.errors.get(r3.lines[1].key)!], ["qty"]);
+  assert.deepStrictEqual([...r3.hdrErrors].sort(), ["date", "reason"], "quantity mode never asks for From / To");
+  assert.strictEqual(r3.lines.length, 2, "no blank-row skipping on the form");
+  const r4 = resolveAdjustLines([adj({ design: "d1", qty: "1", warehouse: "" })], H, { secondRequired: false, warehouseRequired: false });
   assert.strictEqual(r4.errors.size, 0, "location optional while warehouses are dormant; blank batch fine on the box shape");
+}
+
+// CR-458 Location Transfer: positive lines at From; From ≠ To; rows need no location of their own.
+{
+  const T: AdjustHeader = { ...H, mode: "transfer", from: "w1", to: "w2" };
+  const a = adj({ design: "d1", second: "c1", qty: "5", warehouse: "" });
+  const r1 = resolveAdjustLines([a], T, { secondRequired: true, warehouseRequired: true });
+  assert.strictEqual(r1.errors.size + r1.hdrErrors.size, 0, "row location not required in transfer mode");
+  assert.deepStrictEqual([r1.lines[0].qty, r1.lines[0].warehouse, r1.totalOut, r1.totalIn], [5, "w1", 5, 0]);
+  const r2 = resolveAdjustLines([adj({ design: "d1", second: "c1", qty: "-5" })], T, { secondRequired: true, warehouseRequired: true });
+  assert.deepStrictEqual([...r2.errors.values()][0] && [...[...r2.errors.values()][0]], ["qty"], "a transfer never moves a negative qty");
+  assert.deepStrictEqual([...resolveAdjustLines([a], { ...T, to: "w1" }, { secondRequired: true, warehouseRequired: true }).hdrErrors], ["to"]);
+  assert.deepStrictEqual([...resolveAdjustLines([a], { ...T, from: "" }, { secondRequired: true, warehouseRequired: true }).hdrErrors], ["from"]);
+  const dupR = resolveAdjustLines([a, adj({ design: "d1", second: "c1", qty: "2", warehouse: "w9" })], T, { secondRequired: true, warehouseRequired: true });
+  assert.strictEqual(dupR.errors.size, 2, "same item · size twice is a duplicate whatever the rows' own location says");
 }
 
 // Paste: item text → id, cut size by name, unknown item kept as placeholder.

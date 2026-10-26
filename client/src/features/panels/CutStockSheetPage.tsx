@@ -147,7 +147,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
     [receiving, transferring, shared, fromDesign],
   );
 
-  // CR-446: the adjustment is a line form — every line carries its own date · location · reason.
+  // CR-446/457: the adjustment is a FORM — header date · reason over an Item Table; CR-458 transfer mode = one TRF document.
   const adjustSpec = useMemo<StockAdjustSpec>(
     () => ({
       title: "Adjust Stock",
@@ -160,6 +160,18 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
         const res = await postCutStockEntry({
           kind: "adjustment",
           lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, entry_date: l.date, reason: l.reason })),
+        });
+        return { ok: res.ok, error: res.error };
+      },
+      onTransfer: async (h, lines) => {
+        const res = await postCutStockEntry({
+          entry_date: h.date,
+          kind: "transfer",
+          reason: h.reason,
+          note: h.note || undefined,
+          from_warehouse: h.from,
+          to_warehouse: h.to,
+          lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined })),
         });
         return { ok: res.ok, error: res.error };
       },

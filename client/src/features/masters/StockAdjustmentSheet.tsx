@@ -1,12 +1,13 @@
 /* ============================================================
-   New Stock Adjustment (CR-308, CR-446) — /stock-adjustments/new. Box stock on
-   the shared StockAdjustForm (Zoho Books shape): one line by default, each
-   line Item · Batch · Location · Current stock · Add/Remove · Qty · Date ·
-   Reason · Remark. Batch cell = that item's batches with on-hand / free
-   (batch-tracked items); singular items have no batch. A removal may dip
-   below what sales orders reserved (warning), never below physical on-hand
-   (server 409). Saves as signed entry_type="adjust" ProductionLog rows, one
-   per line (date + reason per row).
+   New Stock Adjustment (CR-308, CR-446, CR-457) — /stock-adjustments/new. Box
+   stock on the shared StockAdjustForm (Zoho Books shape): header Mode · Date ·
+   Reason · Description over an Item Table (Item · Batch · Location · Available
+   · New on hand · signed Qty · Remark). Batch cell = that item's batches with
+   on-hand / free (batch-tracked items); singular items have no batch. A removal
+   may dip below what sales orders reserved (warning), never below physical
+   on-hand (server 409). Quantity mode saves signed entry_type="adjust"
+   ProductionLog rows (header date + reason on each); Location Transfer mode
+   (CR-458) posts ONE Transfer Order From → To via /stock-transfer.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/ui/States";
@@ -15,7 +16,7 @@ import { fmt } from "@/lib/format";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedBatchStock, cachedWarehouseStock, listBatchStock, warehouseStockKey, type BatchStockRow } from "@/features/stages/batchStockApi";
 import type { WhCell } from "@/lib/warehouseStock";
-import { adjustStock } from "@/features/stages/productionApi";
+import { adjustStock, transferStock } from "@/features/stages/productionApi";
 import { StockAdjustForm, type StockAdjustSpec } from "@/features/common/StockAdjustForm";
 
 export function StockAdjustmentSheet() {
@@ -67,6 +68,18 @@ export function StockAdjustmentSheet() {
       onSave: async (lines) => {
         const res = await adjustStock({
           lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, date: l.date, reason: l.reason })),
+        });
+        return { ok: res.ok, error: res.error };
+      },
+      // CR-458: the same body the bulk Transfer sheet sends — one TRF document.
+      onTransfer: async (h, lines) => {
+        const res = await transferStock({
+          date: h.date,
+          from_warehouse: h.from,
+          to_warehouse: h.to,
+          reason: h.reason,
+          note: h.note || undefined,
+          lines: lines.map((l) => ({ design: l.design, batch_number: l.second || undefined, qty_boxes: l.qty, note: l.note || undefined })),
         });
         return { ok: res.ok, error: res.error };
       },

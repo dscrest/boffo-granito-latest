@@ -3,6 +3,22 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-26 — Stock history order, Stock tree, Adjust Stock in the Zoho Books shape with Location Transfer (CR-455…458) — BUILT, live client deploy pending
+
+- **Stock history in date order (CR-455).** The Panel Item page's Stock History and the Item master's Production tab list
+  entries by the date shown in the Date column (newest first), then by when they were saved. Back-dated adjustments used to
+  appear wherever they were saved.
+- **Stock tree shows cut-piece rows only where there are special sizes (CR-456).** On Panel Craft ▸ Stock an item whose
+  stock is only its full size is one plain row. The chevron and the ↳ rows appear only for items that also have another cut
+  size; those rows still add up to the item row.
+- **Adjust Stock, Zoho Books shape (CR-457).** Both Adjust Stock pages (Inventory and Panel Craft) now open with a short
+  header — Mode of adjustment, Date, Reason, Description — over an Item Table: Item, Batch / Cut Piece Size, Location,
+  Available, New on hand (updates as you type) and one signed Qty adjusted field ("+10" adds, "-10" removes). Date and
+  Reason are entered once per adjustment, not per line. One line by default, "+ Add line" below.
+- **Location Transfer from the same screen (CR-458).** The Mode switch offers Location Transfer: pick From and To, list the
+  items and the quantity to move. Saving creates one Transfer Order (TRF number, visible under Transfer Orders); the total
+  stock never changes, only where it sits. Boxes and cut pieces alike. The bulk Transfer sheet stays for long lists.
+
 ## 2026-10-26 — Demo build carries no BOFFO branding; plain "Processing…" instead of the wordmark (CR-454) — BUILT, demo deploy pending
 
 - **Demo = neutral branding (CR-454).** On the demo build (`VITE_DEMO=1`) nothing says Boffo: the fallback organization

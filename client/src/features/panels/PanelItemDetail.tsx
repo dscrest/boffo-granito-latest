@@ -73,7 +73,15 @@ export function PanelItemDetail() {
   const design = designs?.find((d) => d.id === designId) ?? null;
   const cutName = useMemo(() => new Map(cutSizes.map((c) => [c.id, c.label])), [cutSizes]);
   const pieces = useMemo(() => stock.filter((r) => r.designId === designId).sort((a, b) => (cutName.get(a.cutSizeId) || "").localeCompare(cutName.get(b.cutSizeId) || "")), [stock, designId, cutName]);
-  const history = useMemo(() => entries.filter((e) => e.designId === designId).slice(0, 30), [entries, designId]);
+  // CR-455: ordered by the date the column shows (back-dated lines were landing in save order).
+  const history = useMemo(
+    () =>
+      entries
+        .filter((e) => e.designId === designId)
+        .sort((a, b) => b.entryDate.localeCompare(a.entryDate) || b.createdTime.localeCompare(a.createdTime))
+        .slice(0, 30),
+    [entries, designId],
+  );
   // CR-332 Locations: pieces per (cut size · warehouse) — the ledger split by warehouse.
   const { warehouses, nodes: whNodes, nameOf: whName, enabled: whEnabled } = useWarehouses();
   const locations = useMemo(
