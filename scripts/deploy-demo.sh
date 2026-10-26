@@ -32,8 +32,8 @@ const env = (cfg.deployment.env_variables ||= {});
 // Zoho sign-in lands on the SLATE page (user 2026-10-25: Slate is where live moves next). This exact
 // URI must also be registered on the Zoho API console client (ZOHO_CLIENT_ID) or Zoho rejects it.
 env.ZOHO_REDIRECT_URI = "https://export-tracker-demo-kfpljfsy.onslate.com/";
-// Both Slate hostnames: the console-created app (clean subdomain) and the CLI-deployed app (suffixed).
-env.APP_CORS_ORIGINS = `${origin},https://export-tracker-demo-kfpljfsy.onslate.com,http://localhost:5173`;
+// All Slate hostnames: clean subdomain, CLI-deployed app (kfpljfsy), GitHub auto-deploy app (tuuvqwyr).
+env.APP_CORS_ORIGINS = `${origin},https://export-tracker-demo-kfpljfsy.onslate.com,https://export-tracker-demo--tuuvqwyr.onslate.com,http://localhost:5173`;
 env.FX_CRON_KEY = "demo-fx-cron-key"; // demo only — no real cron points here
 env.BOFFO_ENV = "demo";
 fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");

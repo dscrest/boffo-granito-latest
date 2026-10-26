@@ -6,7 +6,7 @@ the live project** (`boffo-granito-export-tracker`, 69851000000043001) or its Da
 | Piece | Where |
 |---|---|
 | Git mirror | `github.com/octfis-dev/export-tracker-demo` — `origin` pushes to it AND to the personal repo in one `git push` (see `git remote -v`) |
-| Front end | Catalyst **Slate** app `export-tracker-demo` → **https://export-tracker-demo-kfpljfsy.onslate.com** (deployed from this tree by `scripts/deploy-demo-client.sh`; Slate builds `client/` remotely). The console-created app at https://export-tracker-demo.onslate.com still serves Slate's starter template — delete it or re-point it to the Git repo with the settings below. |
+| Front end | Catalyst **Slate** app `export-tracker-demo-gh` → **https://export-tracker-demo--tuuvqwyr.onslate.com** — Git integration on `octfis-dev/export-tracker-demo`, auto-deploys on push (settings below; 2026-10-26). The CLI-deployed app `export-tracker-demo` → https://export-tracker-demo-kfpljfsy.onslate.com (`scripts/deploy-demo-client.sh`) still works and can be deleted once the Git app is proven. |
 | Back end | Catalyst project **export-tracker-demo** (id `69851000000395215`, org OCTFIS `925638796`) — functions `api-health` + `data-ops`, own Data Store |
 | Functions URL | `https://export-tracker-demo-925638796.development.catalystserverless.com/server` |
 | Same-origin client (no CORS needed) | **https://export-tracker-demo-925638796.development.catalystserverless.com/app/index.html** — the demo project's own Web Client Hosting, deployed with `catalyst deploy --only client -p 69851000000395215 --org 925638796` after a plain `npm --prefix client run build` (no `VITE_API_BASE`). Same layout as live; works without any Authorized-Domain step. |
@@ -38,8 +38,8 @@ If you prefer auto-deploy on push, create the deployment from the Git repo (not 
 |---|---|
 | Branch | `feature/master-order-forms` (or `main` once merged) |
 | Framework | Vite / React |
-| Root path | `client` |
-| Install command | `npm install` |
+| Root path | `client` (NOT `./` — the root `package.json` has no deps, so `npm install` "audits 1 package" and `tsc` is not found) |
+| Install command | `npm install --include=dev` (Slate's Git build sets npm's production flag; typescript + vite are devDependencies) |
 | Build command | `npm run build` |
 | Output path | `dist` |
 | Env vars | `VITE_API_BASE=https://export-tracker-demo-925638796.development.catalystserverless.com/server`, `VITE_DEMO=1` |
@@ -48,12 +48,15 @@ If you prefer auto-deploy on push, create the deployment from the Git repo (not 
 `VITE_API_BASE` is what points the demo client at the demo backend instead of the
 same-origin `/server` the live app uses (`client/src/lib/api.ts`).
 
-## Cross-origin: CORS must be enabled in the Catalyst console
+## Cross-origin: every Slate host must be in `APP_CORS_ORIGINS`
 
 The Slate page and the functions live on different hosts, so every API call is
-cross-origin. `data-ops` already reflects the Slate origin (`APP_CORS_ORIGINS`, set by
-`scripts/deploy-demo.sh`), **but the Catalyst gateway answers the browser's OPTIONS
-preflight itself and sends no CORS headers until the calling domain is authorised**:
+cross-origin. **What actually gates it is the function's own allow-list**
+(`APP_CORS_ORIGINS`, written by `scripts/deploy-demo.sh`): 2026-10-26 the kfpljfsy host
+(listed) signed in fine while the new Git-app host (not listed) got "Failed to fetch";
+adding it to the script + `bash scripts/deploy-demo.sh` is the fix. A new Slate app =
+add its host there and redeploy the functions. The console step below was NOT needed
+for either host; kept for reference in case a gateway ever starts blocking preflights:
 
 Catalyst console → project **export-tracker-demo** → **Cloud Scale ▸ Authentication ▸
 Whitelisting ▸ Authorized Domains** → *Add Domain* `https://export-tracker-demo-kfpljfsy.onslate.com`
