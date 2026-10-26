@@ -15,6 +15,8 @@
   header — Mode of adjustment, Date, Reason, Description — over an Item Table: Item, Batch / Cut Piece Size, Location,
   Available, New on hand (updates as you type) and one signed Qty adjusted field ("+10" adds, "-10" removes). Date and
   Reason are entered once per adjustment, not per line. One line by default, "+ Add line" below.
+- **No Cut Piece Size column on the cut-piece Adjust Stock (CR-459).** The Item list itself names the stock row:
+  an item alone when only its full size is stocked, "Item · 600x600" for a special cut. Pick the row, enter the qty.
 - **Location Transfer from the same screen (CR-458).** The Mode switch offers Location Transfer: pick From and To, list the
   items and the quantity to move. Saving creates one Transfer Order (TRF number, visible under Transfer Orders); the total
   stock never changes, only where it sits. Boxes and cut pieces alike. The bulk Transfer sheet stays for long lists.

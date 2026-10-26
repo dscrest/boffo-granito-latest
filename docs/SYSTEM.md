@@ -925,7 +925,8 @@ plain row — chevron and ↳ rows appear only when it has another cut size. Sto
 receipt with an Entry date; CR-414: a line's missing pair is created with its `weight_kg`, an unweighed one
 back-filled) and Transfer Orders, and through the **Adjust Stock** form (`/cut-stock/adjust`, CR-446/457:
 `common/StockAdjustForm.tsx` — Zoho Books shape: header Mode · Date · Reason · Description over an Item Table of
-Item · Cut Piece Size · Location · Available · New on hand · signed Qty adjusted · Remark, one line by default;
+Item · Location · Available · New on hand · signed Qty adjusted · Remark, one line by default; CR-459: the Item
+picker lists the STOCK ROWS ("Item" for the full-size piece, "Item · 600x600" for a special cut) — no cut-size column;
 CR-458: the **Location Transfer** mode (From → To) posts `kind:"transfer"` = one TRF document). Both open prefilled from
 the item page (`?design=`). Both post `/cut-stock-entry`, which verifies every deduction before any write and, through `adjustCutStock`,
 writes a dated **`CutStockEntry`** ledger row (kinds `receipt` · `adjustment` · `order_ready` ·

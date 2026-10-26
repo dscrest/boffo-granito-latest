@@ -94,6 +94,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Location Transfer from the Adjust Stock screen** (CR-458, 2026-10-26, LIVE 2026-10-26). Mode radio Quantity Adjustment | Location
   Transfer; From → To in the header, Available at From + Qty to move per line; saves one Transfer Order (TRF number) through
   the existing routes, total unchanged. Recorded ≈ 0.5 h · conventional ≈ 3 h.
+- **Cut-piece Adjust Stock: Item picker = stock row, no Cut Piece Size column** (CR-459, 2026-10-26). "Item" alone
+  for a full-size piece, "Item · 600x600" for a special cut. ≈ 0.4 h.
 - **Demo build shows no BOFFO branding** (CR-454, 2026-10-26). With `VITE_DEMO=1` the fallback profile is "Demo / Demo
   Company" (no address / contact / bank rows), PDFs print the brand name where the logo band would be, the login stays
   logo-free, sign-in errors say "No account for …", and the busy indicator is the label alone pulsing ("Processing…" by

@@ -38,7 +38,9 @@ import {
   type AdjustRow,
 } from "./stockEntrySheetEdit";
 
-export type StockAdjustSpec = Pick<StockEntrySpec, "title" | "unit" | "items" | "second" | "warnFor" | "backTo"> & {
+export type StockAdjustSpec = Pick<StockEntrySpec, "title" | "unit" | "items" | "warnFor" | "backTo"> & {
+  /** The column after Item (box page: Batch). CR-459: omitted on the cut page — its Item picker IS the stock row (item · cut size). */
+  second?: StockEntrySpec["second"];
   /** On hand for (item, batch | cut size, location) — "" location = the plain total while warehouses are dormant; undefined = unknown → "—". */
   onHand: (designId: string, second: string, warehouse: string) => number | undefined;
   /** Quantity Adjustment — one signed adjust row per line; `date` / `reason` come from the header. */
@@ -108,8 +110,8 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
   };
 
   const { lines, errors, hdrErrors, totalIn, totalOut } = useMemo(
-    () => resolveAdjustLines(rows, header, { secondRequired: spec.second.required, warehouseRequired: whEnabled }),
-    [rows, header, spec.second.required, whEnabled],
+    () => resolveAdjustLines(rows, header, { secondRequired: !!spec.second?.required, warehouseRequired: whEnabled }),
+    [rows, header, spec.second?.required, whEnabled],
   );
   const bad = (r: AdjustRow, col: AdjustCol) => showErrors && !!errors.get(r.key)?.has(col);
   const hdrBad = (col: AdjustHdrCol) => showErrors && hdrErrors.has(col);
@@ -132,7 +134,7 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
     });
 
   const onCreateSecond = async (i: number, designId: string, text: string) => {
-    if (!spec.second.onCreate) return;
+    if (!spec.second?.onCreate) return;
     const v = await spec.second.onCreate(designId, text);
     if (v) setLine(i, { second: v });
   };
@@ -155,7 +157,9 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
       </>
     );
 
-  const lineCls = `ord-line adj-line${transfer ? " xfer" : whEnabled ? " wh" : ""}`;
+  // One grid for every shape: Item · [second] · [Location] · Available · [New on hand] · Qty · Remark · ✕.
+  const sec = spec.second;
+  const cols = { gridTemplateColumns: ["2.2fr", sec && "1.2fr", !transfer && whEnabled && "1.2fr", "0.8fr", !transfer && "0.8fr", "0.8fr", "1.4fr", "26px"].filter(Boolean).join(" ") };
 
   return (
     <FormPage title={spec.title} note={footNote} busy={form.busy} onCancel={() => void form.cancel()} onSave={() => void save()}>
@@ -205,9 +209,9 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
       <div className="form-section">
         <div className="form-section-title">Item Table</div>
         <div className="ord-lines">
-          <div className={`${lineCls} ord-line-head`}>
+          <div className="ord-line adj-line ord-line-head" style={cols}>
             <span>Item<span className="req"> *</span></span>
-            <span>{spec.second.label}{spec.second.required && <span className="req"> *</span>}</span>
+            {sec && <span>{sec.label}{sec.required && <span className="req"> *</span>}</span>}
             {!transfer && whEnabled && <span>Location<span className="req"> *</span></span>}
             <span>{transfer ? "Available at From" : "Available"}</span>
             {!transfer && <span>New on hand</span>}
@@ -216,16 +220,16 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
             <span />
           </div>
           {rows.map((r, i) => {
-            const secondDisabled = !r.design || !!spec.second.disabledFor?.(r.design);
+            const secondDisabled = !sec || !r.design || !!sec.disabledFor?.(r.design);
             const second = secondDisabled ? "" : r.second;
-            const have = r.design && (second || secondDisabled || !spec.second.required) ? spec.onHand(r.design, second, hdr(r).warehouse) : undefined;
+            const have = r.design && (second || secondDisabled || !sec?.required) ? spec.onHand(r.design, second, hdr(r).warehouse) : undefined;
             const delta = parseSignedQty(r.qty);
             const after = have == null ? "—" : fmt(have + (Number.isFinite(delta) ? delta : 0));
             const line = lineByKey.get(r.key);
             // A transfer takes stock OUT of From — the pages' warnFor already read a negative qty as a removal at `h.warehouse`.
             const warn = line && spec.warnFor ? spec.warnFor(transfer ? { ...line, qty: -line.qty } : line, hdr(r)) : undefined;
             return (
-              <div key={r.key} className={lineCls}>
+              <div key={r.key} className="ord-line adj-line" style={cols}>
                 <Combobox
                   value={r.design}
                   options={itemOptions}
@@ -234,27 +238,27 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
                   ariaLabel={`Item, line ${i + 1}`}
                   onChange={(v) => setLine(i, { design: v, ...(v !== r.design ? { second: "" } : {}) })}
                 />
-                {spec.second.optionsFor ? (
+                {sec && (sec.optionsFor ? (
                   <Combobox
                     value={r.second}
-                    options={r.design ? spec.second.optionsFor(r.design, hdr(r)) : []}
-                    placeholder={secondDisabled ? "" : spec.second.placeholder || `${spec.second.label}…`}
+                    options={r.design ? sec.optionsFor(r.design, hdr(r)) : []}
+                    placeholder={secondDisabled ? "" : sec.placeholder || `${sec.label}…`}
                     invalid={bad(r, "second")}
                     disabled={secondDisabled}
-                    ariaLabel={`${spec.second.label}, line ${i + 1}`}
-                    onCreate={spec.second.onCreate ? (text) => void onCreateSecond(i, r.design, text) : undefined}
+                    ariaLabel={`${sec.label}, line ${i + 1}`}
+                    onCreate={sec.onCreate ? (text) => void onCreateSecond(i, r.design, text) : undefined}
                     onChange={(v) => setLine(i, { second: v })}
                   />
                 ) : (
                   <input
                     className={`mono${bad(r, "second") ? " error" : ""}`}
                     value={r.second}
-                    placeholder={secondDisabled ? "" : spec.second.placeholder}
+                    placeholder={secondDisabled ? "" : sec.placeholder}
                     disabled={secondDisabled}
-                    aria-label={`${spec.second.label}, line ${i + 1}`}
+                    aria-label={`${sec.label}, line ${i + 1}`}
                     onChange={(e) => setLine(i, { second: e.target.value })}
                   />
-                )}
+                ))}
                 {!transfer && whEnabled && (
                   <Combobox value={r.warehouse} options={whOptions} clearable={false} maxVisible={120} invalid={bad(r, "warehouse")} ariaLabel={`Location, line ${i + 1}`} onChange={(v) => setLine(i, { warehouse: v })} />
                 )}

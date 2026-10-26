@@ -2067,12 +2067,7 @@ details.tx-section[open] > summary::after { transform: rotate(90deg); }
 .ord-line-head span { padding-left: 2px; }
 .ord-rm { color: var(--c-red); height: 35px; justify-content: center; line-height: 1; }
 .ord-rm:disabled { opacity: 0.35; cursor: not-allowed; }
-/* CR-457: Stock adjustment Item Table (Zoho Books shape — date · reason live in the header).
-   Quantity: Item · Batch / Cut Piece Size · [Location] · Available · New on hand · Qty adjusted · Remark · ✕ */
-.ord-line.adj-line { grid-template-columns: 2.2fr 1.2fr 0.8fr 0.8fr 0.8fr 1.4fr 26px; }
-.ord-line.adj-line.wh { grid-template-columns: 2.2fr 1.2fr 1.2fr 0.8fr 0.8fr 0.8fr 1.4fr 26px; }
-/* CR-458 Location Transfer: Item · Batch / Cut Piece Size · Available at From · Qty to move · Remark · ✕ */
-.ord-line.adj-line.xfer { grid-template-columns: 2.2fr 1.2fr 0.9fr 0.8fr 1.6fr 26px; }
+/* CR-457/459: Stock adjustment Item Table — the column template is inline (StockAdjustForm `cols`, the visible cells vary by page + mode). */
 .adj-line .warn { grid-column: 1 / -1; font-size: var(--t-sm); color: var(--c-amber); }
 
 /* ============================================================

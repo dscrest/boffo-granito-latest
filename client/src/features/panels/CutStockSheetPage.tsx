@@ -1,8 +1,9 @@
 /* ============================================================
    Cut Stock bulk pages (CR-307/308/330):
      /cut-stock/record   → Add Stock       (receipt: Item · Cut Piece Size · Qty — the bulk StockEntrySheet)
-     /cut-stock/adjust   → Adjust Stock    (CR-446: the Zoho-style StockAdjustForm — one line by default,
-                                            Location · Current stock · Add/Remove · Qty · Date · Reason per line)
+     /cut-stock/adjust   → Adjust Stock    (CR-446/457: the Zoho Books StockAdjustForm — header Mode · Date ·
+                                            Reason · Description over an Item Table; CR-459: the Item picker IS the
+                                            stock row "Item · cut size", no Cut Piece Size column; CR-458 transfer mode)
      /cut-stock/transfer → Transfer Stock  (CR-330: From / To location, reason; CR-409: leaf = Warehouse ▸ Location)
    CR-414: the RECEIPT sheet takes ANY active design from the Item master and
    ANY cut piece size (the item's pieces first, then the rest of the master,
@@ -148,18 +149,34 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
   );
 
   // CR-446/457: the adjustment is a FORM — header date · reason over an Item Table; CR-458 transfer mode = one TRF document.
-  const adjustSpec = useMemo<StockAdjustSpec>(
-    () => ({
+  // CR-459: NO Cut Piece Size column — the Item picker lists the STOCK ROWS (`design|cutSize` id), named by the item alone
+  // when the piece is its full size and "Item · 600x600" for a special cut (the Stock tree's CR-456 rule).
+  const adjustSpec = useMemo<StockAdjustSpec>(() => {
+    const byId = new Map(designs.map((d) => [d.id, d]));
+    const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
+    const split = (id: string) => id.split("|") as [string, string];
+    const items = stockRows
+      .flatMap((r) => {
+        const d = byId.get(r.designId);
+        if (!d) return [];
+        const cut = cutName.get(r.cutSizeId) || "";
+        const name = (d.uniqueName || d.designName) + (cut && cut !== d.sizeLabel ? ` · ${cut}` : "");
+        return [{ id: `${r.designId}|${r.cutSizeId}`, sku: d.sku, uniqueName: name, designName: name, hint: d.sizeLabel || undefined }];
+      })
+      .sort((a, b) => a.uniqueName.localeCompare(b.uniqueName));
+    // `?design=` from the Panel Item page → that item's full-size piece, else its first piece.
+    const mine = fromDesign ? stockRows.filter((r) => r.designId === fromDesign) : [];
+    const first = mine.find((r) => cutName.get(r.cutSizeId) === byId.get(fromDesign)?.sizeLabel) ?? mine[0];
+    return {
       title: "Adjust Stock",
       unit: "pcs",
-      items: shared.items,
-      second: shared.second,
-      warnFor: shared.warnFor,
-      onHand: (designId, cutSizeId, wh) => (cutSizeId ? shared.atWh(designId, cutSizeId, wh) : undefined),
+      items,
+      warnFor: (l, h) => shared.warnFor({ ...l, design: split(l.design)[0], second: split(l.design)[1] }, h),
+      onHand: (id, _second, wh) => shared.atWh(...split(id), wh),
       onSave: async (lines) => {
         const res = await postCutStockEntry({
           kind: "adjustment",
-          lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, entry_date: l.date, reason: l.reason })),
+          lines: lines.map((l) => ({ design: split(l.design)[0], cut_piece_size: split(l.design)[1], qty: l.qty, note: l.note || undefined, warehouse: l.warehouse || undefined, entry_date: l.date, reason: l.reason })),
         });
         return { ok: res.ok, error: res.error };
       },
@@ -171,15 +188,14 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
           note: h.note || undefined,
           from_warehouse: h.from,
           to_warehouse: h.to,
-          lines: lines.map((l) => ({ design: l.design, cut_piece_size: l.second, qty: l.qty, note: l.note || undefined })),
+          lines: lines.map((l) => ({ design: split(l.design)[0], cut_piece_size: split(l.design)[1], qty: l.qty, note: l.note || undefined })),
         });
         return { ok: res.ok, error: res.error };
       },
       backTo: shared.backTo,
-      initialDesign: fromDesign || undefined,
-    }),
-    [shared, fromDesign],
-  );
+      initialDesign: first ? `${first.designId}|${first.cutSizeId}` : undefined,
+    };
+  }, [shared, fromDesign, designs, cutSizes, stockRows]);
 
   if (!can("panel_craft", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
   return adjusting ? <StockAdjustForm spec={adjustSpec} /> : <StockEntrySheet spec={sheetSpec} />;
