@@ -74,6 +74,12 @@ export function StockAdjustForm({ spec }: { spec: StockAdjustSpec }) {
   useEffect(() => {
     void listAdjustmentReasons().then(setReasons);
   }, []);
+  // `?design=` may resolve only after the page's stock rows load (CR-459 composite ids) — fill an untouched first line then.
+  useEffect(() => {
+    const d = spec.initialDesign;
+    if (!d) return;
+    setRows((rs) => (rs.length === 1 && !rs[0].design && !rs[0].qty ? [{ ...rs[0], design: d }] : rs));
+  }, [spec.initialDesign]);
   // Lines (and the transfer's From) left without a location take the primary bay once it is known.
   useEffect(() => {
     if (!primary) return;

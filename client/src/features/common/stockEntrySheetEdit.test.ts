@@ -44,6 +44,10 @@ const H: AdjustHeader = { mode: "quantity", date: "2026-10-25", reason: "Breakag
   assert.strictEqual(r4.errors.size, 0, "location optional while warehouses are dormant; blank batch fine on the box shape");
 }
 
+// CR-459 regression: an undefined seed (no ?design=) leaves design "" — never undefined (the cut page splits it).
+assert.strictEqual(blankAdjustRow({ design: undefined }).design, "");
+assert.strictEqual(blankAdjustRow().warehouse, "");
+
 // CR-458 Location Transfer: positive lines at From; From ≠ To; rows need no location of their own.
 {
   const T: AdjustHeader = { ...H, mode: "transfer", from: "w1", to: "w2" };

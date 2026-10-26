@@ -82,14 +82,14 @@ export type AdjustHdrCol = "date" | "reason" | "from" | "to";
 /** A validated line: `qty` SIGNED (quantity) or > 0 (transfer); date / reason copied from the header — the pages' save bodies are unchanged. */
 export type AdjustLine = { key: string; design: string; second: string; warehouse: string; qty: number; date: string; reason: string; note: string };
 
+// A seed value of undefined must NOT override the "" (a spread would) — downstream code treats design as a string.
 export const blankAdjustRow = (seed?: Partial<Pick<AdjustRow, "design" | "warehouse">>): AdjustRow => ({
   key: `a${++seq}`,
-  design: "",
+  design: seed?.design ?? "",
   second: "",
-  warehouse: "",
+  warehouse: seed?.warehouse ?? "",
   qty: "",
   note: "",
-  ...seed,
 });
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
