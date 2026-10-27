@@ -105,7 +105,8 @@ const rows = [
   ["Production", "Production page — Sheet / Kanban / Grid", "Three views of the same rows (Sheet default); one row per logged batch; Group by Item / Customer / Order / Size; status filter with All.", C, P1, ""],
   ["Production", "To Produce view", "Per item: open demand, free stock, in production and what still needs producing, with the Box Brand wanted; tick rows to start a job.", C, P1, ""],
   ["Production", "Start / Log / Complete Production", "Start creates the job (Item · Quantity); Log adds batch rows from the row's + menu (first log → In Production, full coverage → Completed automatically); Complete closes the job.", C, P1, "CR-234…237"],
-  ["Production", "Record Production sheet (bulk, make-to-stock)", "One ruled sheet, one row per item: Size · Design · Batch (blank = automatic) · Box Brand · Qty · Remark; paste from Excel; one Save records every row into stock; retry-safe.", C, P1, "CR-244, 264"],
+  ["Production", "Bulk Record Production (make-to-stock)", "A form in the Adjust Stock shape: Production date, recorded by and a description over an Item Table — Size · Item · Batch (blank = automatic) · Qty · Box Brand · Location per line — one line to start, + Add line; paste a block from Excel; one Save records every line into stock; retry-safe.", C, "2026-10-27", "CR-244, 264, 469"],
+  ["Production", "Sales Order ▸ Production tab per design", "One row per design with its batches as chips and the requested / produced totals summed; totals footers on both tables.", C, "2026-10-27", "CR-470"],
   ["Production", "Sheet edit mode", "Edit makes plan qty, Produced and Status editable across rows; nothing written until Save; invalid cells block Save.", C, P1, "CR-111"],
   ["Production", "Excel import of the factory file", "Import production from the factory's spreadsheet.", C, P1, ""],
   ["Production", "Batch numbering and rules", "Batches auto-numbered B/YYYY-MM/NNN (restarts monthly per item) or typed; never repeats on one item; Box Brand on every batch row; over-production blocked.", C, P1, ""],
@@ -117,6 +118,7 @@ const rows = [
   // ── 7 · Palletization ───────────────────────────────────────────────────────
   ["Palletization", "Palletization board and plan numbers", "Sheet and Kanban views, Group, Today's Report, New Palletization; plans numbered PAL/FY/NNN; a plan may span several orders of one customer; each line is one item × one batch.", C, P1, ""],
   ["Palletization", "Columns, totals footer and selection bar", "Customer · Item · Order · Batch · Boxes · Remaining · Age · Ready Pallets (N (boxes)) · Pallet type; totals footer; selection bar when rows are ticked.", C, P1, "CR-279"],
+  ["Palletization", "Counts per batch: Ordered · Ready Pallets · Boxes / Pallet · Remaining", "Every palletization page counts the row's own batch — a loaded batch of the same item no longer shows on its sibling. Columns Boxes · Ordered Boxes · Ready Pallets (N (boxes)) · Boxes / Pallet · Remaining with totals; the Complete Palletization dialog shows the same figures.", C, "2026-10-27", "CR-472"],
   ["Palletization", "Plan detail page", "Lines with status, batches, pallets; Edit + More; activity.", C, P1, ""],
   ["Palletization", "Prints on demand", "Pallet Packing Report; Pallet Slips (one per physical pallet, mixed pallet lists every batch); pallet QR labels; batch QR slips.", C, P1, ""],
   ["Palletization", "Board rules", "Planned boxes never exceed the order; batches attributed oldest-first; a hand-edited plan is pinned; the palletized part of a batch can be loaded while the rest is in progress.", C, P1, "CR-129, 248"],
@@ -247,6 +249,11 @@ const rows = [
   ["Panel Craft", "Godown print — issue / request", "A printed issue / request slip for the godown.", F, "", "Panel Craft list #5"],
   ["Panel Craft", "Missing items to fulfil an order", "A view of what is missing per order (Pending Cut Piece + requirements exist; the extra needed is to be clarified).", F, "", "Panel Craft list #6"],
   ["Panel Craft", "Bill / expense", "Record expenses or bills against panel work. New area, scope to be defined.", F, "", "Panel Craft list #12"],
+  ["Masters (Inventory)", "Item code for the catalog", "Every item gets a short unique code such as LSN-800x1600-7K4 (initials of the design · size · three random characters that never repeat), assigned by the system. Shown on the item page, the Items grid, item pickers, the ⌘K search, Panel Craft ▸ Stock and panel pages; existing items are coded in one admin step.", C, "2026-10-27", "CR-473"],
+  ["Panel Craft", "Panel Order PDF — one page per panel", "More ▸ Print order PDF on a panel order: a cover page with the order details and lines, then one page per panel with the showcase photo as large as the page allows, the panel's sizes and its cut pieces with totals for the ordered quantity.", C, "2026-10-27", "CR-474"],
+  ["Sales Orders", "Sales Order without a Location field", "The order form no longer asks for a Location; location is recorded where stock is written (production, cut stock, pallets).", C, "2026-10-27", "CR-468"],
+  ["Masters (Inventory)", "Pallet form without Box Weight", "New / Edit Pallet no longer asks for the box weight; the Size's weight is used.", C, "2026-10-27", "CR-471"],
+  ["Panel Craft", "Boffo / Bonza company separation", "Two companies in one system — login-time company selection; the Export module mainly for Bonza. On hold at the user's request (docs/ON-HOLD.md #1).", F, "", "ON-HOLD #1"],
 
   // ── 12 · Documentation & process ────────────────────────────────────────────
   ["Documentation & process", "System reference and change-request register", "The system as built, kept true with every change; every request numbered with Change · Where · Why · Apply to · Like · Done when, status, date and proof.", C, P1, ""],

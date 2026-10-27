@@ -77,6 +77,7 @@ const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
     render: (d) => (d.glazeLabel ? <span className={`chip finish ${finishClass(d.glazeLabel)}`}>{d.glazeLabel}</span> : dash),
   },
   { key: "status", label: "Status", className: "muted", render: (d) => (d.status ? <span title={d.status}>{codeOf(d.status)}</span> : dash) },
+  { key: "itemCode", label: "Item Code", className: "mono", render: (d) => d.itemCode || dash }, // CR-473
   { key: "sku", label: "SKU", className: "muted mono", render: (d) => d.sku || dash },
   { key: "created", label: "Created", className: "muted mono", render: (d) => fmtDateTime(d.createdTime) },
   { key: "modified", label: "Modified", className: "muted mono", render: (d) => fmtDateTime(d.modifiedTime) },
@@ -233,6 +234,7 @@ export function DesignMaster() {
       [...new Set([...master.map((o) => o.label), ...rows.map(get)].filter(Boolean))].sort();
     return [
       { key: "name", label: "Design Name", type: "text", get: (r) => `${r.designName} ${r.uniqueName}` },
+      { key: "itemCode", label: "Item Code", type: "text", get: (r) => r.itemCode },
       { key: "sku", label: "SKU", type: "text", get: (r) => r.sku },
       { key: "size", label: "Size", type: "multiselect", options: uni(lookups.sizes, (r) => r.sizeLabel), get: (r) => r.sizeLabel },
       { key: "finish", label: "Finish", type: "multiselect", options: uni(lookups.finishes, (r) => r.finishLabel), get: (r) => r.finishLabel },
@@ -250,7 +252,7 @@ export function DesignMaster() {
     const q = query.trim().toLowerCase();
     const base = rows.filter((r) => {
       if (!q) return true;
-      return [r.designName, r.uniqueName, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
+      return [r.designName, r.uniqueName, r.itemCode, r.sku, r.sizeLabel, r.finishLabel, r.brandLabel, r.categoryLabel]
         .join(" ")
         .toLowerCase()
         .includes(q);

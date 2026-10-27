@@ -27,7 +27,8 @@ import {
   invalidatePalPlans,
   lineFrac,
   loadableLineIds,
-  oiProgressOf,
+  batchKey,
+  batchProgressOf,
   PAL_LINE_STATUS_LABEL,
   palLineStatusLabel,
   palletsOf,
@@ -148,7 +149,7 @@ export function DispatchBoard({
   const boxStatusById = new Map(boxes.map((b) => [b.id, b.status]));
   // Partial-palletise progress across ALL lines (boxed + Completed included,
   // or split siblings would deflate the totals).
-  const oiProgress = oiProgressOf(allPlans.flatMap((p) => p.lines));
+  const oiProgress = batchProgressOf(allPlans.flatMap((p) => p.lines));
   // Loading pool: every un-boxed ReadyToLoad line — a partly palletized batch's
   // palletized slice is Ready for Loading too (CR-248 reversed CR-151's gate).
   const loadable = loadableLineIds(allPlans.flatMap((p) => p.lines));
@@ -187,7 +188,7 @@ export function DispatchBoard({
         className: "mono nw",
         style: { fontSize: "var(--t-sm)" },
         render: ({ l }) => {
-          const prog = oiProgress.get(l.orderItemId);
+          const prog = oiProgress.get(batchKey(l));
           // CR-176: per-ROW chip. A recorded slice held back by the batch gate
           // reads "Palletized" (CR-299, was "Recorded"); only the not-yet-recorded rows read "Partial"
           // (same rule as PalPlanDetail's status column).
@@ -216,19 +217,34 @@ export function DispatchBoard({
         },
       },
       { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
-      // CR-279: Ordered + Completed gave way to the pallet view — palletized
-      // boxes of this ITEM as physical pallets "N (boxes)", and the pallet type.
+      // CR-472: the four figures the floor asked for, PER BATCH — Ordered (the batch's boxes
+      // sent to palletization, repeated on split rows), Ready Pallets "N (boxes)", Boxes / Pallet
+      // (the pallet master's capacity) and Remaining. Ordered is back (reverses CR-279's removal).
+      {
+        key: "ordered",
+        label: "Ordered Boxes",
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => fmt(oiProgress.get(batchKey(l))?.total ?? l.boxes),
+      },
       {
         key: "readyPallets",
         label: "Ready Pallets",
         className: "num mono nw",
         style: { textAlign: "right" },
         render: ({ l }) => {
-          const done = oiProgress.get(l.orderItemId)?.done ?? 0;
+          const done = oiProgress.get(batchKey(l))?.done ?? 0;
           return done
-            ? <span style={{ color: "var(--c-green)" }} title="Palletized pallets (boxes) for this item">{readyPalletsLabel(done, l.boxesPerPallet, fmt)}</span>
+            ? <span style={{ color: "var(--c-green)" }} title="Palletized pallets (boxes) of this batch">{readyPalletsLabel(done, l.boxesPerPallet, fmt)}</span>
             : <span className="dim">—</span>;
         },
+      },
+      {
+        key: "bpp",
+        label: "Boxes / Pallet",
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => (l.boxesPerPallet > 0 ? fmt(l.boxesPerPallet) : <span className="dim">—</span>),
       },
       {
         key: "pallet",
@@ -249,7 +265,7 @@ export function DispatchBoard({
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => {
-          const prog = oiProgress.get(l.orderItemId);
+          const prog = oiProgress.get(batchKey(l));
           return fmt(Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0)));
         },
       },
@@ -273,7 +289,8 @@ export function DispatchBoard({
   );
   // .v2 (CR-266): Date column added, PAL code hidden by default (ColumnPicker re-shows it).
   // .v3 (CR-412): Location column (hidden while no warehouse exists).
-  const sheetCols = useColumns("packingSheetColumns.v3", SHEET_COLS, whEnabled ? ["pal"] : ["pal", "location"]);
+  // .v4 (CR-472): Ordered Boxes + Boxes / Pallet columns; Remaining shown again for everyone.
+  const sheetCols = useColumns("packingSheetColumns.v4", SHEET_COLS, whEnabled ? ["pal"] : ["pal", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -504,17 +521,18 @@ export function DispatchBoard({
   const sheetLines = sheetRows.map(({ l }) => l);
   const totalBoxes = sheetLines.reduce((s, l) => s + l.boxes, 0);
   const totalPallets = palletsOf(sheetLines);
-  // Ready/Remaining are per order item and several rows can share one —
-  // dedupe before summing (CR-187 footer; CR-279 pallets = Σ per item, on the
-  // item's first row's boxes-per-pallet).
-  const oiIds = [...new Set(sheetLines.map((l) => l.orderItemId))];
-  const bppOf = (id: string) => sheetLines.find((l) => l.orderItemId === id)?.boxesPerPallet ?? 0;
-  const totalReadyBoxes = oiIds.reduce((s, id) => s + (oiProgress.get(id)?.done ?? 0), 0);
-  const totalReadyPallets = oiIds.reduce((s, id) => {
-    const done = oiProgress.get(id)?.done ?? 0;
-    return s + (done > 0 && bppOf(id) > 0 ? Math.ceil(done / bppOf(id)) : 0);
+  // Ordered/Ready/Remaining are per order item × batch and split rows share one —
+  // dedupe before summing (CR-187 footer; CR-279 pallets = Σ per batch, on the
+  // batch's first row's boxes-per-pallet; CR-472 keyed per batch).
+  const bKeys = [...new Set(sheetLines.map(batchKey))];
+  const bppOf = (k: string) => sheetLines.find((l) => batchKey(l) === k)?.boxesPerPallet ?? 0;
+  const totalOrdered = bKeys.reduce((s, k) => s + (oiProgress.get(k)?.total ?? 0), 0);
+  const totalReadyBoxes = bKeys.reduce((s, k) => s + (oiProgress.get(k)?.done ?? 0), 0);
+  const totalReadyPallets = bKeys.reduce((s, k) => {
+    const done = oiProgress.get(k)?.done ?? 0;
+    return s + (done > 0 && bppOf(k) > 0 ? Math.ceil(done / bppOf(k)) : 0);
   }, 0);
-  const totalRemaining = oiIds.reduce((s, id) => s + Math.max(0, (oiProgress.get(id)?.total ?? 0) - (oiProgress.get(id)?.done ?? 0)), 0);
+  const totalRemaining = bKeys.reduce((s, k) => s + Math.max(0, (oiProgress.get(k)?.total ?? 0) - (oiProgress.get(k)?.done ?? 0)), 0);
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -899,7 +917,7 @@ export function DispatchBoard({
                     <th style={{ width: 34 }} aria-label="Select" />
                     {sheetCols.visible.map((c) => (
                       <th key={c.key} className={c.className?.includes("num") ? "num" : undefined} style={c.style}
-                          title={c.key === "ordered" ? "Total boxes sent to palletization for this order item" : c.key === "completed" ? "Boxes palletized (Ready or loaded)" : undefined}>
+                          title={c.key === "ordered" ? "Boxes of this batch sent to palletization" : c.key === "bpp" ? "Boxes one pallet holds (Pallet Master)" : c.key === "remaining" ? "Boxes of this batch still to palletize" : undefined}>
                         {c.label}
                       </th>
                     ))}
@@ -1048,6 +1066,7 @@ export function DispatchBoard({
                         {ci === 0
                           ? `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"}`
                           : c.key === "boxes" ? fmt(totalBoxes)
+                          : c.key === "ordered" ? fmt(totalOrdered)
                           : c.key === "readyPallets" ? (totalReadyBoxes > 0 ? `${fmt(totalReadyPallets)} (${fmt(totalReadyBoxes)})` : "—")
                           : c.key === "remaining" ? fmt(totalRemaining)
                           : ""}

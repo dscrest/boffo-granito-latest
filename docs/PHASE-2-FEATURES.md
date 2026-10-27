@@ -116,6 +116,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 ## 2 · Masters (Inventory)
 
+- **Pallet form without Box Weight** (CR-471, 2026-10-27). New / Edit Pallet no longer shows the Box Weight field; the
+  Size's weight is stored silently and every reader (pallet page, chips, containerisation fallback) is unchanged. ≈ 0.1 h.
 - **Item master Bulk Upload** (CR-451, 2026-10-26). Excel / CSV upload beside New Item with a downloadable sample
   template: match columns, preview every row (unknown master names, duplicates in the file, items that already
   exist are flagged), create the valid ones in one go with SKUs and unique names exactly as the Item form would.
@@ -223,7 +225,9 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 - **Location is mandatory on a Sales Order** (CR-453, 2026-10-26). The SO form asks where the order's stock will
   sit (Warehouse ▸ Bay, the same picker as the Panel Order); create, edit and convert-from-quote all refuse
-  without it once a warehouse exists; the SO detail header shows it.
+  without it once a warehouse exists; the SO detail header shows it. **Reversed by CR-468** the next day.
+- **No Location on the Sales Order** (CR-468, 2026-10-27, reverses CR-453). The field is gone from the form and the
+  page; the server takes it as optional. Location is asked where stock is written — production, cut stock, pallets. ≈ 0.3 h.
 - **Remaining and totals** (CR-263, 2026-10-03). The Items table shows Remaining = Ordered − Allocated and
   a totals row.
 - **Deallocate Stock** (CR-263). A ✕ on each allocated line (and "Deallocate Stock" in More) lists that
@@ -316,6 +320,11 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 - **Toolbar: Table + Sheet only** (CR-417, 2026-10-24, LIVE 2026-10-24). Kanban, To Produce and Import hidden; Filter, search,
   Group, Fields, Edit, Start New / Bulk Record stay. ≈ 0.25 h.
+- **Bulk Record Production in the Adjust Stock shape** (CR-469, 2026-10-27). Production section (date, recorded by,
+  description) over an Item Table — Size · Item · Batch · Qty · Box Brand · Location per line — one line to start,
+  "+ Add line"; no toolbar options; Excel paste kept. ≈ 1.5 h.
+- **SO Production tab per design** (CR-470, 2026-10-27). One row per design, batches as chips, Requested / Produced /
+  Boxes summed, totals footers. ≈ 0.5 h.
 
 ## 7 · Palletization
 
@@ -350,6 +359,9 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   stock first; refused while any box sits in a container. ≈ 1 h.
 - **Cancel Order empties the board** (CR-371, 2026-10-22). Reason required; boxes leave open containers,
   every line is removed, every allocation returned; a dispatched container blocks the cancel. ≈ 2 h.
+- **Counts per batch + four columns** (CR-472, 2026-10-27). Ready Pallets / Remaining count the row's own batch (a
+  loaded sibling batch no longer bleeds in — the "4 (100)" bug); Boxes · Ordered Boxes · Ready Pallets · Boxes / Pallet ·
+  Remaining on all three palletization pages, totals footer and Complete dialog on the same numbers. ≈ 1 h.
 
 ## 8 · Loading & Dispatch
 
@@ -635,6 +647,13 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   `unique_name` / SKU parity. ≈ 1.5 h.
 - **Brand off the Item form** (CR-430, 2026-10-24, LIVE 2026-10-24). Field hidden and no longer required; grid / filter / bulk edit /
   detail unchanged; SKU slot = `00`. ≈ 0.2 h.
+- **Item code for the catalog** (CR-473, 2026-10-27). Every item gets `ABBR-SIZE-NNN` (e.g. `LSN-800x1600-7K4`) —
+  server-assigned, never repeats, never typed; shown on the item page, grid, pickers, ⌘K, Panel Craft Stock and panel
+  pages; admin backfill for existing items. ≈ 1.5 h.
+- **Panel Order PDF** (CR-474, 2026-10-27). More ▸ Print order PDF: cover page + one page per panel with the showcase
+  photo as large as the page allows and the cut-piece table × ordered qty. ≈ 1.5 h.
+- **Delete leaves an Activity trace** (CR-475, 2026-10-27). Deleting a panel order is recorded on the source SO / Quote /
+  Customer like a cancel. ≈ 0.1 h.
 
 ## 12 · Documentation & process
 
@@ -650,7 +669,12 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 ---
 
+- **Hold register** (2026-10-27). [`ON-HOLD.md`](ON-HOLD.md) — requirements the user has deliberately parked, with the
+  reason and the revisit trigger (Boffo / Bonza company separation first).
+
 ## Not yet built / parked in Phase 2
+
+- Everything in [`ON-HOLD.md`](ON-HOLD.md).
 
 - Suitable Containers on the quote print, PDF and share link (CR-262 follow-up).
 - Mix Batch at loading (CR-260 follow-up).

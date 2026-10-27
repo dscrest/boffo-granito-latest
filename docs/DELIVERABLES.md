@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 172 |
+| Completed | 178 |
 | In progress | 19 |
-| Future | 26 |
-| **Total** | **217** |
+| Future | 27 |
+| **Total** | **224** |
 
 ## Foundation & workspace
 
@@ -73,6 +73,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Locations inside a warehouse | A warehouse holds locations like A1 … F12 (generate the whole grid in one go). Stock is recorded at a location and stays there until a Transfer Order moves it; every label reads Warehouse ▸ Location; old stock shows as Unassigned until moved. | Completed | 2026-10-24 | CR-409 |
 | Location per item / per row when recording | Log Production asks the Location per item, Production Completion per line; the bulk Record Production, cut-stock Add / Adjust and Stock Adjustments sheets have a per-row Location column (blank = the bar's default; paste by label or bay code); the Excel import takes a Location column. | Completed | 2026-10-24 | CR-438 |
 | Location at every stage | Every production screen records a location (default = the bay of the warehouse marked Production); a pallet carries its location from palletization until it is loaded — asked once in the Palletize dialog (Palletization bay on Start, Loading Bay on Complete), changed with Set Location on the boards, shown as a Location column, on the item's Locations tab and as a Pallets view on Stock Locations; panel orders take a location on the form. | Completed | 2026-10-24 | CR-411…413 |
+| Item code for the catalog | Every item gets a short unique code such as LSN-800x1600-7K4 (initials of the design · size · three random characters that never repeat), assigned by the system. Shown on the item page, the Items grid, item pickers, the ⌘K search, Panel Craft ▸ Stock and panel pages; existing items are coded in one admin step. | Completed | 2026-10-27 | CR-473 |
+| Pallet form without Box Weight | New / Edit Pallet no longer asks for the box weight; the Size's weight is used. | Completed | 2026-10-27 | CR-471 |
 
 ## Customers
 
@@ -127,6 +129,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | 'Mark in progress' → 'Mark as sent' | Rename the status action to what it means: the sales person acknowledged the customer. | Future |  | CR-041 |
 | 'Send to Palletization' in the More menu | Move the action into More and name it 'Palletization'. | Future |  | CR-042 |
 | Sales Order page without Panel Orders tab | Production, Palletization and Container Planning tabs only; Request Panels stays in the More menu. | Completed | 2026-10-24 | CR-422 |
+| Sales Order without a Location field | The order form no longer asks for a Location; location is recorded where stock is written (production, cut stock, pallets). | Completed | 2026-10-27 | CR-468 |
 
 ## Production
 
@@ -135,7 +138,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Production page — Sheet / Kanban / Grid | Three views of the same rows (Sheet default); one row per logged batch; Group by Item / Customer / Order / Size; status filter with All. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | To Produce view | Per item: open demand, free stock, in production and what still needs producing, with the Box Brand wanted; tick rows to start a job. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Start / Log / Complete Production | Start creates the job (Item · Quantity); Log adds batch rows from the row's + menu (first log → In Production, full coverage → Completed automatically); Complete closes the job. | Completed | Phase 1 (by 01-Oct-2026) | CR-234…237 |
-| Record Production sheet (bulk, make-to-stock) | One ruled sheet, one row per item: Size · Design · Batch (blank = automatic) · Box Brand · Qty · Remark; paste from Excel; one Save records every row into stock; retry-safe. | Completed | Phase 1 (by 01-Oct-2026) | CR-244, 264 |
+| Bulk Record Production (make-to-stock) | A form in the Adjust Stock shape: Production date, recorded by and a description over an Item Table — Size · Item · Batch (blank = automatic) · Qty · Box Brand · Location per line — one line to start, + Add line; paste a block from Excel; one Save records every line into stock; retry-safe. | Completed | 2026-10-27 | CR-244, 264, 469 |
+| Sales Order ▸ Production tab per design | One row per design with its batches as chips and the requested / produced totals summed; totals footers on both tables. | Completed | 2026-10-27 | CR-470 |
 | Sheet edit mode | Edit makes plan qty, Produced and Status editable across rows; nothing written until Save; invalid cells block Save. | Completed | Phase 1 (by 01-Oct-2026) | CR-111 |
 | Excel import of the factory file | Import production from the factory's spreadsheet. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Batch numbering and rules | Batches auto-numbered B/YYYY-MM/NNN (restarts monthly per item) or typed; never repeats on one item; Box Brand on every batch row; over-production blocked. | Completed | Phase 1 (by 01-Oct-2026) |  |
@@ -151,6 +155,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 |---|---|---|---|---|
 | Palletization board and plan numbers | Sheet and Kanban views, Group, Today's Report, New Palletization; plans numbered PAL/FY/NNN; a plan may span several orders of one customer; each line is one item × one batch. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Columns, totals footer and selection bar | Customer · Item · Order · Batch · Boxes · Remaining · Age · Ready Pallets (N (boxes)) · Pallet type; totals footer; selection bar when rows are ticked. | Completed | Phase 1 (by 01-Oct-2026) | CR-279 |
+| Counts per batch: Ordered · Ready Pallets · Boxes / Pallet · Remaining | Every palletization page counts the row's own batch — a loaded batch of the same item no longer shows on its sibling. Columns Boxes · Ordered Boxes · Ready Pallets (N (boxes)) · Boxes / Pallet · Remaining with totals; the Complete Palletization dialog shows the same figures. | Completed | 2026-10-27 | CR-472 |
 | Plan detail page | Lines with status, batches, pallets; Edit + More; activity. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Prints on demand | Pallet Packing Report; Pallet Slips (one per physical pallet, mixed pallet lists every batch); pallet QR labels; batch QR slips. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Board rules | Planned boxes never exceed the order; batches attributed oldest-first; a hand-edited plan is pinned; the palletized part of a batch can be loaded while the rest is in progress. | Completed | Phase 1 (by 01-Oct-2026) | CR-129, 248 |
@@ -271,6 +276,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Godown print — issue / request | A printed issue / request slip for the godown. | Future |  | Panel Craft list #5 |
 | Missing items to fulfil an order | A view of what is missing per order (Pending Cut Piece + requirements exist; the extra needed is to be clarified). | Future |  | Panel Craft list #6 |
 | Bill / expense | Record expenses or bills against panel work. New area, scope to be defined. | Future |  | Panel Craft list #12 |
+| Panel Order PDF — one page per panel | More ▸ Print order PDF on a panel order: a cover page with the order details and lines, then one page per panel with the showcase photo as large as the page allows, the panel's sizes and its cut pieces with totals for the ordered quantity. | Completed | 2026-10-27 | CR-474 |
+| Boffo / Bonza company separation | Two companies in one system — login-time company selection; the Export module mainly for Bonza. On hold at the user's request (docs/ON-HOLD.md #1). | Future |  | ON-HOLD #1 |
 
 ## Items
 

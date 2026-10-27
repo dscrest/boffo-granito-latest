@@ -164,6 +164,20 @@ export function PanelOrderDetail() {
   };
 
   // CR-368: cancel — reason mandatory for every role; refused once anything is loaded.
+  // CR-474: the PDF builder (pdfmake) is lazy-loaded so the page bundle stays light.
+  const onPdf = async () => {
+    if (!order) return;
+    setBusy(true);
+    try {
+      const { downloadPanelOrderPdf } = await import("./panelOrderPdf");
+      await downloadPanelOrderPdf(order, panelById);
+    } catch {
+      toast.error("Could not build the PDF");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onCancel = async () => {
     if (!order) return;
     const reason = await promptDialog({
@@ -274,6 +288,8 @@ export function PanelOrderDetail() {
                 {/* CR-400: no stage buttons — the status derives from the marks, the booking and the loads. */}
                 <MoreMenu
                   items={[
+                    // CR-474: on-demand PDF — cover page + one page per panel with its photo and cut pieces.
+                    { label: "Print order PDF", disabled: busy, onClick: () => void onPdf() },
                     ...(can("panel_craft", "create") ? [{ label: "Clone", onClick: () => navigate(`/panel-orders/${encodeURIComponent(order.id)}/clone`) }] : []),
                     // CR-410: place the panels at a location (open orders only; hidden while no warehouse exists).
                     ...(canEdit && whEnabled ? [{ label: "Set Location", disabled: busy || !isOpen, title: isOpen ? "Where this order's panels sit" : openReason, onClick: () => setLocating(true) }] : []),

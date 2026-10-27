@@ -604,6 +604,33 @@ function stampDesignCoverage(r) {
   r.coverage_sqft = Math.round(sqm * 10.763915 * 1e4) / 1e4;
 }
 
+/* CR-473: Design.item_code = ABBR-SIZE-NNN — the catalog code an executive orders by.
+   ABBR = initials of the design name ("Leo Statuario Nex" → LSN; one word → first 3 letters),
+   SIZE = the Size master's code, NNN = 3 random chars from an unambiguous alphabet, re-rolled
+   until no Design row (deleted ones included) carries it — a code is NEVER reused. Stamped
+   server-side on insert (and on the first PATCH of a row without one); never typed. A later
+   rename / size change keeps the code: uniqueness beats mirroring. */
+const ITEM_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"; // 32 chars → randomBytes % 32 is unbiased
+function designAbbr(name) {
+  const words = String(name || "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").trim().split(/\s+/).filter(Boolean);
+  const abbr = words.length >= 2 ? words.map((w) => w[0]).join("") : (words[0] || "").slice(0, 3);
+  return abbr.slice(0, 4) || "ITM";
+}
+function randomTail() {
+  return [...crypto.randomBytes(3)].map((b) => ITEM_CODE_ALPHABET[b % 32]).join("");
+}
+async function nextItemCode(catalyst, designName, sizeId) {
+  const sid = rowidParam(sizeId);
+  const sz = sid ? rowList(await catalyst.zcql().executeZCQLQuery(`SELECT code FROM Size WHERE ROWID = ${sid}`))[0] : null;
+  const prefix = `${designAbbr(designName)}-${String((sz && sz.code) || "NOSIZE").trim().replace(/\s+/g, "")}-`;
+  for (let i = 0; i < 20; i++) {
+    const code = prefix + randomTail();
+    const hit = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Design WHERE item_code = '${code.replace(/'/g, "''")}'`));
+    if (!hit.length) return code;
+  }
+  throw badRequest("Could not mint a unique item code — try again", 500);
+}
+
 function assertNoNegatives(obj) {
   for (const [k, v] of Object.entries(obj || {})) {
     if (SIGNED_FIELDS.has(k)) continue;
@@ -1522,7 +1549,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
         const { items, total } = computeLines(body.lines);
         const designIds = items.map((it) => resolveOrThrow(dMap, it.line.item, "Design"));
         const bwMap = await designBoxWeights(catalyst, designIds); // CR-427
-        const warehouse = await requireLocation(catalyst, body.warehouse); // CR-453
+        const warehouse = rowidParam(body.warehouse) || null; // CR-468: optional (reverses CR-453)
 
         // Line rules, checked before any write: a line with work keeps its
         // design, can't drop below what is already palletised/loaded/dispatched,
@@ -1689,8 +1716,8 @@ async function createSalesOrder(ds, body, maps) {
   const { items, total } = computeLines(body.lines);
   const designIds = items.map((it) => resolveOrThrow(maps.dMap, it.line.item, "Design"));
   const bwMap = await designBoxWeights(maps.catalyst, designIds); // CR-427 (was a bare `catalyst` → ReferenceError on every SO create)
-  // CR-453: an order always says where its stock will sit (Warehouse ▸ Bay node).
-  const warehouse = maps.catalyst ? await requireLocation(maps.catalyst, body.warehouse) : rowidParam(body.warehouse) || null;
+  // CR-468: Location is optional on an order (reverses CR-453) — stock carries its own bay.
+  const warehouse = rowidParam(body.warehouse) || null;
 
   const doc = docCompute(total, body);
   const soRow = await ds.table("SalesOrder").insertRow({
@@ -3604,7 +3631,7 @@ app.post("/panel-order-delete/:rowid", async (req, res) => {
       { table_name: "PanelOrder", operation: "soft-delete", payload: { rowid: rid, reason } },
       async () => {
         const order = rowList(
-          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status FROM PanelOrder WHERE ROWID = ${rid} AND deleted_at is null`),
+          await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, order_number, status, sales_order, quote, customer FROM PanelOrder WHERE ROWID = ${rid} AND deleted_at is null`),
         )[0];
         if (!order) throw badRequest(`Panel order not found: ${rid}`, 404);
         if (!PANEL_ORDER_EDITABLE.has(String(order.status)))
@@ -3613,6 +3640,13 @@ app.post("/panel-order-delete/:rowid", async (req, res) => {
         const stamp = stampNow();
         for (const l of await panelOrderLines(catalyst, rid)) await ds.table("PanelOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
         await ds.table("PanelOrder").updateRow({ ROWID: rid, deleted_at: stamp });
+        // CR-475: the source SO / Quote / Customer Activity sees the delete, as it sees a cancel.
+        await logRelated(
+          catalyst,
+          [{ table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }, { table: "Customer", rowid: order.customer }],
+          "panel-order-delete",
+          { ROWID: rid, order_number: order.order_number, reason },
+        );
         return { rowid: rid, data: { ROWID: rid } };
       },
     );
@@ -7939,6 +7973,22 @@ app.get("/:table/:rowid", async (req, res) => {
    pcs/coverage are the item's own, untouched). Overwrites typed weights — warn
    before running. Registered before the generic POST /:table so its
    single-segment path isn't shadowed by it. */
+/* CR-473: stamp an item code on every Design that has none (idempotent; Admin via ADMIN_ROUTES).
+   Run once per target after the column + deploy; re-runs report stamped: 0. */
+app.post("/backfill-item-codes", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const rows = await zcqlAllRows(catalyst, "SELECT ROWID, design_name, size FROM Design WHERE item_code is null AND deleted_at is null");
+    for (const r of rows) {
+      await catalyst.datastore().table("Design").updateRow({ ROWID: r.ROWID, item_code: await nextItemCode(catalyst, r.design_name, r.size) });
+    }
+    delete _cache.Design;
+    res.json({ ok: true, data: { stamped: rows.length } });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 app.post("/resync-size-snapshots", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -8016,7 +8066,11 @@ app.post("/:table", async (req, res) => {
           assertNoStateWrite(table, r, true);
           assertNoNegatives(r); // rule #5: no negative numeric values
           normalizeNames(table, r); // CR-429: names are stored Title Case (before the natural-key check)
-          if (table === "Design") stampDesignCoverage(r); // CR-391
+          if (table === "Design") {
+            stampDesignCoverage(r); // CR-391
+            delete r.item_code; // CR-473: server-minted, never typed
+            r.item_code = await nextItemCode(catalyst, r.design_name, r.size);
+          }
           if (table === "Warehouse" && rowidParam(r.parent)) {
             // CR-409: a Location sits in a top-level warehouse — one level only.
             const p = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT parent FROM Warehouse WHERE ROWID = ${rowidParam(r.parent)} AND deleted_at is null`))[0];
@@ -8178,7 +8232,12 @@ app.patch("/:table/:rowid", async (req, res) => {
           )[0];
           oldSizeBw = Number(prev && prev.box_weight_kg) || 0;
         }
-        if (table === "Design") stampDesignCoverage(patch); // CR-391: coverage from the item's own w × l × pcs
+        if (table === "Design") {
+          stampDesignCoverage(patch); // CR-391: coverage from the item's own w × l × pcs
+          delete patch.item_code; // CR-473: never typed; a pre-CR-473 row gets its code on its first edit
+          const cur = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT item_code, design_name, size FROM Design WHERE ROWID = ${rid}`))[0];
+          if (cur && !cur.item_code) patch.item_code = await nextItemCode(catalyst, patch.design_name ?? cur.design_name, patch.size ?? cur.size);
+        }
         const row = await ds.table(table).updateRow(patch);
         // Size edits fan out to the Item + Pallet packing-data snapshots.
         if (table === "Size") await propagateSizeSnapshots(catalyst, rid, oldSizeBw);

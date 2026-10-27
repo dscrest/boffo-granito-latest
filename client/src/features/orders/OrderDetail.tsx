@@ -23,14 +23,14 @@ import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
 import { soNextStep } from "@/features/stages/nextStep";
 import type { PalPlanLine } from "@/features/stages/palPlansApi";
-import { listProductionLogs, stageChip, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
+import { listProductionLogs, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
 import { AllocateStockModal } from "./AllocateStockModal";
 import { ChangeStatusModal } from "./ChangeStatusModal";
 import { useOrders } from "./useOrders";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { lineSupplies } from "@/lib/needProduction";
 import { useMasters } from "@/features/masters/useMasters";
-import { useWarehouses } from "@/features/masters/useWarehouses";
+import { TotalsRow } from "@/features/reports/ReportShell";
 
 /** Detail-row text for a progress chip: `Partial · 760 of 900` (CR-385). */
 const chipText = (c: SoChip) => (c.detail ? `${c.label} · ${c.detail}` : c.label);
@@ -60,6 +60,50 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
   }, [salesOrderId]);
 
   if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading production…</div>;
+
+  // CR-470: ONE row per design — the user reads the item's total, not one line per job / batch.
+  // Batches union into chips; Requested / Produced sum; the latest date and performer show.
+  type DesignGroup = { designId: string; design: string; size: string; batches: string[]; requested: number; produced: number; jobs: number; date: string; by: string; notes: string[] };
+  const byDesign: DesignGroup[] = [];
+  {
+    const m = new Map<string, DesignGroup>();
+    for (const e of rows) {
+      const lastRec = e.records[e.records.length - 1];
+      const date = e.productionDate || lastRec?.productionDate || e.createdTime.slice(0, 10);
+      const batches = [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))];
+      if (!batches.length && e.batchNumber) batches.push(e.batchNumber);
+      const g = m.get(e.designId) ?? m.set(e.designId, { designId: e.designId, design: e.design, size: e.size, batches: [], requested: 0, produced: 0, jobs: 0, date: "", by: "", notes: [] }).get(e.designId)!;
+      g.batches = [...new Set([...g.batches, ...batches])];
+      g.requested += e.qtyRequested;
+      g.produced += e.producedSoFar;
+      g.jobs += 1;
+      if (date > g.date) {
+        g.date = date;
+        g.by = e.performedBy || lastRec?.performedBy || g.by;
+      }
+      if (e.note) g.notes.push(e.note);
+    }
+    byDesign.push(...m.values());
+  }
+  type AllocGroup = { designId: string; design: string; orderItemId: string; batches: string[]; boxes: number; date: string; by: string };
+  const allocByDesign: AllocGroup[] = [];
+  {
+    const m = new Map<string, AllocGroup>();
+    for (const a of allocs) {
+      const g = m.get(a.designId) ?? m.set(a.designId, { designId: a.designId, design: a.design, orderItemId: a.orderItemId, batches: [], boxes: 0, date: "", by: "" }).get(a.designId)!;
+      if (a.batchNumber && !g.batches.includes(a.batchNumber)) g.batches.push(a.batchNumber);
+      g.boxes += a.qtyBoxes;
+      const d = a.createdTime.slice(0, 10);
+      if (d > g.date) {
+        g.date = d;
+        g.by = a.performedBy || g.by;
+      }
+    }
+    allocByDesign.push(...m.values());
+  }
+  const chips = (batches: string[]) =>
+    batches.length ? batches.map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>) : <span className="dim">—</span>;
+
   return (
     <>
     <div className="card" style={{ marginBottom: 12 }}>
@@ -76,21 +120,21 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
             </tr>
           </thead>
           <tbody>
-            {allocs.map((a) => (
-              <tr key={a.id}>
-                <td className="mono muted nw">{a.createdTime.slice(0, 10) || "—"}</td>
-                <td><span className="design-name">{a.design}</span></td>
-                <td className="nw">{a.batchNumber ? <span className="chip mono">{a.batchNumber}</span> : <span className="dim">—</span>}</td>
-                <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(a.qtyBoxes)}</td>
-                <td className="muted nw">{a.performedBy || "—"}</td>
+            {allocByDesign.map((g) => (
+              <tr key={g.designId}>
+                <td className="mono muted nw">{g.date || "—"}</td>
+                <td><span className="design-name">{g.design}</span></td>
+                <td className="nw">{chips(g.batches)}</td>
+                <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(g.boxes)}</td>
+                <td className="muted nw">{g.by || "—"}</td>
                 <td style={{ textAlign: "right" }}>
                   {can("stages", "edit") && (
-                    <button type="button" className="btn" title="Return boxes of this line to free stock" onClick={() => onDeallocate(a.orderItemId)}>Deallocate</button>
+                    <button type="button" className="btn" title="Return boxes of this item to free stock" onClick={() => onDeallocate(g.orderItemId)}>Deallocate</button>
                   )}
                 </td>
               </tr>
             ))}
-            {allocs.length === 0 && (
+            {allocByDesign.length === 0 && (
               <tr>
                 <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
                   No stock allocated to this order yet.
@@ -98,20 +142,26 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
               </tr>
             )}
           </tbody>
+          {allocByDesign.length > 1 && (
+            <TotalsRow>
+              <td /><td>Total</td><td />
+              <td className="num mono">{fmt(allocByDesign.reduce((s, g) => s + g.boxes, 0))}</td>
+              <td /><td />
+            </TotalsRow>
+          )}
         </table>
       </div>
     </div>
-    {rows.length > 0 && (
+    {byDesign.length > 0 && (
     <div className="card">
       <div style={{ overflow: "auto" }}>
         <table className="tbl">
           <thead>
             <tr>
-              <th>Date</th>
+              <th>Last Output</th>
               <th>Design</th>
               <th>Size</th>
-              <th>Batch</th>
-              <th>Status</th>
+              <th>Batches</th>
               <th className="num" style={{ textAlign: "right" }}>Requested</th>
               <th className="num" style={{ textAlign: "right" }}>Produced</th>
               <th>By</th>
@@ -119,31 +169,28 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
             </tr>
           </thead>
           <tbody>
-            {rows.map((e) => {
-              const s = stageChip(e.stage);
-              const lastRec = e.records[e.records.length - 1];
-              const date = e.productionDate || lastRec?.productionDate || e.createdTime.slice(0, 10);
-              const batches = [...new Set(e.records.map((r) => r.batchNumber).filter(Boolean))];
-              if (!batches.length && e.batchNumber) batches.push(e.batchNumber);
-              return (
-                <tr key={e.id}>
-                  <td className="mono muted nw">{date || "—"}</td>
-                  <td><span className="design-name">{e.design}</span></td>
-                  <td className="nw">{e.size ? <span className={`chip size ${e.size.startsWith("200") || e.size.startsWith("75") ? "b" : ""}`}>{e.size}</span> : "—"}</td>
-                  <td className="nw">
-                    {batches.length
-                      ? batches.map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>)
-                      : <span className="dim">—</span>}
-                  </td>
-                  <td className="nw"><span className="chip" style={{ color: s.color }} title={s.label}>{codeOf(s.label)}</span></td>
-                  <td className="num mono">{fmt(e.qtyRequested)}</td>
-                  <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
-                  <td className="muted nw">{e.performedBy || lastRec?.performedBy || "—"}</td>
-                  <td className="muted" style={{ maxWidth: 240 }}><span className="clip" title={e.note}>{e.note || "—"}</span></td>
-                </tr>
-              );
-            })}
+            {byDesign.map((g) => (
+              <tr key={g.designId}>
+                <td className="mono muted nw">{g.date || "—"}</td>
+                <td>
+                  <span className="design-name">{g.design}</span>
+                  {g.jobs > 1 && <span className="dim" style={{ marginLeft: 6, fontSize: "var(--t-sm)" }}>· {g.jobs} jobs</span>}
+                </td>
+                <td className="nw">{g.size ? <span className={`chip size ${g.size.startsWith("200") || g.size.startsWith("75") ? "b" : ""}`}>{g.size}</span> : "—"}</td>
+                <td className="nw">{chips(g.batches)}</td>
+                <td className="num mono">{fmt(g.requested)}</td>
+                <td className="num mono">{g.produced ? <span style={{ color: "var(--c-green)" }}>{fmt(g.produced)}</span> : <span className="dim">—</span>}</td>
+                <td className="muted nw">{g.by || "—"}</td>
+                <td className="muted" style={{ maxWidth: 240 }}><span className="clip" title={g.notes.join(" · ")}>{g.notes.join(" · ") || "—"}</span></td>
+              </tr>
+            ))}
           </tbody>
+          <TotalsRow>
+            <td /><td>Total</td><td /><td />
+            <td className="num mono">{fmt(byDesign.reduce((s, g) => s + g.requested, 0))}</td>
+            <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(byDesign.reduce((s, g) => s + g.produced, 0))}</td>
+            <td /><td />
+          </TotalsRow>
         </table>
       </div>
     </div>
@@ -323,7 +370,6 @@ export function OrderDetail() {
   const supplyById = lineSupplies(everyOrder, stockFor);
   const [listQ, setListQ] = useState("");
   const { customers } = useMasters();
-  const { enabled: whEnabled, nameOf: whName } = useWarehouses(); // CR-453
 
   const load = async () => {
     const res = await listOrders();
@@ -485,8 +531,6 @@ export function OrderDetail() {
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
     { key: "boxBrand", label: "Box Brand", value: head.boxBrandLabel || head.boxBranding || "—" },
     // Same commercial facts the Quote detail shows (detail-page consistency).
-    // CR-453: where the order's stock sits — "Warehouse ▸ Location"; hidden while no warehouse exists.
-    ...(whEnabled ? [{ key: "location", label: "Location", value: head.warehouseId ? whName(head.warehouseId) : "Not set" }] : []),
     { key: "paymentTerm", label: "Payment Term", value: head.paymentTerm || "—" },
     { key: "currency", label: "Currency", value: head.currency || "—" },
     { key: "totalBoxes", label: "Total Boxes", value: fmt(items.reduce((s, o) => s + o.orderQty, 0)) },

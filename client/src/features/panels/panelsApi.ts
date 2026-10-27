@@ -23,6 +23,7 @@ export interface PanelLineRow {
   id: string; // PanelLine ROWID
   designId: string;
   designName: string; // unique item name (fallback design name)
+  itemCode: string; // CR-473 catalog code of the design
   sizeLabel: string; // the design's Available Size, from the Design master
   cutSizeId: string;
   cutSizeName: string;
@@ -107,6 +108,7 @@ async function fetchPanels(): Promise<{
       id: String(l.ROWID),
       designId,
       designName: d?.uniqueName || d?.designName || "—",
+      itemCode: d?.itemCode || "",
       sizeLabel: d?.sizeLabel || "",
       cutSizeId: str(l.cut_piece_size),
       cutSizeName: cutById.get(str(l.cut_piece_size)) || "",

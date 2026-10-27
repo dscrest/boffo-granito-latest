@@ -27,7 +27,7 @@ export function ItemSearchModal({
   // Every typed word must appear somewhere in the row (same token rule as the Combobox).
   const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hay = (d: DesignRow) =>
-    `${d.designName} ${d.baseDesignName} ${d.sku} ${d.uniqueName} ${d.collectionName} ${d.sizeLabel} ${d.partyBrandName}`.toLowerCase();
+    `${d.designName} ${d.baseDesignName} ${d.itemCode} ${d.sku} ${d.uniqueName} ${d.collectionName} ${d.sizeLabel} ${d.partyBrandName}`.toLowerCase();
   const rows = (cachedDesigns() || [])
     .filter((d) => d.status === "Active" && d.id !== exclude && (!filter || filter(d)))
     .filter((d) => tokens.every((t) => hay(d).includes(t)))
@@ -58,7 +58,7 @@ export function ItemSearchModal({
                 <thead>
                   <tr>
                     <th>Design Name</th>
-                    <th>SKU</th>
+                    <th>Item Code</th>
                     <th>Size</th>
                     <th>Collection</th>
                     <th>Customer Brand</th>
@@ -82,7 +82,7 @@ export function ItemSearchModal({
                       }}
                     >
                       <td style={{ fontWeight: 600 }}>{d.designName}</td>
-                      <td className="mono">{d.sku}</td>
+                      <td className="mono">{d.itemCode || d.sku}</td>
                       <td>{d.sizeLabel}</td>
                       <td>{d.collectionName}</td>
                       <td>{d.partyBrandName}</td>

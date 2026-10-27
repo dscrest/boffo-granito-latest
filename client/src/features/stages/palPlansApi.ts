@@ -225,13 +225,15 @@ export interface PalPlanInput {
 
 // Loading pool + progress grouping live in palLoadGate.ts
 // (pure module, keeps the self-check runnable under plain node).
-export { groupProgressOf, loadableLineIds } from "./palLoadGate";
-import { groupProgressOf as _groupProgressOf } from "./palLoadGate";
+export { batchKey, groupProgressOf, loadableLineIds } from "./palLoadGate";
+import { batchKey as _batchKey, groupProgressOf as _groupProgressOf } from "./palLoadGate";
 
-/** Palletised progress per order item (partial palletise splits a line, both
-    halves keep the same orderItemId) — done = boxes ReadyToLoad or in a box. */
-export function oiProgressOf(lines: PalPlanLine[]): Map<string, { done: number; total: number }> {
-  return _groupProgressOf(lines, (l) => l.orderItemId);
+/** Palletised progress per order item × BATCH (CR-472; was per order item, so a loaded
+    batch's boxes bled into its sibling batch's Ready Pallets / Remaining). Partial
+    palletise splits a line, both halves keep the same key — done = boxes ReadyToLoad or
+    in a box. Read it with `progress.get(batchKey(l))`. */
+export function batchProgressOf(lines: PalPlanLine[]): Map<string, { done: number; total: number }> {
+  return _groupProgressOf(lines, _batchKey);
 }
 
 /* ---- Fractional fill (box % is measured against each line's PALLET capacity,

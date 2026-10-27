@@ -4927,6 +4927,16 @@
           "is_unique": false,
           "search_index_enabled": false,
           "default_value": null
+        },
+        {
+          "column_name": "item_code",
+          "data_type": "varchar",
+          "max_length": 20,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
+          "default_value": null
         }
       ]
     },

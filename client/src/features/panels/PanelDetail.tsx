@@ -241,6 +241,7 @@ export function PanelDetail() {
                           <Link className="linkish" to={`/design/${encodeURIComponent(l.designId)}`} title="Open item">
                             <span className="design-name">{l.designName}</span>
                           </Link>
+                          {l.itemCode && <div className="dim mono" style={{ fontSize: "var(--t-sm)" }}>{l.itemCode}</div>}
                         </td>
                         <td className="mono">{l.sizeLabel || <span className="dim">—</span>}</td>
                         <td className="mono">{l.cutSizeName || <span className="dim">—</span>}</td>

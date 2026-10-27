@@ -66,11 +66,11 @@ function search(q: string): Hit[] {
     })),
   );
   const designs = take(cachedDesigns(), (d) =>
-    hit([d.designName, d.sku, d.uniqueName, d.collectionName, d.baseDesignName], () => ({
+    hit([d.designName, d.itemCode, d.sku, d.uniqueName, d.collectionName, d.baseDesignName], () => ({
       kind: "Item",
       id: d.id,
       title: d.designName || d.sku || "Item",
-      sub: [d.sku, d.sizeLabel].filter(Boolean).join(" · "),
+      sub: [d.itemCode || d.sku, d.sizeLabel].filter(Boolean).join(" · "),
       route: `/design/${d.id}`,
     })),
   );

@@ -87,6 +87,7 @@ export interface DesignRow {
   baseDesignName: string;
   uniqueName: string;
   sku: string;
+  itemCode: string; // CR-473: ABBR-SIZE-NNN catalog code, server-stamped, never typed
   seqCode: string; // design short code — first SKU segment
   partyBrandName: string;
   collectionName: string;
@@ -306,6 +307,7 @@ async function fetchDesigns(): Promise<{
       baseDesignName: str(d.base_design_name),
       uniqueName: str(d.unique_name),
       sku: str(d.sku) || fallbackSku(d, [sizeId, finishId, categoryId, glazeId, brandId, gradeId]),
+      itemCode: str(d.item_code),
       seqCode: str(d.seq_code),
       partyBrandName: str(d.party_brand_name),
       collectionName: str(d.collection_name),

@@ -31,7 +31,8 @@ import {
   invalidatePalPlans,
   listPalPlans,
   PAL_STATUS_LABEL,
-  oiProgressOf,
+  batchKey,
+  batchProgressOf,
   palLineStatusLabel,
   setPalLineLocation,
   type LoadBox,
@@ -87,7 +88,7 @@ export function PalPlanDetail() {
     return [...m.values()];
   }, [plan]);
 
-  const oiProgress = useMemo(() => oiProgressOf(plan?.lines || []), [plan]);
+  const oiProgress = useMemo(() => batchProgressOf(plan?.lines || []), [plan]);
 
   const onDelete = async () => {
     if (!plan) return;
@@ -232,7 +233,7 @@ export function PalPlanDetail() {
                         {g.lines.map((l) => {
                           const box = boxById.get(l.loadBoxId);
                           const done = l.status === "ReadyToLoad" || !!l.loadBoxId;
-                          const prog = oiProgress.get(l.orderItemId);
+                          const prog = oiProgress.get(batchKey(l));
                           const partial = !done && prog && prog.done > 0 && prog.done < prog.total;
                           const label = partial ? "Partially palletized" : palLineStatusLabel(l, box?.status, plan.status);
                           const chipCls = label === "Palletization Completed" ? "p-completed" : l.status === "ReadyToLoad" ? "p-ready" : l.status === "Palletizing" ? "p-palletized" : "p-planning";

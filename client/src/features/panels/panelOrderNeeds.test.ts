@@ -41,7 +41,7 @@ const panel = (id: string, lines: { d: string; c: string; q: number }[]): PanelR
     images: [],
     createdTime: "",
     modifiedTime: "",
-    lines: lines.map((l, i) => ({ id: `${id}-${i}`, designId: l.d, designName: l.d, sizeLabel: "", cutSizeId: l.c, cutSizeName: l.c, qty: l.q })),
+    lines: lines.map((l, i) => ({ id: `${id}-${i}`, designId: l.d, designName: l.d, itemCode: "", sizeLabel: "", cutSizeId: l.c, cutSizeName: l.c, qty: l.q })),
   }) as PanelRow;
 
 const panels = new Map([

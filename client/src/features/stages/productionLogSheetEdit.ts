@@ -24,7 +24,8 @@ export type LogRow = {
 /** Typed columns in sheet order — a paste fills them left to right from the focused one.
     CR-264: Size · Design · Batch · Box Brand · Qty · Remark; Date is an optional (default hidden) column;
     CR-438: Location last. */
-export const LOG_COLS = ["size", "design", "batch", "brand", "qty", "note", "date", "warehouse"] as const;
+// CR-469: paste order = the Item Tables visual order (Size · Design · Batch · Qty · Box Brand), then the unseen columns.
+export const LOG_COLS = ["size", "design", "batch", "qty", "brand", "note", "date", "warehouse"] as const;
 export type LogCol = (typeof LOG_COLS)[number];
 
 export type LogLine = { key: string; jobId?: string; design: string; qty: number; batch: string; date: string; brand: string; note: string; warehouse: string };

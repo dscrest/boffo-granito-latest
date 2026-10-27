@@ -39,6 +39,42 @@ async function getPdfMake() {
   return pdfMakePromise;
 }
 
+/* Image → data URL pdfmake accepts (CR-474). PNG / JPEG pass through; anything else
+   (webp, gif, avif uploads) is re-encoded to PNG on a canvas from the fetched blob —
+   createImageBitmap(blob) never taints the canvas, whatever origin the bytes came from.
+   Long edge capped at 1600px so a phone photo does not bloat the PDF. "" on any failure
+   (builders print a placeholder). Cached per URL. */
+const imageCache = new Map<string, Promise<string>>();
+export function imageDataUrl(url: string): Promise<string> {
+  let p = imageCache.get(url);
+  if (!p) {
+    p = (async () => {
+      try {
+        const blob = await (await fetch(url)).blob();
+        if (blob.type === "image/png" || blob.type === "image/jpeg") {
+          return await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result));
+            fr.onerror = () => reject(new Error("Could not read image"));
+            fr.readAsDataURL(blob);
+          });
+        }
+        const bmp = await createImageBitmap(blob);
+        const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(bmp.width * scale);
+        canvas.height = Math.round(bmp.height * scale);
+        canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/png");
+      } catch {
+        return "";
+      }
+    })();
+    imageCache.set(url, p);
+  }
+  return p;
+}
+
 /** Build and trigger a browser download of the given pdfmake document. */
 export async function downloadPdf(doc: TDocumentDefinitions, filename: string): Promise<void> {
   const pdfMake = await getPdfMake();

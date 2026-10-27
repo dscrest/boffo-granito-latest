@@ -3,6 +3,29 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-27 — Walkthrough: SO without Location, Bulk Record Production form, production per design, palletization counts per batch, item code, Panel Order PDF (CR-468…475) — LIVE + DEMO 2026-10-27
+
+- **Sales Order form without Location (CR-468).** The Location field is gone from the Sales Order form and page; an order
+  saves without one. Location stays where stock is actually recorded — production, cut stock, pallets.
+- **Bulk Record Production, form shape (CR-469).** The page now looks like Adjust Stock: a Production section (date,
+  recorded by, description) over an Item Table — Size · Item · Batch · Qty · Box Brand · Location per line — starting with
+  one line and "+ Add line". No toolbar options above the table. Pasting a block from Excel still fills the lines.
+- **Production tab per design (CR-470).** On a Sales Order the Production tab shows one row per design with its batches as
+  chips and the totals summed, instead of one row per job / batch; totals footers added.
+- **Pallet form without Box Weight (CR-471).** New / Edit Pallet no longer asks for the box weight; the Size's weight is used.
+- **Palletization counts per batch (CR-472).** Ready Pallets and Remaining count only the row's own batch — a loaded batch of
+  the same item no longer shows up on its sibling (the "4 (100)" on a 35-box batch). Every palletization page now shows
+  Boxes · Ordered Boxes · Ready Pallets · Boxes / Pallet · Remaining, with totals.
+- **Item code (CR-473).** Every item gets a short unique code such as `LSN-800x1600-7K4` (initials of the design, the size,
+  three random characters that never repeat). It appears on the item page, the Items grid, item pickers, the ⌘K search,
+  Panel Craft ▸ Stock and panel pages, and prints on the Panel Order PDF. Existing items were coded in the same pass
+  (live and demo).
+- **Panel Order PDF (CR-474).** More ▸ Print order PDF on a panel order: page one is the order, then one page per panel
+  with the showcase photo as large as the page allows and the panel's cut pieces with totals for the ordered quantity.
+- **Deleting a panel order leaves a trace (CR-475).** The source Sales Order / Quote / Customer Activity now records the
+  delete, as it records a cancel. Checked and unchanged: deleting a load returns the cut-piece stock and the booking.
+- **Hold register.** `docs/ON-HOLD.md` lists requirements deliberately parked (Boffo / Bonza company separation first).
+
 ## 2026-10-27 — Customers toolbar, advanced-search dates, red close ×, pager arrows (CR-462…467) — LIVE + DEMO 2026-10-27
 
 - **Search results readable (CR-462).** In the ⌘K search the kind label (CUSTOMER, ITEM, ORDER…) no longer runs into the

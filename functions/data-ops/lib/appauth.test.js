@@ -34,6 +34,7 @@ test("former legacy-fallback routes are now mapped", () => {
   assert.equal(allowed("/panel-order-cancel/1", "POST"), false); // CR-368: edit, Staff is view+create
   assert.equal(allowed("/sample-order-cancel/1", "POST"), false); // CR-368
   assert.equal(allowed("/customer-dedupe", "POST"), false); // CR-373: Admin only
+  assert.equal(allowed("/backfill-item-codes", "POST"), false); // CR-473: Admin only
   assert.equal(allowed("/DISPATCH/1", "POST"), false); // case-insensitive like Express
 });
 

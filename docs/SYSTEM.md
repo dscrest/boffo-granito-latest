@@ -140,7 +140,7 @@ plus `PalletisedBatch` / `PalletisedBatchLine` / `ContainerLoading` (legacy — 
 
 | Term | Means |
 |---|---|
-| **Design / Item** | The sellable tile SKU. UI always says *Item*; the table is `Design`. **Design Master spec (CR-391…396, 2026-10-23):** the form is five sections — Main Information (name, Base Design picked from items — Combobox + 🔍 `ItemSearchModal` since CR-434, Design Owner + Custom Design Buyer = Customers, the buyer's brand), Calculations (Size → dims read-only; **Pcs Per Packing typed per item**, coverage ƒx from the item's own numbers, box weight), Design Data (image, random faces, finish, category, surface application, punch type, glaze, grade — **Brand left the form in CR-430**, not required; grid / filter / bulk edit / detail still show it, SKU slot `00`), Working Data (status, batch-tracked, opening stock), Marketing Data (collection, series, catalogue). Owner defaults from AppSetting `default_design_owner`. |
+| **Design / Item** | The sellable tile SKU. UI always says *Item*; the table is `Design`. **Item code (CR-473):** `Design.item_code` = `ABBR-SIZE-NNN` (initials of the design name · Size code · 3 random chars from an unambiguous alphabet), server-stamped on insert / first edit / `POST /backfill-item-codes`, never typed, never reused — the catalog code shown on the item page, grid, pickers, ⌘K, Panel Craft Stock, panel lines and the Panel Order PDF. **Design Master spec (CR-391…396, 2026-10-23):** the form is five sections — Main Information (name, Base Design picked from items — Combobox + 🔍 `ItemSearchModal` since CR-434, Design Owner + Custom Design Buyer = Customers, the buyer's brand), Calculations (Size → dims read-only; **Pcs Per Packing typed per item**, coverage ƒx from the item's own numbers, box weight), Design Data (image, random faces, finish, category, surface application, punch type, glaze, grade — **Brand left the form in CR-430**, not required; grid / filter / bulk edit / detail still show it, SKU slot `00`), Working Data (status, batch-tracked, opening stock), Marketing Data (collection, series, catalogue). Owner defaults from AppSetting `default_design_owner`. |
 | **Size** | Owns the per-box packing **defaults** — dims, pcs/box, coverage, box weight. Pallets **snapshot** coverage + weight; Items take dims read-only and start their own pcs/box + box weight from it. Editing a Size fans the defaults out ([`/resync-size-snapshots`](../functions/data-ops/index.js) backfills — overwrites typed weights). **Overrides:** box weight on Item + Pallet (CR-133, CR-190) and, since **CR-391, the Item's pcs/box and coverage** are the item's own (coverage stamped server-side from `width × length × pcs`; the fan-out never touches them). Consumers read the **Item's** weight + coverage first (Plan Containerisation Weight Fitting, `/load-container`, `/fit-suggest`), the Pallet format's only as fallback. **CR-427:** every Quote / SO line **freezes** `box_weight_kg` at creation (`designBoxWeights`); Container Planning reads the line's value before the live Item, so a bulk weight edit on Items (Bulk edit ▸ Box Weight) changes only orders made afterwards; `/load-container` + `/fit-suggest` stay live. |
 | **Pallet Master** | The master of pallet *formats* — boxes per pallet + weights, nothing per container since CR-261 (an Inventory master). |
 | **Container Master** | `ContainerFormat`: what ONE container of a Size holds — pallet formats × count, Σ pallets, Σ boxes. A Size may have several (CR-273); the loading picks the one it uses (`LoadBox.container_format`), readers with no pick take the size's largest. The planner's Box Fitting picks one per ROW — a Container column after Pallet Type on every item row, narrowed to the containers built from that row's pallet (CR-300; was one per Size in a toolbar strip, CR-274) — saved per container as `containerFormat` and a loading made from the plan starts on that pick. The only source of per-container capacity (fill %, planner box fitting, quote Suitable Containers). CR-261. |
@@ -190,7 +190,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/containers/new` · `/containers/:id/edit` · `/containers/:id/clone` | `masters/ContainerFormatFormPage.tsx` | CR-261; a clone keeps the size (CR-273 — same size, new mix). CR-269: pallets are added as lines (Pallet picker · count · Add line · ✕), like Quote Line Items |
 | `/prod` · `/prod/:id` | `stages/Production` · `ProductionDetail` | Table + Sheet (Kanban, To Produce, Import hidden — CR-417) |
 | `/prod/new` · `/prod/:id/clone` · `/prod/:id/edit` | `stages/ProductionFormPage.tsx` | CR-220: Start New Production (CR-234) / Edit Production pages |
-| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production sheet — many items, one Save, straight to stock. CR-264: Size · Design · Batch · Box Brand · Qty · Remark, Size narrows Design, toolbar date rules (per-row Date optional) |
+| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production — many items, one Save, straight to stock. CR-469: the Adjust Stock FormPage shape (Production section + Item Table: Size · Item · Batch · Qty · Box Brand · Location per line), Size narrows Item, Excel paste kept |
 | `/parties` · `/parties/:id` | `masters/Parties` · `CustomerDetail` | Customers. Detail = Details · Transactions (collapsible Sales Orders / Quotes / Samples / Panels) · Dispatch · Activity tabs (CR-384) |
 | `/parties/new` · `/parties/:id/edit` · `/parties/:id/clone` | `masters/PartyFormPage.tsx` | CR-220: Customer form page (`:id` = customer code) |
 | `/settings/zoho` (`/settings/zoho-books` redirects) | `settings/ZohoSyncSettings.tsx` | CR-325/356/359 (Admin): connect / reconnect / disconnect the **active Zoho customer source** (`ZOHO` in `zohoApi.ts` — Zoho CRM Accounts since CR-359; Books hidden, its connection kept); **Customer sync** card = last run, **Refresh now** (incremental pull, same as the webhook / cron), **Import all customers** (full pull, 10 per request, safe to re-run — imported + unchanged accounts are skipped, CR-362). Hand mapping stays: Customers ▸ From Zoho CRM or a customer's More ▸ Map / Re-pull / Unmap → `ZohoSearchModal` → PartyFormPage prefilled from the **server-mapped** record (`records/:id` → `mapped`); More ▸ **Create in / Push to Zoho CRM** sends the customer the other way; `Customer.crm_account_id` is the link |
@@ -199,7 +199,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/quotes/:id/containerise` | `quotes/PlanContainerisation.tsx` | Quote-level container plan; Box Fitting picks the container on each item row, narrowed by the row's pallet (CR-300) |
 | `/approvals` | `quotes/Approvals.tsx` | Role-gated at nav **and** route |
 | `/orders` · `/byorder` · `/kanban` | `orders/OrdersTable` · `ByOrderView` · `pipeline/Kanban` | One nav leaf, `ViewToggle` switches. CR-353/355: the grid leads Customer, Design, then the customer **PO Number** (all inside the picker); SO Number is the last column, hidden by default; By-Order cards lead with the PO (`orderLabel` in `ordersApi.ts`); the Kanban still says the SO number |
-| `/orders/new[?quote=<id>]` · `/orders/:id/edit` · `/orders/:id/clone` | `orders/OrderFormPage.tsx` | CR-219: the Sales Order form is a page; `?quote=` = Convert-to-SO |
+| `/orders/new[?quote=<id>]` · `/orders/:id/edit` · `/orders/:id/clone` | `orders/OrderFormPage.tsx` | CR-219: the Sales Order form is a page; `?quote=` = Convert-to-SO; CR-468: no Location field (CR-453 reversed — stock carries its own bay) |
 | `/orders/:id` | `orders/OrderDetail.tsx` | CR-353: title = customer PO (`orderLabel` = `poNumber \|\| orderNumber`), sub line = `SO/FY/NNN · Customer` small; Details card PO Number then SO Number. The SO number stays the identity (URL = ROWID, `order_number` server-minted); the print and the container plan keep it as their document number |
 | `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy; same per-row container pick (CR-300) |
 | `/packing` · `/palletizing` · `/palletized` · `/packing/:id` | `stages/PalPlans` (×3, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization · Palletization Completed (recorded Ready for Loading rows: Load + Release) — CR-160, CR-360 |
@@ -320,10 +320,13 @@ Screen `/prod` — a Table and a Sheet view of the same rows (the Kanban board a
 **Production first, then SO allocation (CR-197…200, 2026-09-18).** The factory produces to
 **stock**; stock is then allocated to Sales Orders.
 - **Bulk Record Production** (CR-244, `/prod/record`, header button on `/prod`) is the fast path for
-  make-to-stock output: a ruled sheet in the Loading Plan sheet's `.psheet` skin, one row per item —
-  Design · Batch No. (blank = auto) · Date (blank = the sheet's Production date) · Qty, plus optional
-  Size / Box Brand / Remark columns (ColumnPicker). 20 rows to start, grows as the tail is typed in;
-  Enter/↑/↓ walk a column; a copied Excel block pastes across rows (item matched sku → unique name →
+  make-to-stock output. **Since CR-469 (2026-10-27) it is a `FormPage` in the Adjust Stock shape**
+  (`common/StockAdjustForm.tsx`, CR-457): a **Production** section — Production date \* · Recorded by ·
+  Description (saved as every line's `note`) — over an **Item Table** (`.ord-lines` / `.adj-line`) —
+  Size · Item \* · Batch No. (blank = auto) · Qty \* · Box Brand · Location per line (blank = the
+  Production bay, CR-438). One line to start, "+ Add line"; no toolbar, no ColumnPicker, no per-row
+  Date / Remark. A copied Excel block still pastes across lines from the focused cell (`LOG_COLS` =
+  size · design · batch · qty · brand · note · date · warehouse; item matched sku → unique name →
   design name, shared with the Excel import). Save is **two requests for any row count**:
   `/production-log` (`stage: "InProduction"`) mints the jobs, then `/production-complete` records every
   row and completes it — that route now takes per-line `production_date`, `box_brand`, `note`. Batches
@@ -446,14 +449,18 @@ lines (they keep drag-back / partial Complete). Entry points: the "+" menu on `/
 "Unload item"). Stock card effect: loaded release → In loading ↑ Available ↑; stock release →
 Available ↑ (Awaiting palletization unchanged, since produced fell with palletized).
 Group, Today's Report and New Palletization Plan sit in the header (the Kanban/Sheet toggle is hidden since CR-418 — Sheet only). The Sheet is
-ColumnDef-driven (CR-161/279: Customer, Item, Order, Batch, Boxes, **Ready Pallets** `N (boxes)` =
-the item's palletized boxes ÷ `Pallet.boxes_per_pallet` rounded up, **Pallet** = the master's
-`pallet_type` (line `palletKind`, composite name on hover), Remaining, Date, Status, Age,
-**PAL** last and hideable; checkbox / edit inputs / "+" cell fixed) and has **no stage band**.
+ColumnDef-driven (CR-161/279/472, key `packingSheetColumns.v4`: Customer, Item, Order, Batch, Boxes,
+**Ordered Boxes** = the BATCH's boxes sent to palletization (back since CR-472 — CR-279 had removed it),
+**Ready Pallets** `N (boxes)` = the batch's palletized boxes ÷ `Pallet.boxes_per_pallet` rounded up,
+**Pallet** = the master's `pallet_type` (line `palletKind`, composite name on hover), **Boxes / Pallet** =
+the master's capacity (CR-472), Location, **Remaining** = the batch's boxes not yet palletized, Date, Status,
+Age, **PAL** last and hideable; checkbox / edit inputs / "+" cell fixed) and has **no stage band**.
+**Progress is per order item × batch** (`batchProgressOf` in palPlansApi, keyed by `batchKey`; CR-472 — it
+used to be per order item, so a loaded batch's 100 boxes read as "4 (100)" on its sibling batch's row).
 The Sheet ends in a **`TotalsRow` tfoot** (CR-187, same shape as /loading): "Total · N pallets"
-in the first visible column, Boxes / Ready Pallets / Remaining sums under their own headers
-(Ready/Remaining deduped per order item; `readyPalletsLabel()` is the one formatter, shared with the
-Complete Palletization dialog which shows each item's `Ready N (boxes) · Remaining N`, CR-280).
+in the first visible column, Boxes / Ordered / Ready Pallets / Remaining sums under their own headers
+(deduped per batch; `readyPalletsLabel()` is the one formatter, shared with the
+Complete Palletization dialog which shows each batch's `Ready N (boxes) · Remaining N`, CR-280).
 A **partial Complete** (Palletizing → ReadyToLoad with fewer boxes than the line) splits off the
 recorded slice and sends the **remainder back to Planning** (CR-281, server) so it re-queues on
 `/packing` with Start available. Under the grid (both views) sits the **totals /

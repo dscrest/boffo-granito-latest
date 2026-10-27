@@ -59,6 +59,8 @@ const STOCK_COLUMNS: ColumnDef<GridRow>[] = [
       r.kind === "item" ? (
         <span className="design-name">
           {r.designName || "—"}
+          {/* CR-473: the catalog item code beside the name. */}
+          {r.design?.itemCode && <span className="dim mono" style={{ fontWeight: 400 }}> · {r.design.itemCode}</span>}
           {r.hasSpecial && <span className="dim" style={{ fontWeight: 400 }}> · {r.pieces} cut piece{r.pieces === 1 ? "" : "s"}</span>}
         </span>
       ) : (

@@ -217,6 +217,7 @@ const ADMIN_ROUTES = new Set([
   "seed", "resync-size-snapshots", "migrate-panel-orders", "migrate-mdf-sizes", "recount-order-items",
   "renumber-loads", "reattribute-blank-lines", "backfill-line-pallets", "fx-refresh",
   "customer-dedupe", // CR-373
+  "backfill-item-codes", // CR-473
 ]);
 
 // POST routes that are read-only computations — any authenticated role may call.

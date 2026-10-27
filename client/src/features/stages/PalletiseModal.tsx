@@ -15,7 +15,7 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { useWarehouses } from "@/features/masters/useWarehouses";
-import { readyPalletsLabel, type PalPlanLine } from "./palPlansApi";
+import { batchKey, readyPalletsLabel, type PalPlanLine } from "./palPlansApi";
 
 export interface PalletiseEntry {
   lineId: string;
@@ -43,7 +43,7 @@ export function PalletiseModal({
   toLabel?: string;
   /** CR-412: the location prefilled for every item (the stage's purpose bay); the user can override. */
   defaultLocation?: string;
-  /** Per-order-item palletized progress (CR-280) — Complete Palletization shows
+  /** Per order item × batch palletized progress (CR-280, per batch since CR-472) — Complete Palletization shows
       each item's ready pallets (boxes) and what is still to palletize. */
   progress?: Map<string, { done: number; total: number }>;
   /** Fallback pallet per line (SO/quote container plan) — used only when the
@@ -165,7 +165,7 @@ export function PalletiseModal({
                         {[l.customerName, l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
                       </div>
                       {(() => {
-                        const prog = progress?.get(l.orderItemId);
+                        const prog = progress?.get(batchKey(l));
                         return prog ? (
                           <div className="mono" style={{ fontSize: "var(--t-sm)", marginTop: 2 }} title="Already palletized for this item: pallets (boxes) · boxes still to palletize">
                             Ready {readyPalletsLabel(prog.done, l.boxesPerPallet, fmt)} · Remaining {fmt(Math.max(0, prog.total - prog.done))}

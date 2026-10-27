@@ -358,6 +358,7 @@ is answered `{disabled:true}` while CRM is active — disable it in the console 
 | seq_code | varchar(10) | design Short Code — first SKU segment (added 2026-07-04, live project) |
 | base_design_name | varchar(255) | **CR-395:** picked from existing item names on the form (stored as the name, not a FK) |
 | sku | varchar(100) | auto: `DesignShortCode-Size-Finish-Category-Glaze-Brand-Grade[-PartyBrand]` from stored `seq_code`s (PB segment only when set); uniqueness enforced once short codes are filled |
+| item_code | varchar(20) | **CR-473 (2026-10-27):** catalog code `ABBR-SIZE-NNN` (e.g. `LSN-800x1600-7K4`) — server-minted (`nextItemCode`) on insert / first PATCH / `POST /backfill-item-codes`; never typed, never reused (collision check includes soft-deleted rows). **Created 2026-10-27 via the Catalyst MCP: live col 69851000000425078, demo col 69851000000424107.** |
 | party_brand_name | varchar(255) | free text; picked from PartyBrand master (creatable) — **CR-393:** narrowed to the `design_buyer`'s brands + unassigned names |
 | pcs_per_box | int | **CR-391: the item's own** "Pcs Per Packing" — typed on the form, Size value = prefill only; never fanned out from Size any more |
 | box_weight_kg | double | nullable → uncalibrated for fit; Size default, per-item override on the Item form (CR-190); read first by planning + loading (Pallet weight = fallback) |
@@ -493,7 +494,7 @@ largest `total_boxes`.
 | payment_term | FK → PaymentTerm | SET-NULL |
 | address | text(10000) | |
 | shipping_address | text(10000) | CR-221 — edited on the SO form; carried from the quote on convert. Created 2026-09-19 (column id 69851000000291143). |
-| warehouse | bigint | **CR-453 — created on live 2026-10-26 via the Catalyst MCP (col 69851000000421082).** Logical FK → Warehouse node (a location, or a warehouse without locations) where the order's stock will sit. **Mandatory** once any Warehouse row exists: `requireLocation` in `createSalesOrder` (`/so-with-items`, `/convert-quote`) and `/update-so-with-items` refuses a blank (400 "Location is required") or unknown (404) node; null only on orders created before the column / before the first warehouse. Shown as **Location** on the SO form (\*) and detail header; `BLOCK_DELETE.Warehouse`. |
+| warehouse | bigint | **CR-453 — created on live 2026-10-26 via the Catalyst MCP (col 69851000000421082).** Logical FK → Warehouse node (a location, or a warehouse without locations) where the order's stock will sit. **Mandatory** once any Warehouse row exists: `requireLocation` in `createSalesOrder` (`/so-with-items`, `/convert-quote`) and `/update-so-with-items` refuses a blank (400 "Location is required") or unknown (404) node; null only on orders created before the column / before the first warehouse. Shown as **Location** on the SO form (\*) and detail header until **CR-468 (2026-10-27) reversed the rule:** optional on create / edit / convert (`rowidParam || null`), the SO form and header no longer show it; column kept, `BLOCK_DELETE.Warehouse` kept. |
 | manual_so_number | varchar(50) | blank→copy auto, set→never overwrite |
 | shipment_date | date | |
 | salesperson | varchar(160) | |

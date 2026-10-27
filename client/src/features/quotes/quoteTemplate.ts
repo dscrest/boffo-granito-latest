@@ -5,6 +5,7 @@
    quotePdf.ts (pdfmake), so copy and palette never drift apart.
    ============================================================ */
 import { getOrg, orgBankRows, orgContactLine, orgLegalName, orgLogoUrl, orgTaxLine } from "@/lib/org";
+import { imageDataUrl } from "@/lib/pdf";
 
 /** Template palette. */
 export const QP = {
@@ -120,24 +121,8 @@ export function termsList(terms?: string): string[] {
 
 /* Logo as a data URL for pdfmake — the org logo (CR-445), or "" when there is
    none (demo build with no saved logo, CR-454: builders print the brand name).
-   Cached per URL, so a newly uploaded logo is picked up; FileReader keeps the
-   real MIME (PNG or JPEG). */
-let logoCache: { url: string; promise: Promise<string> } | null = null;
+   Shares lib/pdf's per-URL image cache (CR-474), so a newly uploaded logo is picked up. */
 export function logoDataUrl(): Promise<string> {
   const url = orgLogoUrl();
-  if (!url) return Promise.resolve("");
-  if (!logoCache || logoCache.url !== url) {
-    logoCache = {
-      url,
-      promise: fetch(url)
-        .then((r) => r.blob())
-        .then((blob) => new Promise<string>((resolve, reject) => {
-          const fr = new FileReader();
-          fr.onload = () => resolve(String(fr.result));
-          fr.onerror = () => reject(new Error("Could not read logo"));
-          fr.readAsDataURL(blob);
-        })),
-    };
-  }
-  return logoCache.promise;
+  return url ? imageDataUrl(url) : Promise.resolve("");
 }

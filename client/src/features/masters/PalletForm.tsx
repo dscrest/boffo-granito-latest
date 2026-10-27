@@ -81,8 +81,9 @@ export function PalletForm({
   // until then a legacy row keeps the values it was saved with.
   const coverageSqm = picked ? picked.sqmPerBox : v.coverage_sqm;
   const coverageSqft = picked ? picked.sqftPerBox : v.coverage_sqft;
-  // Box weight: the Size value is only the DEFAULT — manually editable here
-  // (CR 2026-09-10); picking a size re-fills it (see the Combobox onChange).
+  // Box weight: the Size value, stored on the row for the Loaded Pallet Weight ƒx and the
+  // containerisation fallback. CR-471 removed the field (CR-133's override) — an old override
+  // on an edited pallet is kept as is.
   const boxWeightKg = v.box_weight_kg || (picked ? picked.boxWeightKg : 0);
 
   // Packing detail is formula-owned → "32 boxes" (boxes per pallet). A pallet
@@ -244,15 +245,7 @@ export function PalletForm({
                   title="Formula field: Total SQM per Box, from the selected Size"
                 />
               </label>
-              <label className="form-field">
-                <span className="lbl">Box Weight (kg)</span>
-                <NumberInput
-                  value={v.box_weight_kg || ""}
-                  onChange={(e) => setNum("box_weight_kg", e.target.value)}
-                  placeholder={picked?.boxWeightKg ? String(r2(picked.boxWeightKg)) : "0"}
-                  title="Defaults from the selected Size — type to override for this pallet"
-                />
-              </label>
+              {/* CR-471: no Box Weight field — the Size's weight is stored silently (see boxWeightKg above). */}
             </div>
             {v.size && coverageSqm === 0 && (
               <span className="dim" style={{ fontSize: "var(--t-sm)" }}>

@@ -202,7 +202,7 @@ export function ItemDetail() {
   const needle = q.trim().toLowerCase();
   const railRows = newestFirst(designs);
   const listed = needle
-    ? railRows.filter((d) => `${d.uniqueName || d.designName} ${d.sku}`.toLowerCase().includes(needle))
+    ? railRows.filter((d) => `${d.uniqueName || d.designName} ${d.itemCode} ${d.sku}`.toLowerCase().includes(needle))
     : railRows;
 
   // Order.design is the full unique label; the plain designName is the stock key
@@ -431,7 +431,7 @@ export function ItemDetail() {
                   {d.uniqueName || d.designName}
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  SKU: <span className="mono">{d.sku || "—"}</span>
+                  Code: <span className="mono">{d.itemCode || d.sku || "—"}</span>
                 </div>
               </Link>
             );
@@ -470,7 +470,7 @@ export function ItemDetail() {
                 </button>
               </div>
               <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 4, paddingBottom: 12, borderBottom: "1px solid var(--border)" }}>
-                SKU: <span className="mono">{design.sku || "—"}</span>
+                Code: <span className="mono">{design.itemCode || "—"}</span> · SKU: <span className="mono">{design.sku || "—"}</span>
                 {design.status && (
                   <span className={design.status === "Inactive" || design.status === "Discontinued" ? "dim" : ""} style={{ marginLeft: 10 }}>
                     · {design.status}
@@ -624,6 +624,7 @@ export function ItemDetail() {
               <div style={{ flex: "1 1 340px", minWidth: 280 }}>
                 <div className="form-section-title" style={{ marginBottom: 8 }}>Primary Details</div>
                 <DetailRow label="Unique Item Name" value={design.uniqueName || "—"} />
+                <DetailRow label="Item Code" value={design.itemCode || "—"} />
                 <DetailRow label="SKU" value={design.sku || "—"} />
                 <DetailRow label="Short Code" value={design.seqCode || "—"} />
                 <DetailRow label="Design Name" value={design.designName || "—"} />
