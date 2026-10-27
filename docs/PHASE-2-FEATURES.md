@@ -96,6 +96,11 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   the existing routes, total unchanged. Recorded ≈ 0.5 h · conventional ≈ 3 h.
 - **Cut-piece Adjust Stock: Item picker = stock row, no Cut Piece Size column** (CR-459, 2026-10-26, LIVE 2026-10-26). "Item" alone
   for a full-size piece, "Item · 600x600" for a special cut. ≈ 0.4 h.
+- **Stock rows open the cut piece, inside Panel Craft; no Image column** (CR-460, 2026-10-26, LIVE 2026-10-26). A ↳ row opens that
+  cut piece, the item row its full-size piece; nothing jumps to the Masters workspace any more. ≈ 0.3 h.
+- **Cut Piece detail page** (CR-461, 2026-10-26, LIVE 2026-10-26). `/cut-stock/:design/:cut`: on hand · booked · free · weight,
+  locations, panels using it, orders booking it, its own stock history; Actions = Add / Adjust / Transfer prefilled with
+  the piece + a Panel Item link. ≈ 1.5 h.
 - **Demo build shows no BOFFO branding** (CR-454, 2026-10-26). With `VITE_DEMO=1` the fallback profile is "Demo / Demo
   Company" (no address / contact / bank rows), PDFs print the brand name where the logo band would be, the login stays
   logo-free, sign-in errors say "No account for …", and the busy indicator is the label alone pulsing ("Processing…" by

@@ -37,6 +37,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
   const { warehouses } = useWarehouses();
   const [params] = useSearchParams();
   const fromDesign = params.get("design") || "";
+  const fromCut = params.get("cut") || ""; // CR-461: opened from a cut-piece detail → that piece, Back returns there
 
   useEffect(() => {
     void listDesigns().then((r) => r.ok && setDesigns(r.designs));
@@ -107,9 +108,9 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
       const have = atWh(l.design, l.second, takeFrom(h));
       return out > have ? `Only ${have} pcs on hand${takeFrom(h) ? " at that location" : ""} — this line will be refused` : undefined;
     };
-    const backTo = fromDesign ? `/panel-items/${encodeURIComponent(fromDesign)}` : transferring ? "/stock-transfers" : "/cut-stock";
+    const backTo = fromDesign && fromCut ? `/cut-stock/${encodeURIComponent(fromDesign)}/${encodeURIComponent(fromCut)}` : fromDesign ? `/panel-items/${encodeURIComponent(fromDesign)}` : transferring ? "/stock-transfers" : "/cut-stock";
     return { items, second, warnFor, backTo, atWh, lineWeight };
-  }, [transferring, receiving, designs, cutSizes, stockRows, entries, warehouses, fromDesign]);
+  }, [transferring, receiving, designs, cutSizes, stockRows, entries, warehouses, fromDesign, fromCut]);
 
   const sheetSpec = useMemo<StockEntrySpec>(
     () => ({
@@ -143,7 +144,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
       },
       backTo: shared.backTo,
       columnsKey: receiving ? "cutStockRecordSheetColumns" : "cutStockTransferSheetColumns",
-      initialRows: fromDesign ? [{ design: fromDesign }] : undefined,
+      initialRows: fromDesign ? [{ design: fromDesign, second: fromCut }] : undefined,
     }),
     [receiving, transferring, shared, fromDesign],
   );
@@ -166,7 +167,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
       .sort((a, b) => a.uniqueName.localeCompare(b.uniqueName));
     // `?design=` from the Panel Item page → that item's full-size piece, else its first piece.
     const mine = fromDesign ? stockRows.filter((r) => r.designId === fromDesign) : [];
-    const first = mine.find((r) => cutName.get(r.cutSizeId) === byId.get(fromDesign)?.sizeLabel) ?? mine[0];
+    const first = mine.find((r) => r.cutSizeId === fromCut) ?? mine.find((r) => cutName.get(r.cutSizeId) === byId.get(fromDesign)?.sizeLabel) ?? mine[0];
     return {
       title: "Adjust Stock",
       unit: "pcs",
@@ -195,7 +196,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
       backTo: shared.backTo,
       initialDesign: first ? `${first.designId}|${first.cutSizeId}` : undefined,
     };
-  }, [shared, fromDesign, designs, cutSizes, stockRows]);
+  }, [shared, fromDesign, fromCut, designs, cutSizes, stockRows]);
 
   if (!can("panel_craft", "edit")) return <EmptyState title="No access" hint="You don't have permission for this" />;
   return adjusting ? <StockAdjustForm spec={adjustSpec} /> : <StockEntrySheet spec={sheetSpec} />;

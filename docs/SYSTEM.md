@@ -205,7 +205,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/packing` · `/palletizing` · `/palletized` · `/packing/:id` | `stages/PalPlans` (×3, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization · Palletization Completed (recorded Ready for Loading rows: Load + Release) — CR-160, CR-360 |
 | `/packing/new[?fromOrder=<soId>]` · `/packing/:id/edit` · `/packing/:id/clone` | `stages/PalPlanFormPage.tsx` | CR-222: Palletization form page (New + Send to Palletization share it) |
 | `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading and Dispatch board |
-| `/panel-dashboard` · `/panel-items` → redirect `/masters?g=panel&m=panel_items` · `/panels` → redirect `/masters?g=panel&m=panels` · `/cut-piece-sizes` → redirect `/masters?g=panel&m=cut_piece_size` (CR-436) · `/panel-items/:designId` · `/cut-stock` · `/cut-stock/record` · `/cut-stock/adjust` · `/panels` · `/panels/new` · `/panels/:id/edit` · `/panels/:id/clone` · `/panels/:id` · `/panel-orders` | `panels/*` (`PanelFormPage.tsx` for the form routes, CR-285; `PanelDashboard`, `PanelItems` / `PanelItemDetail`, `CutStockSheetPage` for the CR-306…311 pages) | Panel Craft |
+| `/panel-dashboard` · `/panel-items` → redirect `/masters?g=panel&m=panel_items` · `/panels` → redirect `/masters?g=panel&m=panels` · `/cut-piece-sizes` → redirect `/masters?g=panel&m=cut_piece_size` (CR-436) · `/panel-items/:designId` · `/cut-stock` · `/cut-stock/:designId/:cutSizeId` (CR-461 `CutPieceDetail`) · `/cut-stock/record` · `/cut-stock/adjust` · `/panels` · `/panels/new` · `/panels/:id/edit` · `/panels/:id/clone` · `/panels/:id` · `/panel-orders` | `panels/*` (`PanelFormPage.tsx` for the form routes, CR-285; `PanelDashboard`, `PanelItems` / `PanelItemDetail`, `CutStockSheetPage` for the CR-306…311 pages) | Panel Craft |
 | `/panel-orders` (ONE register, Type = Panel \| Sample, CR-345) · `/panel-orders/new` + `/sample-orders/new` (`OrderFormPage`, type first) · `/sample-orders` → redirect `?type=Sample` · `/sample-orders/:id/edit` · `/sample-orders/:id/clone` · `/sample-orders/:id` · **`/panel-loading`** (CR-348) | `panels/Orders` · `OrderFormPage` · `SampleOrderFormPage` · `SampleOrderDetail` · `PanelLoading` · `PanelLoads` (Dispatch tab + Record Load) | Orders + Loading (CR-315…317, 345…348) |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
 | `/ops` | `ops/OperationsLog.tsx` | Audit log |
@@ -916,10 +916,14 @@ receiving, so import + stock is one Save); `/panel-items/:designId` is the ONE p
 `W x H` — **CR-449: never typed**, the add row shows it read-only and stores it) and removed (server: qty 0 and no
 `PanelLine` uses the pair). **CR-449:** the item page's Details tab is informative (cut pieces read-only · panels ·
 locations · history); the add row, ✕ and Add Stock · Adjust · Transfer sit on its **Actions** tab. `/cut-stock`
-(**sidebar "Stock" since CR-448**) is a two-level list: one row per ITEM (image · item · size · Σ on hand / booked /
+(**sidebar "Stock" since CR-448**) is a two-level list: one row per ITEM (item · size · Σ on hand / booked /
 free / stock weight) with its cut pieces beneath (`↳ <cut size>` rows, their own figures), every item open by
 default, chevron folds, search by item / size / cut size; CR-456: an item whose only piece is its full size is ONE
-plain row — chevron and ↳ rows appear only when it has another cut size. Stock moves ONLY through the bulk `StockEntrySheet`
+plain row — chevron and ↳ rows appear only when it has another cut size. **CR-460/461:** a row opens THAT cut piece's
+detail `/cut-stock/:design/:cut` (`CutPieceDetail.tsx` — item row = its full-size piece; no Image column), which stays
+inside Panel Craft: fields on hand · booked · free · weight, Locations, Panels using the piece, Orders booking it, its own
+Stock History; Actions = Add / Adjust / Transfer with `?design=&cut=` (the sheets prefill the piece and Back returns) + a
+Panel Item link to the master. Stock moves ONLY through the bulk `StockEntrySheet`
 ([`features/common/StockEntrySheet.tsx`](../client/src/features/common/StockEntrySheet.tsx), the
 `/prod/record` skin; pure `stockEntrySheetEdit.ts` with a self-check) for **Add Stock** (`/cut-stock/record`,
 receipt with an Entry date; CR-414: a line's missing pair is created with its `weight_kg`, an unweighed one

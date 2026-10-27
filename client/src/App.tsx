@@ -76,6 +76,7 @@ const PanelOrderFormPage = lazy(() => import("@/features/panels/PanelOrderFormPa
 const SampleOrderDetail = lazy(() => import("@/features/panels/SampleOrderDetail").then((m) => ({ default: m.SampleOrderDetail })));
 const SampleOrderFormPage = lazy(() => import("@/features/panels/SampleOrderFormPage").then((m) => ({ default: m.SampleOrderFormPage })));
 const CutStock = lazy(() => import("@/features/panels/CutStock").then((m) => ({ default: m.CutStock })));
+const CutPieceDetail = lazy(() => import("@/features/panels/CutPieceDetail").then((m) => ({ default: m.CutPieceDetail })));
 // CR-306…311: Panel Items (designs + cut pieces), the bulk cut-stock sheets, the Panel Craft dashboard.
 const PanelItemDetail = lazy(() => import("@/features/panels/PanelItemDetail").then((m) => ({ default: m.PanelItemDetail })));
 const CutStockSheetPage = lazy(() => import("@/features/panels/CutStockSheetPage").then((m) => ({ default: m.CutStockSheetPage })));
@@ -509,6 +510,7 @@ export default function App() {
             <Route path="/cut-stock/record" element={<CutStockSheetPage kind="receipt" />} />
             <Route path="/cut-stock/adjust" element={<CutStockSheetPage kind="adjustment" />} />
             <Route path="/cut-stock/transfer" element={<CutStockSheetPage kind="transfer" />} />
+            <Route path="/cut-stock/:designId/:cutSizeId" element={<CutPieceDetail />} /> {/* CR-461 */}
             <Route path="/pending-cut-stock" element={<PendingCutStock />} />
             <Route path="/panel-dashboard" element={<PanelDashboard />} />
             <Route path="/panel-loading" element={<PanelLoading />} />

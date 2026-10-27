@@ -24,6 +24,7 @@ import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
 import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, pendingNeedLines, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
+import { cutPiecePath } from "./CutPieceDetail";
 
 const dash = <span className="dim">—</span>;
 
@@ -205,9 +206,9 @@ export function PendingCutStock() {
               </thead>
               <tbody>
                 {pageRows.map((r) => {
-                  const open = () => navigate(`/panel-items/${encodeURIComponent(r.designId)}`);
+                  const open = () => navigate(cutPiecePath(r.designId, r.cutSizeId)); // CR-460: the cut piece, inside Panel Craft
                   return (
-                    <tr key={r.key} tabIndex={0} style={{ cursor: "pointer" }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & history">
+                    <tr key={r.key} tabIndex={0} style={{ cursor: "pointer" }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open cut piece — stock, locations & history">
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
                           {c.render!(r)}

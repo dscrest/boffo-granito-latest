@@ -15,6 +15,10 @@
   header — Mode of adjustment, Date, Reason, Description — over an Item Table: Item, Batch / Cut Piece Size, Location,
   Available, New on hand (updates as you type) and one signed Qty adjusted field ("+10" adds, "-10" removes). Date and
   Reason are entered once per adjustment, not per line. One line by default, "+ Add line" below.
+- **Opening a cut piece stays in Panel Craft (CR-460/461).** On Panel Craft ▸ Stock a cut-piece row now opens that cut
+  piece's own page (on hand, booked, free, weight, locations, panels using it, orders booking it, its stock history) with
+  the Stock menu still selected and Back returning to Stock; the item row opens its full-size piece. Add Stock, Adjust
+  Stock and Transfer on its Actions tab open prefilled with that piece. The grid has no Image column.
 - **No Cut Piece Size column on the cut-piece Adjust Stock (CR-459).** The Item list itself names the stock row:
   an item alone when only its full size is stocked, "Item · 600x600" for a special cut. Pick the row, enter the qty.
 - **Location Transfer from the same screen (CR-458).** The Mode switch offers Location Transfer: pick From and To, list the

@@ -98,7 +98,7 @@ export function StockTransfers() {
       out.push({
         id: e.id, code: e.docNumber, date: e.entryDate, unit: "pcs", designId: e.designId, design: d?.uniqueName || d?.designName || e.designId, size: d?.sizeLabel || "",
         second: cutName.get(e.cutSizeId) || "—", qty: -e.qty, fromId: e.warehouseId, toId: twin?.warehouseId ?? "", reason: e.reason, note: e.note,
-        performedBy: e.performedBy, createdTime: e.createdTime, itemPath: `/panel-items/${encodeURIComponent(e.designId)}`,
+        performedBy: e.performedBy, createdTime: e.createdTime, itemPath: `/cut-stock/${encodeURIComponent(e.designId)}/${encodeURIComponent(e.cutSizeId)}`, // CR-460
       });
     }
     return out;

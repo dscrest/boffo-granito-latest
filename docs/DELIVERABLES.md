@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 167 |
+| Completed | 168 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **212** |
+| **Total** | **213** |
 
 ## Foundation & workspace
 
@@ -202,6 +202,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Adjust Stock in the Zoho Books shape | Both Adjust Stock pages open with a header (Mode of adjustment, Date, Reason, Description) over an Item Table showing Available, New on hand and one signed Qty adjusted field per line; date and reason are entered once per adjustment. | Completed | 2026-10-26 | CR-457 |
 | Location Transfer from the Adjust Stock screen | Mode switch Quantity Adjustment / Location Transfer: pick From and To, list items and the quantity to move, save one Transfer Order (TRF number); total stock unchanged. Boxes and cut pieces. | Completed | 2026-10-26 | CR-458 |
 | Cut-piece Adjust Stock without a Cut Piece Size column | On the Panel Craft Adjust Stock screen the Item list names the stock row itself (the item alone for its full size, 'Item · 600x600' for a special cut); pick the row and enter the quantity. | Completed | 2026-10-26 | CR-459 |
+| Cut Piece detail page inside Panel Craft | Clicking a row on Panel Craft ▸ Stock opens that cut piece's own page (on hand, booked, free, weight, locations, panels using it, orders booking it, stock history) with the Stock menu still selected; Add / Adjust / Transfer open prefilled with the piece. The grid has no Image column. | Completed | 2026-10-26 | CR-460/461 |
 | Stock history in date order | The Panel Item Stock History and the Item master Production tab list entries by the date shown, newest first, then by when they were saved. | Completed | 2026-10-26 | CR-455 |
 
 ## Reports & audit

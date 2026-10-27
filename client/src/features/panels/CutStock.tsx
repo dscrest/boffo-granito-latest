@@ -6,8 +6,9 @@
    Booked / Free (CR-312) = what open panel orders hold vs what anyone may
    still book. Read-only grid over CutPieceStock; stock moves ONLY through
    the bulk sheets (Add Stock = /cut-stock/record, Adjust Stock =
-   /cut-stock/adjust) and the panel-order lifecycle. A row click opens the
-   item's Panel Items detail, where cut pieces live.
+   /cut-stock/adjust) and the panel-order lifecycle. CR-460: a row click opens
+   THAT cut piece's detail (/cut-stock/:design/:cut — the item row = its
+   full-size piece), staying inside Panel Craft; no Image column.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -19,11 +20,11 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { allocatedByKey, cachedCutStockRows, cachedPanelOrders, listCutStock, listPanelOrders, type CutStockRow, type PanelOrderRow } from "./panelOrdersApi";
 import { weightPerPc } from "./cutPieceWeight";
+import { cutPiecePath } from "./CutPieceDetail";
 
 const dash = <span className="dim">—</span>;
 const kg2 = (n: number) => Math.round(n * 100) / 100;
@@ -36,6 +37,7 @@ interface GridRow {
   design?: DesignRow;
   designName: string;
   sizeLabel: string;
+  cutSizeId: string; // item line: its full-size piece (the row that IS the item), else its first piece
   cutSizeName: string; // "" on an item line
   weightKg: number | null; // item: the full-piece ƒx; piece: stored weight
   qty: number;
@@ -48,9 +50,8 @@ interface GridRow {
 }
 
 const num = { className: "num mono", style: { textAlign: "right" as const } };
-// CR-448: Cut Piece Size rides in the Item cell (↳) — the own column is gone; key bumped to v4.
+// CR-448: Cut Piece Size rides in the Item cell (↳) — the own column is gone; CR-460: no Image column; key bumped to v5.
 const STOCK_COLUMNS: ColumnDef<GridRow>[] = [
-  { key: "image", label: "Image", style: { width: 44 }, render: (r) => (r.kind === "item" ? <ImageThumb images={r.design?.images ?? []} alt={r.designName} /> : null) },
   {
     key: "design",
     label: "Item",
@@ -85,7 +86,7 @@ export function CutStock() {
   const [query, setQuery] = usePersistedState("cutStock.query", "");
   const [designFilter, setDesignFilter] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // every item open unless folded here
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("cutStockColumns.v4", STOCK_COLUMNS, ["modified"]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("cutStockColumns.v5", STOCK_COLUMNS, ["modified"]);
 
   const load = async () => {
     setLoading(true);
@@ -121,6 +122,7 @@ export function CutStock() {
         design: d,
         designName: d ? d.uniqueName || d.designName : "",
         sizeLabel: d?.sizeLabel || "",
+        cutSizeId: r.cutSizeId,
         cutSizeName: cutName.get(r.cutSizeId) || "",
         weightKg: r.weightKg,
         qty: r.qty,
@@ -144,6 +146,7 @@ export function CutStock() {
           design: p0.design,
           designName: p0.designName,
           sizeLabel: p0.sizeLabel,
+          cutSizeId: (pieces.find((r) => r.cutSizeName === r.sizeLabel) ?? p0).cutSizeId,
           cutSizeName: "",
           weightKg: p0.design ? weightPerPc(p0.design) : null,
           qty: pieces.reduce((s, r) => s + r.qty, 0),
@@ -262,11 +265,11 @@ export function CutStock() {
               </thead>
               <tbody>
                 {pageRows.map((r) => {
-                  // Whole row opens the item's cut pieces; no row icons (CR-279).
-                  const open = () => navigate(`/panel-items/${encodeURIComponent(r.designId)}`);
+                  // Whole row opens that cut piece (CR-460); no row icons (CR-279).
+                  const open = () => navigate(cutPiecePath(r.designId, r.cutSizeId));
                   const folded = collapsed.has(r.id);
                   return (
-                    <tr key={`${r.kind}|${r.id}`} tabIndex={0} style={{ cursor: "pointer", fontWeight: r.kind === "item" ? 500 : undefined }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & history">
+                    <tr key={`${r.kind}|${r.id}`} tabIndex={0} style={{ cursor: "pointer", fontWeight: r.kind === "item" ? 500 : undefined }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open cut piece — stock, locations & history">
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
                           {c.key === "design" && r.kind === "item" && r.hasSpecial && (
