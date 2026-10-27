@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 168 |
+| Completed | 172 |
 | In progress | 19 |
 | Future | 26 |
-| **Total** | **213** |
+| **Total** | **217** |
 
 ## Foundation & workspace
 
@@ -42,6 +42,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Masters only under Settings, clearer tabs | The sidebar no longer lists Masters; the menu is Settings ▸ Masters ▸ Item / Panel / Export and the selected master tab is a highlighted pill. Old links and search still open it. | Completed | 2026-10-24 | CR-440 |
 | Names save as Title Case | Item, customer, contact, driver, transporter, supervisor, user and master names are stored as "Dhiraj Shah Of ABC Exports LLP" however typed — on every form, import and Zoho sync; short acronyms and LLP / LTD / PVT keep their capitals. | In progress |  | CR-429 |
 | Settings search everywhere | The header search (⌘K) finds settings pages and preferences for admins; the Settings search matches every typed word plus synonyms (godown, truck, login) and the Preferences rows. | Completed | 2026-10-24 | CR-408 |
+| Pager with First / Last arrows | Every list footer has « ‹ › » buttons — first, previous, next, last page — beside the page numbers; the range still shows the total. | Completed | 2026-10-27 | CR-467 |
+| Red close × on every window | The × that closes any window or drawer is red on every screen. | Completed | 2026-10-27 | CR-465 |
+| Advanced search date range fits the window | Created Between (and every other date range) sits inside the search window on all grids. | Completed | 2026-10-27 | CR-464 |
 | Title Case for the remaining name fields | Collection Name on the Item form, a container's vessel name, extra-address attention names and role names save as Title Case like every other name. | Completed | 2026-10-25 | CR-447 |
 | No long helper notes | Thirteen how-to paragraphs removed from under tables and cards; what blocks a row is said in its Status cell and tooltips. Standing rule: no multi-sentence instructions in the app. | Completed | 2026-10-24 | CR-416 |
 | Kanban hidden app-wide | Packing, Panel Orders, Sales Orders and Production show the Sheet only; the Default view setting is hidden with it. | Completed | 2026-10-24 | CR-418 |
@@ -86,6 +89,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Sync never creates a twin; duplicate names are an error | The existing-customer lookup reads every customer; a CRM account whose name already belongs to another linked customer is reported as a duplicate and not created; CRM comes first. | Completed | 2026-10-22 | CR-372 |
 | Duplicate customers card | Settings ▸ Zoho CRM ▸ Duplicate customers: Find duplicates → Merge N duplicates (quotes, orders, panel and sample orders move to the surviving customer; reused codes renewed). Import all refuses to run while duplicates exist. | Completed | 2026-10-22 | CR-373 |
 | Zoho item reference | Link items to the Zoho item master. Blocked — reference layout never supplied. | Future |  | CR-013.2 |
+| New customer menu: From Zoho CRM / Refresh from Zoho CRM | New customer stays one click; the arrow beside it offers From Zoho CRM (prefill from a CRM account) and, for admins, Refresh from Zoho CRM. The Active / Inactive pills above the grid are gone — use Working Status in Search Customers. | Completed | 2026-10-27 | CR-463/466 |
 
 ## Quotes & Approvals
 

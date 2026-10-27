@@ -91,8 +91,8 @@ export function OrderDrawer({ order: initial, onClose }: { order: Order; onClose
               <Icon name="palette" size={13} />
               Send to Palletisation
             </button>
-            <button className="iconbtn" title="Close" onClick={onClose} style={{ fontSize: 18 }}>
-              ×
+            <button className="btn x" title="Close" onClick={onClose}>
+              ✕
             </button>
           </div>
         </div>

@@ -146,16 +146,23 @@ export function GridFooter(p: Pager) {
         {p.from}–{p.to} of {p.total}
       </span>
       <div className="row" style={{ gap: 4, alignItems: "center" }}>
-        <button className="btn" disabled={p.page <= 1} onClick={() => p.setPage(p.page - 1)}>
-          ‹ Prev
+        {/* CR-467: First / Prev / Next / Last as arrows. */}
+        <button className="btn pg-nav" disabled={p.page <= 1} onClick={() => p.setPage(1)} title="First page" aria-label="First page">
+          «
+        </button>
+        <button className="btn pg-nav" disabled={p.page <= 1} onClick={() => p.setPage(p.page - 1)} title="Previous page" aria-label="Previous page">
+          ‹
         </button>
         {pageWindow(p.page, p.pageCount).map((n) => (
           <button key={n} className={`btn${n === p.page ? " active" : ""}`} onClick={() => p.setPage(n)}>
             {n}
           </button>
         ))}
-        <button className="btn" disabled={p.page >= p.pageCount} onClick={() => p.setPage(p.page + 1)}>
-          Next ›
+        <button className="btn pg-nav" disabled={p.page >= p.pageCount} onClick={() => p.setPage(p.page + 1)} title="Next page" aria-label="Next page">
+          ›
+        </button>
+        <button className="btn pg-nav" disabled={p.page >= p.pageCount} onClick={() => p.setPage(p.pageCount)} title="Last page" aria-label="Last page">
+          »
         </button>
         <select
           className="pg-size"

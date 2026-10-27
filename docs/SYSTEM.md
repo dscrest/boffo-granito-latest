@@ -148,7 +148,7 @@ plus `PalletisedBatch` / `PalletisedBatchLine` / `ContainerLoading` (legacy — 
 | **Batch** | A production run of one item, numbered `B/YYYY-MM/NNN` (series per item per calendar month; format changed 2026-09-04, older batches keep `B/FY/NNN`). Unique per item always; cross-item reuse is allowed by default, controlled by `AppSetting.allow_duplicate_batches`. |
 | **PalPlan** | A `PalletizationPlan`, numbered `PAL/FY/NNN`. Can span multiple sales orders. |
 | **LoadBox** | A vehicle/container slot that boxes are loaded into. Cross-plan. Numbered `LOAD/FY/NNN` (`load_number`, since 2026-09-04; the MAX-scan uses ZCQL's `*` wildcard — `%` matches nothing, CR-209; older boxes fall back to vehicle / "Container N"). One LoadBox = one container; a multi-container loading plan groups sibling LoadBoxes via `load_plan.group`. |
-| **Customer** | Always "Customer" in the UI — never "Party", despite `Parties.tsx`. |
+| **Customer** | Always "Customer" in the UI — never "Party", despite `Parties.tsx`. Customers toolbar (CR-463/466): no status pills — Working Status is a field of the Search Customers modal; **New customer** + a caret `MoreMenu` (From Zoho CRM picker; Admin-only Refresh from Zoho CRM = `POST /zoho/crm/sync`). |
 | **Shade** | **Retired 2026-08-29.** Columns still exist on `ProductionLog`, `PalletisedBatch` and `PalletisedBatchLine`; nothing reads or writes them. Batch is the only dimension. |
 
 ---
@@ -1473,7 +1473,7 @@ card ("Next:"), Send to Loading and the Load dialog use it; an empty pick list n
 `boxStatusOf(box, lineCount)` (`palPlansApi.ts`), nowhere else.
 
 **Grids** — every list grid: one-line rows (`.nw` / `.clip`, cap on the span, not the `td`);
-footer pager; data-driven column defs with show/hide **and** reorder (`useColumns`, icon-only
+footer pager (`GridFooter`: "x–y of z" + « ‹ pages › » First / Prev / Next / Last arrow buttons, CR-467); data-driven column defs with show/hide **and** reorder (`useColumns`, icon-only
 `ColumnPicker`); advanced-search modal; Created/Modified hidden by default; **whole row** clicks
 through to the detail page; newest-first default sort (`useSortRows(..., "created", -1)`).
 **Customer → Design lead, system numbers hidden (CR-355, global since 2026-10-19):** the default

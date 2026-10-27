@@ -3,6 +3,21 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-27 — Customers toolbar, advanced-search dates, red close ×, pager arrows (CR-462…467) — CR-462 LIVE 2026-10-27, rest BUILT, deploy pending
+
+- **Search results readable (CR-462).** In the ⌘K search the kind label (CUSTOMER, ITEM, ORDER…) no longer runs into the
+  record name.
+- **Customers: status pills gone (CR-463).** The All / Active / Inactive buttons above the Customers grid are removed; filter
+  by Working Status in the Search Customers window instead (nothing ticked = all).
+- **Created Between fits the window (CR-464).** In every advanced-search window the two date fields of a date range now sit
+  inside the window instead of the second one spilling past the edge.
+- **Red close × (CR-465).** The × that closes any window or drawer is red everywhere; remove-row ✕ buttons are red too.
+- **New customer menu (CR-466).** New customer stays one click. The small arrow beside it opens From Zoho CRM (pick a CRM
+  account to prefill the form) and, for admins, Refresh from Zoho CRM (the same pull as Settings ▸ Zoho ▸ Refresh now).
+  The separate From Zoho CRM button is gone.
+- **Pager arrows with First / Last (CR-467).** Every list footer now has « ‹ › » buttons: first page, previous, next, last.
+  The "1–25 of 2017" range still shows the total.
+
 ## 2026-10-26 — Stock history order, Stock tree, Adjust Stock in the Zoho Books shape with Location Transfer (CR-455…458) — LIVE 2026-10-26
 
 - **Stock history in date order (CR-455).** The Panel Item page's Stock History and the Item master's Production tab list

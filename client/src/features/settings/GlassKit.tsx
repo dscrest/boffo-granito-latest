@@ -66,7 +66,7 @@ export function GlassKit() {
           <button className="btn active">Selected</button>
           <button className="btn danger">Danger</button>
           <button className="btn" disabled>Disabled</button>
-          <button className="btn x" title="Icon only"><Icon name="columns" size={13} /></button>
+          <button className="btn x plain" title="Icon only"><Icon name="columns" size={13} /></button>
           <button className="pc-ibtn" title="Toolbar icon"><Icon name="filter" size={13} /></button>
           <button className="hbtn"><Icon name="plus" size={13} /> Header button</button>
           <button className="linkish">Link-ish text</button>

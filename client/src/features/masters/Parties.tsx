@@ -12,16 +12,19 @@ import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter"
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
 import { ProgressBar } from "@/ui/primitives";
 import { Chip } from "@/ui/Chip";
-import { can } from "@/lib/auth";
+import { can, isAdmin } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { fmtDateTime, pct } from "@/lib/format";
 import { useOrders } from "@/features/orders/useOrders";
 import {
+  invalidateCustomers,
   listCustomers,
   type CustomerRow,
 } from "./customersApi";
 import { ZohoSearchModal } from "./ZohoSearchModal";
-import { ZOHO, ZOHO_LINK, type ZohoLink } from "./zohoApi";
+import { ZOHO, ZOHO_LINK, syncZoho, type ZohoLink } from "./zohoApi";
+import { MoreMenu } from "@/features/common/DetailBits";
+import { toast } from "@/ui/Toast";
 
 type Row = {
   key: string;
@@ -110,8 +113,6 @@ export function PartiesView() {
   const [filterField, setFilterField] = usePersistedState<"" | keyof Row>("parties.filterField", "");
   const [filterValue, setFilterValue] = usePersistedState("parties.filterValue", "");
   const [criteria, setCriteria] = usePersistedState<FilterCriteria>("parties.criteria", {});
-  // CR-378: segmented Working Status quick filter (All / Active / Inactive) in the toolbar.
-  const [seg, setSeg] = usePersistedState<"all" | "active" | "inactive">("parties.seg", "all");
   const { ordered, visible, hidden, toggle, move, customised } = useColumns("partiesTableColumns.v2", PARTY_COLUMNS, ["created", "modified", "code"]) // .v2 (CR-355);
 
   const load = () => {
@@ -127,6 +128,20 @@ export function PartiesView() {
     });
   };
   useEffect(load, []);
+
+  // CR-466: pull every CRM account into the Customer master (server route is admin-only).
+  const refreshFromZoho = async () => {
+    setLoading(true);
+    try {
+      const r = await syncZoho();
+      invalidateCustomers();
+      if (r.note) toast.info(r.note);
+      else toast.success(`Refreshed — ${r.created} new, ${r.updated} updated, ${r.linked} linked`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Refresh failed");
+    }
+    load();
+  };
 
   const base = useMemo<Row[]>(
     () =>
@@ -172,13 +187,12 @@ export function PartiesView() {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const quick = base.filter((r) => {
-      if (seg !== "all" && r.active !== (seg === "active")) return false;
       if (filterField && filterValue && String(r[filterField]) !== filterValue) return false;
       if (!q) return true;
       return `${r.name} ${r.code} ${r.country}`.toLowerCase().includes(q);
     });
     return applyFilters(quick, criteria, filterFields);
-  }, [base, query, filterField, filterValue, criteria, filterFields, seg]);
+  }, [base, query, filterField, filterValue, criteria, filterFields]);
 
   // Sort get handles column keys that don't map 1:1 onto Row fields.
   const sort = useSortRows(
@@ -188,11 +202,7 @@ export function PartiesView() {
     "created",
     -1, // newest first
   );
-  const pager = usePagination(rows.length, "partiesPageSize", `${seg}|${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
-  const segCounts = useMemo(() => {
-    const active = base.filter((r) => r.active).length;
-    return { all: base.length, active, inactive: base.length - active };
-  }, [base]);
+  const pager = usePagination(rows.length, "partiesPageSize", `${query}|${filterField}|${filterValue}|${JSON.stringify(criteria)}`);
 
   const filterValues = useMemo(() => {
     if (!filterField) return [];
@@ -244,14 +254,6 @@ export function PartiesView() {
             </select>
           )}
           <div style={{ flex: 1 }} />
-          <div className="seg" role="group" aria-label="Working status">
-            {(["all", "active", "inactive"] as const).map((k) => (
-              <button key={k} type="button" className={`seg-btn${seg === k ? " on" : ""}`} aria-pressed={seg === k} onClick={() => setSeg(k)}>
-                {k === "all" ? "All" : k === "active" ? "Active" : "Inactive"}
-                <span className="badge">{segCounts[k]}</span>
-              </button>
-            ))}
-          </div>
           <span className="gsearch">
             <Icon name="search" size={13} />
             <input
@@ -265,15 +267,20 @@ export function PartiesView() {
           <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
           {can("customers", "create") && (
             <>
-              {/* CR-325/359: pick a Zoho customer → New customer form prefilled from it. */}
-              <button className="hbtn" onClick={() => setZohoOpen(true)} title={`Create a customer from a ${ZOHO.label} ${ZOHO.noun}`}>
-                <Icon name="refresh" size={13} />
-                From {ZOHO.label}
-              </button>
               <button className="hbtn primary" onClick={() => navigate("/parties/new")}>
                 <Icon name="plus" size={13} />
                 New customer
               </button>
+              {/* CR-466: caret menu beside New customer — CR-325/359 pick-a-Zoho-record, and the admin-only CRM sync (same as Settings ▸ Zoho ▸ Refresh now). */}
+              <MoreMenu
+                kebab
+                icon="chev-d"
+                title="More ways to add"
+                items={[
+                  { label: `From ${ZOHO.label}`, title: `Create a customer from a ${ZOHO.label} ${ZOHO.noun}`, onClick: () => setZohoOpen(true) },
+                  ...(isAdmin() ? [{ label: `Refresh from ${ZOHO.label}`, onClick: refreshFromZoho }] : []),
+                ]}
+              />
             </>
           )}
         </div>

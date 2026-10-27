@@ -53,7 +53,7 @@ export function InfoTag({ label, title, children, width = 320 }: { label?: React
   return (
     <span ref={ref} style={{ display: "inline-flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       {label != null && <span>{label}</span>}
-      <button type="button" className="btn x" style={{ width: 22, height: 22, padding: 0 }} title={title} aria-label={title} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="btn x plain" style={{ width: 22, height: 22, padding: 0 }} title={title} aria-label={title} aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <Icon name="info" size={13} />
       </button>
       {open && createPortal(

@@ -110,6 +110,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 /* Icon-only variant (close ×, row kebab ⋮) — square with the icon centered;
    the text-button 0 11px padding made a lone icon read as a lopsided box. */
 .btn.x { width: 34px; height: 34px; padding: 0; justify-content: center; flex-shrink: 0; }
+/* CR-465: every close / remove × reads red. `.plain` exempts the icon-only
+   triggers that reuse the square (MoreMenu kebab, InfoCard (i)); the :hover
+   twin out-specifies the glass skin's .btn:hover colour. */
+.btn.x:not(.plain), .btn.x:not(.plain):hover { color: var(--c-red); }
 
 /* GridFooter page-size select — native selects are only skinned inside
    .form-field/.modal-panel, so this one matches the .btn chrome beside it. */

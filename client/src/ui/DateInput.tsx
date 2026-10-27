@@ -85,7 +85,7 @@ export function DateInput({ value = "", onChange, min, max, style, disabled, ...
   const sel: CSSProperties = { fontSize: 12, height: 24, padding: "0 20px 0 6px", backgroundPosition: "right 5px center" };
 
   return (
-    <div ref={ref} style={{ position: "relative", display: "inline-flex", width: style?.width ?? 150 /* fits dd/mm/yyyy; callers widen explicitly */ }}>
+    <div ref={ref} style={{ position: "relative", display: "inline-flex", width: style?.width ?? (style?.flex ? undefined : 150) /* fits dd/mm/yyyy; callers widen explicitly or pass flex */, flex: style?.flex, minWidth: style?.minWidth }}>
       <input
         type="text"
         inputMode="numeric"
@@ -96,7 +96,7 @@ export function DateInput({ value = "", onChange, min, max, style, disabled, ...
         onChange={(e) => setText(e.target.value)}
         onBlur={commitText}
         onKeyDown={(e) => { if (e.key === "Enter") { commitText(); setPos(null); } if (e.key === "Escape") setPos(null); }}
-        style={{ ...style, width: style?.width ? "100%" : style?.width, paddingRight: 28 }}
+        style={{ ...style, flex: undefined, minWidth: 0, width: style?.width || style?.flex ? "100%" : undefined, paddingRight: 28 }}
         {...rest}
       />
       <button

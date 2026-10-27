@@ -76,7 +76,7 @@ export function MoreMenu({ items, kebab, label, icon, title }: {
   if (items.length === 0) return null;
   return (
     <div className="hdr-pop" ref={ref}>
-      <button className={kebab ? "btn x" : "hbtn"} onClick={() => setOpen((v) => !v)} title={title ?? "More actions"}>
+      <button className={kebab ? "btn x plain" : "hbtn"} onClick={() => setOpen((v) => !v)} title={title ?? "More actions"}>
         {kebab ? <Icon name={icon ?? "more-v"} size={14} /> : <>{label ?? "More"} <Icon name="more" size={13} /></>}
       </button>
       {open && createPortal(
