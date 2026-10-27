@@ -292,7 +292,7 @@ a { color: inherit; text-decoration: none; }
 }
 .header .search-hit.active { background: var(--hover); }
 .header .search-hit-kind {
-  flex-shrink: 0; width: 58px;
+  flex-shrink: 0; min-width: 58px; white-space: nowrap;
   font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;
   color: var(--dim);
 }
