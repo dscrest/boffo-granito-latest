@@ -102,12 +102,12 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   locations, panels using it, orders booking it, its own stock history; Actions = Add / Adjust / Transfer prefilled with
   the piece + a Panel Item link. ≈ 1.5 h.
 - **⌘K kind label no longer overlaps the name** (CR-462, 2026-10-27, LIVE 2026-10-27). ≈ 0.1 h.
-- **Customers: All / Active / Inactive pills removed; status lives in Search Customers** (CR-463, 2026-10-27). ≈ 0.2 h.
-- **Advanced search: Created Between fits the modal** (CR-464, 2026-10-27). DateInput wrapper honours flex — fixes every
+- **Customers: All / Active / Inactive pills removed; status lives in Search Customers** (CR-463, 2026-10-27, LIVE 2026-10-27). ≈ 0.2 h.
+- **Advanced search: Created Between fits the modal** (CR-464, 2026-10-27, LIVE 2026-10-27). DateInput wrapper honours flex — fixes every
   date-range field app-wide. ≈ 0.3 h.
-- **Red close × on every modal / drawer** (CR-465, 2026-10-27). One `.btn.x` rule, menu / info triggers exempted. ≈ 0.3 h.
-- **New customer ▾ menu: From Zoho CRM + Refresh from Zoho CRM (admin)** (CR-466, 2026-10-27). ≈ 0.5 h.
-- **Footer pager: First / Last + arrow buttons on all grids** (CR-467, 2026-10-27). ≈ 0.3 h.
+- **Red close × on every modal / drawer** (CR-465, 2026-10-27, LIVE 2026-10-27). One `.btn.x` rule, menu / info triggers exempted. ≈ 0.3 h.
+- **New customer ▾ menu: From Zoho CRM + Refresh from Zoho CRM (admin)** (CR-466, 2026-10-27, LIVE 2026-10-27). ≈ 0.5 h.
+- **Footer pager: First / Last + arrow buttons on all grids** (CR-467, 2026-10-27, LIVE 2026-10-27). ≈ 0.3 h.
 - **Demo build shows no BOFFO branding** (CR-454, 2026-10-26). With `VITE_DEMO=1` the fallback profile is "Demo / Demo
   Company" (no address / contact / bank rows), PDFs print the brand name where the logo band would be, the login stays
   logo-free, sign-in errors say "No account for …", and the busy indicator is the label alone pulsing ("Processing…" by

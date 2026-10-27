@@ -3,7 +3,7 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
-## 2026-10-27 — Customers toolbar, advanced-search dates, red close ×, pager arrows (CR-462…467) — CR-462 LIVE 2026-10-27, rest BUILT, deploy pending
+## 2026-10-27 — Customers toolbar, advanced-search dates, red close ×, pager arrows (CR-462…467) — LIVE + DEMO 2026-10-27
 
 - **Search results readable (CR-462).** In the ⌘K search the kind label (CUSTOMER, ITEM, ORDER…) no longer runs into the
   record name.
