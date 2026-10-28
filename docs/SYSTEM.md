@@ -1176,7 +1176,8 @@ the load shrinks the booking, `/panel-load-delete` restores it, an edit while `N
 `boxes: {design: [{batch_number, qty_boxes}]}` (absolute per item, ≤ need, ≤ free + own); the load consumes the
 claim oldest batch first and writes signed `adjust` rows (reason "Sample / Display", `request_group`
 `smp-load-<PanelLoad>`), `/panel-load-delete` reverses them; `SampleOrder.allocation["<design>|full"]` mirrors Σ.
-Client: `sampleBoxRequirements` rows (Piece "Full tile · boxes", per-row Book… → `SampleBoxModal`), Ready once
+Client: `sampleBoxRequirements` rows (Piece "Full tile · boxes"); ONE Allocate Stock window (`SampleAllocateModal`:
+cut rows in pcs + full items with batches in boxes, one Save = `allocateSample` with `allocation` + `boxes`), Ready once
 booked; `productionApi.sampleClaimEntries` + `designStock({ sampleClaimed })` keep Item detail / line stock / Reports
 free figures honest. `allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
 Free / Booked reader (Cut Stock, item detail, panel order detail, Orders, dashboard, Pending Cut Stock) count

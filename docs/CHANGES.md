@@ -6,7 +6,8 @@
 ## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28
 
 - **Full tiles book boxes (CR-488).** A sample order's full-tile line now shows on the Requirements card in boxes
-  (the pending pieces at the item's pieces per box) with Book… on the row: pick the batches, book or release.
+  (the pending pieces at the item's pieces per box). The one Allocate Stock window lists every line: pieces for
+  cut-piece lines, batches under each full-tile item; pick, book or release, one Save.
   The row is Ready only once its boxes are booked, and the load is refused until then. The load takes the booked
   boxes out of stock as a "Sample / Display" adjustment (what the godown wrote off by hand); deleting the load
   puts them back. Boxes booked to a sample are no longer free for a Sales Order, and the item page, line stock
