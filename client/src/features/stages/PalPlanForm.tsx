@@ -174,7 +174,7 @@ export function PalPlanForm({
       if (!o) {
         o = {
           salesOrderId: l.salesOrderId,
-          label: [l.soNumber, l.customerName].filter(Boolean).join(" · ") || l.salesOrderId,
+          label: [l.poNumber || l.soNumber, l.customerName].filter(Boolean).join(" · ") || l.salesOrderId,
           customerId: l.customerId,
           customerName: l.customerName,
           portOfDischarge: "",

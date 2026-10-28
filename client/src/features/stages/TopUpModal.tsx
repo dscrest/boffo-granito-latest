@@ -87,7 +87,7 @@ export function TopUpModal({
           <div style={{ marginBottom: 10 }}>
             <div className="design-name">{target.designLabel}</div>
             <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
-              {[target.customerName, target.soNumber, target.palletName].filter(Boolean).join("  ·  ") || "—"}
+              {[target.customerName, target.poNumber || target.soNumber, target.palletName].filter(Boolean).join("  ·  ") || "—"}
             </div>
             <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
               {target.batchNumber && (
@@ -129,7 +129,7 @@ export function TopUpModal({
                     </td>
                     <td>
                       <span className="mono" style={{ fontWeight: 600 }}>{d.itemCode}</span>
-                      <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{d.soNumber || "—"}</div>
+                      <div className="dim" style={{ fontSize: "var(--t-sm)" }}>{d.poNumber || d.soNumber || "—"}</div>
                     </td>
                     <td>
                       {d.batchNumber ? (

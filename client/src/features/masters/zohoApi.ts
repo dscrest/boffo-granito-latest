@@ -50,11 +50,18 @@ export interface ZohoStatus {
 }
 
 /** One sync run (or one import page) as the server reports it. */
+export interface ImportCursor {
+  token: string;
+  offset: number;
+}
+
 export interface SyncSummary {
   provider: string;
   mode: "refresh" | "import";
   page: number;
   done: boolean;
+  /** CR-477: import only — opaque; pass it back on the next call, null when done. */
+  cursor?: ImportCursor | null;
   created: number;
   updated: number;
   linked: number;
@@ -119,8 +126,9 @@ export const getZohoRecord = (id: string): Promise<{ record: unknown; mapped: Pa
 
 /** Admin: the incremental pull (same as the webhook / cron). */
 export const syncZoho = (): Promise<SyncSummary> => apiPost<SyncSummary>(`${base}/sync`, {});
-/** Admin: one page of the one-time import; call again with page+1 until `done`. */
-export const importZohoPage = (page: number): Promise<SyncSummary> => apiPost<SyncSummary>(`${base}/import`, { page });
+/** Admin: one chunk of the full import; call again with the returned `cursor` until `done` (CR-477). */
+export const importZohoPage = (page: number, cursor: ImportCursor | null): Promise<SyncSummary> =>
+  apiPost<SyncSummary>(`${base}/import`, { page, cursor });
 /** Create (unlinked) or update (linked) the customer's remote record. */
 export const pushCustomerToZoho = (rowid: string): Promise<{ id: string; created: boolean }> =>
   apiPost<{ ok: boolean; id: string; created: boolean }>(`${base}/push/${encodeURIComponent(rowid)}`, {});

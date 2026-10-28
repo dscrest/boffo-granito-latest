@@ -78,14 +78,14 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
     { key: "design", label: "Design", className: "nw", render: (g) => <span className="design-name">{g.designSummary}</span> },
     {
       key: "order",
-      label: "Order",
+      label: "PO Number", // CR-482: the customer's PO leads; SO Number is the hidden last column
       className: "mono nw",
       render: (g) =>
         g.independent ? (
           <span className="chip" title="No Sales Order — make-to-stock">Independent</span>
         ) : (
           <Link className="linkish" to={`/orders/${g.salesOrderId}`} onClick={(ev) => ev.stopPropagation()} title="Open Sales Order">
-            {g.orderNumber || g.poNumber || "—"}
+            {g.poNumber || g.orderNumber || "—"}
           </Link>
         ),
     },
@@ -144,6 +144,7 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
         </Link>
       ),
     },
+    { key: "so", label: "SO Number", className: "mono nw dim", render: (g) => (g.independent ? "—" : g.orderNumber || "—") }, // CR-482: hidden last
   ];
 }
 
@@ -152,7 +153,8 @@ function prodSortVal(g: ProductionRequestGroup, k: string): string | number {
   switch (k) {
     case "code": return g.code;
     case "design": return g.designSummary;
-    case "order": return g.independent ? "Independent" : g.orderNumber || g.poNumber || "";
+    case "order": return g.independent ? "Independent" : g.poNumber || g.orderNumber || "";
+    case "so": return g.independent ? "" : g.orderNumber || "";
     case "customer": return g.customer;
     case "date": return g.date || "";
     case "stage": return PRODUCTION_STAGE_ORDER.indexOf(g.stage);
@@ -230,7 +232,7 @@ export function ProductionTable() {
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
   // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
   // .v3 (CR-236): Batch + Mfg Date columns.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v5", COLS, ["items", "created", "modified", "code", "batch", "mfg"]); // .v5 (CR-390): Batch / Mfg Date hidden (empty on group rows; the Sheet shows them)
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v6", COLS, ["items", "created", "modified", "code", "batch", "mfg", "so"]); // .v5 (CR-390): Batch / Mfg Date hidden (empty on group rows; the Sheet shows them); .v6 (CR-482): PO Number leads, SO Number hidden last
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -299,7 +301,7 @@ export function ProductionTable() {
         d === "date" ? (g.date || "").slice(0, 10) || "—"
         : d === "item" ? g.designSummary || "—"
         : d === "customer" ? g.customer || "—"
-        : d === "order" ? g.orderNumber || g.poNumber || (g.independent ? "Independent" : "—")
+        : d === "order" ? g.poNumber || g.orderNumber || (g.independent ? "Independent" : "—")
         : g.entries[0]?.size || "—",
       )
       .join("  ›  ");
@@ -752,7 +754,7 @@ export function ProductionTable() {
                           <td><span className="design-name">{g.designSummary}</span></td>
                           <td className="mono nw">{batchCell(rec)}</td>
                           <td className="mono muted nw">{mfgCell(rec)}</td>
-                          <td className="mono">{g.independent ? "Independent" : g.orderNumber || g.poNumber || "—"}</td>
+                          <td className="mono">{g.independent ? "Independent" : g.poNumber || g.orderNumber || "—"}</td>
                           <td className="num mono" style={{ textAlign: "right" }}>
                             {i > 0 ? null : editMode ? (
                               <NumberInput

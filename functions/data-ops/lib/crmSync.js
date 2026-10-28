@@ -5,8 +5,8 @@
  *
  *   listChanged  GET /Accounts?fields=…&sort_by=Modified_Time&sort_order=desc with
  *                If-Modified-Since: <watermark> (304 = nothing changed — one cheap call).
- *                Import pages (25) run without the header.
- *                ponytail: page-based paging stops at 2 000 accounts; page_token if the org is bigger.
+ *                Import pages (200) run without the header and walk `page_token`s (CR-477 — page
+ *                numbers stop at record 2 000; tokens reach 100 000, valid 24 h).
  *   fetch        GET /Accounts/{id} + GET /Accounts/{id}/Contacts (contact persons)
  *                + CR-362: Books GET /contacts?zcrm_account_id={id} when Books is connected — Zoho's own
  *                CRM ⇄ Books integration stamps that id, so the hit's contact_id → books_contact_id
@@ -238,17 +238,24 @@ const adapter = {
   name: "crm",
   label,
   linkColumn,
-  async listChanged(ctx, { watermark, full, page, perPage }) {
+  /* CR-477: the full import pages by `page_token` (page numbers stop at record 2 000); a token is bound
+     to the request it came from, so fields / sort / per_page never change between pages. */
+  async listChanged(ctx, { watermark, full, perPage, token }) {
     const fields = ["id", "Account_Name", "Modified_Time"].join(",");
-    const path = `/Accounts?fields=${fields}&sort_by=Modified_Time&sort_order=desc&per_page=${perPage}&page=${full ? page : 1}`;
+    const base = `/Accounts?fields=${fields}&sort_by=Modified_Time&sort_order=desc&per_page=${perPage}`;
+    const path = full && token ? `${base}&page_token=${q(token)}` : `${base}&page=1`;
     const headers = !full && watermark ? { "If-Modified-Since": watermark } : undefined;
     const data = await crm(ctx, path, { headers });
-    if (data.notModified) return { hits: [], hasMore: false };
+    if (data.notModified) return { hits: [], hasMore: false, next: "" };
+    const info = data.info || {};
     return {
       hits: (data.data || []).map((a) => ({ id: s(a.id), name: s(a.Account_Name), modified: s(a.Modified_Time) })),
-      hasMore: !!(data.info && data.info.more_records),
+      hasMore: !!info.more_records,
+      next: s(info.next_page_token),
     };
   },
+  /** CR-477: which already-imported rows the import still owes a Books check (the rest cost nothing). */
+  needsRecheck: (row) => !!s(row.crm_account_id) && !s(row.books_contact_id),
   async loadAux(ctx) {
     const [terms, fieldMap, books] = await Promise.all([
       core.loadTerms(ctx.catalyst, ctx.rowList),

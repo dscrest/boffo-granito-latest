@@ -104,7 +104,7 @@ export function SendToLoadingModal({
       .sort((a, b) => Number(b[0]) - Number(a[0]))
       .map(([id, v]) => ({
         value: id,
-        label: v.o.orderNumber || v.o.poNumber || id,
+        label: v.o.poNumber || v.o.orderNumber || id,
         hint: [v.o.party, soStatusLabel(v.o.status || "Confirmed")].filter(Boolean).join(" · "),
         badge: `${fmt(v.remaining)} boxes left`,
       }));

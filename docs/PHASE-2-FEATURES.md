@@ -114,6 +114,9 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   default) — no wordmark. Live keeps the wordmark, spelling the organization's name. Demo seeds use the brand "Stonecraft".
   ≈ 1 h.
 
+- **PO number leads on every stage screen** (CR-482, 2026-10-28). Palletization, Loading, Dispatch, Production, the
+  pipeline and every stage modal show the customer's PO; the SO number is a hidden last column; prints keep the SO. ≈ 1.5 h.
+
 ## 2 · Masters (Inventory)
 
 - **Pallet form without Box Weight** (CR-471, 2026-10-27). New / Edit Pallet no longer shows the Box Weight field; the
@@ -180,6 +183,13 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   merge into it with their quotations, sales orders, panel orders and sample orders; codes used twice are
   renewed; names shared by different CRM accounts are listed and left alone) → Merge N duplicates
   (Yes/No). ≈ 2 h.
+- **List pages load whole-table lookups in one round trip** (CR-478, 2026-10-28). The 2,820-row Customer table
+  was fetched 300 rows per request, serially, at ≈ 1 s per request on every list page; the server now returns a
+  whole table in one response, paging ZCQL in parallel internally. ≈ 1 h.
+- **Import all reaches every CRM account; re-runs skip the unchanged in bulk** (CR-477, 2026-10-27). Zoho CRM
+  serves page numbers only up to record 2,000, so the import had stopped there and older accounts never arrived;
+  it now walks Zoho's page tokens, 200 accounts per list call, working on the changed / unlinked ones ten at a
+  time and skipping the rest without re-listing them. ≈ 1.5 h.
 - **Import all never waits for duplicates** (CR-387, 2026-10-22). Import all customers runs every page, skips a
   duplicate name per record, and runs Find duplicates when it finishes (also after a page that timed out), so the
   Duplicate customers card shows what is left to merge; the summary toast counts the skipped duplicates. ≈ 0.5 h.
@@ -309,6 +319,10 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   afternoon the export transactions followed (quotes, sales orders, production, palletization, load boxes, status
   history; Operations log kept only Customer rows), then the Item master (12 Items; lookups kept). ≈ 0.4 h.
 
+- **Box Brand mandatory** (CR-483, 2026-10-28). Form and server refuse a Sales Order without a box brand. ≈ 0.3 h.
+- **Production tab per batch with Production date + stock actions** (CR-479, 2026-10-28). One row per design × batch
+  with the day the batch was produced; Allocate / Deallocate Stock buttons live on the tab, off the Items card. ≈ 1 h.
+
 ## 6 · Production
 
 - **Bulk Record Production** (CR-264, 2026-10-03). Columns Size · Design · Batch · Box Brand · Qty ·
@@ -323,6 +337,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Bulk Record Production in the Adjust Stock shape** (CR-469, 2026-10-27). Production section (date, recorded by,
   description) over an Item Table — Size · Item · Batch · Qty · Box Brand · Location per line — one line to start,
   "+ Add line"; no toolbar options; Excel paste kept. ≈ 1.5 h.
+- **Bulk Record Production: no Size column — REVERSED** (CR-476, 2026-10-27 → back 2026-10-28). The Size column stays
+  as CR-469 built it; the no-Size version was live for one night. ≈ 0.25 h.
 - **SO Production tab per design** (CR-470, 2026-10-27). One row per design, batches as chips, Requested / Produced /
   Boxes summed, totals footers. ≈ 0.5 h.
 
@@ -363,6 +379,10 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   loaded sibling batch no longer bleeds in — the "4 (100)" bug); Boxes · Ordered Boxes · Ready Pallets · Boxes / Pallet ·
   Remaining on all three palletization pages, totals footer and Complete dialog on the same numbers. ≈ 1 h.
 
+- **Whole pallets, per-page columns, Complete Palletization in pallets** (CR-481, 2026-10-28). Floor arithmetic
+  (23 boxes / 18 = 1 pallet · 18 boxes · 5 pending); Possible / Prepared Pallets; Boxes / Pallet and Remaining
+  removed; the dialog records pallets and the remainder waits for a Top Up. ≈ 1.5 h.
+
 ## 8 · Loading & Dispatch
 
 - **Date column, LOAD hidden** (CR-266). The loading sheet and the Loadings grid show the loading's date
@@ -398,6 +418,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   then Container & vehicle (step 2: Container pick, name, container no., vehicle, driver, seals) under the
   rows, hidden behind one line until step 1 has an item; both Sheet and Tabs views. Containers read C1, C2 ….
   Reverses the container-first half of CR-350 at the user's request. ≈ 1.5 h.
+
+- **Five stage pages** (CR-480, 2026-10-28). Palletization Completed stays its own page, Loading holds the items being loaded, the new Dispatch page the containers ready to dispatch and the dispatched ones. ≈ 1 h.
 
 ## 9 · Stock & batch ledger
 
@@ -654,6 +676,14 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   photo as large as the page allows and the cut-piece table × ordered qty. ≈ 1.5 h.
 - **Delete leaves an Activity trace** (CR-475, 2026-10-27). Deleting a panel order is recorded on the source SO / Quote /
   Customer like a cancel. ≈ 0.1 h.
+
+- **Panel form without a default size** (CR-484, 2026-10-28). ≈ 0.1 h.
+- **Sample order Actions tab; header Record Load removed** (CR-485, 2026-10-28). The sample order page carries the
+  panel order's tabs; loads are recorded from the Actions tab (Load Now per row, "+" Load…, Dispatch, Load Copy
+  per trip) or the Dispatch tab. ≈ 0.8 h.
+- **Sample order pick slip** (CR-486, 2026-10-28). More ▸ Print order PDF: items with photo + item code, piece,
+  Requested · Supplied · Remaining, line remarks, a blank Broken / Adjustment box per row, the Stock Adjustments
+  reminder and sign-off lines. ≈ 1.2 h.
 
 ## 12 · Documentation & process
 

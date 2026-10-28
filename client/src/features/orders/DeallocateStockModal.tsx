@@ -16,7 +16,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { can } from "@/lib/auth";
-import { cachedAllocEntries, deallocateStock, listProductionLogs, type AllocEntry } from "@/features/stages/productionApi";
+import { batchProductionDate, cachedAllocEntries, deallocateStock, listProductionLogs, type AllocEntry, type ProductionLogResult } from "@/features/stages/productionApi";
 import type { Order } from "@/data";
 
 export function DeallocateStockModal({
@@ -43,8 +43,13 @@ export function DeallocateStockModal({
   const [boxesById, setBoxesById] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [tick, setTick] = useState(0);
+  const [logs, setLogs] = useState<ProductionLogResult | null>(null); // CR-479: batch production dates
   useEffect(() => {
-    void listProductionLogs().then((r) => r.ok && setAllocs(r.allocEntries.filter(scope)));
+    void listProductionLogs().then((r) => {
+      if (!r.ok) return;
+      setLogs(r);
+      setAllocs(r.allocEntries.filter(scope));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesOrderId, orderItemId, tick]);
 
@@ -106,7 +111,7 @@ export function DeallocateStockModal({
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>Allocated on</th>
+                    <th>Production date</th>
                     <th>Design</th>
                     <th>Batch</th>
                     <th className="num" style={{ textAlign: "right" }}>Boxes</th>
@@ -122,7 +127,7 @@ export function DeallocateStockModal({
                     const locked = a.qtyBoxes - cap;
                     return (
                       <tr key={a.id}>
-                        <td className="mono muted nw">{a.createdTime.slice(0, 10) || "—"}</td>
+                        <td className="mono muted nw">{(logs && batchProductionDate(logs, a.design, a.batchNumber)) || a.createdTime.slice(0, 10) || "—"}</td>
                         <td><span className="design-name">{a.design}</span></td>
                         <td className="nw">{a.batchNumber ? <span className="chip mono">{a.batchNumber}</span> : <span className="dim">—</span>}</td>
                         <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(a.qtyBoxes)}</td>

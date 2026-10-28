@@ -113,7 +113,7 @@ export function LoadingWorkspace({
     for (const o of soOrders) {
       if (customer && o.party !== customer) continue;
       if (!bySo.has(o.salesOrderId!))
-        bySo.set(o.salesOrderId!, { label: o.orderNumber || o.poNumber || o.salesOrderId!, party: o.party, date: o.orderDate });
+        bySo.set(o.salesOrderId!, { label: o.poNumber || o.orderNumber || o.salesOrderId!, party: o.party, date: o.orderDate });
     }
     return [...bySo.entries()]
       .sort((a, b) => Number(b[0]) - Number(a[0])) // newest first (house default)
@@ -443,7 +443,7 @@ export function LoadingWorkspace({
                               <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>{" "}
                               <span className="clip" style={{ maxWidth: 160 }} title={l.designLabel}>{l.designLabel}</span>
                               {l.salesOrderId !== soId && (
-                                <span className="dim" style={{ fontSize: "var(--t-sm)", marginLeft: 6 }} title="Belongs to another sales order in this container">{l.soNumber}</span>
+                                <span className="dim" style={{ fontSize: "var(--t-sm)", marginLeft: 6 }} title="Belongs to another sales order in this container">{l.poNumber || l.soNumber}</span>
                               )}
                             </td>
                             <td className="nw mono">{l.batchNumber || "—"}</td>

@@ -1,8 +1,11 @@
 /* ============================================================
    Sample Order detail (CR-315/316) — the Panel Order detail shape on the
    shared RecordDetail: DetailRail of sample orders on the left; right:
-   SMP number + status chip, customer link, right-aligned Edit ·
-   Record Supply · More (Clone, Delete) · ✕; Details | Activity.
+   SMP number + status chip, customer link, right-aligned Edit · More
+   (Print order PDF, Clone, Cancel Order, Delete) · ✕; Details | Readiness |
+   Actions | Dispatch | Activity — the Panel Order detail's tabs (CR-485:
+   loads are recorded on the Actions / Dispatch tabs, the header Record Load
+   is gone). CR-486: More ▸ Print order PDF = the godown pick slip.
    Details = fields card + the Items card (one row per sample line with
    Requested · Supplied · Remaining · Last Supplied). Edit / Delete only
    while New (nothing supplied); Edit stays visible but disabled after.
@@ -22,7 +25,7 @@ import { DetailRail } from "@/features/common/DetailRail";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { Chip } from "@/ui/Chip";
 import { LOADING_TONE } from "./pcBits";
-import { loadStatusOf, PanelLoadsTab, RecordLoadModal } from "./PanelLoads";
+import { loadStatusOf, PanelLoadsTab, SampleActionsTab } from "./PanelLoads";
 import { OrderReadinessTab, type ReadinessRow } from "./OrderReadinessTab";
 import {
   cachedSampleOrders,
@@ -51,7 +54,6 @@ export function SampleOrderDetail() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<SampleOrderRow[] | null>(() => cachedSampleOrders());
   const [busy, setBusy] = useState(false);
-  const [supplying, setSupplying] = useState(false);
 
   const load = async () => {
     const o = await listSampleOrders();
@@ -100,6 +102,20 @@ export function SampleOrderDetail() {
     }
     toast.success("Sample order cancelled");
     await load();
+  };
+
+  // CR-486: the godown pick slip — pdfmake lazy-loaded, like the Panel Order PDF (CR-474).
+  const onPdf = async () => {
+    if (!order) return;
+    setBusy(true);
+    try {
+      const { downloadSampleOrderPdf } = await import("./sampleOrderPdf");
+      await downloadSampleOrderPdf(order);
+    } catch {
+      toast.error("Could not build the PDF");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const canEdit = can("panel_craft", "edit");
@@ -173,13 +189,10 @@ export function SampleOrderDetail() {
                     <Icon name="edit" size={13} /> Edit
                   </button>
                 )}
-                {canEdit && open && (
-                  <button className="hbtn primary" disabled={busy} onClick={() => setSupplying(true)} title="Record what went out to the customer — vehicle, photos, qty per line (CR-347)">
-                    <Icon name="truck" size={13} /> Record Load
-                  </button>
-                )}
+                {/* CR-485: no Record Load here — loads are recorded on the Actions / Dispatch tabs, like a panel order. */}
                 <MoreMenu
                   items={[
+                    { label: "Print order PDF", disabled: busy, title: "The pick slip for the godown — items, remarks, a box per row for broken pieces", onClick: () => void onPdf() }, // CR-486
                     ...(can("panel_craft", "create") ? [{ label: "Clone", onClick: () => navigate(`/sample-orders/${encodeURIComponent(order.id)}/clone`) }] : []),
                     ...(canEdit
                       ? [{ label: "Cancel Order", danger: true, disabled: busy || !cancellable, title: cancellable ? "Cancel this order" : "Samples have gone out — delete the loads first, or the order is already closed", onClick: () => void onCancel() }]
@@ -201,6 +214,7 @@ export function SampleOrderDetail() {
             modified={order.modifiedTime}
             extraTabs={[
               { id: "readiness", label: "Readiness", content: <OrderReadinessTab rows={readinessRows} noun="items" /> }, // CR-404
+              { id: "actions", label: "Actions", content: <SampleActionsTab order={order} onChanged={() => void load()} /> }, // CR-485
               ...(loadable ? [{ id: "dispatch", label: "Dispatch", content: <PanelLoadsTab order={loadable} onChanged={() => void load()} /> }] : []),
             ]}
           >
@@ -274,7 +288,6 @@ export function SampleOrderDetail() {
                 </table>
               </div>
             </div>
-            {supplying && loadable && <RecordLoadModal orders={[loadable]} onDone={() => void load()} onClose={() => setSupplying(false)} />}
           </RecordDetail>
         )}
       </div>

@@ -25,6 +25,7 @@ import {
   ZOHO,
   zohoStatus,
   type DedupePlan,
+  type ImportCursor,
   type SyncSummary,
   type ZohoStatus,
 } from "@/features/masters/zohoApi";
@@ -146,6 +147,7 @@ export function ZohoSyncSettings() {
     setBusy(true);
     const total = { created: 0, updated: 0, linked: 0, skipped: 0, duplicates: 0, errors: [] as string[] };
     let page = 1;
+    let cursor: ImportCursor | null = null; // CR-477: the server's place in the CRM list
     // After the pull (complete or stopped): the Duplicate customers card shows what is left to merge.
     const dupNote = (p: DedupePlan | null) => {
       const n = (p && p.groups.length ? dupCount(p) : 0) || total.duplicates;
@@ -154,14 +156,15 @@ export function ZohoSyncSettings() {
     try {
       for (; ; page++) {
         setProgress(`Importing page ${page}…`);
-        const r = await importZohoPage(page);
+        const r = await importZohoPage(page, cursor);
         total.created += r.created;
         total.updated += r.updated;
         total.linked += r.linked;
         total.skipped += Math.max(0, r.skipped);
         total.duplicates += r.duplicates ?? 0;
         total.errors.push(...r.errors);
-        if (r.done) break;
+        if (r.done || !r.cursor) break;
+        cursor = r.cursor;
       }
       invalidateCustomers();
       const p = await onFind();

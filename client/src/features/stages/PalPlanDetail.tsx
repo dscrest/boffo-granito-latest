@@ -80,9 +80,9 @@ export function PalPlanDetail() {
 
   // Group the plan's lines by Sales Order for the "Associated SO(s)" section.
   const bySo = useMemo(() => {
-    const m = new Map<string, { soNumber: string; salesOrderId: string; lines: PalPlan["lines"] }>();
+    const m = new Map<string, { soNumber: string; poNumber: string; salesOrderId: string; lines: PalPlan["lines"] }>();
     (plan?.lines || []).forEach((l) => {
-      const g = m.get(l.salesOrderId) ?? m.set(l.salesOrderId, { soNumber: l.soNumber, salesOrderId: l.salesOrderId, lines: [] }).get(l.salesOrderId)!;
+      const g = m.get(l.salesOrderId) ?? m.set(l.salesOrderId, { soNumber: l.soNumber, poNumber: l.poNumber, salesOrderId: l.salesOrderId, lines: [] }).get(l.salesOrderId)!;
       g.lines.push(l);
     });
     return [...m.values()];
@@ -213,7 +213,7 @@ export function PalPlanDetail() {
                 return (
                   <div key={g.salesOrderId} style={{ marginBottom: 14 }}>
                     <div style={{ marginBottom: 4 }}>
-                      <Link className="linkish mono" to={`/orders/${encodeURIComponent(g.salesOrderId)}`} title="Open Sales Order">{g.soNumber}</Link>
+                      <Link className="linkish mono" to={`/orders/${encodeURIComponent(g.salesOrderId)}`} title={`Open Sales Order ${g.soNumber}`}>{g.poNumber || g.soNumber}</Link>
                     </div>
                     <table className="tbl">
                       <thead>

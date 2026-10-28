@@ -4,7 +4,7 @@
    since CR-360, one stage each:
      /packing      → Ready for Palletization (the Planning stage only)
      /palletizing  → In Palletization (the Palletizing stage only)
-     /palletized   → Palletization Completed (recorded Ready for Loading rows;
+     /palletized   → Palletization Completed (recorded Ready for Loading rows; leaf name kept by user 2026-10-28;
                      Load + Release live in the row's "+" menu, CR-361)
    Each page lists its own stage only — no status dropdown (CR-364 removed
    the page | All filter). The page header held the ONE Kanban/Sheet view toggle (hidden CR-418),

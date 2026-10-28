@@ -203,7 +203,7 @@ const KanbanCard = memo(function KanbanCard({
       className="kcard"
       role="button"
       tabIndex={0}
-      aria-label={`${order.orderNumber || order.poNumber} · ${order.design} · ${order.party}`}
+      aria-label={`${order.poNumber || order.orderNumber} · ${order.design} · ${order.party}`}
       onClick={() => onOpen && onOpen(order)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -221,7 +221,7 @@ const KanbanCard = memo(function KanbanCard({
       </button>
 
       <div className="top">
-        <span className="po">{order.orderNumber || order.poNumber}</span>
+        <span className="po">{order.poNumber || order.orderNumber}</span>
         <span>·</span>
         <span>{order.flag}</span>
         {isMulti && (

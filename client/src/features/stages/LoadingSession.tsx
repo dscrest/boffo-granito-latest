@@ -604,7 +604,7 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
         <tr key={l0.id} style={removed ? { opacity: 0.5 } : undefined}>
           {indexed && <td className="mono dim">{i + 1}</td>}
           <td><span className="design-name">{l0.designLabel}</span></td>
-          <td className="mono nw" title={l0.customerName}>{l0.soNumber || "—"}</td>
+          <td className="mono nw" title={[l0.customerName, l0.soNumber].filter(Boolean).join(" · ")}>{l0.poNumber || l0.soNumber || "—"}</td>
           <td className="mono nw" title={batches.join("\n")}>{ls.length === 1 ? l0.batchNumber || "—" : `${ls.length} batches`}{mix && <span className="chip mx" style={{ marginLeft: 6 }}>MXBATCH</span>}</td>
           <td className="num" title={error || undefined}>
             {open ? (
@@ -789,7 +789,7 @@ function SessionPage({ group, openedId, plans, boxes, presetSalesOrderId, reload
               <thead>
                 <tr>
                   <th>Design</th>
-                  <th style={{ width: 130 }}>Order</th>
+                  <th style={{ width: 130 }}>PO</th>
                   <th style={{ width: 150 }}>Batch</th>
                   <th className="num" style={{ textAlign: "right", width: 90 }}>Pallets</th>
                   <th className="num" style={{ textAlign: "right", width: 80 }}>Boxes</th>
@@ -1122,7 +1122,7 @@ function ContainerRows({ draft, pick, otherUse, patch, open, loadedRows, loadedI
                 emptyText={bands.length === 0 ? "Nothing ready for loading. See the note above" : "Every ready item is already on a row"}
               />
             </td>
-            <td className="mono dim nw" style={{ fontSize: "var(--t-sm)" }} title={[soBand?.customerName, soBand?.poNumber && `PO ${soBand.poNumber}`].filter(Boolean).join(" · ")}>{soBand?.soNumber || (dr ? "—" : "")}</td>
+            <td className="mono dim nw" style={{ fontSize: "var(--t-sm)" }} title={[soBand?.customerName, soBand?.soNumber].filter(Boolean).join(" · ")}>{soBand?.poNumber || soBand?.soNumber || (dr ? "—" : "")}</td>
             <td>
               <input
                 readOnly
@@ -1265,7 +1265,7 @@ function ContainerSection({ draft, title, status, box, entries, allLines, open, 
               <tr>
                 <th style={{ width: 28 }}>#</th>
                 <th>Design</th>
-                <th style={{ width: 130 }}>Order</th>
+                <th style={{ width: 130 }}>PO</th>
                 <th style={{ width: 150 }}>Batch</th>
                 <th className="num" style={{ textAlign: "right", width: 90 }}>Pallets</th>
                 <th className="num" style={{ textAlign: "right", width: 80 }}>Boxes</th>

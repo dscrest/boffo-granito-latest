@@ -4,7 +4,9 @@
  * CR-359 — the provider-agnostic customer sync (lifted out of booksSync.js, CR-356/358).
  * A provider adapter (lib/booksSync.js, lib/crmSync.js) supplies:
  *   name, label, linkColumn          "books" / "crm", Customer.<link> column
- *   listChanged(ctx, {watermark, full, page}) → { hits: [{id, name, modified}] newest first, hasMore }
+ *   listChanged(ctx, {watermark, full, perPage, token}) → { hits: [{id, name, modified}] newest first,
+ *                                    hasMore, next } — `next` = the token that lists the page after
+ *   needsRecheck(row)                optional (CR-477): an imported row the import still owes a cross-link check
  *   loadAux(ctx)                     per-run lookups (payment terms, CRM field map)
  *   fetch(ctx, id, aux)              the full remote record (null when gone)
  *   toCustomer(record, aux)          → Customer patch (non-empty values only, link column included)
@@ -13,7 +15,9 @@
  *   search(ctx, q)                   → [{id, name, detail, phone, place}] for the picker
  *
  *   sync(ctx, A, {full:false})       incremental pull: stop at the watermark (zoho_<p>_sync_at).
- *   sync(ctx, A, {full:true, page})  one-time import, one page per call; the client loops on `done`.
+ *   sync(ctx, A, {full:true, cursor}) the full import, one call = up to IMPORT_PAGE records of real work
+ *                                    out of a LIST_PAGE list page; the client passes `summary.cursor`
+ *                                    back until `done` (CR-477 — page_token paging, no 2 000 ceiling).
  *   push(ctx, A, rowid)              create / update the remote record for a customer.
  *
  * The remote wins on a pull: a value overwrites only where it is non-empty; add-on-only columns
@@ -29,7 +33,10 @@ const zoho = require("./zoho");
 
 // CR-362: 1 list + per account (CRM detail + Contacts + Books check + insert) ≈ 1.1 s — a page of 25 ran
 // 26–36 s and hit the gateway's ~30 s limit (408 / dropped connection) on the 2026-10-21 import.
-const IMPORT_PAGE = 10; // ≈ 12 s per page
+const IMPORT_PAGE = 10; // ≈ 12 s of work per call
+// CR-477: one list call covers 200 accounts (the CRM maximum); only the changed / unlinked ones cost a
+// fetch, so a re-run over 2 000 unchanged accounts is ~10 list calls instead of 200.
+const LIST_PAGE = 200;
 const INCREMENTAL_CAP = 50; // oldest-first; the rest arrive on the next run
 
 const s = (v) => (v == null ? "" : String(v).trim());
@@ -107,6 +114,22 @@ function pickChanged(hits, watermark, { full, linked }) {
   return { rows: fresh.slice(0, INCREMENTAL_CAP), reachedWatermark: reached, skipped: 0, unchanged: [] };
 }
 
+/** CR-477: the slice of a list page one import call works on. `kindOf(hit, i)` → "sync" | "recheck" | "".
+    The cursor offset indexes the LIST (stable across re-lists of the same page), not the work list —
+    a hit processed by the previous call becomes linked / unchanged and drops out of the work, which
+    would shift a work-list offset onto the wrong record. Returns { slice, offset } — `offset` = where
+    the next call resumes on this page, or -1 when the page is finished. */
+function pickChunk(hits, offset, kindOf, size = IMPORT_PAGE) {
+  const slice = [];
+  for (let i = offset; i < hits.length; i++) {
+    const kind = kindOf(hits[i], i);
+    if (!kind) continue;
+    if (slice.length === size) return { slice, offset: i };
+    slice.push({ i, hit: hits[i], kind });
+  }
+  return { slice, offset: -1 };
+}
+
 async function lastSummary(catalyst, rowList, A) {
   const row = (await zoho.settingRows(catalyst, rowList, [summaryKey(A)]))[0];
   try {
@@ -158,9 +181,11 @@ async function sync(ctx, A, opts) {
   }
 }
 
-async function run(ctx, A, { full = false, page = 1 } = {}) {
+async function run(ctx, A, { full = false, page = 1, cursor = null } = {}) {
   const { catalyst, rowList, writeOpLog } = ctx;
-  const summary = { ok: true, provider: A.name, mode: full ? "import" : "refresh", page, done: true, created: 0, updated: 0, linked: 0, skipped: 0, duplicates: 0, errors: [], at: istNow() };
+  // CR-477: the import cursor = { token: the list token of the page being worked, offset: where on it }.
+  const cur = full ? { token: s(cursor && cursor.token), offset: Math.max(0, Number(cursor && cursor.offset) || 0) } : null;
+  const summary = { ok: true, provider: A.name, mode: full ? "import" : "refresh", page, done: true, cursor: null, created: 0, updated: 0, linked: 0, skipped: 0, duplicates: 0, errors: [], at: istNow() };
   const watermarkRow = (await zoho.settingRows(catalyst, rowList, [syncAtKey(A)]))[0];
   let watermark = watermarkRow ? s(watermarkRow.setting_value) : "";
 
@@ -172,7 +197,7 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
     return summary;
   }
 
-  const { hits, hasMore } = await A.listChanged(ctx, { watermark, full, page, perPage: full ? IMPORT_PAGE : 200 });
+  const { hits, hasMore, next } = await A.listChanged(ctx, { watermark, full, perPage: LIST_PAGE, token: cur && cur.token });
   const existing = hits.length ? await allRows(catalyst, rowList, "SELECT ROWID, code, name, crm_account_id, books_contact_id FROM Customer WHERE deleted_at is null") : [];
   const byLink = new Map();
   const byName = new Map(); // nameKey → unmapped rows (CR-372: every candidate, not just the last one)
@@ -187,14 +212,25 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
       linkedByName.set(key, r);
     } else byName.set(key, [...(byName.get(key) || []), r]);
   }
-  const { rows: todo, reachedWatermark, skipped, unchanged } = pickChanged(hits, watermark, { full, linked: new Set(byLink.keys()) });
+  const picked = pickChanged(hits, watermark, { full, linked: new Set(byLink.keys()) });
+  const { reachedWatermark, skipped, unchanged } = picked;
+  let todo = picked.rows;
+  let rechecks = [];
   if (full) {
-    summary.done = !hasMore;
-    summary.skipped = skipped; // CR-362: already imported, unchanged
+    // CR-477: this call works on at most IMPORT_PAGE records of the page — the changed ones (fetch)
+    // and, CR-363, the unchanged ones still owing a cross-link check. The rest wait for the next call.
+    const todoIds = new Set(todo.map((h) => s(h.id)));
+    const owes = (h) => A.recheck && A.needsRecheck && byLink.has(s(h.id)) && A.needsRecheck(byLink.get(s(h.id)));
+    const { slice, offset } = pickChunk(hits, cur.offset, (h) => (todoIds.has(s(h.id)) ? "sync" : owes(h) ? "recheck" : ""));
+    todo = slice.filter((x) => x.kind === "sync").map((x) => x.hit);
+    rechecks = slice.filter((x) => x.kind === "recheck").map((x) => x.hit);
+    summary.cursor = offset >= 0 ? { token: cur.token, offset } : hasMore && next ? { token: next, offset: 0 } : null;
+    summary.done = !summary.cursor;
+    if (cur.offset === 0) summary.skipped = skipped; // CR-362: already imported, unchanged — counted once per page
   } else summary.done = reachedWatermark || !hasMore || todo.length === hits.length;
 
   // One adapter aux per run (CR-363: the re-check below shares it, and its note is reported once).
-  const aux = todo.length || (full && unchanged.length && A.recheck) ? await A.loadAux(ctx) : null;
+  const aux = todo.length || rechecks.length ? await A.loadAux(ctx) : null;
   if (todo.length) {
     let code = nextCustomerCode(codes);
     const bump = () => {
@@ -284,10 +320,10 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
   } else if (!full) {
     summary.skipped = hits.length;
   }
-  if (full && unchanged.length && A.recheck) {
+  if (rechecks.length) {
     // CR-363: skipped-as-unchanged rows still get the cheap cross-link check (Books link for CRM rows).
     const table = catalyst.datastore().table("Customer");
-    for (const hit of unchanged) {
+    for (const hit of rechecks) {
       const row = byLink.get(s(hit.id));
       if (!row) continue;
       const started = Date.now();
@@ -312,8 +348,8 @@ async function run(ctx, A, { full = false, page = 1 } = {}) {
     }
   }
   if (aux && aux.note) summary.errors.push(aux.note);
-  if (full && page === 1 && hits.length) {
-    // Page 1 of a newest-first import holds the newest record of all — that is the watermark.
+  if (full && !cur.token && hits.length) {
+    // The first page of a newest-first import holds the newest record of all — that is the watermark.
     const top = s(hits[0].modified);
     if (!watermark || newerThan(top, watermark)) watermark = top;
   }
@@ -350,7 +386,9 @@ async function push(ctx, A, rowid) {
 
 module.exports = {
   IMPORT_PAGE,
+  LIST_PAGE,
   INCREMENTAL_CAP,
+  pickChunk,
   NAME_TO_ISO,
   composeAddress,
   nextCustomerCode,

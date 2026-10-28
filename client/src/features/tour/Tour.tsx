@@ -41,6 +41,7 @@ export const AUTO_TOURS: Record<string, string> = {
   "/palletizing": "packing",
   "/palletized": "packing",
   "/loading": "loading",
+  "/dispatch": "loading",
 };
 
 export const TOURS: Record<string, TourStep[]> = {
@@ -91,14 +92,14 @@ export const TOURS: Record<string, TourStep[]> = {
       group: "Sales",
       route: "/packing",
       title: "Palletization",
-      body: "Pack produced stock onto pallets, batch by batch. Two pages: Ready for Palletization is the queue; In Palletization holds the work in progress and the pallets ready for loading.",
+      body: "Pack produced stock onto pallets, batch by batch. Three pages: Ready for Palletization is the queue, In Palletization the work in progress, Palletization Completed the finished pallets ready for loading.",
     },
     {
       anchor: "nav-loading",
       group: "Sales",
       route: "/loading",
       title: "Loading and Dispatch",
-      body: "Plan containers, load pallets, then assign the vehicle and seals to dispatch. The last stop of the flow — goods leave the factory from here.",
+      body: "Loading: pallets go into containers. Dispatch: containers with their vehicle and seals assigned, ready to leave — and the ones already gone.",
     },
     {
       anchor: "nav-reports",
@@ -128,7 +129,7 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/packing",
       title: "Three stages",
-      body: "Palletization is three pages: Ready for Palletization (this queue), In Palletization (work in progress) and Palletization Completed (palletized stock waiting to be loaded). The Sheet's columns can be shown, hidden and reordered; Group bands rows by Customer, Order, Batch or Item.",
+      body: "Palletization is three pages: Ready for Palletization (this queue), In Palletization (work in progress) and Palletization Completed (finished pallets ready for loading). Pallets are whole — Possible Pallets is what the boxes can fill; the rest waits for a mixed-batch pallet. The Sheet's columns can be shown, hidden and reordered; Group bands rows by Customer, Order, Batch or Item.",
     },
     {
       route: "/packing",
@@ -152,27 +153,27 @@ export const TOURS: Record<string, TourStep[]> = {
     {
       route: "/palletizing",
       title: "On to loading",
-      body: "Started pallets move to the In Palletization page. Complete Palletization records the boxes and moves them to Palletization Completed. Edit lets you type quantities across rows and save each with ✓.",
+      body: "Started pallets move to the In Palletization page. Complete Palletization records whole pallets and moves them to Palletization Completed; boxes below one pallet stay here for a Top Up. Edit lets you type quantities across rows and save each with ✓.",
     },
     {
       route: "/palletized",
-      title: "Palletized stock",
-      body: "Recorded pallets wait here. The row's + menu holds Load (into a container) and Release (return boxes to free stock with a reason — the order's allocation is returned). Loaded rows move on to Loading and Dispatch, where Release sends boxes back here.",
+      title: "Palletization Completed",
+      body: "Recorded pallets wait here, ready for loading. The row's + menu holds Load (into a container) and Release (return boxes to free stock with a reason — the order's allocation is returned). Loaded rows move on to the Loading page, where Release sends boxes back here.",
     },
   ],
 
   loading: [
     {
       route: "/loading",
-      title: "Loading and Dispatch",
-      body: "The last stage: pallets go into containers, the vehicle is assigned, goods dispatch. Fully palletized stock arrives here as Ready for Loading — its + menu's Load puts it into a container, or start from New Loading here or on the sales order.",
+      title: "Loading",
+      body: "Pallets go into containers here. Start from New Loading (here or on the sales order), or Load a row on the Palletization Completed page. Once the vehicle and seals are assigned the container moves to the Dispatch page.",
     },
     {
       anchor: "load-view-toggle",
       route: "/loading",
       waitMs: 5000,
       title: "Three views",
-      body: "Sheet lists ready and loaded lines (Edit changes loaded boxes or moves items between containers); Loadings lists the containers; Customer Sheet groups by customer with edit-in-place.",
+      body: "Sheet lists the loaded lines (Edit changes loaded boxes or moves items between containers); Loadings lists the containers; Customer Sheet groups by customer with edit-in-place.",
     },
     {
       anchor: "load-new",
@@ -195,6 +196,11 @@ export const TOURS: Record<string, TourStep[]> = {
       route: "/loading",
       title: "Prints",
       body: "The + menu also prints: Print QR label (a public scan page for the container) and Dispatch Copy. After you dispatch, the printable Dispatch Entry opens on its own.",
+    },
+    {
+      route: "/dispatch",
+      title: "Dispatch",
+      body: "Containers ready to dispatch (vehicle and seals assigned) and the ones already dispatched, with their dispatch date. Dispatch and the prints are in the row's + menu.",
     },
   ],
 };

@@ -163,15 +163,18 @@ const adapter = {
   name: "books",
   label,
   linkColumn,
-  async listChanged({ catalyst, rowList }, { full, page, perPage }) {
+  async listChanged({ catalyst, rowList }, { full, perPage, token }) {
+    const page = full && token ? Number(token) || 1 : 1; // CR-477: the cursor token = the page number here
     const list = await zoho.booksCall(
       catalyst,
       rowList,
-      `/contacts?contact_type=customer&sort_column=last_modified_time&sort_order=D&per_page=${perPage}&page=${full ? page : 1}`,
+      `/contacts?contact_type=customer&sort_column=last_modified_time&sort_order=D&per_page=${perPage}&page=${page}`,
     );
+    const hasMore = !!(list.page_context && list.page_context.has_more_page);
     return {
       hits: (list.contacts || []).map((c) => ({ id: s(c.contact_id), name: s(c.contact_name), modified: s(c.last_modified_time) })),
-      hasMore: !!(list.page_context && list.page_context.has_more_page),
+      hasMore,
+      next: hasMore ? String(page + 1) : "",
     };
   },
   async loadAux({ catalyst, rowList }) {

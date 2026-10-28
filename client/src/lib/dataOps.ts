@@ -40,6 +40,7 @@ export interface ListOpts {
   limit?: number;
   offset?: number; // ZCQL pages via "LIMIT offset, count"
   columns?: string[]; // projection; ROWID always included server-side
+  all?: boolean; // CR-478: whole table in one response (server pages ZCQL in parallel)
 }
 
 function fail(e: unknown): OpResult {
@@ -54,51 +55,25 @@ export async function list(table: string, opts: ListOpts = {}): Promise<OpResult
     if (opts.limit) qs.set("limit", String(opts.limit));
     if (opts.offset) qs.set("offset", String(opts.offset));
     if (opts.columns?.length) qs.set("columns", opts.columns.join(","));
+    if (opts.all) qs.set("all", "1");
     const q = qs.toString();
-    const res = await apiGet<{ ok: boolean; rows: DSRow[] }>(`${FN}/${table}${q ? `?${q}` : ""}`);
-    return { ok: true, rows: res.rows };
+    const res = await apiGet<{ ok: boolean; rows: DSRow[]; truncated?: boolean }>(`${FN}/${table}${q ? `?${q}` : ""}`);
+    return res.truncated ? { ok: true, rows: res.rows, truncated: true } : { ok: true, rows: res.rows };
   } catch (e) {
     return fail(e);
   }
 }
 
-/** Fetch ALL rows of a table by paging through ZCQL's 300-row cap.
-    One request for tables under 300 rows (same cost as before); larger
-    tables transparently page until a short page arrives.
-
-    Correctness of `LIMIT offset, n` paging depends on a stable ordering, which
-    ZCQL does NOT guarantee for unordered queries — so a default
-    `ORDER BY ROWID asc` is applied (callers can still override `order`), and
-    rows are deduped by ROWID so a mid-pagination shift can never double-count.
-    Guards against servers that ignore `offset` (would echo page 1 forever).
-    Hitting the page cap sets `truncated` instead of silently returning a
-    partial table. */
-export async function listAll(
+/** Fetch ALL rows of a table in ONE request (CR-478). The server pages past
+    ZCQL's 300-row cap itself, in parallel, and dedupes by ROWID — the client
+    used to walk the pages serially at ~1 s per round trip, which made every
+    list page wait ~10 s for the 2,800-row Customer table alone. `truncated`
+    is set when the table exceeds the server's ~10k-row safety valve. */
+export function listAll(
   table: string,
-  opts: Omit<ListOpts, "limit" | "offset"> = {},
+  opts: Omit<ListOpts, "limit" | "offset" | "all"> = {},
 ): Promise<OpResult> {
-  const PAGE = 300;
-  const MAX_PAGES = 34; // ~10k rows safety valve
-  const all: DSRow[] = [];
-  const seen = new Set<string>();
-  let prevFirstId: string | null = null;
-  let truncated = true; // proven false by any short/duplicate page
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await list(table, { order: "ROWID asc", ...opts, limit: PAGE, offset: page * PAGE });
-    if (!res.ok) return res;
-    const rows = res.rows || [];
-    const firstId = rows.length ? String(rows[0].ROWID) : null;
-    if (page > 0 && firstId !== null && firstId === prevFirstId) { truncated = false; break; } // offset unsupported
-    prevFirstId = firstId;
-    for (const r of rows) {
-      const id = String(r.ROWID);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      all.push(r);
-    }
-    if (rows.length < PAGE) { truncated = false; break; }
-  }
-  return truncated ? { ok: true, rows: all, truncated } : { ok: true, rows: all };
+  return list(table, { ...opts, all: true });
 }
 
 export async function getOne(table: string, rowid: string): Promise<OpResult> {

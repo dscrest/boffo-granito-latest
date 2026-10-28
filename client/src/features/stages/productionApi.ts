@@ -147,6 +147,17 @@ export function batchNumberExists(batch: string, design?: string): boolean {
   );
 }
 
+/** CR-479: the day a batch was PRODUCED — latest production_date across the
+    record + opening rows of that design × batch ("" when none is known). The
+    SO Production tab shows this, not the allocation day. */
+export function batchProductionDate(res: ProductionLogResult, design: string, batchNumber: string): string {
+  if (!batchNumber) return "";
+  let best = "";
+  for (const r of res.openingEntries) if (r.design === design && r.batchNumber === batchNumber && r.productionDate > best) best = r.productionDate;
+  for (const e of res.entries) for (const r of e.records) if (r.design === design && r.batchNumber === batchNumber && r.productionDate > best) best = r.productionDate;
+  return best;
+}
+
 /** Mint (or fetch) a batch record's public share token — keys its scannable QR
     slip page (#/share/batch/<token> → GET /public/batch/<token>). Idempotent. */
 export async function shareProductionRecord(rowid: string): Promise<string> {

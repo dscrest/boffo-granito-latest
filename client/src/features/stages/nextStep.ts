@@ -81,7 +81,7 @@ export function blockers(want: "load" | "palletize", customerId: string, orders:
       finished++;
       continue;
     }
-    out.push({ label: items[0].orderNumber || items[0].poNumber || soId, reason: n.reason, to: n.to });
+    out.push({ label: items[0].poNumber || items[0].orderNumber || soId, reason: n.reason, to: n.to });
   }
   if (out.length === 0 && finished > 0) return [{ label: "", reason: finished === 1 ? "The only order is complete or closed" : `All ${finished} orders are complete or closed`, to: "" }];
   return out;

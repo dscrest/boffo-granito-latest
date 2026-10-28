@@ -8,7 +8,7 @@
    only, from the More menu on /panel-orders/:id — never auto-printed.
    Same branded template as the Load Copy (panelLoadCopyPdf.ts).
    ============================================================ */
-import type { Content, ContentText, TDocumentDefinitions } from "pdfmake/interfaces";
+import type { Column, Content, ContentText, TDocumentDefinitions } from "pdfmake/interfaces";
 import { downloadPdf, imageDataUrl } from "@/lib/pdf";
 import { designImageUrl } from "@/lib/api";
 import { COMPANY, QP, logoDataUrl, prettyDate } from "@/features/quotes/quoteTemplate";
@@ -16,10 +16,12 @@ import type { PanelOrderRow } from "./panelOrdersApi";
 import type { PanelRow } from "./panelsApi";
 
 const M = 33;
-const PAGE_W = 595.28 - 2 * M; // A4 content width
+export const PAGE_W = 595.28 - 2 * M; // A4 content width
 const nfmt = (n: number) => n.toLocaleString("en-IN");
 
-const th = (text: string, right = false): ContentText => ({
+/* Table cells + layout, the cover's key / value panel and the branded page frame are shared with the
+   Sample Order PDF (sampleOrderPdf.ts, CR-486). */
+export const th = (text: string, right = false): ContentText => ({
   text: text.toUpperCase(),
   fontSize: 6.5,
   bold: true,
@@ -29,8 +31,8 @@ const th = (text: string, right = false): ContentText => ({
   alignment: right ? "right" : "left",
   margin: [0, 3, 0, 3],
 });
-const td = (text: string, right = false): ContentText => ({ text, fontSize: 8, color: QP.body, alignment: right ? "right" : "left", margin: [0, 4, 0, 4] });
-const tableLayout = (lastCol: number) => ({
+export const td = (text: string, right = false): ContentText => ({ text, fontSize: 8, color: QP.body, alignment: right ? "right" : "left", margin: [0, 4, 0, 4] });
+export const tableLayout = (lastCol: number) => ({
   hLineWidth: (i: number) => (i > 1 ? 0.75 : 0),
   hLineColor: () => QP.line,
   vLineWidth: () => 0,
@@ -39,6 +41,67 @@ const tableLayout = (lastCol: number) => ({
   paddingTop: () => 0,
   paddingBottom: () => 0,
 });
+
+/** The cover's right-hand key / value panel: [label, value, value colour] per row. */
+export const metaTable = (rows: [string, string, string][]): Column => ({
+  width: 210,
+  table: {
+    widths: ["auto", "*"],
+    body: rows.map(([k, v, c]) => [
+      { text: k, fontSize: 7.5, bold: true, color: QP.dim, characterSpacing: 1.2, margin: [0, 6, 0, 6] },
+      { text: v, fontSize: 9, bold: true, color: c, alignment: "right", margin: [0, 5, 0, 5] },
+    ]),
+  },
+  layout: {
+    hLineWidth: (i: number) => (i === 0 ? 1.5 : 0.75),
+    hLineColor: (i: number) => (i === 0 ? QP.ink : QP.line),
+    vLineWidth: () => 0,
+    paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
+  },
+});
+
+/** A4 portrait, the branded ink header band (logo + TITLE) and the orange-rule footer
+    (company · footerCenter · page x of y) around `content`. */
+export function brandedOrderDoc(title: string, footerCenter: string, logo: string, content: Content[]): TDocumentDefinitions {
+  return {
+    pageSize: "A4",
+    pageMargins: [M, 100, M, 58],
+    defaultStyle: { fontSize: 8, color: QP.body },
+    header: {
+      table: {
+        widths: ["*", "auto"],
+        body: [[
+          { ...(logo ? { image: logo, width: 100 } : { text: COMPANY.brand, color: "#fff", bold: true, fontSize: 18 }), fillColor: QP.ink, border: [false, false, false, false], margin: [M, 18, 0, 16] },
+          {
+            stack: [
+              { text: title, fontSize: 19, bold: true, color: "#fff", characterSpacing: 4.5 },
+              { columns: [{ width: "*", text: "" }, { width: 48, canvas: [{ type: "rect", x: 0, y: 0, w: 48, h: 3, color: QP.orange }] }], margin: [0, 5, 0, 0] },
+            ],
+            fillColor: QP.ink,
+            border: [false, false, false, false],
+            margin: [0, 24, M, 16],
+          },
+        ]],
+      },
+    },
+    footer: (page: number, pages: number) => ({
+      stack: [
+        { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 2.5, color: QP.orange }] },
+        {
+          table: {
+            widths: ["auto", "*", "auto"],
+            body: [[
+              { text: COMPANY.name, fontSize: 7, bold: true, color: QP.ink, characterSpacing: 0.9, fillColor: QP.paper, border: [false, false, false, false], margin: [M, 8, 0, 8] },
+              { text: `${footerCenter}   ·   page ${page} of ${pages}`, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
+              { text: COMPANY.contact, fontSize: 7, color: QP.dim, fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, M, 8] },
+            ]],
+          },
+        },
+      ],
+    }),
+    content,
+  };
+}
 
 /** One page per panel line: photo, sizes, cut pieces × ordered qty. */
 function panelPage(order: PanelOrderRow, line: PanelOrderRow["lines"][number], panel: PanelRow | undefined, image: string): Content {
@@ -110,43 +173,7 @@ async function buildPanelOrderDoc(order: PanelOrderRow, panelsById: Map<string, 
     ];
   };
 
-  return {
-    pageSize: "A4",
-    pageMargins: [M, 100, M, 58],
-    defaultStyle: { fontSize: 8, color: QP.body },
-    header: {
-      table: {
-        widths: ["*", "auto"],
-        body: [[
-          { ...(logo ? { image: logo, width: 100 } : { text: COMPANY.brand, color: "#fff", bold: true, fontSize: 18 }), fillColor: QP.ink, border: [false, false, false, false], margin: [M, 18, 0, 16] },
-          {
-            stack: [
-              { text: "PANEL ORDER", fontSize: 19, bold: true, color: "#fff", characterSpacing: 4.5 },
-              { columns: [{ width: "*", text: "" }, { width: 48, canvas: [{ type: "rect", x: 0, y: 0, w: 48, h: 3, color: QP.orange }] }], margin: [0, 5, 0, 0] },
-            ],
-            fillColor: QP.ink,
-            border: [false, false, false, false],
-            margin: [0, 24, M, 16],
-          },
-        ]],
-      },
-    },
-    footer: (page: number, pages: number) => ({
-      stack: [
-        { canvas: [{ type: "rect", x: 0, y: 0, w: 595.28, h: 2.5, color: QP.orange }] },
-        {
-          table: {
-            widths: ["auto", "*", "auto"],
-            body: [[
-              { text: COMPANY.name, fontSize: 7, bold: true, color: QP.ink, characterSpacing: 0.9, fillColor: QP.paper, border: [false, false, false, false], margin: [M, 8, 0, 8] },
-              { text: `${order.orderNumber || ""}   ·   page ${page} of ${pages}`, fontSize: 7, color: QP.dim, alignment: "center", fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, 0, 8] },
-              { text: COMPANY.contact, fontSize: 7, color: QP.dim, fillColor: QP.paper, border: [false, false, false, false], margin: [0, 8, M, 8] },
-            ]],
-          },
-        },
-      ],
-    }),
-    content: [
+  return brandedOrderDoc("PANEL ORDER", order.orderNumber || "", logo, [
       /* Page 1 — customer + meta */
       {
         columns: [
@@ -159,27 +186,12 @@ async function buildPanelOrderDoc(order: PanelOrderRow, panelsById: Map<string, 
               { text: `Source: ${source}`, fontSize: 9, color: QP.body, lineHeight: 1.3 },
             ],
           },
-          {
-            width: 210,
-            table: {
-              widths: ["auto", "*"],
-              body: ([
-                ["ORDER NO.", order.orderNumber || "—", QP.orange],
-                ["ORDER DATE", order.orderDate ? prettyDate(order.orderDate) : "—", QP.ink],
-                ["PANELS", nfmt(order.lines.length), QP.ink],
-                ["TOTAL QTY", nfmt(totalQty), QP.ink],
-              ] as [string, string, string][]).map(([k, v, c]) => [
-                { text: k, fontSize: 7.5, bold: true, color: QP.dim, characterSpacing: 1.2, margin: [0, 6, 0, 6] },
-                { text: v, fontSize: 9, bold: true, color: c, alignment: "right", margin: [0, 5, 0, 5] },
-              ]),
-            },
-            layout: {
-              hLineWidth: (i: number) => (i === 0 ? 1.5 : 0.75),
-              hLineColor: (i: number) => (i === 0 ? QP.ink : QP.line),
-              vLineWidth: () => 0,
-              paddingLeft: () => 0, paddingRight: () => 0, paddingTop: () => 0, paddingBottom: () => 0,
-            },
-          },
+          metaTable([
+            ["ORDER NO.", order.orderNumber || "—", QP.orange],
+            ["ORDER DATE", order.orderDate ? prettyDate(order.orderDate) : "—", QP.ink],
+            ["PANELS", nfmt(order.lines.length), QP.ink],
+            ["TOTAL QTY", nfmt(totalQty), QP.ink],
+          ]),
         ],
         columnGap: 24,
         margin: [0, 0, 0, 18],
@@ -201,8 +213,7 @@ async function buildPanelOrderDoc(order: PanelOrderRow, panelsById: Map<string, 
       },
       /* One page per panel line */
       ...panelLines.map((l, i) => panelPage(order, l, panelsById.get(l.panelId), images[i])),
-    ],
-  };
+  ]);
 }
 
 /** Build + download the Panel Order PDF (cover + one page per panel). */

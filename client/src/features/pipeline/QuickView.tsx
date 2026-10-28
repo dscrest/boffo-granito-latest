@@ -91,7 +91,7 @@ export function QuickView({
         <div>
           <div className="lbl">Line items in order</div>
           <div className="po">
-            {order.orderNumber || order.poNumber} · {order.flag} {order.party}
+            {order.poNumber || order.orderNumber} · {order.flag} {order.party}
           </div>
         </div>
         <div className="right">

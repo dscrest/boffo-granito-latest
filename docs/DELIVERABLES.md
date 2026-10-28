@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 178 |
+| Completed | 188 |
 | In progress | 19 |
 | Future | 27 |
-| **Total** | **224** |
+| **Total** | **234** |
 
 ## Foundation & workspace
 
@@ -36,6 +36,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Clear / None option on every pick list | A way to clear a chosen value on every dropdown in the app. | Future |  | CR-069 |
 | Pick-list keyboard navigation | Arrow keys move, Enter / Space selects, on every dropdown — to be verified and completed across all screens. | Future |  | CR-009 |
 | Hosting platform upgrade | Move the app to the newer hosting platform (same app, same data; faster page loads). Planned, not started. | Future |  |  |
+| PO number first on every stage screen | Palletization, Loading, Dispatch, Production and their pop-ups show the customer's PO number; the system SO number is a hidden column one tick away. Printed documents keep the SO number. | Completed | 2026-10-28 | CR-482 |
+| List pages load in one round trip | Every list page joins the Customer table (2,800+ rows after the CRM import); it was fetched 300 rows per request, one after another, at about a second each. The server now returns a whole table in one response, so the sales order, quote, production, palletization, loading and customer lists stop waiting about ten seconds for it. | Completed | 2026-10-28 | CR-478 |
 | Settings groups: Item Master and Panel Master | Item reference lists under Item Master, panel ones (Cut Piece Size, MDF) under Panel Master; Adjustment Reason and Warehouses under Setup & Configuration. Superseded by the Masters page (CR-436). | Completed | 2026-10-24 | CR-428 |
 | One Masters page | Single Masters entry in the sidebar with Export Master · Item Master · Panel Master sub-tabs; every master (Pallets, Containers, Sizes, Items, Panel Items, Panels, lookups, Currencies, Warehouses) opens in place; old menu entries and links redirect into it; roles with Items or Panel Craft view see it. | Completed | 2026-10-24 | CR-436 |
 | Masters menu inside Settings with horizontal tabs | The Settings page's left menu has Masters ▸ Item / Panel / Export; the chosen group shows its title and its masters as horizontal tabs that open each list in place. The sidebar Masters entry opens the same page. | Completed | 2026-10-24 | CR-439 |
@@ -90,6 +92,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Zoho link status per customer | Customers grid column Zoho: CRM & Books / CRM only / Books only; customer page spells it out with both ids; advanced filter takes the states; token handling fixed so the status fills for every synced customer. | Completed | 2026-10-21 | CR-362, 363 |
 | Sync never creates a twin; duplicate names are an error | The existing-customer lookup reads every customer; a CRM account whose name already belongs to another linked customer is reported as a duplicate and not created; CRM comes first. | Completed | 2026-10-22 | CR-372 |
 | Duplicate customers card | Settings ▸ Zoho CRM ▸ Duplicate customers: Find duplicates → Merge N duplicates (quotes, orders, panel and sample orders move to the surviving customer; reused codes renewed). Import all refuses to run while duplicates exist. | Completed | 2026-10-22 | CR-373 |
+| Import all reaches every CRM account | Zoho CRM only serves page numbers up to record 2,000, so older accounts never arrived; the import now walks Zoho's page tokens (200 accounts per list call) and a re-run works only on the changed or unlinked accounts instead of re-listing everything ten by ten. | Completed | 2026-10-27 | CR-477 |
 | Zoho item reference | Link items to the Zoho item master. Blocked — reference layout never supplied. | Future |  | CR-013.2 |
 | New customer menu: From Zoho CRM / Refresh from Zoho CRM | New customer stays one click; the arrow beside it offers From Zoho CRM (prefill from a CRM account) and, for admins, Refresh from Zoho CRM. The Active / Inactive pills above the grid are gone — use Working Status in Search Customers. | Completed | 2026-10-27 | CR-463/466 |
 
@@ -130,6 +133,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | 'Send to Palletization' in the More menu | Move the action into More and name it 'Palletization'. | Future |  | CR-042 |
 | Sales Order page without Panel Orders tab | Production, Palletization and Container Planning tabs only; Request Panels stays in the More menu. | Completed | 2026-10-24 | CR-422 |
 | Sales Order without a Location field | The order form no longer asks for a Location; location is recorded where stock is written (production, cut stock, pallets). | Completed | 2026-10-27 | CR-468 |
+| Box Brand mandatory | A Sales Order cannot be saved without a box brand; the customer's default still prefills it. | Completed | 2026-10-28 | CR-483 |
 
 ## Production
 
@@ -140,6 +144,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Start / Log / Complete Production | Start creates the job (Item · Quantity); Log adds batch rows from the row's + menu (first log → In Production, full coverage → Completed automatically); Complete closes the job. | Completed | Phase 1 (by 01-Oct-2026) | CR-234…237 |
 | Bulk Record Production (make-to-stock) | A form in the Adjust Stock shape: Production date, recorded by and a description over an Item Table — Size · Item · Batch (blank = automatic) · Qty · Box Brand · Location per line — one line to start, + Add line; paste a block from Excel; one Save records every line into stock; retry-safe. | Completed | 2026-10-27 | CR-244, 264, 469 |
 | Sales Order ▸ Production tab per design | One row per design with its batches as chips and the requested / produced totals summed; totals footers on both tables. | Completed | 2026-10-27 | CR-470 |
+| Production tab per batch with Production date; stock actions on the tab | Each batch on its own line with the day it was produced (not the allocation day), its boxes and who allocated it; Allocate Stock / Deallocate Stock sit above this table instead of on the Items card. | Completed | 2026-10-28 | CR-479 |
 | Sheet edit mode | Edit makes plan qty, Produced and Status editable across rows; nothing written until Save; invalid cells block Save. | Completed | Phase 1 (by 01-Oct-2026) | CR-111 |
 | Excel import of the factory file | Import production from the factory's spreadsheet. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Batch numbering and rules | Batches auto-numbered B/YYYY-MM/NNN (restarts monthly per item) or typed; never repeats on one item; Box Brand on every batch row; over-production blocked. | Completed | Phase 1 (by 01-Oct-2026) |  |
@@ -156,6 +161,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Palletization board and plan numbers | Sheet and Kanban views, Group, Today's Report, New Palletization; plans numbered PAL/FY/NNN; a plan may span several orders of one customer; each line is one item × one batch. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Columns, totals footer and selection bar | Customer · Item · Order · Batch · Boxes · Remaining · Age · Ready Pallets (N (boxes)) · Pallet type; totals footer; selection bar when rows are ticked. | Completed | Phase 1 (by 01-Oct-2026) | CR-279 |
 | Counts per batch: Ordered · Ready Pallets · Boxes / Pallet · Remaining | Every palletization page counts the row's own batch — a loaded batch of the same item no longer shows on its sibling. Columns Boxes · Ordered Boxes · Ready Pallets (N (boxes)) · Boxes / Pallet · Remaining with totals; the Complete Palletization dialog shows the same figures. | Completed | 2026-10-27 | CR-472 |
+| Whole pallets: Possible / Prepared Pallets, pallets recorded | No fractions — 23 boxes on an 18-box pallet is 1 pallet · 18 boxes, the 5 wait for a mixed-batch pallet. Ready for Palletization shows Possible Pallets; In Palletization shows Pending Boxes, Possible Pallets, Prepared Pallets and the boxes on them; Ready for Loading shows Pallets and Boxes. Boxes / Pallet and Remaining removed; Complete Palletization asks for pallets. | Completed | 2026-10-28 | CR-481 |
 | Plan detail page | Lines with status, batches, pallets; Edit + More; activity. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Prints on demand | Pallet Packing Report; Pallet Slips (one per physical pallet, mixed pallet lists every batch); pallet QR labels; batch QR slips. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Board rules | Planned boxes never exceed the order; batches attributed oldest-first; a hand-edited plan is pinned; the palletized part of a batch can be loaded while the rest is in progress. | Completed | Phase 1 (by 01-Oct-2026) | CR-129, 248 |
@@ -193,6 +199,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Pick the planned container at loading | Each container tab's plan row is a picker over the order's planned containers (format, pallets, boxes, Planned / Sent / Claimed by); the claim is saved. | Completed | 2026-10-13 | CR-338 |
 | Two steps per container; C1 / C2 naming | Designs & pallets first, then Container & vehicle (container pick, number, vehicle, driver, seals) under the rows; party and customer PO lead the header, SO numbers small. | Completed | 2026-10-19 | CR-350, 354 |
 | Mix Batch at loading | Top up a pallet with another batch at loading time, not only at palletization. | Future |  | CR-260 follow-up |
+| Five stage pages: Palletization Completed, Loading, Dispatch | Palletization Completed stays its own page; Loading lists the items being loaded; the new Dispatch page lists the containers ready to dispatch and the dispatched ones, with their prints. | Completed | 2026-10-28 | CR-480 |
 
 ## Stock & batch ledger
 
@@ -230,6 +237,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Feature | What it does | Status | Delivered on | Ref |
 |---|---|---|---|---|
 | Panel Master | Showcase panel master with one image, PANEL-001 numbering by the server, full-page New / Edit form; grid opens as photo tiles with a toggle to the column grid; row / tile click opens the panel. | Completed | 2026-10-08 | CR-283…285, 291, 319 |
+| Panel form opens with a blank size | New Panel no longer prefills 1200x2100; the size is typed. | Completed | 2026-10-28 | CR-484 |
+| Sample order Actions tab | A sample order has the panel order's tabs (Details · Readiness · Actions · Dispatch · Activity). Loads are recorded on the Actions tab — quantity per row, + Load… on one row, Dispatch, Load Copy per trip — the header Record Load button is gone. | Completed | 2026-10-28 | CR-485 |
+| Sample order pick slip | More ▸ Print order PDF on a sample order: every item with its photo, name and item code, full tile / cut piece size, Requested · Supplied · Remaining, the remark typed on the line and an empty Broken / Adjustment box to fill in by hand; the Stock Adjustments reminder and Taken out by / Checked by lines. | Completed | 2026-10-28 | CR-486 |
 | Remarks on a panel | Free-text Remarks on New / Edit Panel for the old reference ID; shown on the panel page and searchable in the panel list. | In progress |  | CR-425 |
 | Cut Piece Size master under Panel Items | The cut piece size list is maintained from the Panel Items page (Cut Piece Sizes button) instead of Settings ▸ Masters. | In progress |  | CR-426 |
 | Panel Items with weighed cut pieces | Designs picked from the Item master into Panel Craft, each with its cut pieces (add, weigh, remove); the Panel form offers only these. | Completed | 2026-10-07 | CR-306 |

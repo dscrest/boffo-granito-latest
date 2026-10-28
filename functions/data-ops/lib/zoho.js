@@ -302,13 +302,15 @@ function registerZoho(app, { init, rowList, sendErr, assertAdmin, writeOpLog }) 
     }
   });
 
-  /* POST /zoho/:provider/import {page} (Admin): one page of the one-time full import; the client
-     loops until `done`. */
+  /* POST /zoho/:provider/import {page, cursor} (Admin): one chunk of the full import; the client
+     passes `summary.cursor` back (CR-477) and loops until `done`. `page` is its call counter. */
   app.post("/zoho/:provider/import", async (req, res) => {
     try {
       assertAdmin(req);
-      const page = Math.max(1, Number((req.body || {}).page) || 1);
-      res.json(await sync.sync(ctx(req), pick(req), { full: true, page }));
+      const body = req.body || {};
+      const page = Math.max(1, Number(body.page) || 1);
+      const cursor = body.cursor && typeof body.cursor === "object" ? body.cursor : null;
+      res.json(await sync.sync(ctx(req), pick(req), { full: true, page, cursor }));
     } catch (err) {
       sendErr(res, err);
     }

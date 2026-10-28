@@ -63,7 +63,7 @@ export function ReleaseModal({ line, box, onDone, onClose }: {
           <div style={{ marginBottom: 10 }}>
             <div className="design-name">{line.designLabel}</div>
             <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
-              {[line.customerName, line.soNumber, line.batchNumber ? `Batch ${line.batchNumber}` : "", box ? boxLabel(box) : ""].filter(Boolean).join("  ·  ") || "—"}
+              {[line.customerName, line.poNumber || line.soNumber, line.batchNumber ? `Batch ${line.batchNumber}` : "", box ? boxLabel(box) : ""].filter(Boolean).join("  ·  ") || "—"}
             </div>
           </div>
 

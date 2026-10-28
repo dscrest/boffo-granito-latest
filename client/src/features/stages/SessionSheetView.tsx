@@ -76,7 +76,7 @@ export function SessionSheetView({
           return [
             <tr key={band.salesOrderId} style={{ background: "var(--accent-soft)", color: "var(--accent-ink)", fontWeight: 700 }}>
               <td />
-              <td className="mono nw">{band.soNumber}</td>
+              <td className="mono nw" title={band.soNumber}>{band.poNumber || band.soNumber}</td>
               <td colSpan={4}>
                 <span style={{ display: "inline-flex", gap: 6 }}>
                   {hasPlan(band.salesOrderId) && <button className="btn" onClick={() => onFillFromPlan(band)}>Fill from plan</button>}
@@ -94,7 +94,7 @@ export function SessionSheetView({
                 return (
                   <tr key={l.id} style={q(l) > 0 ? { background: "var(--accent-soft)" } : undefined}>
                     <td className="mono dim">{n}</td>
-                    <td className="mono dim nw">{band.soNumber}</td>
+                    <td className="mono dim nw" title={band.soNumber}>{band.poNumber || band.soNumber}</td>
                     <td><span className="design-name">{row.designLabel}</span></td>
                     <td className="nw">{brandName(row.brandId) || "—"}</td>
                     <td className="mono nw">{l.batchNumber || "—"}</td>

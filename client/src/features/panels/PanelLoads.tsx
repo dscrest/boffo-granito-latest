@@ -18,6 +18,8 @@
    CR-402: the Actions tab also carries each panel's MDF · Vinyl · Pasted
    marks (Combobox per panel, spanning its Pieces + MDF rows); CR-401 the
    vinyl print waits for MDF Ready, CR-366 pasting waits for both.
+   CR-485: SampleActionsTab = the same Actions tab for a sample order (one
+   row per line, always Ready); the sample header lost its Record Load.
    ============================================================ */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@/ui/Icon";
@@ -72,7 +74,7 @@ import {
   type ProgressRow,
   type Requirement,
 } from "./panelOrdersApi";
-import { remaining, type SampleOrderRow } from "./sampleOrdersApi";
+import { remaining, SAMPLE_PIECE_LABEL, type SampleOrderRow } from "./sampleOrdersApi";
 
 /** CR-402: short column heads for the per-panel marks (the full names stay in CHECKPOINT_LABEL). */
 const LINE_CHECKPOINT_HEAD: Record<LineCheckpointKey, string> = { mdf: "MDF", vinyl: "Vinyl", pasted: "Pasted" };
@@ -188,6 +190,16 @@ export function readinessOf(o: LoadableOrder, r: ProgressRow, reqs: Requirement[
 function bookingWarning(reqs: Requirement[]): string {
   const short = reqs.reduce((s, r) => s + Math.max(0, r.need - r.allocated), 0);
   return short > 0 ? `Book ${fmt(short)} more pcs first.` : "";
+}
+type ReadyRow = ProgressRow & { rd: { ready: boolean; missing: string[] } };
+/** The "+" item that loads ONE row alone — greyed with the reason, never hidden (CR-382). Shared by both Actions tabs (CR-485). */
+function loadRowItem(r: ReadyRow, open: boolean, canEdit: boolean, pick: () => void, label = "Load…") {
+  return {
+    label,
+    disabled: !open || !canEdit || r.pending === 0 || !r.rd.ready,
+    title: !open ? "Order is closed" : r.pending === 0 ? "Nothing pending on this row" : r.rd.ready ? "Record a vehicle load for this row only" : r.rd.missing.join(" · "),
+    onClick: pick,
+  };
 }
 /** Status cell shared by the Actions tab and Record Load: Loaded · Ready · the missing list. */
 function StatusCell({ pending, rd }: { pending: number; rd: { ready: boolean; missing: string[] } }) {
@@ -520,16 +532,7 @@ export function PanelActionsTab({
     const ordered = list.reduce((n, r) => n + r.ordered, 0);
     return pending > 0 ? <span className="mono"><span style={amber}>{fmt(pending)}</span> <span className="dim">of {fmt(ordered)}</span></span> : <Chip tone="green" label="Loaded" />;
   };
-  /** The "+" item that loads ONE row alone — greyed with the reason, never hidden (CR-382). */
-  const loadRowItem = (r: (typeof rows)[number], label = "Load…") => {
-    const blocked = !open || !canEdit || r.pending === 0 || !r.rd.ready;
-    return {
-      label,
-      disabled: blocked,
-      title: !open ? "Order is closed" : r.pending === 0 ? "Nothing pending on this row" : r.rd.ready ? "Record a vehicle load for this row only" : r.rd.missing.join(" · "),
-      onClick: () => setRecording({ only: new Set([keyOf(r)]) }),
-    };
-  };
+  const rowItem = (r: ReadyRow, label?: string) => loadRowItem(r, open, canEdit, () => setRecording({ only: new Set([keyOf(r)]) }), label);
   const loadNow = (r: (typeof rows)[number], width: number) => (
     <NumberInput min={0} value={val(r)} onChange={(e) => set(r, Number(e.target.value))} placeholder="0" style={{ width, textAlign: "right" }} aria-label={`${rowLabel(r)} loading now`} disabled={!open || !canEdit || r.pending === 0 || !r.rd.ready} title={r.rd.ready ? undefined : r.rd.missing.join(" · ")} />
   );
@@ -606,8 +609,8 @@ export function PanelActionsTab({
                                   title: !open ? "Order is closed" : wholeKeys.length === 0 ? "Nothing on this panel is ready to load" : wholeKeys.length < pend.length ? "Loads the ready rows of this panel — the rest stay back" : "Every piece of this panel and its MDF board on one vehicle",
                                   onClick: () => setRecording({ only: new Set(wholeKeys) }),
                                 }]
-                              : pieces.map((r) => loadRowItem(r))),
-                            ...(board ? [loadRowItem(board, "Load board…")] : []),
+                              : pieces.map((r) => rowItem(r))),
+                            ...(board ? [rowItem(board, "Load board…")] : []),
                           ]}
                         />
                       </td>
@@ -659,7 +662,7 @@ export function PanelActionsTab({
                     <td className="num">{loadNow(r, 100)}</td>
                     {canEdit && (
                       <td>
-                        <MoreMenu kebab icon="plus" title="Loading actions" items={[loadRowItem(r)]} />
+                        <MoreMenu kebab icon="plus" title="Loading actions" items={[rowItem(r)]} />
                       </td>
                     )}
                   </tr>
@@ -686,6 +689,102 @@ export function PanelActionsTab({
       )}
       {/* CR-450: the Requirements card (need · in stock · allocated · short · Available tick · Allocate Stock) lives here, not on Details. */}
       <RequirementsCard order={order} reqs={reqs} onChanged={onChanged} />
+    </div>
+  );
+}
+
+/* ---------------- Actions tab — sample orders (CR-485) ---------------- */
+/** The panel tab's shape for a sample order: one row per sample line (always Ready — no marks, no booking),
+    Load Now + "+" Load… per row, Load Copy per trip and Dispatch in the card head. One card — no pieces
+    card, no Requirements. The header Record Load button is gone; the Dispatch tab keeps its own. */
+export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; onChanged: () => void }) {
+  const o: LoadableOrder = { ...order, type: "Sample" };
+  const rows: ReadyRow[] = progressOf(o).map((r) => ({ ...r, rd: readinessOf(o, r, []) }));
+  const open = isOpen(o);
+  const canEdit = can("panel_craft", "edit");
+  const keyOf = (r: ProgressRow) => `${order.id}|${rowKey(r)}`;
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const [recording, setRecording] = useState<false | { only?: Set<string> }>(false);
+  const val = (r: ReadyRow) => qty[keyOf(r)] ?? r.pending;
+  const set = (r: ProgressRow, v: number) => setQty((p) => ({ ...p, [keyOf(r)]: Math.max(0, Math.min(r.pending, Math.floor(v) || 0)) }));
+  const total = rows.reduce((s, r) => s + val(r), 0);
+  const pendingRows = rows.filter((r) => r.pending > 0).length;
+  const lineOf = (id: string) => order.lines.find((l) => l.id === id);
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card-head">
+          <span style={{ fontWeight: 600 }}>Ready to Dispatch</span>
+          {pendingRows > 0 && <Chip tone="green" label={`${pendingRows} of ${pendingRows} ready`} />}
+          <span style={{ flex: 1 }} />
+          <MoreMenu
+            label="Load Copy"
+            title="Download the Load Copy of one trip — only what left on that vehicle"
+            items={[...order.loads].reverse().map((ld) => ({
+              label: `${ld.loadNumber || "Load"} · ${ld.vehicle || "—"}`,
+              title: [ld.date, ld.driverName].filter(Boolean).join(" · "),
+              onClick: () => loadCopy(o, ld),
+            }))}
+          />
+          {canEdit && (
+            <button className="hbtn primary" disabled={!open || total === 0} onClick={() => setRecording({})} title={!open ? "Order is closed" : total === 0 ? "Type a quantity to dispatch" : "Record the vehicle load for these quantities"}>
+              <Icon name="truck" size={13} /> Dispatch
+            </button>
+          )}
+        </div>
+        <div style={{ overflow: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Piece</th>
+                <th className="num" style={{ textAlign: "right" }}>Requested</th>
+                <th className="num" style={{ textAlign: "right" }}>Supplied</th>
+                <th className="num" style={{ textAlign: "right" }}>Pending</th>
+                <th>Status</th>
+                <th className="num" style={{ textAlign: "right", width: 120 }}>Load Now</th>
+                {canEdit && <th style={{ width: 44 }} aria-label="Actions" />}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const l = lineOf(r.lineId);
+                return (
+                  <tr key={keyOf(r)}>
+                    <td style={{ whiteSpace: "nowrap" }}><LineCell label={l?.designName || "—"} o={o} lineId={r.lineId} /></td>
+                    <td className="mono">{!l ? "—" : l.pieceKind === "Cut" ? `${SAMPLE_PIECE_LABEL.Cut} · ${l.cutSizeName || "—"}` : SAMPLE_PIECE_LABEL.Full}</td>
+                    <td className="num mono">{fmt(r.ordered)}</td>
+                    <td className="num mono">{fmt(r.loaded)}</td>
+                    <td className="num mono" style={r.pending > 0 ? { color: "var(--c-amber)", fontWeight: 600 } : undefined}>{fmt(r.pending)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}><StatusCell pending={r.pending} rd={r.rd} /></td>
+                    <td className="num">
+                      <NumberInput min={0} value={val(r)} onChange={(e) => set(r, Number(e.target.value))} placeholder="0" style={{ width: 100, textAlign: "right" }} aria-label={`${l?.designName || "line"} loading now`} disabled={!open || !canEdit || r.pending === 0} />
+                    </td>
+                    {canEdit && (
+                      <td>
+                        <MoreMenu kebab icon="plus" title="Loading actions" items={[loadRowItem(r, open, canEdit, () => setRecording({ only: new Set([keyOf(r)]) }))]} />
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={canEdit ? 8 : 7} className="muted" style={{ textAlign: "center", padding: 18 }}>No samples on this order.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {recording && (
+        <RecordLoadModal
+          orders={[o]}
+          initialQty={Object.fromEntries(rows.map((r) => [keyOf(r), recording.only ? (recording.only.has(keyOf(r)) ? val(r) || r.pending : 0) : val(r)]))}
+          onDone={onChanged}
+          onClose={() => setRecording(false)}
+        />
+      )}
     </div>
   );
 }

@@ -160,7 +160,7 @@ export function LoadingDetail() {
             to: `/loading/${encodeURIComponent(b.id)}`,
             title: boxLabel(b),
             subtitle: [customers, b.vehicleNumber, status].filter(Boolean).join("  ·  "),
-            searchText: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(" "),
+            searchText: [...new Set(inBox.flatMap((l) => [l.soNumber, l.poNumber]).filter(Boolean))].join(" "),
           };
         }),
     [boxes, plans, orders],
@@ -254,7 +254,7 @@ export function LoadingDetail() {
       <DetailRail placeholder="Search loadings…" currentId={boxId} items={railItems} />
       <div style={{ flex: 1, minWidth: 0 }}>
       <RecordDetail
-        backTo="/loading"
+        backTo={box.status === "Dispatched" || sealed(box) ? "/dispatch" : "/loading"}
         title={boxLabel(box)}
         statusChip={{ label: stage.label, cls: stage.cls }}
         subtitle={
@@ -326,7 +326,7 @@ export function LoadingDetail() {
                       {soHeads.map(({ soId, head }) => (
                         <button key={soId} className={`chip mono${soId === selSo ? " palstatus p-loading" : ""}`}
                           style={{ cursor: "pointer" }} onClick={() => setPlanSo(soId)} title={head.party}>
-                          {head.orderNumber || head.poNumber}
+                          {head.poNumber || head.orderNumber}
                         </button>
                       ))}
                     </div>
@@ -352,7 +352,7 @@ export function LoadingDetail() {
                       {soHeads.map(({ soId, head }) => (
                         <button key={soId} className={`chip mono${soId === selSo ? " palstatus p-loading" : ""}`}
                           style={{ cursor: "pointer" }} onClick={() => setPlanSo(soId)} title={head.party}>
-                          {head.orderNumber || head.poNumber}
+                          {head.poNumber || head.orderNumber}
                         </button>
                       ))}
                     </div>
@@ -420,9 +420,9 @@ export function LoadingDetail() {
                     <td className="num mono">{fmt(l.boxes)}</td>
                     <td className="mono">
                       {l.salesOrderId ? (
-                        <Link className="linkish" to={`/orders/${encodeURIComponent(l.salesOrderId)}`} title="Open order">{l.soNumber}</Link>
+                        <Link className="linkish" to={`/orders/${encodeURIComponent(l.salesOrderId)}`} title={`Open order ${l.soNumber}`}>{l.poNumber || l.soNumber}</Link>
                       ) : (
-                        l.soNumber || "—"
+                        l.poNumber || l.soNumber || "—"
                       )}
                     </td>
                     <td className="muted">{l.customerName || "—"}</td>
@@ -442,7 +442,7 @@ export function LoadingDetail() {
                         <td className="num mono">{fmt(l.boxes)}</td>
                         <td className="mono">
                           {o ? (
-                            <Link className="linkish" to={`/orders/${encodeURIComponent(l.so)}`} title="Open order">{o.orderNumber || o.poNumber}</Link>
+                            <Link className="linkish" to={`/orders/${encodeURIComponent(l.so)}`} title={`Open order ${o.orderNumber}`}>{o.poNumber || o.orderNumber}</Link>
                           ) : (
                             "—"
                           )}

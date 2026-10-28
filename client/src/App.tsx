@@ -153,13 +153,14 @@ function navTree(): NavNode[] {
         // the page (ViewToggle) switches between /byorder and /kanban.
         // #21: "All Orders" page commented out — By Order is the primary list.
         { id: "byorder", label: "Sales Orders", icon: "orders", path: "/orders" },
-        // Palletization is THREE pages over one board (CR-160, CR-360): the
-        // queue, the work in progress, and the palletized stock waiting for
-        // loading. Same feature id ("packing") so one role permission covers all.
+        // CR-480: FIVE pages, one stage each — three over the palletization board
+        // (CR-160, CR-360) and two over the loading board. Same feature ids
+        // ("packing" / "loading") so one role permission covers each board.
         { id: "packing", label: "Ready for Palletization", icon: "palette", path: "/packing" },
         { id: "packing", label: "In Palletization", icon: "palette", path: "/palletizing" },
-        { id: "packing", label: "Palletization Completed", icon: "palette", path: "/palletized" },
-        { id: "loading", label: "Loading and Dispatch", icon: "truck" },
+        { id: "packing", label: "Palletization Completed", icon: "palette", path: "/palletized" }, // CR-480 rename reversed by the user the same day
+        { id: "loading", label: "Loading", icon: "truck", path: "/loading" },
+        { id: "loading", label: "Dispatch", icon: "truck", path: "/dispatch" },
       ],
     },
     // Panel Craft — showcase panels the reps show retailers: the panel
@@ -463,14 +464,18 @@ export default function App() {
             <Route path="/ops" element={<OperationsLog />} />
             <Route path="/packing" element={<PalPlans stages={["Planning"]} sectionsKey="palplans.stages.ready" />} />
             {/* CR-360: one stage per page — In Palletization alone here, the recorded
-                (Ready for Loading) rows on /palletized; /loading keeps its Ready section too. */}
+                (Ready for Loading) rows on /palletized ONLY (CR-480 took them off /loading). */}
             <Route path="/palletizing" element={<PalPlans stages={["Palletizing"]} />} />
             <Route path="/palletized" element={<PalPlans stages={["Ready"]} sectionsKey="palplans.stages.done" />} />
             <Route path="/packing/new" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/edit" element={<PalPlanFormPage />} />
             <Route path="/packing/:id/clone" element={<PalPlanFormPage />} />
             <Route path="/packing/:id" element={<PalPlanDetail />} />
-            <Route path="/loading" element={<LoadingBay />} />
+            {/* CR-480: Loading = items being loaded; Dispatch = containers ready to dispatch
+                (+ the dispatched ones as history) — user 2026-10-28: "Loading will show All items
+                in Loading. Dispatch will show all containers that are ready to dispatch." */}
+            <Route path="/loading" element={<LoadingBay stages={["InLoading"]} />} />
+            <Route path="/dispatch" element={<LoadingBay stages={["ReadyDispatch", "Dispatched"]} />} />
             <Route path="/loading/new" element={<LoadingSession />} />
             {/* CR-227 trial: spreadsheet-style New Loading, beside the session. */}
             <Route path="/loading/plan" element={<LoadingPlanPage />} />

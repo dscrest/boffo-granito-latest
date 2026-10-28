@@ -15,7 +15,7 @@ import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { useWarehouses } from "@/features/masters/useWarehouses";
-import { batchKey, readyPalletsLabel, type PalPlanLine } from "./palPlansApi";
+import { batchKey, readyPalletsLabel, wholePallets, type PalPlanLine } from "./palPlansApi";
 
 export interface PalletiseEntry {
   lineId: string;
@@ -58,10 +58,15 @@ export function PalletiseModal({
   const [palletByLine, setPalletByLine] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((l) => [l.id, l.palletId || defaultPalletFor?.(l) || ""])),
   );
-  // Boxes to move per line (string drafts) — defaults to the full line.
+  // Boxes to move per line (string drafts) — defaults to the full line. Used only
+  // while the pallet's capacity is unknown; otherwise the PALLETS draft rules (CR-481).
   const [boxesByLine, setBoxesByLine] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((l) => [l.id, String(l.boxes)])),
   );
+  // CR-481: the floor records WHOLE pallets — boxes = pallets × capacity, the rest
+  // stays back as "need palletization" (a Mix Batch top-up takes it later). Blank
+  // draft = every whole pallet the line can fill.
+  const [palletsByLine, setPalletsByLine] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
   // CR-412: ONE location for all items in the dialog — a pallet run stands in one bay.
   const { options: whOptions, enabled: whEnabled } = useWarehouses();
@@ -86,7 +91,17 @@ export function PalletiseModal({
 
   const setPallet = (lineId: string, pid: string) => setPalletByLine((p) => ({ ...p, [lineId]: pid }));
 
-  const boxesOf = (l: PalPlanLine) => Math.min(Math.max(0, Math.floor(Number(boxesByLine[l.id]) || 0)), l.boxes);
+  const palletsOfLine = (l: PalPlanLine) => {
+    const cap = capOf(l.id);
+    const max = wholePallets(l.boxes, cap);
+    const d = palletsByLine[l.id];
+    return d === undefined || d === "" ? max : Math.min(Math.max(0, Math.floor(Number(d) || 0)), max);
+  };
+  const boxesOf = (l: PalPlanLine) => {
+    const cap = capOf(l.id);
+    if (cap > 0) return palletsOfLine(l) * cap;
+    return Math.min(Math.max(0, Math.floor(Number(boxesByLine[l.id]) || 0)), l.boxes);
+  };
   const entries: PalletiseEntry[] = lines.map((l) => ({
     lineId: l.id,
     palletId: palletByLine[l.id] || "",
@@ -162,13 +177,13 @@ export function PalletiseModal({
                       <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
                       <div className="design-name">{l.designLabel}</div>
                       <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                        {[l.customerName, l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
+                        {[l.customerName, l.poNumber || l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
                       </div>
                       {(() => {
                         const prog = progress?.get(batchKey(l));
                         return prog ? (
                           <div className="mono" style={{ fontSize: "var(--t-sm)", marginTop: 2 }} title="Already palletized for this item: pallets (boxes) · boxes still to palletize">
-                            Ready {readyPalletsLabel(prog.done, l.boxesPerPallet, fmt)} · Remaining {fmt(Math.max(0, prog.total - prog.done))}
+                            Prepared {readyPalletsLabel(prog.done, l.boxesPerPallet, fmt)} · Pending {fmt(Math.max(0, prog.total - prog.done))}
                           </div>
                         ) : null;
                       })()}
@@ -183,18 +198,45 @@ export function PalletiseModal({
                     <td className="num">
                       {/* Editable: palletise part of the line now, the rest later —
                           the remainder stays in its current stage. */}
-                      <NumberInput
-                        value={boxesByLine[l.id] ?? ""}
-                        onChange={(e) => setBoxesByLine((p) => ({ ...p, [l.id]: e.target.value }))}
-                        placeholder="0"
-                        style={{ width: 84, textAlign: "right" }}
-                        aria-label={`${l.designLabel} boxes to palletize`}
-                        className={showErrors && boxesOf(l) <= 0 ? "error" : undefined}
-                      />
-                      {moving < l.boxes && (
-                        <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }}>
-                          of {fmt(l.boxes)} — {fmt(l.boxes - moving)} stay back
-                        </div>
+                      {cap > 0 ? (
+                        // CR-481: whole PALLETS; boxes follow (pallets × capacity).
+                        <>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+                            <NumberInput
+                              value={palletsByLine[l.id] ?? String(wholePallets(l.boxes, cap))}
+                              onChange={(e) => setPalletsByLine((p) => ({ ...p, [l.id]: e.target.value }))}
+                              placeholder="0"
+                              style={{ width: 64, textAlign: "right" }}
+                              aria-label={`${l.designLabel} pallets to palletize`}
+                              className={showErrors && boxesOf(l) <= 0 ? "error" : undefined}
+                            />
+                            <span className="dim" style={{ fontSize: "var(--t-sm)" }}>of {fmt(wholePallets(l.boxes, cap))} pallet{wholePallets(l.boxes, cap) === 1 ? "" : "s"}</span>
+                          </div>
+                          <div className="mono dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }}>
+                            = {fmt(moving)} boxes{l.boxes - moving > 0 ? ` · ${fmt(l.boxes - moving)} stay back` : ""}
+                          </div>
+                          {wholePallets(l.boxes, cap) === 0 && (
+                            <div style={{ fontSize: "var(--t-xs)", marginTop: 2, color: "var(--c-amber)" }}>
+                              Less than one pallet — top up from another batch
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <NumberInput
+                            value={boxesByLine[l.id] ?? ""}
+                            onChange={(e) => setBoxesByLine((p) => ({ ...p, [l.id]: e.target.value }))}
+                            placeholder="0"
+                            style={{ width: 84, textAlign: "right" }}
+                            aria-label={`${l.designLabel} boxes to palletize`}
+                            className={showErrors && boxesOf(l) <= 0 ? "error" : undefined}
+                          />
+                          {moving < l.boxes && (
+                            <div className="dim" style={{ fontSize: "var(--t-xs)", marginTop: 2 }}>
+                              of {fmt(l.boxes)} — {fmt(l.boxes - moving)} stay back
+                            </div>
+                          )}
+                        </>
                       )}
                     </td>
                     <td>
@@ -233,7 +275,7 @@ export function PalletiseModal({
           <span className="df-req-note info">
             {showErrors && (missingPallet > 0 || missingBoxes > 0) ? (
               <span className="field-err">
-                {missingPallet > 0 ? "Choose a pallet for every item" : "Enter the boxes to palletize for every item"}
+                {missingPallet > 0 ? "Choose a pallet for every item" : "Enter the pallets to palletize for every item"}
               </span>
             ) : (
               `${fmt(totalBoxes)} boxes · ${lines.length} item${lines.length === 1 ? "" : "s"} → ${toLabel}`

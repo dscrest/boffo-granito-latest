@@ -136,9 +136,9 @@ export function DispatchTab({ scope, orderedBoxes }: {
                 <td className="num mono">{fmt(line.boxes)}</td>
                 <td className="mono">
                   {line.salesOrderId ? (
-                    <Link className="linkish" to={`/orders/${encodeURIComponent(line.salesOrderId)}`} title="Open order">{line.soNumber}</Link>
+                    <Link className="linkish" to={`/orders/${encodeURIComponent(line.salesOrderId)}`} title="Open order">{line.poNumber || line.soNumber}</Link>
                   ) : (
-                    line.soNumber || "—"
+                    line.poNumber || line.soNumber || "—"
                   )}
                 </td>
               </tr>

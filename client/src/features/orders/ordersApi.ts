@@ -255,7 +255,10 @@ export const soStatusLabel = (s: string) => SO_STATUS_LABEL[s] || s;
 
 /** CR-353: what a sales order is called on screen — the customer's PO first, the SO number as fallback
     (the SO number stays the DB / URL identity and rides small beside the label). */
-export const orderLabel = (o: { poNumber?: string; orderNumber?: string }) => o.poNumber || o.orderNumber || "—";
+export const orderLabel = (o: { poNumber?: string; orderNumber?: string; soNumber?: string }) =>
+  o.poNumber || o.orderNumber || o.soNumber || "—";
+/** CR-482: the system SO number alone (hidden-by-default grid column / small sub text). */
+export const soLabel = (o: { orderNumber?: string; soNumber?: string }) => o.orderNumber || o.soNumber || "";
 
 /** Boxes an order line still needs = Ordered − Allocated (CR-263; Allocate Stock's "to allocate"). */
 export const remainingOf = (o: Pick<Order, "orderQty" | "producedQty">) => Math.max(0, o.orderQty - o.producedQty);

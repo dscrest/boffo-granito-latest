@@ -1609,7 +1609,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           ...(typeof body.shipping_address === "string" ? { shipping_address: body.shipping_address } : {}),
           // Box Brand master pick (Brand FK, CR-162). The legacy free-text
           // box_branding column is left untouched (read-only history).
-          box_brand: body.box_brand || null,
+          box_brand: requireBoxBrand(body.box_brand),
           sales_person: salesPerson || undefined,
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -1697,6 +1697,14 @@ async function nextOrderNumber(catalyst, table = "SalesOrder", tag = "SO") {
   return `${prefix}${String(max + 1).padStart(3, "0")}`;
 }
 
+// CR-483: every Sales Order carries a Box Brand (the floor prints it on the
+// boxes) — the form enforces it and so does every write path here.
+function requireBoxBrand(v) {
+  const id = String(v || "").trim();
+  if (!/^\d+$/.test(id)) throw badRequest("Box Brand is required");
+  return id;
+}
+
 async function createSalesOrder(ds, body, maps) {
   // Blank order_number → the server assigns the next number (clients no
   // longer generate SO numbers; hard-coded counters caused 409 collisions).
@@ -1743,7 +1751,7 @@ async function createSalesOrder(ds, body, maps) {
     warehouse, // CR-453
     manual_so_number: body.manual_so_number || "",
     // Box Brand master pick (Brand FK, CR-162) — replaces the free-text box_branding.
-    box_brand: body.box_brand || null,
+    box_brand: requireBoxBrand(body.box_brand),
     sales_person: salesPerson || undefined,
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
@@ -7918,6 +7926,31 @@ app.get("/:table", async (req, res) => {
         if (table === "AppSetting" && !ids.includes("setting_key")) ids.push("setting_key");
         cols = ids.join(", ");
       }
+    }
+    // CR-478: ?all=1 returns the WHOLE table in one response. The client used to
+    // walk 300-row pages one HTTP round trip at a time (~1 s each on Catalyst);
+    // Customer alone is 2,800+ rows = 10 serial trips on every list page. Here the
+    // pages run in parallel against ZCQL after one COUNT, so it is ~1 trip total.
+    if (req.query.all === "1") {
+      const PAGE = 300, MAX_PAGES = 34; // ~10k rows safety valve, same as the client had
+      const zcql = catalyst.zcql();
+      const countRow = rowList(await zcql.executeZCQLQuery(`SELECT COUNT(ROWID) FROM ${table}${where}`))[0] || {};
+      const total = Number(Object.values(countRow)[0]) || 0;
+      const pages = Math.min(Math.ceil(total / PAGE), MAX_PAGES);
+      const ord = order || " ORDER BY ROWID asc"; // LIMIT offset paging needs a stable order
+      const chunks = await Promise.all(
+        Array.from({ length: pages }, (_, i) =>
+          zcql.executeZCQLQuery(`SELECT ${cols} FROM ${table}${where}${ord} LIMIT ${i * PAGE}, ${PAGE}`),
+        ),
+      );
+      const seen = new Set();
+      const rows = [];
+      for (const r of chunks.flatMap(rowList)) {
+        if (seen.has(String(r.ROWID)) || isSecretSetting(table, r)) continue;
+        seen.add(String(r.ROWID));
+        rows.push(r);
+      }
+      return res.json(total > pages * PAGE ? { ok: true, rows, truncated: true } : { ok: true, rows });
     }
     const lim = offset > 0 ? `${offset}, ${limit}` : `${limit}`;
     const sql = `SELECT ${cols} FROM ${table}${where}${order} LIMIT ${lim}`;

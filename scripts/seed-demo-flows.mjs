@@ -218,7 +218,7 @@ async function orders(m) {
   if (!S.so.B) {
     await asSales(async () => {
       const r = await post("so-with-items", {
-        customer: m["DEMO-NOVA"].name, po_number: "NOVA-PO-7781", order_date: day(-2), shipment_date: day(30), currency: "USD", exchange_rate: 83.5,
+        customer: m["DEMO-NOVA"].name, po_number: "NOVA-PO-7781", box_brand: await idOf("Brand", "name", "Stonecraft"), order_date: day(-2), shipment_date: day(30), currency: "USD", exchange_rate: 83.5,
         remarks: "Pending approval — raised by Sales", container_plan: plan(m, [{ k: "calacatta", boxes: 240 }, { k: "emperador", boxes: 240 }]),
         lines: [{ item: unique("calacatta"), qty: 240, rate: 1.35, rate_basis: "box", pallet: m.pallet48 }, { item: unique("emperador"), qty: 240, rate: 1.2, rate_basis: "box", pallet: m.pallet48 }],
       });
@@ -231,7 +231,7 @@ async function orders(m) {
   // SO-C — Confirmed, nothing produced yet
   if (!S.so.C) {
     const r = await post("so-with-items", {
-      customer: m["DEMO-RIO"].name, po_number: "RIO-PO-0119", order_date: day(-1), shipment_date: day(40), currency: "USD", exchange_rate: 83.5,
+      customer: m["DEMO-RIO"].name, po_number: "RIO-PO-0119", box_brand: await idOf("Brand", "name", "Stonecraft"), order_date: day(-1), shipment_date: day(40), currency: "USD", exchange_rate: 83.5,
       remarks: "Awaiting production", lines: [{ item: unique("ashwood"), qty: 300, rate: 0.95, rate_basis: "box", pallet: m.pallet40 }],
     });
     S.so.C = { id: String(r.rowid), number: r.data?.order_number }; save();
@@ -241,7 +241,7 @@ async function orders(m) {
   // SO-D — one full container, produced → palletised → loaded → dispatched
   if (!S.so.D) {
     const r = await post("so-with-items", {
-      customer: m["DEMO-KENYA"].name, po_number: "SAV-PO-3307", order_date: day(-20), shipment_date: day(-3), currency: "USD", exchange_rate: 83.5,
+      customer: m["DEMO-KENYA"].name, po_number: "SAV-PO-3307", box_brand: await idOf("Brand", "name", "Stonecraft"), order_date: day(-20), shipment_date: day(-3), currency: "USD", exchange_rate: 83.5,
       remarks: "Shipped", container_plan: plan(m, [{ k: "calacatta", boxes: 480 }]),
       lines: [{ item: unique("calacatta"), qty: 480, rate: 1.35, rate_basis: "box", pallet: m.pallet48 }],
     });

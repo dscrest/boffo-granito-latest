@@ -252,7 +252,7 @@ export function SessionItemsStep({ pick, presetSalesOrderId }: { pick: ReturnTyp
   const shownBands = !dq
     ? bands
     : bands
-        .map((b) => (b.soNumber.toLowerCase().includes(dq) ? b : { ...b, designs: b.designs.filter((r) => r.designLabel.toLowerCase().includes(dq)) }))
+        .map((b) => (`${b.soNumber} ${b.poNumber}`.toLowerCase().includes(dq) ? b : { ...b, designs: b.designs.filter((r) => r.designLabel.toLowerCase().includes(dq)) }))
         .filter((b) => b.designs.length > 0);
   const cq = custQuery.trim().toLowerCase();
   const shownCustomers = cq ? customers.filter((c) => c.name.toLowerCase().includes(cq)) : customers;
@@ -352,7 +352,7 @@ export function SessionItemsStep({ pick, presetSalesOrderId }: { pick: ReturnTyp
         {shownBands.map((band) => (
           <div key={band.salesOrderId}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 8, marginBottom: 4, background: "var(--accent-soft)", color: "var(--accent-ink)", fontWeight: 700 }}>
-              <span className="mono">{band.soNumber}</span>
+              <span className="mono" title={band.soNumber}>{band.poNumber || band.soNumber}</span>
               <span className="mono" style={{ fontWeight: 400 }}>{fmt(band.designs.reduce((n, r) => n + r.ready, 0))} bx ready</span>
               <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
                 {planBySo.has(band.salesOrderId) && (

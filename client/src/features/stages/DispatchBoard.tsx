@@ -11,7 +11,7 @@
    Ready-for-Palletization and Ready-for-Loading cards carry a record-level
    checkbox — the selection palletises / loads together.
    Lines allocated to a load box (and legacy Completed plans) leave this
-   board entirely — they live on the Loading and Dispatch page (/loading).
+   board entirely — they live on the Loading (/loading) and Dispatch (/dispatch) pages (CR-480).
    ============================================================ */
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -31,9 +31,10 @@ import {
   batchProgressOf,
   PAL_LINE_STATUS_LABEL,
   palLineStatusLabel,
+  palletBoxes,
   palletsOf,
   palTopUp,
-  readyPalletsLabel,
+  wholePallets,
   setPalLineLocation,
   setPalLineStatus,
   type LoadBox,
@@ -53,6 +54,7 @@ import { TopUpModal } from "./TopUpModal";
 import { ReleaseModal } from "./ReleaseModal";
 import { LoadContainerModal } from "./LoadContainerModal";
 import { useLoadFlow } from "./useLoadFlow";
+import { orderLabel } from "@/features/orders/ordersApi";
 
 // Board columns — all hold ITEM cards (a PalPlanLine each). Exported so
 // PalPlans' Sections picker builds its defs from the same list.
@@ -167,8 +169,15 @@ export function DispatchBoard({
   // via the ColumnPicker. Customer then Item lead; the PAL line code sits
   // LAST and is hideable. The checkbox, edit-mode inputs and the "+" menu
   // stay fixed outside the picker.
-  const SHEET_COLS = useMemo<ColumnDef<Entry>[]>(
-    () => [
+  // Boxes of a batch still to palletize (In Palletization's Pending).
+  const pendingOf = (l: PalPlanLine) => {
+    const prog = oiProgress.get(batchKey(l));
+    return Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0));
+  };
+  const pageStages = new Set<string>(cols.map((c) => c.key));
+  type SheetCol = ColumnDef<Entry> & { stages?: ColKey[] };
+  const SHEET_COLS = useMemo<SheetCol[]>(() => {
+    const defs: SheetCol[] = [
       {
         key: "customer",
         label: "Customer",
@@ -181,7 +190,8 @@ export function DispatchBoard({
         className: "nw",
         render: ({ l }) => <span className="clip" style={{ maxWidth: 260 }} title={l.designLabel}>{l.designLabel}</span>,
       },
-      { key: "so", label: "Order", className: "mono nw", render: ({ l }) => l.soNumber || "—" },
+      // CR-482: the customer's PO leads on every stage screen; the SO number is the hidden LAST column.
+      { key: "po", label: "PO Number", className: "mono nw", render: ({ l }) => orderLabel(l) },
       {
         key: "batch",
         label: "Batch",
@@ -216,35 +226,78 @@ export function DispatchBoard({
           );
         },
       },
-      { key: "boxes", label: "Boxes", className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
-      // CR-472: the four figures the floor asked for, PER BATCH — Ordered (the batch's boxes
-      // sent to palletization, repeated on split rows), Ready Pallets "N (boxes)", Boxes / Pallet
-      // (the pallet master's capacity) and Remaining. Ordered is back (reverses CR-279's removal).
+      // CR-481 (reshapes CR-472): pallets are WHOLE — floor, never a fraction; each page shows
+      // its own figures (`stages`), per BATCH where progress is involved:
+      //   Ready for Palletization: Boxes (queued) · Possible Pallets
+      //   In Palletization:        Pending Boxes · Possible Pallets · Prepared Pallets · Boxes (= pallets × capacity)
+      //   Ready for Loading:       Pallets · Boxes (= pallets × capacity; a Mix Batch pallet shows its own boxes)
+      // Boxes / Pallet (capacity) and Remaining are gone — the user reads pallets, not arithmetic.
+      { key: "boxes", label: "Boxes", stages: ["Planning"], className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
       {
         key: "ordered",
         label: "Ordered Boxes",
+        stages: ["Planning", "Palletizing"],
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => fmt(oiProgress.get(batchKey(l))?.total ?? l.boxes),
       },
       {
-        key: "readyPallets",
-        label: "Ready Pallets",
+        key: "pending",
+        label: "Pending Boxes",
+        stages: ["Palletizing"],
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => fmt(pendingOf(l)),
+      },
+      {
+        key: "possible",
+        label: "Possible Pallets",
+        stages: ["Planning", "Palletizing"],
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => {
+          const n = wholePallets(l.status === "Palletizing" ? pendingOf(l) : l.boxes, l.boxesPerPallet);
+          return n ? <span title="Whole pallets these boxes can fill">{fmt(n)}</span> : <span className="dim" title={l.boxesPerPallet > 0 ? "Less than one pallet — top up from another batch (Mix Batch)" : "Pick a pallet to see the count"}>—</span>;
+        },
+      },
+      {
+        key: "prepared",
+        label: "Prepared Pallets",
+        stages: ["Palletizing"],
         className: "num mono nw",
         style: { textAlign: "right" },
         render: ({ l }) => {
           const done = oiProgress.get(batchKey(l))?.done ?? 0;
-          return done
-            ? <span style={{ color: "var(--c-green)" }} title="Palletized pallets (boxes) of this batch">{readyPalletsLabel(done, l.boxesPerPallet, fmt)}</span>
-            : <span className="dim">—</span>;
+          const n = wholePallets(done, l.boxesPerPallet);
+          return n ? <span style={{ color: "var(--c-green)" }} title="Whole pallets already palletized for this batch">{fmt(n)}</span> : <span className="dim">—</span>;
         },
       },
       {
-        key: "bpp",
-        label: "Boxes / Pallet",
+        key: "preparedBoxes",
+        label: "Boxes",
+        stages: ["Palletizing"],
         className: "num mono",
         style: { textAlign: "right" },
-        render: ({ l }) => (l.boxesPerPallet > 0 ? fmt(l.boxesPerPallet) : <span className="dim">—</span>),
+        render: ({ l }) => {
+          const n = palletBoxes(oiProgress.get(batchKey(l))?.done ?? 0, l.boxesPerPallet);
+          return n ? <span style={{ color: "var(--c-green)" }} title="Boxes on the prepared pallets (pallets × boxes per pallet)">{fmt(n)}</span> : <span className="dim">—</span>;
+        },
+      },
+      {
+        key: "pallets",
+        label: "Pallets",
+        stages: ["Ready"],
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => (l.palletGroup ? <span title="Shares one physical pallet with another batch (Mix Batch)">Mix</span> : fmt(wholePallets(l.boxes, l.boxesPerPallet))),
+      },
+      {
+        key: "readyBoxes",
+        label: "Boxes",
+        stages: ["Ready"],
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => fmt(l.palletGroup || l.boxesPerPallet <= 0 ? l.boxes : palletBoxes(l.boxes, l.boxesPerPallet)),
       },
       {
         key: "pallet",
@@ -259,16 +312,6 @@ export function DispatchBoard({
         className: "nw",
         render: ({ l }) => (l.warehouseId ? <span className="clip" style={{ maxWidth: 180 }} title={whName(l.warehouseId)}>{whName(l.warehouseId)}</span> : <span className="dim">—</span>),
       },
-      {
-        key: "remaining",
-        label: "Remaining",
-        className: "num mono",
-        style: { textAlign: "right" },
-        render: ({ l }) => {
-          const prog = oiProgress.get(batchKey(l));
-          return fmt(Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0)));
-        },
-      },
       // CR-266: the line's date (when it entered palletization) reads instead of the PAL code.
       { key: "date", label: "Date", className: "mono muted nw", render: ({ p, l }) => (l.createdTime || p.createdTime || "").slice(0, 10) || "—" },
       {
@@ -282,15 +325,18 @@ export function DispatchBoard({
       },
       { key: "age", label: "Age", className: "dim nw", render: ({ p, l }) => `${ageDays(p, l)}d` },
       { key: "pal", label: "PAL", className: "mono nw", style: { fontWeight: 600 }, render: ({ l }) => l.itemCode },
-    ],
+      { key: "so", label: "SO Number", className: "mono nw dim", render: ({ l }) => l.soNumber || "—" },
+    ];
+    return defs.filter((c) => !c.stages || c.stages.some((s) => pageStages.has(s)));
+  },
     // oiProgress/ageDays are re-derived from plans each render; warehouses relabel the Location column.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [plans, warehouses],
-  );
+  [plans, warehouses, cols]);
   // .v2 (CR-266): Date column added, PAL code hidden by default (ColumnPicker re-shows it).
   // .v3 (CR-412): Location column (hidden while no warehouse exists).
   // .v4 (CR-472): Ordered Boxes + Boxes / Pallet columns; Remaining shown again for everyone.
-  const sheetCols = useColumns("packingSheetColumns.v4", SHEET_COLS, whEnabled ? ["pal"] : ["pal", "location"]);
+  // .v5 (CR-481/482): per-stage pallet columns (whole pallets), PO Number leads, SO Number hidden last.
+  const sheetCols = useColumns(`packingSheetColumns.v5.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -496,7 +542,7 @@ export function DispatchBoard({
   // Group-by lane key per dimension.
   const laneKeyOf = (e: Entry, d: DispatchGroupBy): string =>
     d === "customer" ? e.l.customerName || "—"
-    : d === "so" ? e.l.soNumber || "No SO"
+    : d === "so" ? (orderLabel(e.l) !== "—" ? orderLabel(e.l) : "No order")
     : d === "batch" ? (e.l.batchNumber ? `Batch ${e.l.batchNumber}` : "No batch")
     : d === "status" ? palLineStatusLabel(e.l, boxStatusById.get(e.l.loadBoxId), e.p.status) // same label as the Status column
     : d === "location" ? (e.l.warehouseId ? whName(e.l.warehouseId) : "No location")
@@ -527,12 +573,16 @@ export function DispatchBoard({
   const bKeys = [...new Set(sheetLines.map(batchKey))];
   const bppOf = (k: string) => sheetLines.find((l) => batchKey(l) === k)?.boxesPerPallet ?? 0;
   const totalOrdered = bKeys.reduce((s, k) => s + (oiProgress.get(k)?.total ?? 0), 0);
-  const totalReadyBoxes = bKeys.reduce((s, k) => s + (oiProgress.get(k)?.done ?? 0), 0);
-  const totalReadyPallets = bKeys.reduce((s, k) => {
-    const done = oiProgress.get(k)?.done ?? 0;
-    return s + (done > 0 && bppOf(k) > 0 ? Math.ceil(done / bppOf(k)) : 0);
-  }, 0);
-  const totalRemaining = bKeys.reduce((s, k) => s + Math.max(0, (oiProgress.get(k)?.total ?? 0) - (oiProgress.get(k)?.done ?? 0)), 0);
+  // CR-481: whole-pallet footers, per batch.
+  const doneOf = (k: string) => oiProgress.get(k)?.done ?? 0;
+  const pendOf = (k: string) => Math.max(0, (oiProgress.get(k)?.total ?? 0) - doneOf(k));
+  const totalPending = bKeys.reduce((s, k) => s + pendOf(k), 0);
+  const totalPrepared = bKeys.reduce((s, k) => s + wholePallets(doneOf(k), bppOf(k)), 0);
+  const totalPreparedBoxes = bKeys.reduce((s, k) => s + palletBoxes(doneOf(k), bppOf(k)), 0);
+  const totalPossible = pageStages.has("Palletizing")
+    ? bKeys.reduce((s, k) => s + wholePallets(pendOf(k), bppOf(k)), 0)
+    : sheetLines.reduce((s, l) => s + wholePallets(l.boxes, l.boxesPerPallet), 0);
+  const totalReadyBoxes = sheetLines.reduce((s, l) => s + (l.palletGroup || l.boxesPerPallet <= 0 ? l.boxes : palletBoxes(l.boxes, l.boxesPerPallet)), 0);
 
   // ---- selection ----------------------------------------------
   // Selection spans two stages: Planning items palletise together, Ready
@@ -703,7 +753,7 @@ export function DispatchBoard({
           </div>
         )}
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {[l.soNumber, l.palletKind || l.palletName, l.warehouseId ? whName(l.warehouseId) : ""].filter((s) => s && s !== "—").join("  ·  ") || "—"}
+          {[orderLabel(l), l.palletKind || l.palletName, l.warehouseId ? whName(l.warehouseId) : ""].filter((s) => s && s !== "—").join("  ·  ") || "—"}
         </div>
         {canEdit && (
           // MoreMenu doesn't stop propagation and the card is draggable +
@@ -759,12 +809,12 @@ export function DispatchBoard({
               {col.key === "Ready"
                 ? (() => {
                     // Palletised items group by their SO so a load is easy to find.
-                    const bySo = [...entries].sort((a, b) => (a.l.soNumber || "").localeCompare(b.l.soNumber || ""));
+                    const bySo = [...entries].sort((a, b) => orderLabel(a.l).localeCompare(orderLabel(b.l)));
                     const countOf = new Map<string, number>();
-                    bySo.forEach(({ l }) => countOf.set(l.soNumber || "", (countOf.get(l.soNumber || "") || 0) + 1));
+                    bySo.forEach(({ l }) => countOf.set(orderLabel(l), (countOf.get(orderLabel(l)) || 0) + 1));
                     let prevSo: string | null = null;
                     return bySo.map(({ p, l }) => {
-                      const so = l.soNumber || "";
+                      const so = orderLabel(l);
                       const divider = so !== prevSo;
                       prevSo = so;
                       return (
@@ -1067,8 +1117,12 @@ export function DispatchBoard({
                           ? `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"}`
                           : c.key === "boxes" ? fmt(totalBoxes)
                           : c.key === "ordered" ? fmt(totalOrdered)
-                          : c.key === "readyPallets" ? (totalReadyBoxes > 0 ? `${fmt(totalReadyPallets)} (${fmt(totalReadyBoxes)})` : "—")
-                          : c.key === "remaining" ? fmt(totalRemaining)
+                          : c.key === "pending" ? fmt(totalPending)
+                          : c.key === "possible" ? fmt(totalPossible)
+                          : c.key === "prepared" ? fmt(totalPrepared)
+                          : c.key === "preparedBoxes" ? fmt(totalPreparedBoxes)
+                          : c.key === "pallets" ? fmt(totalPallets)
+                          : c.key === "readyBoxes" ? fmt(totalReadyBoxes)
                           : ""}
                       </td>
                     ))}

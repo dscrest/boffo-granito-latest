@@ -115,4 +115,22 @@ const solo = customerToAccount({ name: "Solo Co", contact_first_name: "Anu" }, {
 assert.strictEqual(solo.contacts[0].Last_Name, "Anu", "CRM Contacts need Last_Name — first name stands in");
 assert.deepStrictEqual(customerToAccount({ company_name: "Only Co" }, {}), { account: { Account_Name: "Only Co" }, contacts: [] });
 
+/* CR-477: the import chunk walks the LIST offset, so a re-list of the same page resumes correctly. */
+const { pickChunk, IMPORT_PAGE } = require("./customerSync");
+const hits = Array.from({ length: 30 }, (_, i) => ({ id: String(i) }));
+const kindOf = (h) => (Number(h.id) % 3 === 0 ? "sync" : Number(h.id) % 3 === 1 ? "recheck" : ""); // 20 work items in 30
+let c = pickChunk(hits, 0, kindOf);
+assert.strictEqual(c.slice.length, IMPORT_PAGE);
+assert.strictEqual(c.slice[0].kind, "sync");
+assert.strictEqual(c.slice[1].kind, "recheck");
+assert.strictEqual(c.offset, 15, "resumes at the first unworked list index, not at the work-list count");
+// after the first chunk those hits are linked / rechecked → no longer work; the offset still lands right
+const done = new Set(c.slice.map((x) => x.hit.id));
+c = pickChunk(hits, c.offset, (h) => (done.has(h.id) ? "" : kindOf(h)));
+assert.deepStrictEqual(c.slice.map((x) => x.hit.id), ["15", "16", "18", "19", "21", "22", "24", "25", "27", "28"]);
+assert.strictEqual(c.offset, -1, "page finished");
+assert.deepStrictEqual(pickChunk([], 0, kindOf), { slice: [], offset: -1 });
+assert.strictEqual(require("./crmSync").needsRecheck({ crm_account_id: "1", books_contact_id: "" }), true);
+assert.strictEqual(require("./crmSync").needsRecheck({ crm_account_id: "1", books_contact_id: "2" }), false);
+
 console.log("crmSync.check: ok");

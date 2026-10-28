@@ -17,13 +17,22 @@ export function groupProgressOf(
   return m;
 }
 
+/** CR-481: pallets are WHOLE — never a fraction (user: 23 boxes on an 18-box pallet =
+    1 pallet, 18 boxes; the 5 stay as "need palletization" for a mixed-batch pallet). */
+export const wholePallets = (boxes: number, boxesPerPallet: number) => (boxesPerPallet > 0 && boxes > 0 ? Math.floor(boxes / boxesPerPallet) : 0);
+/** Boxes sitting on full pallets = wholePallets × capacity. */
+export const palletBoxes = (boxes: number, boxesPerPallet: number) => wholePallets(boxes, boxesPerPallet) * boxesPerPallet;
+/** Boxes left over below one pallet (unknown capacity → all of them). */
+export const looseBoxes = (boxes: number, boxesPerPallet: number) => Math.max(0, boxes - palletBoxes(boxes, boxesPerPallet));
+
 /** "N (boxes)" readout of palletized boxes as physical pallets (CR-279) —
-    the Ready Pallets column, its footer and the Complete dialog share it.
-    Unknown pallet capacity → just "(boxes)"; nothing done → "—". */
+    the Prepared Pallets column, its footer and the Complete dialog share it.
+    Unknown pallet capacity → just "(boxes)"; nothing done → "—". CR-481: whole pallets
+    and the boxes ON them (floor), never rounded up. */
 export function readyPalletsLabel(doneBoxes: number, boxesPerPallet: number, fmtNum: (n: number) => string = String): string {
   if (doneBoxes <= 0) return "—";
-  const boxes = `(${fmtNum(doneBoxes)})`;
-  return boxesPerPallet > 0 ? `${fmtNum(Math.ceil(doneBoxes / boxesPerPallet))} ${boxes}` : boxes;
+  if (boxesPerPallet <= 0) return `(${fmtNum(doneBoxes)})`;
+  return `${fmtNum(wholePallets(doneBoxes, boxesPerPallet))} (${fmtNum(palletBoxes(doneBoxes, boxesPerPallet))})`;
 }
 
 // Blank batchNumber = legacy aggregate: those lines group per order item, so

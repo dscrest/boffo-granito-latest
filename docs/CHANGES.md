@@ -3,6 +3,59 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-28 — Sample order: Actions tab, Record Load off the header, printable pick slip (CR-485/486) — LIVE 2026-10-28
+
+- **Sample orders get the Actions tab (CR-485).** A sample order's page now has the same tabs as a panel order:
+  Details · Readiness · Actions · Dispatch · Activity. The purple Record Load button is gone from the header;
+  loads are recorded on the Actions tab (type the quantities, or "+" ▸ Load… on one row, then Dispatch) or
+  on the Dispatch tab as before. Load Copy per trip sits in the Actions card head too.
+- **Sample order print for the godown (CR-486).** More ▸ Print order PDF on a sample order: the order details,
+  then one row per item with its photo, name and item code, full tile / cut piece size, Requested · Supplied ·
+  Remaining, the remark typed on the line, and an empty Broken / Adjustment box to fill in by hand. The note
+  under the table reminds that broken pieces and opened boxes go on Stock Adjustments (reason Sample /
+  Display). Taken out by / Checked by lines at the bottom. Printed only when asked for.
+
+## 2026-10-28 — Walkthrough: Production tab per batch, five stage pages, whole pallets, PO first everywhere, Box Brand mandatory, panel size blank (CR-479…484) — LIVE 2026-10-28
+
+- **Sales Order ▸ Production tab (CR-479).** The column reads **Production date** — the day the batch was produced,
+  not the day it was allocated. Batches sit one under the other, each with its own date, boxes and person; the
+  design spans them. Allocate Stock and Deallocate Stock now sit on this tab (the Items card lost its buttons and
+  the per-line ✕); More ▸ keeps both.
+- **Five pages, one stage each (CR-480).** Ready for Palletization · In Palletization · Palletization Completed · **Loading** (items being loaded) · **Dispatch** (containers ready to dispatch, plus the dispatched ones). Loading no longer
+  lists the pallets waiting to be loaded — Palletization Completed does.
+- **Pallets are whole (CR-481).** 23 boxes on an 18-box pallet = 1 pallet · 18 boxes; the 5 stay pending for a
+  mixed-batch pallet. Ready for Palletization shows Possible Pallets; In Palletization shows Pending Boxes, Possible
+  Pallets, Prepared Pallets and the boxes on them; Ready for Loading shows Pallets and Boxes. Boxes / Pallet and
+  Remaining are gone. Complete Palletization asks for pallets, and the boxes follow.
+- **PO number first on every stage screen (CR-482).** Palletization, Loading, Dispatch, Production and their
+  pop-ups show the customer's PO; the SO number is a hidden column one tick away. Printed documents keep the SO.
+- **Box Brand is mandatory on a Sales Order (CR-483).** The form and the server both refuse an order without it.
+- **Panel form opens with a blank Panel Size (CR-484).** The 1200x2100 default is gone.
+
+## 2026-10-28 — List pages stop waiting ~10 s for the customer lookup (CR-478) — LIVE 2026-10-28
+
+- **Whole-table lookups arrive in one round trip (CR-478).** Every list page (sales orders, quotes, production,
+  palletization, loading, customers) joins the Customer table, which has grown to 2,820 rows since the CRM import.
+  The app fetched it 300 rows at a time, one request after another, and each request to the server costs about a
+  second — so those pages waited about ten seconds before painting. The server now returns the whole table in a
+  single response, fetching its pages in parallel internally; the pages wait about a second instead.
+
+## 2026-10-27 — Import all reaches every Zoho CRM account, re-runs stop re-walking unchanged ones (CR-477) — LIVE 2026-10-27, 529 accounts imported
+
+- **Every CRM account is imported (CR-477).** Zoho CRM only serves page numbers up to record 2,000, so Import all
+  stopped there every time and the older accounts never arrived. The import now walks Zoho's page tokens, 200
+  accounts per list call, so no account is out of reach.
+- **A re-run costs almost nothing (CR-477).** Each call lists 200 accounts and works only on the changed or unlinked
+  ones (ten at a time); accounts already imported and unchanged are skipped in bulk instead of re-listed ten by ten.
+  Run on LIVE right after deploy: 529 accounts that were out of reach came in; three names exist as two CRM
+  accounts each (Guru Krupa Creation, Balaji Tiles, Ceramic World) and are listed for a merge in CRM.
+
+## 2026-10-28 — Bulk Record Production keeps its Size column (CR-476 reversed) — LIVE 2026-10-28
+
+- **Size column back (CR-476 reversed).** The Item Table on Bulk Record Production is Size · Item · Batch No. · Qty ·
+  Box Brand · Location again, Size narrowing the Item list, as CR-469 built it. The no-Size version had reached LIVE on
+  2026-10-27 inside the CR-477 deploy without being asked for; this redeploy restores it.
+
 ## 2026-10-27 — Walkthrough: SO without Location, Bulk Record Production form, production per design, palletization counts per batch, item code, Panel Order PDF (CR-468…475) — LIVE + DEMO 2026-10-27
 
 - **Sales Order form without Location (CR-468).** The Location field is gone from the Sales Order form and page; an order

@@ -59,7 +59,7 @@ function laneKey(e: ProductionEntry, groupBy: ProductionGroupBy): string {
     case "date": return (e.productionDate || e.createdTime || "").slice(0, 10) || "—";
     case "item": return e.design || "—";
     case "customer": return e.customer || "—";
-    case "order": return e.independent ? "Independent" : e.orderNumber || e.poNumber || "—";
+    case "order": return e.independent ? "Independent" : e.poNumber || e.orderNumber || "—";
     case "size": return e.size || "—";
     default: return "";
   }
@@ -167,7 +167,7 @@ export function ProductionKanban({
                       {e.design || "—"}
                     </div>
                     <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {[e.size, e.independent ? "Independent" : e.orderNumber || e.poNumber, e.customer].filter(Boolean).join(" · ") || "—"}
+                      {[e.size, e.independent ? "Independent" : e.poNumber || e.orderNumber, e.customer].filter(Boolean).join(" · ") || "—"}
                     </div>
                     {e.records.length > 0 && (
                       <div className="mono dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={batchesOf(e)}>
@@ -257,7 +257,7 @@ export function ProductionKanban({
                 </div>
                 <div className="form-field">
                   <span className="lbl">Sales Order</span>
-                  <span>{info.independent ? "—" : info.orderNumber || info.poNumber || "—"}</span>
+                  <span>{info.independent ? "—" : info.poNumber || info.orderNumber || "—"}</span>
                 </div>
                 <div className="form-field">
                   <span className="lbl">SO Qty (ordered)</span>

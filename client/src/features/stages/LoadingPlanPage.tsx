@@ -170,7 +170,7 @@ function VehicleStep({ box, lines, boxes, onBack, onDone }: {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th>SO No.</th>
+                    <th>PO No.</th>
                     <th>Design</th>
                     <th>Batch</th>
                     <th className="num" style={{ textAlign: "right" }}>Boxes</th>
@@ -180,7 +180,7 @@ function VehicleStep({ box, lines, boxes, onBack, onDone }: {
                 <tbody>
                   {lines.map((l) => (
                     <tr key={l.id}>
-                      <td className="mono nw">{l.soNumber}</td>
+                      <td className="mono nw" title={l.soNumber}>{l.poNumber || l.soNumber}</td>
                       <td><span className="design-name">{l.designLabel}</span></td>
                       <td className="mono nw">{l.batchNumber || "—"}</td>
                       <td className="num mono">{fmt(l.boxes)}</td>

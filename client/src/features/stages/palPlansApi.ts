@@ -226,7 +226,7 @@ export interface PalPlanInput {
 // Loading pool + progress grouping live in palLoadGate.ts
 // (pure module, keeps the self-check runnable under plain node).
 export { batchKey, groupProgressOf, loadableLineIds } from "./palLoadGate";
-import { batchKey as _batchKey, groupProgressOf as _groupProgressOf } from "./palLoadGate";
+import { batchKey as _batchKey, groupProgressOf as _groupProgressOf, wholePallets } from "./palLoadGate";
 
 /** Palletised progress per order item × BATCH (CR-472; was per order item, so a loaded
     batch's boxes bled into its sibling batch's Ready Pallets / Remaining). Partial
@@ -248,12 +248,21 @@ export function lineFrac(l: PalPlanLine): number {
 export function boxFill(lines: PalPlanLine[]): number {
   return lines.reduce((s, l) => s + lineFrac(l), 0);
 }
-/** Physical pallets = Σ ceil(boxes / boxes-per-pallet) per line (grid footers). */
+/** Physical pallets = Σ WHOLE pallets per line (CR-481: floor, never rounded up — loose
+    boxes are not a pallet); a Mix Batch group (`palletGroup`) is ONE shared pallet. */
 export function palletsOf(lines: PalPlanLine[]): number {
-  return lines.reduce((s, l) => s + (l.boxesPerPallet > 0 && l.boxes > 0 ? Math.ceil(l.boxes / l.boxesPerPallet) : 0), 0);
+  const groups = new Set<string>();
+  return lines.reduce((s, l) => {
+    if (l.palletGroup) {
+      if (groups.has(l.palletGroup)) return s;
+      groups.add(l.palletGroup);
+      return s + 1;
+    }
+    return s + wholePallets(l.boxes, l.boxesPerPallet);
+  }, 0);
 }
-// readyPalletsLabel (CR-279) lives in palLoadGate.ts with the other pure helpers.
-export { readyPalletsLabel } from "./palLoadGate";
+// readyPalletsLabel (CR-279) + the whole-pallet helpers (CR-481) live in palLoadGate.ts.
+export { readyPalletsLabel, wholePallets, palletBoxes, looseBoxes } from "./palLoadGate";
 /** The one pallet capacity shared by all lines, or 0 when mixed/unknown —
     lets the UI show absolute "X boxes short" only when that number is meaningful. */
 export function sharedCapacity(lines: PalPlanLine[]): number {

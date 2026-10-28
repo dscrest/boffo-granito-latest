@@ -3,9 +3,16 @@
 import assert from "node:assert";
 import { readyPalletsLabel } from "./palLoadGate";
 
-// Whole pallets, partial pallet rounds UP, unknown capacity shows boxes only, nothing done = dash.
+// CR-481: WHOLE pallets only — a partial pallet is not a pallet; unknown capacity shows boxes only, nothing done = dash.
 assert.strictEqual(readyPalletsLabel(480, 60), "8 (480)");
-assert.strictEqual(readyPalletsLabel(481, 60), "9 (481)");
+assert.strictEqual(readyPalletsLabel(481, 60), "8 (480)");
+import { looseBoxes, palletBoxes, wholePallets } from "./palLoadGate";
+// The user's example: 23 boxes on an 18-box pallet = 1 pallet · 18 boxes · 5 need palletization.
+assert.strictEqual(wholePallets(23, 18), 1);
+assert.strictEqual(palletBoxes(23, 18), 18);
+assert.strictEqual(looseBoxes(23, 18), 5);
+assert.strictEqual(wholePallets(17, 18), 0);
+assert.deepStrictEqual([wholePallets(23, 0), palletBoxes(23, 0), looseBoxes(23, 0)], [0, 0, 23]);
 assert.strictEqual(readyPalletsLabel(60, 0), "(60)");
 assert.strictEqual(readyPalletsLabel(0, 60), "—");
 // Formatter is applied to both numbers.

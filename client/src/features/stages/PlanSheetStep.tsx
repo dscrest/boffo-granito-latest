@@ -42,7 +42,7 @@ export function PlanSheetStep({ onCancel, ...pickProps }: SessionPickProps & { o
   // fixed so the blocked-row colSpan and the Qty key-walk need no bookkeeping.
   const COLS = useMemo<ColumnDef<Cell>[]>(() => [
     { key: "design", label: "Design", render: ({ row }) => <span className="design-name">{row.designLabel}</span> },
-    { key: "so", label: "SO No.", className: "mono so nw", render: ({ band }) => band.soNumber },
+    { key: "so", label: "PO No.", className: "mono so nw", render: ({ band }) => <span title={band.soNumber}>{band.poNumber || band.soNumber}</span> },
     { key: "size", label: "Size", className: "nw", render: ({ l }) => l.sizeCode || "—" },
     { key: "brand", label: "Box Brand", className: "nw", render: ({ row }) => brandName(row.brandId) || "—" },
     { key: "batch", label: "Batch", className: "mono nw", render: ({ l }) => l.batchNumber || "—" },
@@ -61,7 +61,7 @@ export function PlanSheetStep({ onCancel, ...pickProps }: SessionPickProps & { o
           lines: r.lines.filter(
             ({ line: l }) =>
               (!onlyPicked || q(l) > 0) &&
-              (!needle || [b.soNumber, r.designLabel, l.customerName, l.batchNumber, l.sizeCode].some((s) => (s || "").toLowerCase().includes(needle))),
+              (!needle || [b.soNumber, b.poNumber, r.designLabel, l.customerName, l.batchNumber, l.sizeCode].some((s) => (s || "").toLowerCase().includes(needle))),
           ),
         }))
         .filter((r) => r.lines.length > 0),

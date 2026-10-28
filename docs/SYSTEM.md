@@ -165,7 +165,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 |---|---|
 | **Dashboard** | Dashboard |
 | **Inventory** | Items · Stock Details · Stock Adjustments (CR-308) · Transfer Orders (CR-330) · Production |
-| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Palletization · Loading and Dispatch · **Panel Craft** (Dashboard · **Stock** (CR-448, was "Cut Piece") · Pending Cut Piece · Orders · Loading) |
+| **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Ready for Palletization · In Palletization · Palletization Completed · Loading · Dispatch (CR-480: five leaves, one stage each) · **Panel Craft** (Dashboard · **Stock** (CR-448, was "Cut Piece") · Pending Cut Piece · Orders · Loading) |
 | **Masters** (CR-436; CR-439 layout; **CR-440: NO sidebar entry** — reached from Settings ▸ Masters; `/masters` is only the redirect / ⌘K / tile landing) | `/masters` = the **Settings workspace (`SettingsHome`) opened on its Masters menu**. **CR-439 (2026-10-24): the Settings rail carries Masters ▸ Item · Panel · Export as a menu + sub-menu (`.set-subgroups`); the pane (`MastersPane`, `Masters.tsx`) = the group title + horizontal `.fbar .btn` pill tabs of its masters (CR-440: pills, not the faint underline), master rendered in place; Item first; non-admins see the Masters menu only.** Groups: **Export Master** (Pallet Master · Container Master · Vehicles · Payment Terms · Adjustment Reason · Currencies · Warehouses & Locations) · **Item Master** (Items · Size Master · Finish · Category · Glaze · Box Brand · Customer Brand · Grade · Surface Application · Punch Type · Series · Catalogue) · **Panel Master** (Panel Items · Cut Piece Size · MDF · Panels); each master declares the nav id it needs (or Admin). Visible to Admin and any role whose matrix grants Items or Panel Craft view (`MODULE_NAV` adds `masters` to both) |
 | **Reports** | Reports · Audit Log |
 | *header gear* | Settings (admin only) |
@@ -190,23 +190,23 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | `/containers/new` · `/containers/:id/edit` · `/containers/:id/clone` | `masters/ContainerFormatFormPage.tsx` | CR-261; a clone keeps the size (CR-273 — same size, new mix). CR-269: pallets are added as lines (Pallet picker · count · Add line · ✕), like Quote Line Items |
 | `/prod` · `/prod/:id` | `stages/Production` · `ProductionDetail` | Table + Sheet (Kanban, To Produce, Import hidden — CR-417) |
 | `/prod/new` · `/prod/:id/clone` · `/prod/:id/edit` | `stages/ProductionFormPage.tsx` | CR-220: Start New Production (CR-234) / Edit Production pages |
-| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production — many items, one Save, straight to stock. CR-469: the Adjust Stock FormPage shape (Production section + Item Table: Size · Item · Batch · Qty · Box Brand · Location per line), Size narrows Item, Excel paste kept |
+| `/prod/record` | `stages/ProductionLogSheet.tsx` | CR-244: Bulk Record Production — many items, one Save, straight to stock. CR-469: the Adjust Stock FormPage shape (Production section + Item Table: Size · Item · Batch · Qty · Box Brand · Location per line), Size narrows Item, Excel paste kept (CR-476 removed Size for one night, reversed 2026-10-28) |
 | `/parties` · `/parties/:id` | `masters/Parties` · `CustomerDetail` | Customers. Detail = Details · Transactions (collapsible Sales Orders / Quotes / Samples / Panels) · Dispatch · Activity tabs (CR-384) |
 | `/parties/new` · `/parties/:id/edit` · `/parties/:id/clone` | `masters/PartyFormPage.tsx` | CR-220: Customer form page (`:id` = customer code) |
-| `/settings/zoho` (`/settings/zoho-books` redirects) | `settings/ZohoSyncSettings.tsx` | CR-325/356/359 (Admin): connect / reconnect / disconnect the **active Zoho customer source** (`ZOHO` in `zohoApi.ts` — Zoho CRM Accounts since CR-359; Books hidden, its connection kept); **Customer sync** card = last run, **Refresh now** (incremental pull, same as the webhook / cron), **Import all customers** (full pull, 10 per request, safe to re-run — imported + unchanged accounts are skipped, CR-362). Hand mapping stays: Customers ▸ From Zoho CRM or a customer's More ▸ Map / Re-pull / Unmap → `ZohoSearchModal` → PartyFormPage prefilled from the **server-mapped** record (`records/:id` → `mapped`); More ▸ **Create in / Push to Zoho CRM** sends the customer the other way; `Customer.crm_account_id` is the link |
+| `/settings/zoho` (`/settings/zoho-books` redirects) | `settings/ZohoSyncSettings.tsx` | CR-325/356/359 (Admin): connect / reconnect / disconnect the **active Zoho customer source** (`ZOHO` in `zohoApi.ts` — Zoho CRM Accounts since CR-359; Books hidden, its connection kept); **Customer sync** card = last run, **Refresh now** (incremental pull, same as the webhook / cron), **Import all customers** (full pull by CRM page token, 200 listed / ≤10 worked per request, safe to re-run — imported + unchanged accounts are skipped, CR-362/477). Hand mapping stays: Customers ▸ From Zoho CRM or a customer's More ▸ Map / Re-pull / Unmap → `ZohoSearchModal` → PartyFormPage prefilled from the **server-mapped** record (`records/:id` → `mapped`); More ▸ **Create in / Push to Zoho CRM** sends the customer the other way; `Customer.crm_account_id` is the link |
 | `/quotes` · `/quotes/:id` | `quotes/QuotesTable` · `QuoteDetail` | |
 | `/quotes/new[?customer=]` · `/quotes/:id/edit` · `/quotes/:id/clone` | `quotes/QuoteFormPage.tsx` | CR-219: the Quote form is a page (create / edit / clone), never a modal |
 | `/quotes/:id/containerise` | `quotes/PlanContainerisation.tsx` | Quote-level container plan; Box Fitting picks the container on each item row, narrowed by the row's pallet (CR-300) |
 | `/approvals` | `quotes/Approvals.tsx` | Role-gated at nav **and** route |
 | `/orders` · `/byorder` · `/kanban` | `orders/OrdersTable` · `ByOrderView` · `pipeline/Kanban` | One nav leaf, `ViewToggle` switches. CR-353/355: the grid leads Customer, Design, then the customer **PO Number** (all inside the picker); SO Number is the last column, hidden by default; By-Order cards lead with the PO (`orderLabel` in `ordersApi.ts`); the Kanban still says the SO number |
 | `/orders/new[?quote=<id>]` · `/orders/:id/edit` · `/orders/:id/clone` | `orders/OrderFormPage.tsx` | CR-219: the Sales Order form is a page; `?quote=` = Convert-to-SO; CR-468: no Location field (CR-453 reversed — stock carries its own bay) |
-| `/orders/:id` | `orders/OrderDetail.tsx` | CR-353: title = customer PO (`orderLabel` = `poNumber \|\| orderNumber`), sub line = `SO/FY/NNN · Customer` small; Details card PO Number then SO Number. The SO number stays the identity (URL = ROWID, `order_number` server-minted); the print and the container plan keep it as their document number |
+| `/orders/:id` | `orders/OrderDetail.tsx` | CR-479: Production tab = one row per design × BATCH with the batch's **Production date** (`batchProductionDate`; allocation day as fallback), Design + Deallocate spanning the group; **Allocate Stock / Deallocate Stock buttons live on that tab** (`stockActions`), not the Items card (reverses CR-297's placement; More ▸ keeps both). CR-353: title = customer PO (`orderLabel` = `poNumber \|\| orderNumber`), sub line = `SO/FY/NNN · Customer` small; Details card PO Number then SO Number. The SO number stays the identity (URL = ROWID, `order_number` server-minted); the print and the container plan keep it as their document number |
 | `/orders/:id/containerise` | `quotes/PlanContainerisation.tsx` | The SO's own editable plan copy; same per-row container pick (CR-300) |
-| `/packing` · `/palletizing` · `/palletized` · `/packing/:id` | `stages/PalPlans` (×3, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization · Palletization Completed (recorded Ready for Loading rows: Load + Release) — CR-160, CR-360 |
+| `/packing` · `/palletizing` · `/palletized` · `/packing/:id` | `stages/PalPlans` (×3, `stages` prop) · `PalPlanDetail` | Ready for Palletization (queue) · In Palletization · **Palletization Completed** (leaf name kept — the user reversed CR-480's "Ready for Loading" rename the same day; recorded Ready for Loading rows: Load + Release) — CR-160, CR-360 |
 | `/packing/new[?fromOrder=<soId>]` · `/packing/:id/edit` · `/packing/:id/clone` | `stages/PalPlanFormPage.tsx` | CR-222: Palletization form page (New + Send to Palletization share it) |
-| `/loading` · `/loading/:id` | `stages/LoadingBay` · `LoadingDetail` | Loading and Dispatch board |
+| `/loading` · `/dispatch` · `/loading/:id` | `stages/LoadingBay` (×2, `stages` prop) · `LoadingDetail` | CR-480: **Loading** = In Loading only (New Loading, sheet Edit), **Dispatch** = Ready for Dispatch (sealed) + Dispatched containers (user 2026-10-28: "Loading will show All items in Loading. Dispatch will show all containers that are ready to dispatch"); a sealed or dispatched loading's ‹ Back goes to `/dispatch` |
 | `/panel-dashboard` · `/panel-items` → redirect `/masters?g=panel&m=panel_items` · `/panels` → redirect `/masters?g=panel&m=panels` · `/cut-piece-sizes` → redirect `/masters?g=panel&m=cut_piece_size` (CR-436) · `/panel-items/:designId` · `/cut-stock` · `/cut-stock/:designId/:cutSizeId` (CR-461 `CutPieceDetail`) · `/cut-stock/record` · `/cut-stock/adjust` · `/panels` · `/panels/new` · `/panels/:id/edit` · `/panels/:id/clone` · `/panels/:id` · `/panel-orders` | `panels/*` (`PanelFormPage.tsx` for the form routes, CR-285; `PanelDashboard`, `PanelItems` / `PanelItemDetail`, `CutStockSheetPage` for the CR-306…311 pages) | Panel Craft |
-| `/panel-orders` (ONE register, Type = Panel \| Sample, CR-345) · `/panel-orders/new` + `/sample-orders/new` (`OrderFormPage`, type first) · `/sample-orders` → redirect `?type=Sample` · `/sample-orders/:id/edit` · `/sample-orders/:id/clone` · `/sample-orders/:id` · **`/panel-loading`** (CR-348) | `panels/Orders` · `OrderFormPage` · `SampleOrderFormPage` · `SampleOrderDetail` · `PanelLoading` · `PanelLoads` (Dispatch tab + Record Load) | Orders + Loading (CR-315…317, 345…348) |
+| `/panel-orders` (ONE register, Type = Panel \| Sample, CR-345) · `/panel-orders/new` + `/sample-orders/new` (`OrderFormPage`, type first) · `/sample-orders` → redirect `?type=Sample` · `/sample-orders/:id/edit` · `/sample-orders/:id/clone` · `/sample-orders/:id` · **`/panel-loading`** (CR-348) | `panels/Orders` · `OrderFormPage` · `SampleOrderFormPage` · `SampleOrderDetail` · `PanelLoading` · `PanelLoads` (Actions + Dispatch tabs; CR-485: the sample header has no Record Load) · `sampleOrderPdf` (CR-486 pick slip) | Orders + Loading (CR-315…317, 345…348) |
 | `/reports` · `/reports/:id` | `reports/ReportsHome` · `Reports.tsx` (`ReportView`) | |
 | `/ops` | `ops/OperationsLog.tsx` | Audit log |
 | `/settings` · `/users` · `/roles` · `/data-operations` | `settings/*`, `admin/*` | **Rail groups since CR-436 (2026-10-24): **Organization (CR-445: logo, company name, tax, contact, bank — the branding source for the whole app)** · Users & Roles · **Masters ▸ Item · Panel · Export (CR-439: menu + sub-menu in the rail, masters render in the pane as horizontal tabs; the tiles are the search / ⌘K index only, deep-linking `/masters?g=…&m=…` = this page)** · Data Operations · Preferences.** **Admin only** — non-admins redirect to `/dashboard` |
@@ -239,7 +239,7 @@ auto-skip; replay lives under the user menu ("Take a tour"). All logic and step 
 anchors are `data-tour` attributes (`nav-<id>` on every sidebar leaf, plus `search`,
 `settings`, `usermenu`).
 
-**Page tours** (CR-159): `/packing` (also `/palletizing`, `/palletized`) and `/loading` each have a process guide that auto-starts
+**Page tours** (CR-159): `/packing` (also `/palletizing`, `/palletized`) and `/loading` (also `/dispatch`, CR-480) each have a process guide that auto-starts
 on a user's first visit (`tour.seen.<id>.v1.<rowid>`) and replays via user menu → "Page
 guide". Steps may omit `anchor` (centered explainer card) and set `waitMs` (anchor lookup
 retries while the lazy page/data loads); `AUTO_TOURS` maps route → tour id. Adding a tour for
@@ -426,10 +426,10 @@ deliberately **not** stock-adjusted.
 **Three sidebar pages over one board since 2026-10-21 (CR-160 two, CR-360 three — one stage each)**:
 `/packing` **Ready for Palletization** (the Planning queue only), `/palletizing` **In Palletization**
 (the Palletizing stage only — CR-360 took the Ready rows CR-278 had put here back out) and
-`/palletized` **Palletization Completed** (the recorded, not-yet-loaded `ReadyToLoad` rows — they
-wear the **Palletized** chip (CR-176, relabelled from "Recorded" by CR-299), carry **Load** and
-**Release…** in their "+" menu (CR-361), and also appear in the **Ready for Loading** section of
-`/loading`; the unrecorded rows of a partially palletised item read **Partial**). Same `PalPlans`
+`/palletized` **Palletization Completed** (CR-480 briefly renamed the leaf "Ready for Loading"; the user reversed that the same day; the recorded,
+not-yet-loaded `ReadyToLoad` rows — they wear the **Palletized** chip (CR-176, relabelled from "Recorded" by
+CR-299), carry **Load** and **Release…** in their "+" menu (CR-361); since CR-480 this is the ONLY place
+they list — `/loading` dropped its Ready section; the unrecorded rows of a partially palletised item read **Partial**). Same `PalPlans`
 component scoped by the `stages` prop; all three nav leaves share feature id `packing`. **No status
 dropdown** (CR-364) — each page lists its own stage only; the page | All filter of CR-228/246/278/299
 and the board's read-only Done rows are gone.
@@ -449,18 +449,26 @@ lines (they keep drag-back / partial Complete). Entry points: the "+" menu on `/
 "Unload item"). Stock card effect: loaded release → In loading ↑ Available ↑; stock release →
 Available ↑ (Awaiting palletization unchanged, since produced fell with palletized).
 Group, Today's Report and New Palletization Plan sit in the header (the Kanban/Sheet toggle is hidden since CR-418 — Sheet only). The Sheet is
-ColumnDef-driven (CR-161/279/472, key `packingSheetColumns.v4`: Customer, Item, Order, Batch, Boxes,
-**Ordered Boxes** = the BATCH's boxes sent to palletization (back since CR-472 — CR-279 had removed it),
-**Ready Pallets** `N (boxes)` = the batch's palletized boxes ÷ `Pallet.boxes_per_pallet` rounded up,
-**Pallet** = the master's `pallet_type` (line `palletKind`, composite name on hover), **Boxes / Pallet** =
-the master's capacity (CR-472), Location, **Remaining** = the batch's boxes not yet palletized, Date, Status,
-Age, **PAL** last and hideable; checkbox / edit inputs / "+" cell fixed) and has **no stage band**.
+ColumnDef-driven (CR-161/279/472/481, key `packingSheetColumns.v5.<stage>` — each `ColumnDef` may carry
+`stages`, so every page shows its own figures): Customer, Item, **PO Number** (CR-482; **SO Number** last, hidden),
+Batch, then per page — *Ready for Palletization*: Boxes (queued), Ordered Boxes, **Possible Pallets**; *In
+Palletization*: **Pending Boxes** (batch total − recorded), Possible Pallets (of the pending), **Prepared Pallets**,
+**Boxes** (= prepared pallets × capacity), Ordered Boxes; *Ready for Loading*: **Pallets**, **Boxes** (= pallets ×
+capacity; a Mix Batch row shows its own boxes) — then **Pallet** = the master's `pallet_type` (line `palletKind`,
+composite name on hover), Location, Date, Status, Age, **PAL** last and hideable; checkbox / edit inputs / "+"
+cell fixed) and has **no stage band**. **Pallets are WHOLE (CR-481):** `wholePallets` = floor(boxes ÷
+`Pallet.boxes_per_pallet`), `palletBoxes` = pallets × capacity, `looseBoxes` = the rest (palLoadGate.ts);
+23 boxes on an 18-box pallet = 1 pallet · 18 boxes · 5 pending for a mixed-batch pallet. Boxes / Pallet and
+Remaining (CR-472) are gone.
 **Progress is per order item × batch** (`batchProgressOf` in palPlansApi, keyed by `batchKey`; CR-472 — it
 used to be per order item, so a loaded batch's 100 boxes read as "4 (100)" on its sibling batch's row).
 The Sheet ends in a **`TotalsRow` tfoot** (CR-187, same shape as /loading): "Total · N pallets"
-in the first visible column, Boxes / Ordered / Ready Pallets / Remaining sums under their own headers
-(deduped per batch; `readyPalletsLabel()` is the one formatter, shared with the
-Complete Palletization dialog which shows each batch's `Ready N (boxes) · Remaining N`, CR-280).
+in the first visible column, the page's figures summed under their own headers (deduped per batch;
+`readyPalletsLabel()` — whole pallets since CR-481 — is the one formatter, shared with the Complete
+Palletization dialog which shows each batch's `Prepared N (boxes) · Pending N`, CR-280). **Complete
+Palletization records PALLETS (CR-481):** with a capacity known the per-line input is whole pallets
+(prefilled with every pallet the line can fill, "= N boxes · M stay back"); boxes = pallets × capacity go to
+the server as before, the remainder stays Palletizing for a Top Up; capacity 0 keeps the boxes input.
 A **partial Complete** (Palletizing → ReadyToLoad with fewer boxes than the line) splits off the
 recorded slice and sends the **remainder back to Planning** (CR-281, server) so it re-queues on
 `/packing` with Start available. Under the grid (both views) sits the **totals /
@@ -568,11 +576,15 @@ boxes per order item across all lines/plans are capped at the SO ordered qty
 
 ### 5.5 Loading and Dispatch
 
-Screen `/loading` (Sheet + Loadings grid + Customer Sheet; Workspace and kanban hidden, code
-kept), detail at `/loading/:id`. Nav label renamed **"Loading and Dispatch"** 2026-09-04.
+Screens `/loading` **Loading** and `/dispatch` **Dispatch** (CR-480, 2026-10-28: one `LoadingBay` with a
+`stages` prop — Loading = In Loading, Dispatch = Ready for Dispatch + Dispatched; Sheet + Loadings grid +
+Customer Sheet; Workspace and kanban hidden, code kept), detail at `/loading/:id`. The single leaf was
+"Loading and Dispatch" from 2026-09-04 to CR-480.
 
-**Ready for Loading lives here since CR-170 (2026-09-14).** The Sheet's first stage is *Ready
-for Loading*: un-boxed `ReadyToLoad` lines that pass `loadableLineIds` (whole batch palletised).
+**Ready for Loading is NOT here any more (CR-480 reverses CR-170).** Un-boxed `ReadyToLoad` lines that pass
+`loadableLineIds` list on `/palletized` **Palletization Completed** only; the Loading page shows the lines being loaded, New
+Loading and sheet Edit; the Dispatch page shows the sealed containers waiting to go (Dispatch in the "+" menu)
+and the dispatched ones (prints in the "+" menu).
 Their "+" menu has one item, **Load**, which opens `LoadContainerModal` through `useLoadFlow`
 (the same flow the palletization board used until CR-170). Then *In Loading* → *Ready for
 Dispatch* → *Dispatched* as before. The Sheet and the Loadings grid end in a **Total · N pallets /
@@ -622,7 +634,8 @@ in place since CR-145** (no Edit toggle, rows don't navigate): the load-detail c
 per-line Pallet No. / Pallet type; **Box Brand** is shown read-only since CR-208 (Brand master, relabeled "Box Brand" 2026-09-11 — the short-lived
 separate BoxBrand table was merged into it; **Quote and SalesOrder carry `box_brand` too since
 2026-09-14 (CR-162)** — a Box Brand Combobox on both forms, DB-sourced from the Brand master,
-prefilled from the customer's default, carried by `/convert-quote`; **the master carries an
+prefilled from the customer's default, carried by `/convert-quote`; **mandatory on the Sales Order since
+CR-483 (2026-10-28)** — form `*` + error, server `requireBoxBrand` 400 on create / edit / convert, quotes optional; **the master carries an
 image since CR-181** (`Brand.logo` = File Store file id, uploaded on the Box Brand master form via
 `ImageUploader` — a single-image click-or-drop tile with Replace/Remove since CR-189 —, shown as a thumbnail in the Combobox popup and as a preview beside the field on
 the Quote, SO and Customer forms — `useBoxBrands()` in `masters/boxBrands.tsx`); the free-text
@@ -1148,14 +1161,14 @@ and linked to the same Customer: a customer's request for item samples, each lin
 Item-master design × Full tile | Cut piece (× cut size) × qty. `SampleOrder` (SMP/FY/NNN, status,
 optional source SO / Quote, note) + `SampleOrderLine` (`piece_kind`, `cut_piece_size`, `qty`,
 `supplied_qty`, `supplied_on`, `note`) save in one `/sample-order-save` call; edit / delete only while
-`New`. Supply is recorded per line on `/sample-orders/:id` as a LOAD since CR-347 (Dispatch tab / **Record Load**
+`New`. Supply is recorded per line on `/sample-orders/:id` as a LOAD since CR-347 (the **Actions** tab — `SampleActionsTab`, CR-485: Load Now per row, "+" Load…, Dispatch, Load Copy per trip — or the Dispatch tab's Record Load; the header button is gone
 → `/panel-load-save`: date, vehicle, photos + qty per line, partial allowed; 0 skips a line; the old
 `/sample-order-supply` is gone). The header status is never set by hand — it is
 derived from the lines (`sampleStatus` server / `deriveSampleStatus` client): New → Partially Supplied →
 Supplied. Stock: a **Cut** line deducts cut-piece stock through `adjustCutStock` with ledger kind
 `sample` (409 when free stock — on hand minus open panel-order bookings — is short); a **Full** tile is
 record-only (box stock is counted in boxes; the godown writes the opened box off on Stock Adjustments
-with reason "Sample / Display"). "Request Samples" sits beside "Request Panels" on the Quote and SO More
+with reason "Sample / Display"). **CR-486:** More ▸ Print order PDF = the godown pick slip (`sampleOrderPdf.ts`: photo + name + item code, piece, Requested · Supplied · Remaining, the line's Remarks, a blank Broken / Adjustment box per row, the Stock Adjustments reminder under the table, Taken out by / Checked by; frame shared with `panelOrderPdf.ts`). "Request Samples" sits beside "Request Panels" on the Quote and SO More
 menus (shared `useSaleSource` resolver: customer locked, designs preselected); the request and every supply
 mirror onto the source record's AND the Customer's Activity. The Customer page's **Samples** section lists
 every sample line (order, item, piece, requested, supplied, supplied on, status, source) — the register of
@@ -1487,7 +1500,10 @@ through to the detail page; newest-first default sort (`useSortRows(..., "create
 column order starts with Customer then Design (Item / Name on masters); the server- or client-minted
 number (SO, QT, PNL, SMP, PRD, PAL, LOAD, TRF, CUS-, SKU, panel code) is an ordinary `ColumnDef` at the
 END of the order and in `defaultHidden` — never pinned outside the picker. Customer-supplied numbers
-(PO Number, Container No.) stay visible. "Design" on an order-level grid is the record's design names
+(PO Number, Container No.) stay visible. **CR-482 (2026-10-28): the customer's PO number LEADS on every stage
+screen** — Palletization, Loading, Dispatch, Production grids, boards, bands and modals render `orderLabel`
+(PO, else SO); the SO number is a hidden-by-default LAST column (`SO Number`); prints keep the SO (extends
+CR-353 beyond the orders module). "Design" on an order-level grid is the record's design names
 in one clipped cell — `ui/DesignNames.tsx` (Panel Craft rows feed it `lineCodeList` from
 `PanelLoads.tsx`). A changed default order or hidden set bumps the `useColumns` key (`.v2`, `.vN`),
 because saved prefs win over code defaults. A grid with no detail page opens its edit form on row click
@@ -1592,6 +1608,10 @@ Full rationale for each: `ARCHITECT-BLUEPRINT.md` and the project memory notes.
 
 ---
 
+- **Whole-table reads go through `GET /:table?all=1`** (CR-478): the function runs one `COUNT`, then
+  fetches every 300-row ZCQL page **in parallel** and returns one deduped response (`truncated` past ~10k
+  rows). The client `listAll` is that single call — never page a table from the browser again; one round
+  trip to the function costs ≈ 1 s on the Development environment, and Customer alone is 2,800+ rows.
 - **ZCQL `LIKE` uses `*`, never `%`** (CR-209). A `%` pattern silently matches nothing.
 - **Mutations that move OrderItem counters invalidate the orders cache** — `palPlansApi.bust`,
   `productionApi.bust`, `bustStageCaches` all fan out; `useOrders` refetches on invalidation, and
@@ -1707,9 +1727,13 @@ names the CRM org from `GET /crm/v8/org`. **Sync core `lib/customerSync.js`** (l
 `listChanged / loadAux / fetch / toCustomer / toRecord / create / update / search`. **CRM adapter
 `lib/crmSync.js`:** list = `GET /Accounts?fields=id,Account_Name,Modified_Time&sort_by=Modified_Time
 &sort_order=desc&per_page=200` with **`If-Modified-Since: <watermark>`** (a quiet pull = one call, 304;
-import pages of **10** without the header (CR-362: 25 ran 26–36 s per page with the Books check and hit the
-gateway's ~30 s limit; a re-run skips hits already linked and unchanged since the watermark — `pickChanged`
-`linked`, reported as `skipped`); `// ponytail:` page-based paging stops at 2 000 accounts);
+import pages of **200** (`LIST_PAGE`) without the header, walked by **`page_token`** (CR-477 — page numbers stop
+at record 2 000, tokens reach 100 000 and are bound to the same fields / sort / per_page; the Books adapter keeps
+page numbers behind the same cursor); one import call = ≤ **10** (`IMPORT_PAGE`) records of real work on that page
+(CR-362: 25 fetches ran 26–36 s with the Books check and hit the gateway's ~30 s limit) — the changed / unlinked hits
+(fetch) plus the unchanged ones still owing a Books check (`needsRecheck`), picked by `pickChunk` over the LIST
+offset; `summary.cursor = {token, offset}` goes back to the client until `done`; a re-run skips hits already
+linked and unchanged since the watermark — `pickChanged` `linked`, reported as `skipped` once per page);
 fetch = `GET /Accounts/{id}` + `GET /Accounts/{id}/Contacts` + **CR-362** Books `GET /contacts?zcrm_account_id={id}` when
 Books is connected (`loadAux.books`; a hit → `books_contact_id`, so the client derives CRM & Books / CRM only /
 Books only — `zohoLinkOf` in `zohoApi.ts`; no hit → left as is; a Books failure stops the checks for the run and
@@ -1851,7 +1875,7 @@ Dummy data: `scripts/seed-demo-masters.mjs` then `seed-multi.mjs` / `seed-panel-
 | **Slate migration** | Planned, not executed — [`Migration to Slate plan.md`](../Migration%20to%20Slate%20plan.md). Risk: same-origin `/server` + auth cookie. |
 | **QC stage** | Exists in `ProductionStage`, dropped from the board and flow. |
 | **Production approval** | Retired; server transitions kept for rollback only. |
-| **Zoho integration** | Customers sync both ways with **Zoho CRM Accounts** since CR-359 (2026-10-21; Books CR-356/358 hidden behind `ACTIVE_PROVIDER`, kept). Still open: invoices / sales orders to Books, several organisations, a 429 retry, CRM page_token past 2 000 accounts, Signals CRM publisher as the webhook source. |
+| **Zoho integration** | Customers sync both ways with **Zoho CRM Accounts** since CR-359 (2026-10-21; Books CR-356/358 hidden behind `ACTIVE_PROVIDER`, kept). Still open: invoices / sales orders to Books, several organisations, a 429 retry, Signals CRM publisher as the webhook source (page_token paging past 2 000 accounts landed with CR-477). |
 | **Hidden routes** | `/po`, `/qc`, `/container-shipments`, `/fit`, `/loadplan`, `/invoices` — registered, no nav entry. |
 | **Clear / None on pick lists** | Every `Combobox` still needs a Clear affordance (reverses the None-removal in `b9a47f2`). |
 | **Excel import dedupe** | Re-uploading the same production file double-counts. |

@@ -6,7 +6,7 @@
 > "Final Loading" as separate stages and predate the Palletization board redesign,
 > container-first loading, batch-wise stock and Panel Craft — and the 2026-09-04 revamp:
 > two-step palletise (Palletise → In Palletization, then Mark Palletised → Ready for
-> Loading), the Load button on the Palletization board, the "Loading and Dispatch" menu
+> Loading), the Load button on the Palletization board, the "Loading" menu (dispatched containers list under "Dispatch", CR-480)
 > (boxed containers only) and the per-loading Plan Loading screen. For the current behaviour
 > see [`SYSTEM.md` §5](SYSTEM.md#5--the-order-to-dispatch-flow). Sections 1–4, 7–8 and the §9
 > formula reference are still accurate.
@@ -189,7 +189,7 @@ A **location** is a bay inside a warehouse, written as **Warehouse ▸ Bay** (fo
 - **Start Palletization** and **Complete Palletization** dialogs: one Location row at the top covers every item. Start presets the Palletization bay, Complete presets the Loading Bay. Change it if the pallets went elsewhere.
 - **+ ▸ Set Location…** on any card or row of Palletization, Palletizing and Palletized. Ticked items come along with the one you clicked.
 - **Set Location (n)** on the selection bar after ticking items.
-- **Loading and Dispatch** row menu ▸ Set Location…, for Ready for Loading rows only. Once a pallet is in a container the container is its place and the cell reads "—".
+- **Palletization Completed** row menu ▸ Set Location… (CR-480 moved those rows off the Loading page). Once a pallet is in a container the container is its place and the cell reads "—".
 - **Plan page ▸ More ▸ Set Location…** places every un-loaded line of that plan at once.
 
 **Where panels get a location**
@@ -200,7 +200,7 @@ A **location** is a bay inside a warehouse, written as **Warehouse ▸ Bay** (fo
 **Where to see it**
 
 - Palletization sheets: **Location** column and **Group: Location**. Kanban cards show it on the meta line.
-- Loading and Dispatch sheet: **Location** column.
+- Loading sheet: **Location** column.
 - Plan page lines table: **Location** column.
 - Item page ▸ **Locations** tab: loose boxes per bay and batch, then **On pallets at**.
 - Panel Item ▸ Locations card. Panel Orders grid **Location** column (hidden by default, turn it on in the column picker).
@@ -288,9 +288,9 @@ The **Sales Orders** menu item has a **List | Kanban** toggle at the top of the 
 
 ### 5.5 Palletization
 
-*Group produced boxes onto pallets and run them through the load lifecycle.* Three sidebar pages, one stage each (CR-360): **Ready for Palletization** (`/packing`, the queue), **In Palletization** (`/palletizing`, work in progress) and **Palletization Completed** (`/palletized`, palletized stock waiting to be loaded). Every palletization is tied to a Sales Order — there is no independent (make-to-stock) palletization.
+*Group produced boxes onto pallets and run them through the load lifecycle.* Three sidebar pages, one stage each (CR-360; renamed by CR-480): **Ready for Palletization** (`/packing`, the queue), **In Palletization** (`/palletizing`, work in progress) and **Palletization Completed** (`/palletized`, whole pallets waiting to be loaded). Pallets are whole (CR-481): 23 boxes on an 18-box pallet = 1 pallet · 18 boxes; the 5 stay pending for a mixed-batch pallet (Top Up). Complete Palletization asks for pallets. Every palletization is tied to a Sales Order — there is no independent (make-to-stock) palletization.
 
-**Release (CR-361):** the row's **+** menu on Palletization Completed and on Loading and Dispatch holds **Release…** — type how many boxes and a reason (Admin may leave it blank). Boxes in an open container return to **Ready for Loading**; palletized boxes that are not loaded yet return to **free stock** and the order's allocation is returned (allocate again to reuse them). A dispatched container cannot be released.
+**Release (CR-361):** the row's **+** menu on Palletization Completed and on Loading holds **Release…** — type how many boxes and a reason (Admin may leave it blank). Boxes in an open container return to **Ready for Loading**; palletized boxes that are not loaded yet return to **free stock** and the order's allocation is returned (allocate again to reuse them). A dispatched container cannot be released.
 
 **A Palletization Plan** is a first-class record with a server-minted **PAL/FY/NNN** number that groups a Sales Order's items onto a vehicle. Each item on the plan also carries its own sequential **`PAL-NNN`** code (like Production's `PROD-NNN`), so individual palletised items are traceable.
 

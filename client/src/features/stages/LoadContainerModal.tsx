@@ -449,7 +449,7 @@ export function LoadContainerModal({
     .map((l) => ({
       value: `pal:${l.id}`,
       label: `${l.itemCode} · ${l.designLabel}`,
-      hint: [l.customerName, l.soNumber].filter(Boolean).join(" · "),
+      hint: [l.customerName, l.poNumber || l.soNumber].filter(Boolean).join(" · "),
       badge: `${fmt(l.boxes)} boxes`,
     }));
   const oiOpts = orders
@@ -463,7 +463,7 @@ export function LoadContainerModal({
     .map((o) => ({
       value: `oi:${o.id}`,
       label: o.design,
-      hint: ["From production", o.party, o.orderNumber].filter(Boolean).join(" · "),
+      hint: ["From production", o.party, o.poNumber || o.orderNumber].filter(Boolean).join(" · "),
       badge: `${fmt(remainingOf(o))} left`,
     }));
   const addItem = (v: string) => {
@@ -487,7 +487,7 @@ export function LoadContainerModal({
           ...prev,
           {
             salesOrderId: so,
-            soNumber: o.orderNumber || "",
+            soNumber: o.poNumber || o.orderNumber || "",
             orderItemId: o.id,
             label: o.design,
             customer: o.party || "",
@@ -562,7 +562,7 @@ export function LoadContainerModal({
                       <span className="mono" style={{ fontWeight: 600 }}>{l.itemCode}</span>
                       <div className="design-name">{l.designLabel}</div>
                       <div className="dim" style={{ fontSize: "var(--t-sm)" }}>
-                        {[l.customerName, l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
+                        {[l.customerName, l.poNumber || l.soNumber, l.sizeCode].filter(Boolean).join("  ·  ") || "—"}
                       </div>
                     </td>
                     <td>

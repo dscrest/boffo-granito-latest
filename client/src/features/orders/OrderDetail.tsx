@@ -2,7 +2,7 @@
    "Send to Palletization" (inline button or the header More menu) opens the
    PalPlan screen scoped to this order (/packing?fromOrder=). */
 import { codeOf } from "@/ui/statusCode";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmt, finishClass } from "@/lib/format";
 import { Icon } from "@/ui/Icon";
@@ -23,7 +23,7 @@ import { SendToLoadingModal } from "@/features/stages/SendToLoadingModal";
 import { groupReady } from "@/features/stages/newLoadingRows";
 import { soNextStep } from "@/features/stages/nextStep";
 import type { PalPlanLine } from "@/features/stages/palPlansApi";
-import { listProductionLogs, type AllocEntry, type ProductionEntry } from "@/features/stages/productionApi";
+import { batchProductionDate, listProductionLogs, type ProductionLogResult } from "@/features/stages/productionApi";
 import { AllocateStockModal } from "./AllocateStockModal";
 import { ChangeStatusModal } from "./ChangeStatusModal";
 import { useOrders } from "./useOrders";
@@ -42,24 +42,24 @@ const chipText = (c: SoChip) => (c.detail ? `${c.label} · ${c.detail}` : c.labe
 const toPalletise = (o: Order) => Math.max(0, o.producedQty - o.palletizedQty);
 
 // CR-297: Deallocate opens the shared Deallocate Stock modal (scoped to that line) —
-// one place owns the confirm + partial-return rule.
-function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; onDeallocate: (orderItemId: string) => void }) {
-  const [rows, setRows] = useState<ProductionEntry[] | null>(null);
-  // Stock allocated to this order (CR-199) — the production-first supply trail.
-  const [allocs, setAllocs] = useState<AllocEntry[]>([]);
+// one place owns the confirm + partial-return rule. CR-479: the tab owns the
+// Allocate / Deallocate buttons (`toolbar`, lifted from the Items card).
+function SoProduction({ salesOrderId, onDeallocate, toolbar }: { salesOrderId: string; onDeallocate: (orderItemId: string) => void; toolbar?: ReactNode }) {
+  const [logs, setLogs] = useState<ProductionLogResult | null>(null);
   useEffect(() => {
     let alive = true;
     void listProductionLogs().then((res) => {
-      if (!alive) return;
-      setRows(res.ok ? res.entries.filter((e) => e.salesOrderId === salesOrderId) : []);
-      setAllocs(res.ok ? res.allocEntries.filter((a) => a.salesOrderId === salesOrderId) : []);
+      if (alive) setLogs(res);
     });
     return () => {
       alive = false;
     };
   }, [salesOrderId]);
 
-  if (rows == null) return <div className="muted mono" style={{ padding: 18 }}>Loading production…</div>;
+  if (logs == null) return <div className="muted mono" style={{ padding: 18 }}>Loading production…</div>;
+  const rows = logs.ok ? logs.entries.filter((e) => e.salesOrderId === salesOrderId) : [];
+  // Stock allocated to this order (CR-199) — the production-first supply trail.
+  const allocs = logs.ok ? logs.allocEntries.filter((a) => a.salesOrderId === salesOrderId) : [];
 
   // CR-470: ONE row per design — the user reads the item's total, not one line per job / batch.
   // Batches union into chips; Requested / Produced sum; the latest date and performer show.
@@ -85,33 +85,41 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
     }
     byDesign.push(...m.values());
   }
-  type AllocGroup = { designId: string; design: string; orderItemId: string; batches: string[]; boxes: number; date: string; by: string };
+  // CR-479: ONE row per design × BATCH — batches read DOWN the column, each with
+  // its own production date (the day the batch was recorded / opened, falling
+  // back to the allocation day) and boxes; Design + Deallocate span the group.
+  type AllocRow = { batch: string; boxes: number; date: string; by: string };
+  type AllocGroup = { designId: string; design: string; orderItemId: string; rows: AllocRow[]; boxes: number };
   const allocByDesign: AllocGroup[] = [];
   {
     const m = new Map<string, AllocGroup>();
     for (const a of allocs) {
-      const g = m.get(a.designId) ?? m.set(a.designId, { designId: a.designId, design: a.design, orderItemId: a.orderItemId, batches: [], boxes: 0, date: "", by: "" }).get(a.designId)!;
-      if (a.batchNumber && !g.batches.includes(a.batchNumber)) g.batches.push(a.batchNumber);
+      const g = m.get(a.designId) ?? m.set(a.designId, { designId: a.designId, design: a.design, orderItemId: a.orderItemId, rows: [], boxes: 0 }).get(a.designId)!;
+      let r = g.rows.find((x) => x.batch === a.batchNumber);
+      if (!r) g.rows.push((r = { batch: a.batchNumber, boxes: 0, date: "", by: "" }));
+      r.boxes += a.qtyBoxes;
       g.boxes += a.qtyBoxes;
-      const d = a.createdTime.slice(0, 10);
-      if (d > g.date) {
-        g.date = d;
-        g.by = a.performedBy || g.by;
+      const d = batchProductionDate(logs, a.design, a.batchNumber) || a.createdTime.slice(0, 10);
+      if (d > r.date) {
+        r.date = d;
+        r.by = a.performedBy || r.by;
       }
     }
     allocByDesign.push(...m.values());
   }
-  const chips = (batches: string[]) =>
-    batches.length ? batches.map((b) => <span key={b} className="chip mono" style={{ marginRight: 4 }}>{b}</span>) : <span className="dim">—</span>;
+  // Batches stacked one per line (CR-479: "multi-line row", never side by side).
+  const stacked = (batches: string[]) =>
+    batches.length ? batches.map((b) => <div key={b} className="mono">{b}</div>) : <span className="dim">—</span>;
 
   return (
     <>
+    {toolbar && <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginBottom: 10 }}>{toolbar}</div>}
     <div className="card" style={{ marginBottom: 12 }}>
       <div style={{ overflow: "auto" }}>
         <table className="tbl">
           <thead>
             <tr>
-              <th>Allocated on</th>
+              <th>Production date</th>
               <th>Design</th>
               <th>Batch</th>
               <th className="num" style={{ textAlign: "right" }}>Boxes</th>
@@ -120,20 +128,36 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
             </tr>
           </thead>
           <tbody>
-            {allocByDesign.map((g) => (
-              <tr key={g.designId}>
-                <td className="mono muted nw">{g.date || "—"}</td>
-                <td><span className="design-name">{g.design}</span></td>
-                <td className="nw">{chips(g.batches)}</td>
-                <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(g.boxes)}</td>
-                <td className="muted nw">{g.by || "—"}</td>
-                <td style={{ textAlign: "right" }}>
-                  {can("stages", "edit") && (
-                    <button type="button" className="btn" title="Return boxes of this item to free stock" onClick={() => onDeallocate(g.orderItemId)}>Deallocate</button>
+            {allocByDesign.map((g) => {
+              const span = g.rows.length + (g.rows.length > 1 ? 1 : 0);
+              return (
+                <Fragment key={g.designId}>
+                  {g.rows.map((r, i) => (
+                    <tr key={r.batch || i}>
+                      <td className="mono muted nw">{r.date || "—"}</td>
+                      {i === 0 && <td rowSpan={span} style={{ verticalAlign: "top" }}><span className="design-name">{g.design}</span></td>}
+                      <td className="mono nw">{r.batch || "—"}</td>
+                      <td className="num mono" style={{ color: "var(--c-green)" }}>{fmt(r.boxes)}</td>
+                      <td className="muted nw">{r.by || "—"}</td>
+                      {i === 0 && (
+                        <td rowSpan={span} style={{ textAlign: "right", verticalAlign: "top" }}>
+                          {can("stages", "edit") && (
+                            <button type="button" className="btn" title="Return boxes of this item to free stock" onClick={() => onDeallocate(g.orderItemId)}>Deallocate</button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {g.rows.length > 1 && (
+                    <tr>
+                      <td /><td className="dim" style={{ textAlign: "right" }}>{g.rows.length} batches</td>
+                      <td className="num mono" style={{ fontWeight: 600 }}>{fmt(g.boxes)}</td>
+                      <td />
+                    </tr>
                   )}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
             {allocByDesign.length === 0 && (
               <tr>
                 <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>
@@ -177,7 +201,7 @@ function SoProduction({ salesOrderId, onDeallocate }: { salesOrderId: string; on
                   {g.jobs > 1 && <span className="dim" style={{ marginLeft: 6, fontSize: "var(--t-sm)" }}>· {g.jobs} jobs</span>}
                 </td>
                 <td className="nw">{g.size ? <span className={`chip size ${g.size.startsWith("200") || g.size.startsWith("75") ? "b" : ""}`}>{g.size}</span> : "—"}</td>
-                <td className="nw">{chips(g.batches)}</td>
+                <td>{stacked(g.batches)}</td>
                 <td className="num mono">{fmt(g.requested)}</td>
                 <td className="num mono">{g.produced ? <span style={{ color: "var(--c-green)" }}>{fmt(g.produced)}</span> : <span className="dim">—</span>}</td>
                 <td className="muted nw">{g.by || "—"}</td>
@@ -436,7 +460,8 @@ export function OrderDetail() {
     !!head.salesOrderId && !["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(status) && can("stages", "edit") && items.some((o) => o.producedQty < o.orderQty);
   const noStockReason =
     totalAvail > 0 ? "" : items.every((o) => o.palletizedQty >= o.orderQty) ? "Nothing left to palletize" : "Allocate stock to this order first";
-  // CR-297: Allocate / Deallocate are always on the Items card — greyed with the reason, never hidden.
+  // CR-297: Allocate / Deallocate are always visible — greyed with the reason, never hidden
+  // (CR-479 moved them from the Items card to the Production tab, see `stockActions`).
   const canDeallocate = !!head.salesOrderId && can("stages", "edit") && items.some((o) => o.producedQty > 0);
   const stockWaiting = items.some((o) => ["Stock ready", "Partial stock"].includes(supplyById.get(o.id)?.status ?? ""));
   const allocateReason = ["Draft", "PendingApproval"].includes(status)
@@ -448,6 +473,28 @@ export function OrderDetail() {
         : !stockWaiting
           ? "No free stock for these items yet"
           : "";
+  // CR-479: the two stock actions, rendered on the Production tab (user: "allocate /
+  // deallocate action moves to Production Tab"). Header More ▸ keeps its entries.
+  const stockActions = can("stages", "edit") ? (
+    <>
+      <button
+        className="btn primary"
+        disabled={!canAllocate || !stockWaiting}
+        onClick={() => setAllocating(true)}
+        title={allocateReason || "Hand free stock to this order's lines"}
+      >
+        Allocate Stock
+      </button>
+      <button
+        className="btn"
+        disabled={!canDeallocate}
+        onClick={() => setDeallocating("*")}
+        title={canDeallocate ? "Return allocated boxes to free stock" : "Nothing allocated to this order yet"}
+      >
+        Deallocate Stock
+      </button>
+    </>
+  ) : null;
   const changeStatus = async (next: string, label: string, reason?: string) => {
     if (!head.salesOrderId || statusBusy) return;
     setStatusBusy(true);
@@ -722,7 +769,7 @@ export function OrderDetail() {
       extraTabs={
         head.salesOrderId
           ? [
-              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onDeallocate={(id) => setDeallocating(id)} /> },
+              { id: "production", label: "Production", content: <SoProduction salesOrderId={head.salesOrderId} onDeallocate={(id) => setDeallocating(id)} toolbar={stockActions} /> },
               { id: "palletization", label: "Palletization", content: <SoPalletisation salesOrderId={head.salesOrderId} /> },
               {
                 id: "containers",
@@ -773,29 +820,8 @@ export function OrderDetail() {
             {/* Both send paths (this button and the header More → Palletization)
                open the same PalPlan screen scoped to this order. */}
             {/* Stock is waiting to be claimed — the one action that unblocks the rest. */}
-            {/* Per line, not the header label — allocating one line moves the header
-               on while another line still has free stock to claim. CR-297: both
-               stock actions always sit here, greyed with the reason when not applicable. */}
-            {can("stages", "edit") && (
-              <>
-                <button
-                  className="btn primary"
-                  disabled={!canAllocate || !stockWaiting}
-                  onClick={() => setAllocating(true)}
-                  title={allocateReason || "Hand free stock to this order's lines"}
-                >
-                  Allocate Stock
-                </button>
-                <button
-                  className="btn"
-                  disabled={!canDeallocate}
-                  onClick={() => setDeallocating("*")}
-                  title={canDeallocate ? "Return allocated boxes to free stock" : "Nothing allocated to this order yet"}
-                >
-                  Deallocate Stock
-                </button>
-              </>
-            )}
+            {/* CR-479: Allocate / Deallocate Stock live on the Production tab (the
+               `stockActions` toolbar) — the Items card keeps only the send paths. */}
             <button
               className="btn"
               disabled={totalAvail === 0 || !head.salesOrderId}
@@ -841,7 +867,6 @@ export function OrderDetail() {
                 <th className="num" style={{ textAlign: "right" }}>Remaining</th>
                 <th>Supply</th>
                 <th className="num" style={{ textAlign: "right" }}>Palletized</th>
-                <th />
               </tr>
             </thead>
             <tbody>
@@ -861,12 +886,6 @@ export function OrderDetail() {
                     })()}
                   </td>
                   <td className="num mono">{fmt(o.palletizedQty)}</td>
-                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    {/* CR-263: per-line Deallocate — returns this line's allocated boxes to free stock. */}
-                    {can("stages", "edit") && o.producedQty > 0 && (
-                      <button type="button" className="btn ord-rm" title="Deallocate stock from this item" onClick={() => setDeallocating(o.id)}>✕</button>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>

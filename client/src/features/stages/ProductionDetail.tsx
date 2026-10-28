@@ -51,7 +51,9 @@ type FieldDef = ColumnDef<ProductionRequestGroup> & { value: (g: ProductionReque
 const FIELDS: FieldDef[] = [
   // Production ID omitted here — it's the page title.
   // Stage omitted — shown as the header chip, not repeated here.
-  { key: "order", label: "Sales Order", value: (g) => (g.independent ? "Independent (stock)" : g.orderNumber || g.poNumber || "—") },
+  // CR-482: PO leads; the SO number is its own (hideable) field.
+  { key: "order", label: "PO Number", value: (g) => (g.independent ? "Independent (stock)" : g.poNumber || g.orderNumber || "—") },
+  { key: "so", label: "SO Number", value: (g) => (g.independent ? "—" : g.orderNumber || "—") },
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
   { key: "requested", label: "Requested (boxes)", value: (g) => fmt(g.totalRequested) },
   { key: "produced", label: "Produced (boxes)", value: (g) => (g.totalProduced ? fmt(g.totalProduced) : "—") },
@@ -293,7 +295,7 @@ export function ProductionDetail() {
                   {fmtLocalDate(x.date) || x.code} · {x.designSummary}
                 </div>
                 <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2 }}>
-                  {[x.code, x.independent ? "Independent" : x.orderNumber || x.poNumber, stageChip(x.stage).label].filter(Boolean).join("  ·  ")}
+                  {[x.code, x.independent ? "Independent" : x.poNumber || x.orderNumber, stageChip(x.stage).label].filter(Boolean).join("  ·  ")}
                 </div>
               </Link>
             );
@@ -353,7 +355,7 @@ export function ProductionDetail() {
               <>
                 {" · "}
                 <Link className="linkish" to={`/orders/${group.salesOrderId}`} title="Open Sales Order">
-                  {group.orderNumber || group.poNumber || "Order"}
+                  {group.poNumber || group.orderNumber || "Order"}
                 </Link>
                 {group.customer && <> · {group.customer}</>}
               </>
@@ -384,7 +386,7 @@ export function ProductionDetail() {
                     <span className="lbl">{f.label}</span>
                     {f.key === "order" && !group.independent ? (
                       <Link className="linkish" style={{ textAlign: "left" }} to={`/orders/${group.salesOrderId}`} title="Open Sales Order">
-                        {group.orderNumber || group.poNumber || "—"}
+                        {group.poNumber || group.orderNumber || "—"}
                       </Link>
                     ) : (
                       <span style={{ color: "var(--fg)" }}>{f.value(group)}</span>

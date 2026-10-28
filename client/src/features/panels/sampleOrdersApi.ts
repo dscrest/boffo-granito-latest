@@ -44,6 +44,7 @@ export interface SampleOrderLineRow {
   id: string; // SampleOrderLine ROWID
   designId: string;
   designName: string;
+  itemCode: string; // CR-473 catalog code — printed on the pick slip (CR-486)
   images: DesignImage[];
   pieceKind: SamplePieceKind;
   cutSizeId: string; // "" for a Full tile
@@ -124,6 +125,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       id: String(l.ROWID),
       designId: str(l.design),
       designName: d?.uniqueName || d?.designName || "—",
+      itemCode: d?.itemCode || "",
       images: d?.images ?? [],
       pieceKind: str(l.piece_kind) === "Cut" ? "Cut" : "Full",
       cutSizeId: str(l.cut_piece_size),

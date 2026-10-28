@@ -1,5 +1,5 @@
 /* ============================================================
-   Loading and Dispatch (/loading) — the loading & dispatch board, standard
+   Loading (/loading) + Dispatch (/dispatch, CR-480) — the loading & dispatch board, standard
    list-page kit. Rows are PalletizationPlanLines moving through
    Ready for Loading → In Loading → Ready for Dispatch → Dispatched. The
    stage is DERIVED: un-boxed + ReadyToLoad = Ready
@@ -127,7 +127,8 @@ function loadColumns(nameOf: (id: string) => string): ColumnDef<Row>[] {
         <span className="design-name clip" style={{ maxWidth: 260 }} title={r.l.designLabel}>{r.l.designLabel}</span>
       ),
     },
-    { key: "so", label: "Order", className: "mono nw", render: (r) => r.l.soNumber || "—" },
+    // CR-482: the customer's PO leads; the SO number is the hidden LAST column.
+    { key: "po", label: "PO Number", className: "mono nw", render: (r) => r.l.poNumber || r.l.soNumber || "—" },
     {
       key: "batch",
       label: "Batch",
@@ -206,6 +207,7 @@ function loadColumns(nameOf: (id: string) => string): ColumnDef<Row>[] {
     { key: "dispatchDate", label: "Dispatch Date", className: "mono muted nw", render: (r) => r.box?.dispatchDate || "—" },
     { key: "age", label: "Age", className: "muted nw", render: (r) => `${ageDays(r.p, r.l)}d` },
     { key: "code", label: "Loading", className: "mono nw", style: { fontWeight: 600 }, render: (r) => (r.box ? boxLabel(r.box) : "—") },
+    { key: "so", label: "SO Number", className: "mono nw dim", render: (r) => r.l.soNumber || "—" },
   ];
 }
 
@@ -245,6 +247,7 @@ type BoxRow = {
   lines: PalPlanLine[];
   customers: string; // distinct, joined
   sos: string; // distinct SO numbers, joined
+  pos: string; // distinct customer POs (SO number when none), joined — CR-482
   totalBoxes: number;
   fillPct: number; // vs pallet capacity (boxFill)
   status: BoxStatus;
@@ -259,10 +262,10 @@ function boxColumns(formatName: Map<string, string>): ColumnDef<BoxRow>[] {
       render: (r) => <span className="clip" style={{ maxWidth: 200 }} title={r.customers}>{r.customers || "—"}</span>,
     },
     {
-      key: "sos",
-      label: "Orders",
+      key: "pos",
+      label: "PO Numbers",
       className: "mono nw",
-      render: (r) => <span className="clip" style={{ maxWidth: 180 }} title={r.sos}>{r.sos || "—"}</span>,
+      render: (r) => <span className="clip" style={{ maxWidth: 180 }} title={r.pos}>{r.pos || "—"}</span>,
     },
     { key: "items", label: "Items", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.lines.length) },
     { key: "pallets", label: "Pallets", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(palletsOf(r.lines)) },
@@ -327,6 +330,7 @@ function boxColumns(formatName: Map<string, string>): ColumnDef<BoxRow>[] {
         );
       },
     },
+    { key: "sos", label: "SO Numbers", className: "mono nw dim", render: (r) => <span className="clip" style={{ maxWidth: 180 }} title={r.sos}>{r.sos || "—"}</span> },
   ];
 }
 
@@ -335,6 +339,7 @@ function boxSortVal(r: BoxRow, k: string): string | number {
     case "label": return boxLabel(r.box);
     case "customers": return r.customers;
     case "sos": return r.sos;
+    case "pos": return r.pos;
     case "items": return r.lines.length;
     case "pallets": return palletsOf(r.lines);
     case "boxes": return r.totalBoxes;
@@ -355,8 +360,15 @@ function boxSortVal(r: BoxRow, k: string): string | number {
   }
 }
 
-export function LoadingBay() {
+// CR-480: ONE page per stage (like PalPlans) — /loading = In Loading, /dispatch = Ready for
+// Dispatch + Dispatched. Ready for Loading lives on /palletized only.
+export function LoadingBay({ stages = STAGES.map((s) => s.key) }: { stages?: LoadStage[] }) {
   const navigate = useNavigate();
+  const pageStages = new Set<LoadStage>(stages);
+  const PAGE_STAGES = STAGES.filter((s) => pageStages.has(s.key));
+  // New Loading + sheet Edit belong to the In Loading page only; the row "+" menus
+  // (Dispatch, Unload, Release, prints) stay on every page.
+  const canWork = pageStages.has("InLoading");
   const canEdit = can("stages", "edit");
 
   const [plans, setPlans] = useState<PalPlan[]>(() => cachedPalPlans() ?? []);
@@ -433,7 +445,7 @@ export function LoadingBay() {
   // Key bumped to .v2 (CR-161) so the Customer→Design default order and the
   // now-hideable Loading column apply everywhere; the old prefs are dead.
   // .v3 (CR-266): Date in, LOAD code hidden. .v4 (CR-412): Location column (hidden while no warehouse exists).
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v4", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "code", ...(whEnabled ? [] : ["location"])]);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("loadingColumns.v5", COLS, ["vehicle", "seal", "containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "code", "so", ...(whEnabled ? [] : ["location"])]); // .v5 (CR-482): PO Number leads, SO Number hidden last
 
   // ---- derived ------------------------------------------------
   const { allLines, openBoxes, linesOfBox } = flow;
@@ -466,7 +478,11 @@ export function LoadingBay() {
   // master list). Customers/SOs come from the loaded lines, else the plan
   // JSON (CR-174: per field, so a box whose lines can't name a customer
   // still shows the planned one, like /loading/:id does).
-  const boxRows: BoxRow[] = boxes.map((b) => {
+  // CR-480: the Loadings view lists this page's containers only — Empty / Planned / In Loading
+  // boxes on /loading, sealed (Ready for Dispatch) + Dispatched ones on /dispatch.
+  const boxStage = (b: LoadBox): LoadStage => (b.status !== "Open" ? "Dispatched" : sealed(b) ? "ReadyDispatch" : "InLoading");
+  const pageBoxes = boxes.filter((b) => pageStages.has(boxStage(b)));
+  const boxRows: BoxRow[] = pageBoxes.map((b) => {
     const inBox = linesOfBox(b.id).map(({ l }) => l);
     const plan = planSummary(b);
     return {
@@ -474,6 +490,8 @@ export function LoadingBay() {
       lines: inBox,
       customers: [...new Set(inBox.map((l) => l.customerName).filter(Boolean))].join(", ") || plan?.customers || "",
       sos: [...new Set(inBox.map((l) => l.soNumber).filter(Boolean))].join(", ") || plan?.sos || "",
+      // CR-482: the customer POs lead the Loadings grid; SO numbers are the hidden column.
+      pos: [...new Set(inBox.map((l) => l.poNumber || l.soNumber).filter(Boolean))].join(", ") || plan?.sos || "",
       totalBoxes: inBox.length ? inBox.reduce((s, l) => s + l.boxes, 0) : plan?.boxes ?? 0,
       fillPct: Math.round(boxFill(inBox) * 100),
       status: b.status !== "Open" ? "Dispatched" : sealed(b) ? "Ready for Dispatch" : inBox.length ? "In Loading" : plan ? "Planned" : "Empty",
@@ -491,7 +509,7 @@ export function LoadingBay() {
   };
   const rows: Row[] = allLines.flatMap(({ p, l }) => {
     const stage = stageOf(l);
-    return stage ? [{ p, l, stage, box: l.loadBoxId ? boxById.get(l.loadBoxId) : undefined }] : [];
+    return stage && pageStages.has(stage) ? [{ p, l, stage, box: l.loadBoxId ? boxById.get(l.loadBoxId) : undefined }] : [];
   });
 
   // ---- search + advanced filter -------------------------------
@@ -501,7 +519,7 @@ export function LoadingBay() {
     return [
       { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.l.customerName), get: (r) => r.l.customerName },
       { key: "country", label: "Country", type: "multiselect", options: opts(country), get: country },
-      { key: "stage", label: "Status", type: "multiselect", options: STAGES.map((s) => s.label), get: (r) => stageMeta(r.stage).label },
+      { key: "stage", label: "Status", type: "multiselect", options: PAGE_STAGES.map((s) => s.label), get: (r) => stageMeta(r.stage).label },
       { key: "batch", label: "Batch", type: "multiselect", options: opts((r) => r.l.batchNumber), get: (r) => r.l.batchNumber },
       { key: "container", label: "Loading", type: "multiselect", options: opts((r) => (r.box ? boxLabel(r.box) : "")), get: (r) => (r.box ? boxLabel(r.box) : "") },
       { key: "boxes", label: "Boxes", type: "numrange", get: (r) => r.l.boxes },
@@ -519,7 +537,7 @@ export function LoadingBay() {
   const searched = rows.filter(
     (r) =>
       !qLower ||
-      `${r.l.itemCode} ${r.l.soNumber} ${r.l.customerName} ${r.l.designLabel} ${r.l.batchNumber} ${r.p.palNumber} ${r.box ? boxLabel(r.box) : ""}`
+      `${r.l.itemCode} ${r.l.soNumber} ${r.l.poNumber} ${r.l.customerName} ${r.l.designLabel} ${r.l.batchNumber} ${r.p.palNumber} ${r.box ? boxLabel(r.box) : ""}`
         .toLowerCase()
         .includes(qLower),
   );
@@ -556,13 +574,13 @@ export function LoadingBay() {
   // ---- loadings view: box-level grid state --------------------
   const formats = useContainerFormats();
   const BOX_COLS = useMemo(() => boxColumns(new Map(formats.map((f) => [f.id, f.name]))), [formats]);
-  const boxCols = useColumns("loadingBoxColumns.v4", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created", "date", "name", "containerFormat"]); // .v4 (CR-390): LOAD code + Container No. are the identity; Date/Created/Name/format hidden
+  const boxCols = useColumns("loadingBoxColumns.v5", BOX_COLS, ["containerSize", "transporter", "lrNumber", "destination", "supervisor", "age", "created", "date", "name", "containerFormat", "sos"]); // .v5 (CR-482): PO Numbers lead, SO Numbers hidden // .v4 (CR-390): LOAD code + Container No. are the identity; Date/Created/Name/format hidden
   // Plain search only — the advanced-filter criteria and group dims are
   // line-shaped and would silently half-apply to box rows.
   const boxSearched = boxRows.filter(
     (r) =>
       !qLower ||
-      `${boxLabel(r.box)} ${r.box.containerNumber} ${r.customers} ${r.sos} ${r.box.transporter} ${r.box.destination}`
+      `${boxLabel(r.box)} ${r.box.containerNumber} ${r.customers} ${r.sos} ${r.pos} ${r.box.transporter} ${r.box.destination}`
         .toLowerCase()
         .includes(qLower),
   );
@@ -802,7 +820,7 @@ export function LoadingBay() {
           {l.designLabel}
         </div>
         <div className="dim" style={{ fontSize: "var(--t-sm)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {[l.customerName, l.soNumber].filter(Boolean).join("  ·  ") || "—"}
+          {[l.customerName, l.poNumber || l.soNumber].filter(Boolean).join("  ·  ") || "—"}
         </div>
         {(l.batchNumber || l.palletGroup || (stage === "Dispatched" && box?.dispatchDate)) && (
           <div style={{ marginTop: 4, display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
@@ -854,8 +872,8 @@ export function LoadingBay() {
   // ponytail: on the grouped board the stubs render once in a strip above the
   // lanes (renderLevel) — inside group lanes they'd duplicate per lane.
   const stageGrid = (laneRows: Row[], showEmpties = false) => (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${STAGES.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
-      {STAGES.map((col) => {
+    <div style={{ display: "grid", gridTemplateColumns: `repeat(${PAGE_STAGES.length}, minmax(230px, 1fr))`, gap: 12, alignItems: "start", overflowX: "auto" }}>
+      {PAGE_STAGES.map((col) => {
         const cards = laneRows.filter((r) => r.stage === col.key);
         const totalBoxes = cards.reduce((s, r) => s + r.l.boxes, 0);
         const empties = showEmpties && col.key === "InLoading" ? stubBoxes : [];
@@ -948,7 +966,7 @@ export function LoadingBay() {
         {view !== "customer" && view !== "workspace" && (
           <span className="gsearch">
             <Icon name="search" size={13} />
-            <input type="text" placeholder="Search item, SO, customer, batch, container…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input type="text" placeholder="Search item, PO, customer, batch, container…" value={q} onChange={(e) => setQ(e.target.value)} />
           </span>
         )}
         <div style={{ flex: 1 }} />
@@ -975,7 +993,7 @@ export function LoadingBay() {
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
         {/* Sheet edit mode (CR-173): Loaded qty + Container go editable per row;
             ✓ commits one row, Save commits every drafted row. */}
-        {view === "sheet" && canEdit && (
+        {view === "sheet" && canEdit && canWork && (
           editMode ? (
             <>
               <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
@@ -999,13 +1017,13 @@ export function LoadingBay() {
         )}
         {view === "loadings" && <ColumnPicker columns={boxCols.ordered} hidden={boxCols.hidden} onToggle={boxCols.toggle} onMove={boxCols.move} active={boxCols.customised} />}
         {/* CR-227 trial: the spreadsheet-style page, beside New Loading until approved. */}
-        {canEdit && (
+        {canEdit && canWork && (
           <button className="hbtn sm" disabled={flow.busy} onClick={() => navigate("/loading/plan")}>
             <Icon name="plus" size={13} />
             New Loading (sheet)
           </button>
         )}
-        {canEdit && (
+        {canEdit && canWork && (
           <button className="hbtn primary sm" data-tour="load-new" disabled={flow.busy} onClick={() => navigate("/loading/new")}>
             <Icon name="plus" size={13} />
             New Loading
@@ -1054,7 +1072,7 @@ export function LoadingBay() {
                 {!loading && boxSearched.length === 0 && (
                   <tr>
                     <td colSpan={boxCols.visible.length + 1}>
-                      <EmptyState title="No loadings yet" hint="New Loading creates the first container" />
+                      <EmptyState title={canWork ? "No loadings yet" : "Nothing ready to dispatch"} hint={canWork ? "New Loading creates the first container" : "Assign the vehicle and seals on the Loading page first"} />
                     </td>
                   </tr>
                 )}

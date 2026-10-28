@@ -110,8 +110,11 @@ async function masters() {
   const pallet = rows(await get(`Pallet?where=size=${size}&columns=ROWID,name,boxes_per_pallet,size&limit=50`))
     .find((p) => n(p.boxes_per_pallet) === PLAN.palletBoxes);
   if (!pallet) throw new Error(`No ${PLAN.palletBoxes}-box pallet for size ${size}`);
-  log(`· masters: formats ${picked.map((f) => f.name).join(" | ")} · pallet ${pallet.name}`);
-  return { formats: picked, size, pallet };
+  // CR-483: an SO needs a Box Brand — reuse the first Brand row, never create one.
+  const brand = rows(await get("Brand?columns=ROWID,name&limit=1"))[0];
+  if (!brand) throw new Error("No Brand master row — add one box brand first");
+  log(`· masters: formats ${picked.map((f) => f.name).join(" | ")} · pallet ${pallet.name} · brand ${brand.name}`);
+  return { formats: picked, size, pallet, brand };
 }
 
 async function seedMasters(m) {
@@ -195,6 +198,7 @@ async function seedOrder(m) {
   const r = await post("so-with-items", {
     customer: PLAN.customer.name,
     po_number: "ZZT-PO-MULTI",
+    box_brand: String(m.brand.ROWID), // CR-483: mandatory
     order_date: today(),
     shipment_date: plusDays(21),
     currency: "INR",

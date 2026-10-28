@@ -293,6 +293,7 @@ export function OrderForm({
   const missing =
     !h.customer.trim() ||
     !h.po_number.trim() ||
+    !h.box_brand || // CR-483: Box Brand is mandatory on an order
     validLines.length === 0 ||
     rateMissing ||
     lines.some(belowFloor) ||
@@ -302,6 +303,7 @@ export function OrderForm({
   const [showErrors, setShowErrors] = useState(false);
   const customerErr = showErrors && !h.customer.trim() ? "Customer is required" : null;
   const poErr = showErrors && !h.po_number.trim() ? "PO Number is required" : null;
+  const brandErr = showErrors && !h.box_brand ? "Box Brand is required" : null; // CR-483
   const [custSearch, setCustSearch] = useState(false);
   // Convert mode: customer + currency are fixed by the source quote.
   const locked = !!q;
@@ -421,10 +423,10 @@ export function OrderForm({
               {/* Box Brand master pick list (CR-162) — prefilled from the customer's
                   default, carried from the quote on convert, feeds the Customer Sheet. */}
               <label className="form-field">
-                <span className="lbl">Box Brand</span>
+                <span className="lbl">Box Brand *</span>
                 <div className="ctl-row">
                   <Combobox
-                    className="grow"
+                    className={`grow${brandErr ? " invalid" : ""}`}
                     value={h.box_brand}
                     onChange={(v) => setHead("box_brand", v)}
                     placeholder="Search box brand…"
@@ -433,6 +435,7 @@ export function OrderForm({
                   />
                   <BoxBrandPreview src={boxBrands.logoUrlOf(h.box_brand)} />
                 </div>
+                {brandErr && <span className="field-err">{brandErr}</span>}
               </label>
             </div>
           </div>

@@ -57,7 +57,7 @@ export function PanelForm({
   // Edit keeps the stored code; create / clone send "" and the server assigns
   // the next PANEL-NNN (form-ux rule 7: no typed short codes).
   const code = initial?.panel_code ?? "";
-  const [panelSize, setPanelSize] = useState(initial?.panel_size ?? "1200x2100");
+  const [panelSize, setPanelSize] = useState(initial?.panel_size ?? ""); // CR-484: no default size — the user types it
   const [vinylSize, setVinylSize] = useState(initial?.vinyl_size ?? "");
   // CR-344: the panel carries its MDF size; thickness + weight come from the size-keyed MDF master.
   const [mdfSize, setMdfSize] = useState(initial?.mdf_size ?? "");
