@@ -802,8 +802,8 @@ export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; 
           </table>
         </div>
       </div>
-      {/* CR-487: booking + Allocate Stock for the Cut lines — hidden when the order has none (full tiles never book). */}
-      {reqs.length > 0 && <SampleRequirementsCard order={order} reqs={reqs} onChanged={onChanged} />}
+      {/* CR-487: booking + Allocate Stock for the Cut lines — always shown; with only Full tiles it says so (they never book). */}
+      <SampleRequirementsCard order={order} reqs={reqs} onChanged={onChanged} />
       {recording && (
         <RecordLoadModal
           orders={[o]}

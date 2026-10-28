@@ -3,14 +3,15 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
-## 2026-10-28 — Sample orders book cut pieces like panel orders (CR-487) — LIVE 2026-10-28
+## 2026-10-28 — Sample orders book cut pieces like panel orders (CR-487) — LIVE + DEMO 2026-10-28
 
 - **Allocate Stock on a sample order (CR-487).** The Actions tab of a sample order now has the Requirements card
   from the panel order: Need, In Stock, Allocated, Short per cut piece, and the same Allocate Stock window to book
   or release pieces. A cut-piece row is Ready to load once its pieces are booked; the load then takes the booked
   pieces and the booking shrinks with it. Full tiles are unchanged (record-only). Panel and sample bookings share
   one pool, so two orders can never claim the same piece; Free and Booked on Cut Stock, the item page and Pending
-  Cut Stock count sample bookings too, and sample cut-piece demand shows on Pending Cut Stock.
+  Cut Stock count sample bookings too, and sample cut-piece demand shows on Pending Cut Stock. An order with only
+  full tiles still shows the Requirements card, saying that full tiles are record-only.
 
 ## 2026-10-28 — Sample order: Actions tab, Record Load off the header, printable pick slip (CR-485/486) — LIVE 2026-10-28
 
