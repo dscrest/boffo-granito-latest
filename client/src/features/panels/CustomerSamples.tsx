@@ -8,7 +8,6 @@ import { Chip } from "@/ui/Chip";
 import { codeOf } from "@/ui/statusCode";
 import { EmptyState } from "@/ui/States";
 import { fmt } from "@/lib/format";
-import { ImageThumb } from "@/features/common/ImageLightbox";
 import { SAMPLE_STATUS_TONE } from "./pcBits";
 import { cachedSampleOrders, listSampleOrders, SAMPLE_PIECE_LABEL, SAMPLE_STATUS_LABEL, type SampleOrderRow } from "./sampleOrdersApi";
 
@@ -37,7 +36,6 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width: 44 }}>Image</th>
               <th>Item</th>
               <th>Piece</th>
               <th>Cut Piece Size</th>
@@ -64,7 +62,6 @@ export function CustomerSamples({ customerId }: { customerId: string }) {
                     if (e.key === "Enter" && e.target === e.currentTarget) navigate(to);
                   }}
                 >
-                  <td><ImageThumb images={l.images} alt={l.designName} /></td>
                   <td>
                     <Link className="linkish" to={`/design/${encodeURIComponent(l.designId)}`} onClick={stop} title="Open item">{l.designName}</Link>
                   </td>

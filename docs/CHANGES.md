@@ -13,6 +13,8 @@
 - **Only panel items can be sampled.** The sample order form's Item list shows items that are on Cut Stock
   (Panel Items); an item already on the order stays pickable. An item not yet in Panel Craft is added there
   first (Panel Items ▸ Add Item / Add Stock).
+- **Tidy-ups.** No image thumbnails on sample rows (Orders grid, the sample order's Samples card, the Customer
+  page's Samples section); the Cut Stock bar shows pieces only, no weight.
 
 ## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28, REVERSED by CR-489
 

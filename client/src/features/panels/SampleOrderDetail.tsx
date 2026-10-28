@@ -22,7 +22,6 @@ import { newestFirst } from "@/lib/dates";
 import { RecordDetail, type RecordField } from "@/features/common/RecordDetail";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
-import { ImageThumb } from "@/features/common/ImageLightbox";
 import { Chip } from "@/ui/Chip";
 import { LOADING_TONE } from "./pcBits";
 import { loadStatusOf, PanelLoadsTab, SampleActionsTab } from "./PanelLoads";
@@ -240,7 +239,6 @@ export function SampleOrderDetail() {
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th style={{ width: 44 }}>Image</th>
                       <th>Item</th>
                       <th>Piece</th>
                       <th>Cut Piece Size</th>
@@ -256,7 +254,6 @@ export function SampleOrderDetail() {
                       const rem = remaining(l);
                       return (
                         <tr key={l.id}>
-                          <td><ImageThumb images={l.images} alt={l.designName} /></td>
                           <td>
                             <Link className="linkish" to={`/design/${encodeURIComponent(l.designId)}`} title="Open item">{l.designName}</Link>
                           </td>
@@ -272,13 +269,13 @@ export function SampleOrderDetail() {
                     })}
                     {order.lines.length === 0 && (
                       <tr>
-                        <td colSpan={9} className="muted" style={{ textAlign: "center", padding: 18 }}>No samples on this order.</td>
+                        <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>No samples on this order.</td>
                       </tr>
                     )}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={4} style={{ fontWeight: 600 }}>Total</td>
+                      <td colSpan={3} style={{ fontWeight: 600 }}>Total</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.totalQty)}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.suppliedQty)}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.totalQty - order.suppliedQty)}</td>

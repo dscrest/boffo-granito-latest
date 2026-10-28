@@ -170,10 +170,8 @@ const ORDER_COLUMNS: ColumnDef<Row>[] = [
       o.type === "Panel" ? (
         <PanelCount o={o} />
       ) : (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 8, maxWidth: 360 }}>
-          <ImageThumb images={o.lines[0]?.images ?? []} alt={o.orderNumber} />
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lineCodes(o)}>{lineCodes(o) || "—"}</span>
-        </span>
+        // CR-489 follow-up (user: "image should not be here"): names only — no thumb in a grid cell (one-line rows).
+        <span style={{ display: "inline-block", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }} title={lineCodes(o)}>{lineCodes(o) || "—"}</span>
       ),
   },
   {

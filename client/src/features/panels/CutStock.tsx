@@ -227,7 +227,8 @@ export function CutStock() {
 
       <div className="fbar">
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
-        <span className="muted">{loading ? "Loading…" : `${fmt(totals.pcs)} pcs · ${kg2(totals.kg)} kg`}</span>
+        {/* user 2026-10-28: no weight in this bar — pieces only (Stock Wt stays a column) */}
+        <span className="muted">{loading ? "Loading…" : `${fmt(totals.pcs)} pcs`}</span>
         <div style={{ flex: 1 }} />
         <FilterSelect label="Item" value={designFilter} onChange={setDesignFilter} options={designOptions} />
         <span className="gsearch">
