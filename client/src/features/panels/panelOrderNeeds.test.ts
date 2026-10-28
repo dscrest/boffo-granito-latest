@@ -3,9 +3,6 @@
 import assert from "node:assert";
 import {
   allocatedByKey,
-  boxesNeeded,
-  fullKey,
-  sampleBoxRequirements,
   sampleNeedLines,
   demandByKey,
   lineCheckpoint,
@@ -301,15 +298,17 @@ console.log("panelOrderNeeds: booking + progress checks passed");
   assert.strictEqual(d[3].done, true, "loaded pieces = done, booked or not");
   assert.strictEqual(lineStages(lines[1], { checkpoints: cp, loads }, requirementsFor(lines, panels, stock), true, panels)[3].done, false, "unbooked, not loaded = pending");
 }
-// CR-487: sample orders book cut pieces too — Cut lines' PENDING qty are need lines, Full tiles never; open = New / PartiallySupplied.
+// CR-487: sample orders book cut pieces too — every line's PENDING qty is a need line; CR-489: a Full tile keys on the
+// item's full-size piece (an unresolved one — legacy row, no such piece yet — drops out); open = New / PartiallySupplied.
 {
   const sLines = [
     { pieceKind: "Cut", designId: "grey", cutSizeId: "300x300", designName: "Grey", cutSizeName: "300x300", qty: 10, suppliedQty: 4 },
-    { pieceKind: "Full", designId: "grey", cutSizeId: "", designName: "Grey", cutSizeName: "", qty: 3, suppliedQty: 0 },
+    { pieceKind: "Full", designId: "grey", cutSizeId: "600x600", designName: "Grey", cutSizeName: "600x600", qty: 3, suppliedQty: 0 },
+    { pieceKind: "Full", designId: "ivory", cutSizeId: "", designName: "Ivory", cutSizeName: "", qty: 3, suppliedQty: 0 },
     { pieceKind: "Cut", designId: "ivory", cutSizeId: "600x300", designName: "Ivory", cutSizeName: "600x300", qty: 2, suppliedQty: 2 },
   ];
   const need = sampleNeedLines(sLines);
-  assert.deepStrictEqual(need.map((l) => [l.designId, l.qty]), [["grey", 6]], "pending Cut pieces only; a Full tile and a supplied line drop out");
+  assert.deepStrictEqual(need.map((l) => [l.designId, l.cutSizeId, l.cutSizeName, l.qty]), [["grey", "300x300", "300x300", 6], ["grey", "600x600", "Full tile", 3]], "pending pieces; a Full tile on its full-size piece; unresolved and supplied lines drop out");
   const k = stockKey("grey", "300x300");
   const panelsOpen = [{ status: "Received", allocation: { [k]: 5 } }];
   const samples = [
@@ -323,25 +322,6 @@ console.log("panelOrderNeeds: booking + progress checks passed");
   const [r] = requirementsFor(need, new Map(), new Map([[k, 12]]), { allocation: { [k]: 4 }, booked: allocatedByKey(panelsOpen, samples) });
   assert.deepStrictEqual([r.need, r.allocated, r.free, r.toCut], [6, 4, 2, 0], "need 6, 4 booked, 12 − 10 free, nothing to cut");
   const demand = demandByKey([], new Map(), new Map([[k, 12]]), [], [{ id: "s1", orderNumber: "SMP/1", status: "New", lines: need, allocation: { [k]: 4 } }]);
-  assert.deepStrictEqual(demand.map((d) => [d.key, d.required, d.allocated]), [[k, 6, 4]], "a sample order's Cut lines are demand on Pending Cut Stock");
+  assert.deepStrictEqual(demand.map((d) => [d.key, d.required, d.allocated]), [[k, 6, 4], ["grey|600x600", 3, 0]], "a sample order's lines — cut piece AND full tile — are demand on Pending Cut Stock");
 }
-// CR-488: Full-tile sample lines book BOXES — ceil(pending ÷ pcs per box); have / free from the batch rows.
-{
-  assert.deepStrictEqual([boxesNeeded(1, 2), boxesNeeded(3, 2), boxesNeeded(4, 2), boxesNeeded(5, 0), boxesNeeded(0, 2)], [1, 2, 2, 5, 0], "ceil; pcs per box ≤ 0 = one per box");
-  const fl = [
-    { pieceKind: "Full", designId: "grey", designName: "Grey", qty: 3, suppliedQty: 1, pcsPerBox: 2 }, // 2 pcs pending → 1 box
-    { pieceKind: "Full", designId: "ivory", designName: "Ivory", qty: 2, suppliedQty: 2, pcsPerBox: 2 }, // nothing pending
-    { pieceKind: "Cut", designId: "grey", designName: "Grey", qty: 9, suppliedQty: 0, pcsPerBox: 2 }, // cut lines never book boxes
-  ];
-  const rows = [
-    { designId: "grey", current: 10, free: 4 },
-    { designId: "grey", current: 5, free: 0 },
-    { designId: "ivory", current: 8, free: 8 },
-  ];
-  const [r, ...rest] = sampleBoxRequirements(fl, rows, { [fullKey("grey")]: 1 });
-  assert.strictEqual(rest.length, 0, "one box row — the supplied line and the cut line drop out");
-  assert.deepStrictEqual([r.key, r.need, r.have, r.free, r.allocated, r.toCut, r.short], [fullKey("grey"), 1, 15, 4, 1, 0, false]);
-  const [s] = sampleBoxRequirements(fl, [{ designId: "grey", current: 0, free: 0 }], {});
-  assert.deepStrictEqual([s.allocated, s.toCut, s.short], [0, 1, true], "no stock = short by the box");
-}
-console.log("panelOrderNeeds: loads + weight split + sample booking + box booking checks passed");
+console.log("panelOrderNeeds: loads + weight split + sample booking checks passed");

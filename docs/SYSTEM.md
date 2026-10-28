@@ -1170,23 +1170,22 @@ sums open PanelOrder **and** SampleOrder rows — one pool), shown on the Action
 (`SampleRequirementsCard` → the ONE `AllocateCutStockModal`, `save = allocateSampleOrder`); a Cut row is Ready
 only once booked and `/panel-load-save` refuses an unbooked Cut pick (409 "Book N more pcs … before loading");
 the load shrinks the booking, `/panel-load-delete` restores it, an edit while `New` clamps it, Cancel writes `{}`.
-**CR-488 — Full-tile lines book BOXES** (reverses the 2026-10-08 record-only rule): need = ceil(pending pcs ÷
-`Design.pcs_per_box`); a claim is a `ProductionLog` `alloc` row with no order item, `request_group` `smp-<id>`
-(`sampleBoxClaims`), netted by `serverFreeStock` / `batchStockApi` like an SO claim; `/sample-order-allocate`
-`boxes: {design: [{batch_number, qty_boxes}]}` (absolute per item, ≤ need, ≤ free + own); the load consumes the
-claim oldest batch first and writes signed `adjust` rows (reason "Sample / Display", `request_group`
-`smp-load-<PanelLoad>`), `/panel-load-delete` reverses them; `SampleOrder.allocation["<design>|full"]` mirrors Σ.
-Client: `sampleBoxRequirements` rows (Piece "Full tile · boxes"); ONE Allocate Stock window (`SampleAllocateModal`:
-cut rows in pcs + full items with batches in boxes, one Save = `allocateSample` with `allocation` + `boxes`), Ready once
-booked; `productionApi.sampleClaimEntries` + `designStock({ sampleClaimed })` keep Item detail / line stock / Reports
-free figures honest. `allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
+**CR-489 — a Full-tile line IS a cut-piece line on the item's FULL-SIZE piece** (reverses CR-488, which booked export
+batch boxes — the user: "no need for batch … we have separate sample stock"): the sample stock is Panel Craft's Cut
+Stock, where every Panel Item owns the `CutPieceSize` named after its Size code (`fullSizeCutPiece`, the row that IS
+the item). `/sample-order-save` stamps that id as `cut_piece_size` on Full lines (minted on first use);
+`sampleOrderLines` resolves + stamps pre-CR-489 rows lazily; `sampleOrderNeeds` keys every line on `design|cutSize`;
+booking, the load gate, `applySampleSupply` (`adjustCutStock` kind `sample`), edit clamp and cancel treat Full and Cut
+alike. Export box stock, batches and `ProductionLog` are never touched by a sample. Client: `sampleNeedLines` takes
+every line with a piece (Full rows read "Full tile"), `readinessOf` books every sample line, the sample form's Item
+picker lists PANEL ITEMS only (designs with a Cut Stock row; items already on the order stay pickable).
+`allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
 Free / Booked reader (Cut Stock, item detail, panel order detail, Orders, dashboard, Pending Cut Stock) count
 sample bookings and sample Cut-line demand. The header status is never set by hand — it is
 derived from the lines (`sampleStatus` server / `deriveSampleStatus` client): New → Partially Supplied →
-Supplied. Stock: a **Cut** line deducts cut-piece stock through `adjustCutStock` with ledger kind
-`sample` (409 when free stock — on hand minus open panel-order bookings — is short); a **Full** tile is
-record-only (box stock is counted in boxes; the godown writes the opened box off on Stock Adjustments
-with reason "Sample / Display"). **CR-486:** More ▸ Print order PDF = the godown pick slip (`sampleOrderPdf.ts`: photo + name + item code, piece, Requested · Supplied · Remaining, the line's Remarks, a blank Broken / Adjustment box per row, the Stock Adjustments reminder under the table, Taken out by / Checked by; frame shared with `panelOrderPdf.ts`). "Request Samples" sits beside "Request Panels" on the Quote and SO More
+Supplied. Stock: EVERY line deducts Panel Craft cut stock through `adjustCutStock` with ledger kind
+`sample` (409 when free stock — on hand minus open bookings — is short) — a **Cut** line its cut piece, a
+**Full** tile the item's full-size piece (CR-489; export box stock is never a sample's source). **CR-486:** More ▸ Print order PDF = the godown pick slip (`sampleOrderPdf.ts`: photo + name + item code, piece, Requested · Supplied · Remaining, the line's Remarks, a blank Broken / Adjustment box per row, the Stock Adjustments reminder under the table, Taken out by / Checked by; frame shared with `panelOrderPdf.ts`). "Request Samples" sits beside "Request Panels" on the Quote and SO More
 menus (shared `useSaleSource` resolver: customer locked, designs preselected); the request and every supply
 mirror onto the source record's AND the Customer's Activity. The Customer page's **Samples** section lists
 every sample line (order, item, piece, requested, supplied, supplied on, status, source) — the register of

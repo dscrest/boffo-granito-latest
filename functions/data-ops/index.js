@@ -3718,18 +3718,27 @@ app.post("/panel-order-cancel/:rowid", async (req, res) => {
    Panel Orders (separate order type, same Customer). Header + SampleOrderLine
    rows save in one call (SMP/FY/NNN); status New → PartiallySupplied →
    Supplied is DERIVED from the lines by /panel-load-save (CR-347; per-line
-   qty + date, partial allowed). A Cut line deducts cut-piece stock
-   (ledger kind "sample"); a Full tile is RECORD-ONLY — box stock has no
-   per-piece path, the godown writes the opened box off on Stock
-   Adjustments (reason "Sample / Display"). Edit / delete only while New.
+   qty + date, partial allowed). EVERY line deducts the Panel Craft sample
+   stock (CutStockEntry, ledger kind "sample"): a Cut line its cut piece, a
+   Full tile the item's FULL-SIZE piece (CR-489 — `fullSizeCutPiece`, the row
+   that IS the item on Cut Stock; export box stock / batches are never touched,
+   reversing CR-488). Edit / delete only while New.
    ---------------------------------------------------------------- */
 const SAMPLE_PIECE_KINDS = new Set(["Full", "Cut"]);
 async function sampleOrderLines(catalyst, orderId) {
-  return rowList(
+  const lines = rowList(
     await catalyst.zcql().executeZCQLQuery(
       `SELECT ROWID, design, piece_kind, cut_piece_size, qty, supplied_qty, supplied_on FROM SampleOrderLine WHERE sample_order = ${orderId} AND deleted_at is null`,
     ),
   );
+  // CR-489: a Full line is keyed on the item's full-size piece. Rows saved before CR-489 carry no
+  // cut_piece_size — resolve once and stamp it, so every reader sees one shape.
+  for (const l of lines) {
+    if (rowidParam(l.cut_piece_size) || String(l.piece_kind) === "Cut") continue;
+    l.cut_piece_size = await fullSizeCutPiece(catalyst, catalyst.datastore(), l.design);
+    await catalyst.datastore().table("SampleOrderLine").updateRow({ ROWID: l.ROWID, cut_piece_size: l.cut_piece_size });
+  }
+  return lines;
 }
 /* The one status rule (mirrored in client sampleOrderStatus.ts): every line
    fully supplied → Supplied; any piece supplied → PartiallySupplied; else New. */
@@ -3744,15 +3753,15 @@ function sampleStatus(lines) {
   return all ? "Supplied" : any ? "PartiallySupplied" : "New";
 }
 
-/* CR-487: a sample order's cut-piece need per design|cutSize — Cut lines only (a Full
-   tile is record-only, user decision 2026-10-08), the PENDING qty (qty − supplied)
+/* CR-487: a sample order's piece need per design|cutSize — every line (CR-489: a Full tile
+   keys on the item's full-size piece), the PENDING qty (qty − supplied)
    unless explicit picks [{line, qty}] are given (a load, or its reversal). */
 async function sampleOrderNeeds(catalyst, orderId, picks) {
   const needs = new Map();
   const src = picks || (await sampleOrderLines(catalyst, orderId)).map((l) => ({ line: l, qty: (Number(l.qty) || 0) - (Number(l.supplied_qty) || 0) }));
   for (const p of src) {
     const l = p.line || {};
-    if (String(l.piece_kind) !== "Cut" || !rowidParam(l.cut_piece_size) || !(p.qty > 0)) continue;
+    if (!rowidParam(l.cut_piece_size) || !(p.qty > 0)) continue;
     const k = `${l.design}|${l.cut_piece_size}`;
     const cur = needs.get(k) || { design: String(l.design), cut_piece_size: String(l.cut_piece_size), need: 0 };
     cur.need += p.qty;
@@ -3760,68 +3769,6 @@ async function sampleOrderNeeds(catalyst, orderId, picks) {
   }
   return needs;
 }
-
-/* CR-488: a FULL-tile sample line books BOXES of batch stock (the SO Allocate Stock claim,
-   CR-199): need = ceil(pending pcs ÷ Design.pcs_per_box) per item (pcs_per_box ≤ 0 → one
-   piece per box). A claim is a ProductionLog `alloc` row WITHOUT an order item, tagged
-   request_group `smp-<sample ROWID>`; every free-stock reader nets it (serverFreeStock,
-   batchStockApi). The load consumes the claim: the row shrinks and a signed `adjust` row
-   (reason "Sample / Display", request_group `smp-load-<PanelLoad ROWID>`) takes the box out
-   of stock — the godown's manual write-off, automated. Explicit picks = a load / reversal. */
-const sampleClaimGroup = (orderId) => `smp-${String(orderId)}`;
-async function sampleBoxNeeds(catalyst, orderId, picks) {
-  const needs = new Map(); // design → { design, pcs, ppb, need (boxes) }
-  const src = picks || (await sampleOrderLines(catalyst, orderId)).map((l) => ({ line: l, qty: (Number(l.qty) || 0) - (Number(l.supplied_qty) || 0) }));
-  const pcs = new Map();
-  for (const p of src) {
-    const l = p.line || {};
-    if (String(l.piece_kind) === "Cut" || !rowidParam(l.design) || !(p.qty > 0)) continue;
-    pcs.set(String(l.design), (pcs.get(String(l.design)) || 0) + p.qty);
-  }
-  if (!pcs.size) return needs;
-  const rows = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, pcs_per_box FROM Design WHERE ROWID IN (${[...pcs.keys()].join(",")})`));
-  const ppbOf = new Map(rows.map((r) => [String(r.ROWID), Math.max(1, Math.floor(Number(r.pcs_per_box)) || 1)]));
-  for (const [d, n] of pcs) {
-    const ppb = ppbOf.get(d) || 1;
-    needs.set(d, { design: d, pcs: n, ppb, need: Math.ceil(n / ppb) });
-  }
-  return needs;
-}
-/** This sample order's live box claims, oldest first. */
-async function sampleBoxClaims(catalyst, orderId) {
-  const rows = await zcqlAllRows(
-    catalyst,
-    `SELECT ROWID, design, batch_number, qty_boxes, CREATEDTIME FROM ProductionLog WHERE request_group = '${sampleClaimGroup(orderId)}' AND entry_type = 'alloc' AND deleted_at is null`,
-  );
-  return rows.sort((a, b) => (String(a.CREATEDTIME) < String(b.CREATEDTIME) ? -1 : String(a.CREATEDTIME) > String(b.CREATEDTIME) ? 1 : 0));
-}
-function insertSampleBoxClaim(ds, { orderId, orderNumber, design, batch, qty, actor, date }) {
-  return ds.table("ProductionLog").insertRow({
-    entry_type: "alloc", design: String(design), batch_number: batch, qty_boxes: qty, qty_requested: 0,
-    status: "Allocated", stage: "Completed", request_group: sampleClaimGroup(orderId),
-    production_date: date || new Date().toISOString().slice(0, 10), performed_by: String(actor || ""), note: `Sample ${orderNumber || ""}`.trim(),
-  });
-}
-/** Take `n` boxes off this order's claims on `design` (oldest first for a load, newest first for a
-    clamp); returns [{batch, qty}] actually taken. */
-async function takeSampleBoxClaims(catalyst, ds, orderId, design, n, oldestFirst) {
-  const rows = (await sampleBoxClaims(catalyst, orderId)).filter((r) => String(r.design) === String(design));
-  if (!oldestFirst) rows.reverse();
-  const taken = [];
-  const stamp = stampNow();
-  let left = n;
-  for (const r of rows) {
-    if (left <= 0) break;
-    const q = Number(r.qty_boxes) || 0;
-    const cut = Math.min(q, left);
-    if (cut <= 0) continue;
-    await ds.table("ProductionLog").updateRow(cut < q ? { ROWID: r.ROWID, qty_boxes: q - cut } : { ROWID: r.ROWID, deleted_at: stamp });
-    taken.push({ batch: String(r.batch_number || ""), qty: cut });
-    left -= cut;
-  }
-  return taken;
-}
-const fullKey = (design) => `${design}|full`;
 
 app.post("/sample-order-save", async (req, res) => {
   try {
@@ -3852,7 +3799,9 @@ app.post("/sample-order-save", async (req, res) => {
           if (!d) throw badRequest("Every line needs an item");
           const kind = String(l.piece_kind || "Full").trim();
           if (!SAMPLE_PIECE_KINDS.has(kind)) throw badRequest("piece_kind must be Full or Cut");
-          const c = kind === "Cut" ? rowidParam(l.cut_piece_size) : "";
+          // CR-489: a Full tile IS the item's full-size piece on Cut Stock — stamp its CutPieceSize so stock,
+          // booking and the load all key on that one row (minted on first use, like a panel line).
+          const c = kind === "Cut" ? rowidParam(l.cut_piece_size) : await fullSizeCutPiece(catalyst, ds, d);
           if (kind === "Cut" && !c) throw badRequest("A cut-piece sample needs a cut piece size");
           const q = Number(l.qty);
           if (!Number.isInteger(q) || q <= 0) throw badRequest("qty must be a positive whole number");
@@ -3888,18 +3837,8 @@ app.post("/sample-order-save", async (req, res) => {
           const oldAlloc = parseJsonCol(cur.allocation);
           const kept = {};
           for (const l of clean) {
-            if (l.piece_kind !== "Cut") continue;
             const q = Math.min(Number(oldAlloc[`${l.design}|${l.cut_piece_size}`]) || 0, l.qty);
             if (q > 0) kept[`${l.design}|${l.cut_piece_size}`] = q;
-          }
-          // CR-488: box claims clamp the same way — per item down to the new full-tile need; items gone → released.
-          const boxNeeds = await sampleBoxNeeds(catalyst, id, clean.map((l) => ({ line: l, qty: l.qty })));
-          const claims = await sampleBoxClaims(catalyst, id);
-          for (const d of new Set(claims.map((r) => String(r.design)))) {
-            const have = claims.filter((r) => String(r.design) === d).reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
-            const keep = Math.min(have, boxNeeds.has(d) ? boxNeeds.get(d).need : 0);
-            if (have > keep) await takeSampleBoxClaims(catalyst, ds, id, d, have - keep, false);
-            if (keep > 0) kept[fullKey(d)] = keep;
           }
           await ds.table("SampleOrder").updateRow({ ROWID: id, ...header, allocation: JSON.stringify(kept) });
         } else {
@@ -3983,10 +3922,7 @@ app.post("/sample-order-cancel/:rowid", async (req, res) => {
         if (from === "Supplied" || lines.some((l) => (Number(l.supplied_qty) || 0) > 0)) throw badRequest("Samples have been supplied — this order cannot be cancelled", 409);
         const n = (await panelLoadsOf(catalyst, "sample_order", rid)).loads.length;
         if (n) throw badRequest(`Delete the ${n} load${n === 1 ? "" : "s"} in the Dispatch tab first`, 409);
-        // CR-487/488: a cancelled order books nothing — cut keys drop, box claims are released.
-        const stampC = stampNow();
-        for (const r of await sampleBoxClaims(catalyst, rid)) await ds.table("ProductionLog").updateRow({ ROWID: r.ROWID, deleted_at: stampC });
-        await ds.table("SampleOrder").updateRow({ ROWID: rid, status: "Cancelled", allocation: "{}" });
+        await ds.table("SampleOrder").updateRow({ ROWID: rid, status: "Cancelled", allocation: "{}" }); // CR-487: a cancelled order books nothing
         await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: rid, from_status: from, to_status: "Cancelled", note: reason });
         await logRelated(
           catalyst,
@@ -4012,84 +3948,34 @@ app.post("/sample-order-allocate/:rowid", async (req, res) => {
     const catalyst = init(req);
     const ds = catalyst.datastore();
     const rid = rowidParam(req.params.rowid);
-    const wanted = (req.body || {}).allocation; // Cut lines: {design|cutSize: pcs}, absolute (CR-487)
-    const boxesIn = (req.body || {}).boxes; // CR-488 Full lines: {design: [{batch_number, qty_boxes}]}, absolute per item
+    const wanted = (req.body || {}).allocation;
     const result = await withOpLog(
       catalyst,
-      { table_name: "SampleOrder", operation: "allocate", payload: { ROWID: rid, allocation: wanted, boxes: boxesIn } },
+      { table_name: "SampleOrder", operation: "allocate", payload: { ROWID: rid, allocation: wanted } },
       async () => {
-        const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
-        if (wanted === undefined && boxesIn === undefined) throw badRequest("allocation (cut pieces) or boxes (full tiles) is required");
-        if (wanted !== undefined && !isObj(wanted)) throw badRequest("allocation must be an object of design|cutSize → pcs");
-        if (boxesIn !== undefined && !isObj(boxesIn)) throw badRequest("boxes must be an object of item → [{batch_number, qty_boxes}]");
+        if (!wanted || typeof wanted !== "object" || Array.isArray(wanted)) throw badRequest("allocation must be an object of design|cutSize → pcs");
         const order = rowList(
           await catalyst.zcql().executeZCQLQuery(
-            `SELECT ROWID, order_number, status, sales_order, quote, customer, allocation FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`,
+            `SELECT ROWID, order_number, status, sales_order, quote, customer FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`,
           ),
         )[0];
         if (!order) throw badRequest(`Sample order not found: ${rid}`, 404);
         if (!SAMPLE_ORDER_OPEN.has(String(order.status)))
           throw badRequest(String(order.status) === "Cancelled" ? `${order.order_number} is cancelled` : `${order.order_number} is fully supplied`, 409);
-        const next = parseJsonCol(order.allocation);
-        if (wanted !== undefined) {
-          for (const k of Object.keys(next)) if (!k.endsWith("|full")) delete next[k]; // cut keys are replaced wholesale
-          const needs = await sampleOrderNeeds(catalyst, rid);
-          const others = await otherAllocations(catalyst, rid);
-          for (const [k, n] of needs) {
-            const q = Number(wanted[k] == null || wanted[k] === "" ? 0 : wanted[k]);
-            if (!Number.isInteger(q) || q < 0) throw badRequest("Booked pcs must be a whole number ≥ 0");
-            if (q === 0) continue;
-            if (q > n.need) throw badRequest(`Only ${n.need} pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} are needed`);
-            const free = (await cutOnHand(catalyst, n.design, n.cut_piece_size)) - (others.get(k) || 0);
-            if (q > free)
-              throw badRequest(`Only ${Math.max(0, free)} pcs free of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} — the rest are booked by other orders`, 409);
-            next[k] = q;
-          }
-        }
-        // CR-488: box claims — verify every item against need + free (free nets this order's own rows,
-        // which are about to be replaced, so they count as available again), THEN write.
-        const plan = [];
-        if (boxesIn !== undefined) {
-          const needs = await sampleBoxNeeds(catalyst, rid);
-          const own = await sampleBoxClaims(catalyst, rid);
-          for (const [d, rowsIn] of Object.entries(boxesIn)) {
-            const design = rowidParam(d);
-            if (!design) throw badRequest("boxes keys must be item ids");
-            const want = new Map();
-            for (const r of Array.isArray(rowsIn) ? rowsIn : []) {
-              const q = Number(r && r.qty_boxes);
-              if (!Number.isInteger(q) || q < 0) throw badRequest("qty_boxes must be a whole number ≥ 0");
-              if (q === 0) continue;
-              const b = String((r && r.batch_number) || "").trim();
-              want.set(b, (want.get(b) || 0) + q);
-            }
-            const total = [...want.values()].reduce((s, q) => s + q, 0);
-            const n = needs.get(design);
-            if (total > 0 && !n) throw badRequest(`${await designLabel(catalyst, design)} has no full-tile pieces pending on this order`);
-            if (n && total > n.need) throw badRequest(`Only ${n.need} box${n.need === 1 ? "" : "es"} of ${await designLabel(catalyst, design)} are needed (${n.pcs} pcs at ${n.ppb} per box)`);
-            const ownHere = own.filter((r) => String(r.design) === design);
-            if (total > 0) {
-              const free = await serverFreeStock(catalyst, design);
-              for (const [b, q] of want) {
-                const mine = ownHere.filter((r) => String(r.batch_number || "") === b).reduce((s, r) => s + (Number(r.qty_boxes) || 0), 0);
-                const f = Math.max(0, free.get(b) || 0) + mine;
-                if (q > f) throw badRequest(`Only ${f} free box${f === 1 ? "" : "es"} left in ${b ? `batch ${b}` : "unbatched stock"} of ${await designLabel(catalyst, design)}`, 409);
-              }
-            }
-            plan.push({ design, want, total, ownHere });
-          }
+        const needs = await sampleOrderNeeds(catalyst, rid);
+        const others = await otherAllocations(catalyst, rid);
+        const next = {};
+        for (const [k, n] of needs) {
+          const q = Number(wanted[k] == null || wanted[k] === "" ? 0 : wanted[k]);
+          if (!Number.isInteger(q) || q < 0) throw badRequest("Booked pcs must be a whole number ≥ 0");
+          if (q === 0) continue;
+          if (q > n.need) throw badRequest(`Only ${n.need} pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} are needed`);
+          const free = (await cutOnHand(catalyst, n.design, n.cut_piece_size)) - (others.get(k) || 0);
+          if (q > free)
+            throw badRequest(`Only ${Math.max(0, free)} pcs free of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} — the rest are booked by other orders`, 409);
+          next[k] = q;
         }
         // ponytail: read-check-write, single-writer app — the /panel-order-allocate ceiling.
-        if (plan.length) {
-          const actor = await currentActor(catalyst);
-          const stamp = stampNow();
-          for (const p of plan) {
-            for (const r of p.ownHere) await ds.table("ProductionLog").updateRow({ ROWID: r.ROWID, deleted_at: stamp });
-            for (const [b, q] of p.want) await insertSampleBoxClaim(ds, { orderId: rid, orderNumber: order.order_number, design: p.design, batch: b, qty: q, actor });
-            if (p.total > 0) next[fullKey(p.design)] = p.total;
-            else delete next[fullKey(p.design)];
-          }
-        }
         await ds.table("SampleOrder").updateRow({ ROWID: rid, allocation: JSON.stringify(next) });
         await logRelated(
           catalyst,
@@ -4109,7 +3995,8 @@ app.post("/sample-order-allocate/:rowid", async (req, res) => {
 /* CR-316: record what went out — {date, note?, lines:[{line, qty}]}. Every
    quantity is verified (≤ remaining; CR-487: Cut lines must be BOOKED to the
    order and on hand — the panel-order load gate) BEFORE any
-   write. Cut → adjustCutStock(−qty, kind "sample"); Full → record only.
+   write. Every pick → adjustCutStock(−qty, kind "sample") on its piece (CR-489: a Full
+   tile on the item's full-size piece).
    Header status is re-derived from the lines; the supply mirrors onto the
    source SO / Quote and the Customer's Activity. */
 /* CR-316 supply rules, lifted verbatim from the old /sample-order-supply (deleted by
@@ -4148,22 +4035,14 @@ async function verifySampleSupply(catalyst, order, picksIn) {
       throw badRequest(`Book ${n.need - have} more pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} before loading ${order.order_number}`, 409);
     if ((await cutOnHand(catalyst, n.design, n.cut_piece_size)) < n.need) throw badRequest(`Insufficient cut-piece stock for ${order.order_number}`, 409);
   }
-  // CR-488: full tiles leave as BOXES — booked boxes must cover ceil(pcs ÷ pcs per box).
-  const boxNeeds = await sampleBoxNeeds(catalyst, rid, picks);
-  for (const [d, n] of boxNeeds) {
-    const have = Number(booked[fullKey(d)]) || 0;
-    if (have < n.need)
-      throw badRequest(`Book ${n.need - have} more box${n.need - have === 1 ? "" : "es"} of ${await designLabel(catalyst, d)} before loading ${order.order_number} (${n.pcs} pcs at ${n.ppb} per box)`, 409);
-  }
-  return { picks, lines, needs, boxNeeds };
+  return { picks, lines, needs };
 }
-async function applySampleSupply(catalyst, ds, order, { picks, lines, needs, boxNeeds }, { date, note, actor, load, loadId, vehicle }) {
+async function applySampleSupply(catalyst, ds, order, { picks, lines, needs }, { date, note, actor, load, vehicle }) {
   const rid = String(order.ROWID);
   for (const p of picks) {
-    if (String(p.line.piece_kind) === "Cut")
-      await adjustCutStock(catalyst, ds, p.line.design, p.line.cut_piece_size, -p.qty, {
-        kind: "sample", entry_date: date, note, ref_table: "SampleOrder", ref_rowid: rid, performed_by: actor,
-      });
+    await adjustCutStock(catalyst, ds, p.line.design, p.line.cut_piece_size, -p.qty, {
+      kind: "sample", entry_date: date, note, ref_table: "SampleOrder", ref_rowid: rid, performed_by: actor,
+    });
     p.line.supplied_qty = (Number(p.line.supplied_qty) || 0) + p.qty;
     await ds.table("SampleOrderLine").updateRow({ ROWID: p.line.ROWID, supplied_qty: p.line.supplied_qty, supplied_on: date });
   }
@@ -4173,21 +4052,6 @@ async function applySampleSupply(catalyst, ds, order, { picks, lines, needs, box
     const left = (Number(alloc[k]) || 0) - n.need;
     if (left > 0) alloc[k] = left;
     else delete alloc[k];
-  }
-  // CR-488: the booked boxes leave stock — claim rows shrink (oldest batch first) and a signed adjust row per
-  // batch records the write-off (reason "Sample / Display"), tagged with the load so a delete can reverse it.
-  for (const [d, n] of boxNeeds || []) {
-    for (const t of await takeSampleBoxClaims(catalyst, ds, rid, d, n.need, true)) {
-      await ds.table("ProductionLog").insertRow({
-        entry_type: "adjust", design: String(d), batch_number: t.batch, qty_boxes: -t.qty, qty_requested: 0,
-        status: "Adjusted", stage: "Completed", request_group: `smp-load-${String(loadId || "")}`,
-        production_date: date, performed_by: String(actor || ""), reason: "Sample / Display",
-        note: `Sample ${order.order_number}${load ? ` · ${load}` : ""} — ${n.pcs} pcs at ${n.ppb} per box`,
-      });
-    }
-    const left = (Number(alloc[fullKey(d)]) || 0) - n.need;
-    if (left > 0) alloc[fullKey(d)] = left;
-    else delete alloc[fullKey(d)];
   }
   const status = sampleStatus(lines);
   await ds.table("SampleOrder").updateRow({ ROWID: rid, allocation: JSON.stringify(alloc), ...(status !== String(order.status) ? { status } : {}) });
@@ -4310,7 +4174,7 @@ app.post("/panel-load-save", async (req, res) => {
           const loadId = String((await ds.table("PanelLoad").insertRow(head)).ROWID);
           if (j.type === "Sample") {
             await ds.table("PanelLoadLine").insertRows(j.supply.picks.map((p) => ({ panel_load: loadId, order_line: String(p.line.ROWID), material: "Item", qty: p.qty })));
-            const status = await applySampleSupply(catalyst, ds, j.order, j.supply, { date, note: `${orderNumber} · ${vehicle}${note ? ` · ${note}` : ""}`, actor, load: orderNumber, loadId, vehicle });
+            const status = await applySampleSupply(catalyst, ds, j.order, j.supply, { date, note: `${orderNumber} · ${vehicle}${note ? ` · ${note}` : ""}`, actor, load: orderNumber, vehicle });
             out.push({ ROWID: loadId, order: oid, order_type: j.type, status });
             continue;
           }
@@ -4400,18 +4264,6 @@ app.post("/panel-load-delete/:rowid", async (req, res) => {
             }
             line.supplied_qty = Math.max(0, (Number(line.supplied_qty) || 0) - q);
             await ds.table("SampleOrderLine").updateRow({ ROWID: line.ROWID, supplied_qty: line.supplied_qty });
-          }
-          // CR-488: full-tile boxes come back — the load's write-off rows are reversed and the claims re-created.
-          const adj = await zcqlAllRows(
-            catalyst,
-            `SELECT ROWID, design, batch_number, qty_boxes FROM ProductionLog WHERE request_group = 'smp-load-${rid}' AND entry_type = 'adjust' AND deleted_at is null`,
-          );
-          for (const a of adj) {
-            await ds.table("ProductionLog").updateRow({ ROWID: a.ROWID, deleted_at: stamp });
-            const q = -(Number(a.qty_boxes) || 0);
-            if (q <= 0) continue;
-            await insertSampleBoxClaim(ds, { orderId: oid, orderNumber: order.order_number, design: a.design, batch: String(a.batch_number || ""), qty: q, actor });
-            alloc[fullKey(a.design)] = (Number(alloc[fullKey(a.design)]) || 0) + q;
           }
           const status = sampleStatus(olines);
           await ds.table("SampleOrder").updateRow({ ROWID: oid, allocation: JSON.stringify(alloc), ...(status !== String(order.status) ? { status } : {}) });
@@ -6246,8 +6098,6 @@ async function serverFreeStock(catalyst, designId, opts = {}) {
     const oi = String(r.order_item || "");
     if (oi && (type === "record" || type === "alloc" || type === "plan"))
       claim.set(`${oi}|${batch}`, (claim.get(`${oi}|${batch}`) || 0) + qty);
-    // CR-488: a sample order's box claim (alloc row with no order item) is outstanding until its load removes it.
-    if (!oi && type === "alloc" && !opts.onHand) add(batch, -qty);
   }
   for (const l of lines) {
     const n = Number(l.boxes) || 0;

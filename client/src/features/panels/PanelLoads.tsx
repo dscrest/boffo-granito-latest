@@ -53,10 +53,9 @@ import {
   CHECKPOINT_LABEL,
   CHECKPOINT_STATUSES,
   LINE_CHECKPOINT_KEYS,
-  boxesNeeded,
-  fullKey,
   listCutStock,
   listPanelOrders,
+  sampleNeedLines,
   stockKey,
   lineCheckpoint,
   lineCheckpointMark,
@@ -83,7 +82,6 @@ import {
   type Requirement,
 } from "./panelOrdersApi";
 import { cachedSampleOrders, listSampleOrders, remaining, SAMPLE_PIECE_LABEL, sampleRequirements, type SampleOrderRow } from "./sampleOrdersApi";
-import { cachedBatchStock, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi"; // CR-488: box stock for Full-tile bookings
 
 /** CR-402: short column heads for the per-panel marks (the full names stay in CHECKPOINT_LABEL). */
 const LINE_CHECKPOINT_HEAD: Record<LineCheckpointKey, string> = { mdf: "MDF", vinyl: "Vinyl", pasted: "Pasted" };
@@ -187,23 +185,19 @@ const loadCopy = (o: LoadableOrder, ld: LoadRow) => void import("./panelLoadCopy
 
 /** This order's requirements with its booking (the detail page passes the same thing to the Actions tab). */
 function reqsOf(o: LoadableOrder, panelsById: Map<string, PanelRow> | undefined, stock: Map<string, number> | undefined): Requirement[] {
-  // CR-487/488: a sample order's lines carry a booking too (stock only colours In Stock — readiness reads `allocated`).
-  if (o.type === "Sample") return sampleRequirements(o, stock ?? new Map());
+  // CR-487: a sample order's Cut lines carry a booking too (stock only colours In Stock — readiness reads `allocated`).
+  if (o.type === "Sample") return requirementsFor(sampleNeedLines(o.lines), new Map(), stock ?? new Map(), { allocation: o.allocation });
   if (!panelsById || !stock) return [];
   return requirementsFor(pendingNeedLines(o.lines, o.loads, panelsById), panelsById, stock, { allocation: o.allocation });
 }
-/** CR-381: readiness of one row — a sample row has no marks; CR-487: its Cut pieces must be BOOKED; CR-488: a Full
-    tile's BOXES (ceil(pending ÷ pcs per box)) must be booked. */
+/** CR-381: readiness of one row — a sample row has no marks; CR-487/489: its pieces must be BOOKED (a Full tile on the
+    item's full-size piece; the server is the gate for a line whose piece is still unresolved). */
 export function readinessOf(o: LoadableOrder, r: ProgressRow, reqs: Requirement[]): { ready: boolean; missing: string[] } {
   if (o.type !== "Panel") {
     const l = o.lines.find((x) => x.id === r.lineId);
-    if (!l) return { ready: true, missing: [] };
-    if (l.pieceKind === "Cut") {
-      const short = Math.max(0, r.pending - (reqs.find((q) => q.key === stockKey(l.designId, l.cutSizeId))?.allocated ?? 0));
-      return short > 0 ? { ready: false, missing: [`Book ${fmt(short)} more pcs`] } : { ready: true, missing: [] };
-    }
-    const short = Math.max(0, boxesNeeded(r.pending, l.pcsPerBox) - (reqs.find((q) => q.key === fullKey(l.designId))?.allocated ?? 0));
-    return short > 0 ? { ready: false, missing: [`Book ${fmt(short)} more box${short === 1 ? "" : "es"}`] } : { ready: true, missing: [] };
+    if (!l || !l.cutSizeId) return { ready: true, missing: [] };
+    const short = Math.max(0, r.pending - (reqs.find((q) => q.key === stockKey(l.designId, l.cutSizeId))?.allocated ?? 0));
+    return short > 0 ? { ready: false, missing: [`Book ${fmt(short)} more pcs`] } : { ready: true, missing: [] };
   }
   return materialReadiness(r, o.lines.find((l) => l.id === r.lineId) ?? {}, o.checkpoints, reqs);
 }
@@ -724,13 +718,11 @@ export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; 
   // CR-487: free = on hand − every open order's booking (panel + sample); the detail page holds neither, so load here.
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [booked, setBooked] = useState<Map<string, number>>(() => allocatedByKey(cachedPanelOrders() ?? [], cachedSampleOrders() ?? []));
-  const [batchRows, setBatchRows] = useState<BatchStockRow[]>(() => cachedBatchStock() ?? []); // CR-488
   useEffect(() => {
     void listCutStock().then((r) => r.ok && setStock(r.stock));
-    void listBatchStock().then((r) => r.ok && setBatchRows(r.rows));
     void Promise.all([listPanelOrders(), listSampleOrders()]).then(([p, s]) => setBooked(allocatedByKey(p.ok ? p.orders : [], s.ok ? s.orders : [])));
   }, [order]);
-  const reqs = sampleRequirements(order, stock, booked, batchRows);
+  const reqs = sampleRequirements(order, stock, booked);
   const rows: ReadyRow[] = progressOf(o).map((r) => ({ ...r, rd: readinessOf(o, r, reqs) }));
   const open = isOpen(o);
   const canEdit = can("panel_craft", "edit");

@@ -21,7 +21,7 @@ import { confirmDelete } from "@/ui/ConfirmDialog";
 import { SkeletonRows, EmptyState } from "@/ui/States";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { useOrders } from "@/features/orders/useOrders";
-import { cachedAdjustEntries, cachedAllocByDesign, cachedSampleClaimByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type AdjustEntry, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
+import { cachedAdjustEntries, cachedAllocByDesign, cachedProductionLogs, cachedOpeningEntries, listProductionLogs, type AdjustEntry, type ProductionEntry, type ProductionRecordRow } from "@/features/stages/productionApi";
 import { cachedAdjustedByDesign, cachedOpeningByDesign, cachedWarehouseStock, listBatchStock, warehouseStockKey } from "@/features/stages/batchStockApi";
 import { cachedPalPlans, listPalPlans, type PalPlan } from "@/features/stages/palPlansApi";
 import type { WhCell } from "@/lib/warehouseStock";
@@ -214,7 +214,7 @@ export function ItemDetail() {
   // transaction line-item rows and Reports. Batch-tracked items read opening from
   // their opening rows (openingByDesign); singular items from accounting_stock.
   const openingStock = openingStockFor(design, openingByDesign);
-  const stock = designStock(design?.id ?? "", { openingStock, adjusted: adjustedByDesign.get(design?.id ?? ""), allocated: cachedAllocByDesign().get(design?.id ?? ""), sampleClaimed: cachedSampleClaimByDesign().get(design?.id ?? ""), orders: allOrders, prodLogs }); // CR-488
+  const stock = designStock(design?.id ?? "", { openingStock, adjusted: adjustedByDesign.get(design?.id ?? ""), allocated: cachedAllocByDesign().get(design?.id ?? ""), orders: allOrders, prodLogs });
   const inProduction = stock.inProduction;
   const inLoading = stock.inLoading;
   const awaitingPal = stock.awaitingPalletization;

@@ -35,7 +35,7 @@ import { cachedCutSizes, listPanels, type CutSizeOption } from "@/features/panel
 import { cachedCutStockRows, cachedPanelOrders, cutWarehouseCells, listCutStock, listCutStockEntries, listPanelOrders, type CutStockEntryRow, type CutStockRow, type PanelOrderRow } from "@/features/panels/panelOrdersApi";
 import { batchLedger, type BatchMoveRow } from "@/features/stages/batchLedger";
 import { InProductionModal, InProductionCell } from "@/features/stages/InProductionModal";
-import { cachedAllocByDesign, cachedSampleClaimByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
+import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import {
   boxFill,
   boxLabel,
@@ -533,7 +533,7 @@ function StockReport() {
   const allRows = useMemo<StockRow[]>(() => {
     return designRows.map((d) => {
       const opening = openingStockFor(d, openingByDesign);
-      const s = designStock(d.id, { openingStock: opening, adjusted: adjustedByDesign.get(d.id), allocated: cachedAllocByDesign().get(d.id), sampleClaimed: cachedSampleClaimByDesign().get(d.id), orders, prodLogs }); // CR-488
+      const s = designStock(d.id, { openingStock: opening, adjusted: adjustedByDesign.get(d.id), allocated: cachedAllocByDesign().get(d.id), orders, prodLogs });
       return {
         key: d.id,
         label: d.designName || "—",

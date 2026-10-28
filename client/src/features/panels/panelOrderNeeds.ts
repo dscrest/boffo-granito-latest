@@ -105,54 +105,14 @@ export function requirementsFor(lines: NeedLine[], panelsById: Map<string, Panel
 /** CR-487: sample-order stages whose booking counts (mirrors the server SAMPLE_ORDER_OPEN). */
 export const SAMPLE_ORDER_OPEN: ReadonlySet<string> = new Set(["New", "PartiallySupplied"]);
 
-/** CR-487: a sample order's Cut lines as need lines — the PENDING qty, one piece per unit
-    (a Full tile is record-only and never books). Feed to requirementsFor / demandByKey. */
+/** CR-487: a sample order's lines as need lines — the PENDING qty, one piece per unit. CR-489: a Full
+    tile keys on the item's full-size piece (its `cutSizeId`), shown as "Full tile". Feed to requirementsFor / demandByKey. */
 export function sampleNeedLines(
   lines: { pieceKind: string; designId: string; cutSizeId: string; designName: string; cutSizeName: string; qty: number; suppliedQty: number }[],
 ): NeedLine[] {
   return lines
-    .filter((l) => l.pieceKind === "Cut" && l.cutSizeId && l.qty - l.suppliedQty > 0)
-    .map((l) => ({ panelId: "", qty: l.qty - l.suppliedQty, designId: l.designId, cutSizeId: l.cutSizeId, designName: l.designName, cutSizeName: l.cutSizeName }));
-}
-
-/** CR-488: a FULL-tile sample line books BOXES of batch stock — key `${designId}|full`, figures in boxes. */
-export const fullKey = (designId: string) => `${designId}|full`;
-export const isFullKey = (key: string) => key.endsWith("|full");
-/** Boxes that cover `pcs` pieces at `pcsPerBox` per box (≤ 0 / blank → one piece per box). */
-export const boxesNeeded = (pcs: number, pcsPerBox: number) => Math.ceil(Math.max(0, pcs) / Math.max(1, Math.floor(pcsPerBox) || 1));
-/** CR-488: requirement rows for the Full-tile lines — need = boxes for the PENDING pieces, have / free from the
-    batch-stock rows of that item (free already nets every claim, this order's own included — the cut-row rule). */
-export function sampleBoxRequirements(
-  lines: { pieceKind: string; designId: string; designName: string; qty: number; suppliedQty: number; pcsPerBox: number }[],
-  stockRows: { designId: string; current: number; free: number }[],
-  allocation: Allocation,
-): Requirement[] {
-  const acc = new Map<string, Requirement>();
-  for (const l of lines) {
-    const pcs = l.qty - l.suppliedQty;
-    if (l.pieceKind === "Cut" || !l.designId || pcs <= 0) continue;
-    const key = fullKey(l.designId);
-    const rows = stockRows.filter((r) => r.designId === l.designId);
-    const cur = acc.get(key) ?? {
-      key,
-      designId: l.designId,
-      cutSizeId: "full",
-      designName: l.designName,
-      cutSizeName: "Full tile",
-      need: 0,
-      have: rows.reduce((s, r) => s + r.current, 0),
-      short: false,
-      allocated: allocation[key] ?? 0,
-      free: rows.reduce((s, r) => s + r.free, 0),
-      toCut: 0,
-      panels: [],
-    };
-    cur.need += boxesNeeded(pcs, l.pcsPerBox);
-    cur.short = cur.need > cur.have;
-    cur.toCut = Math.max(0, cur.need - cur.allocated - cur.free);
-    acc.set(key, cur);
-  }
-  return [...acc.values()];
+    .filter((l) => l.cutSizeId && l.qty - l.suppliedQty > 0)
+    .map((l) => ({ panelId: "", qty: l.qty - l.suppliedQty, designId: l.designId, cutSizeId: l.cutSizeId, designName: l.designName, cutSizeName: l.pieceKind === "Cut" ? l.cutSizeName : "Full tile" }));
 }
 
 /** CR-312: Σ booking per key over every OPEN order (Dispatched rows drop out).

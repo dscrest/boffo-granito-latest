@@ -24,6 +24,7 @@ import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
+import { cachedCutStockRows, listCutStock, type CutStockRow } from "./panelOrdersApi";
 import { InfoDot } from "./pcBits";
 import { SAMPLE_PIECE_LABEL, type SampleOrderInput, type SamplePieceKind } from "./sampleOrdersApi";
 
@@ -59,6 +60,7 @@ export function SampleOrderForm({
   const [customers, setCustomers] = useState<CustomerRow[]>(() => cachedCustomers() ?? []);
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
+  const [stockRows, setStockRows] = useState<CutStockRow[]>(() => cachedCutStockRows() ?? []); // CR-489
   const [salesperson, setSalesperson] = useState(() => initial?.salesperson || currentSalespersonName(cachedSalesPersons() ?? []));
 
   const [customer, setCustomer] = useState(initial?.customer ?? presetCustomerId ?? "");
@@ -75,6 +77,7 @@ export function SampleOrderForm({
     void listCustomers().then((r) => r.ok && setCustomers(r.customers));
     void listDesigns().then((r) => r.ok && setDesigns(r.designs));
     void listPanels().then((r) => r.ok && setCutSizes(r.cutSizes));
+    void listCutStock().then((r) => r.ok && setStockRows(r.rows));
     void listSalesPersons().then((r) => r.ok && setSalesperson((s) => s || currentSalespersonName(r.salesPersons)));
   }, []);
 
@@ -84,11 +87,14 @@ export function SampleOrderForm({
   );
   const customerName = customers.find((c) => c.id === customer)?.name ?? "";
   const designById = useMemo(() => new Map(designs.map((d) => [d.id, d])), [designs]);
-  // Any live item can be sampled — inactive items stay pickable only if already on the order.
-  const designOptions = useMemo(
-    () => designs.filter((d) => d.status !== "Inactive").map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.sizeLabel || undefined })),
-    [designs],
-  );
+  // CR-489: only PANEL ITEMS can be sampled — items with a row on Cut Stock (the sample stock a Full tile or cut
+  // piece books; the Panel Items page rule). Items already on the order stay pickable so an edit never loses one.
+  const designOptions = useMemo(() => {
+    const inPanel = new Set(stockRows.map((r) => r.designId));
+    return designs
+      .filter((d) => (d.status !== "Inactive" && inPanel.has(d.id)) || lines.some((l) => l.designId === d.id))
+      .map((d) => ({ value: d.id, label: d.uniqueName || d.designName, hint: d.sizeLabel || undefined }));
+  }, [designs, stockRows, lines]);
   const cutOptions = useMemo(() => cutSizes.map((c) => ({ value: c.id, label: c.label })), [cutSizes]);
 
   const setLine = (i: number, patch: Partial<Line>) => {

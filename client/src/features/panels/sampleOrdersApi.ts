@@ -10,17 +10,15 @@
    only while New. Supply is recorded per line, partial allowed
    (CR-347: a supply is a LOAD, /panel-load-save: qty + date + vehicle); the header status is DERIVED:
    New → PartiallySupplied → Supplied (sampleOrderStatus.ts).
-   Stock: a Cut line deducts cut-piece stock (ledger kind "sample");
-   a Full tile is record-only (box stock has no per-piece path — the
-   godown writes the opened box off on Stock Adjustments).
+   Stock: EVERY line books and deducts the Panel Craft sample stock (cut
+   stock, ledger kind "sample") — a Cut line its cut piece, a Full tile the
+   item's full-size piece (CR-489; export box stock / batches never).
    ============================================================ */
 import { listAll, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
 import { listPanels } from "./panelsApi";
-import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleBoxRequirements, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
-import { invalidateBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
-import { invalidateProductionLogs } from "@/features/stages/productionApi";
+import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
 import { deriveSampleStatus, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 export { deriveSampleStatus, remaining, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
@@ -55,8 +53,6 @@ export interface SampleOrderLineRow {
   suppliedQty: number;
   suppliedOn: string; // yyyy-MM-dd of the LAST supply, "" if none
   note: string;
-  /** CR-488: the item's pieces per box — a Full-tile line books ceil(pending ÷ this) boxes. */
-  pcsPerBox: number;
 }
 
 export interface SampleOrderRow {
@@ -122,6 +118,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
   const quoteNo = new Map((quotes.rows || []).map((r) => [String(r.ROWID), str(r.quote_number)]));
   const design = new Map((designsRes.ok ? designsRes.designs : []).map((d) => [d.id, d]));
   const cutName = new Map((panelsRes.ok ? panelsRes.cutSizes : []).map((c) => [c.id, c.label]));
+  const fullSizeId = new Map([...cutName].map(([id, label]) => [label, id])); // CR-489: size code → its full-size piece
   const loadsByOrder = parseLoads(loads.rows || [], loadLines.rows || [], "sample_order");
   const linesByOrder = new Map<string, SampleOrderLineRow[]>();
   for (const l of lines.rows || []) {
@@ -134,13 +131,14 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       itemCode: d?.itemCode || "",
       images: d?.images ?? [],
       pieceKind: str(l.piece_kind) === "Cut" ? "Cut" : "Full",
-      cutSizeId: str(l.cut_piece_size),
-      cutSizeName: cutName.get(str(l.cut_piece_size)) || "",
+      // CR-489: a Full tile keys on the item's full-size piece — stamped on save; a pre-CR-489 row resolves by
+      // the Cut Stock rule (the CutPieceSize named after the item's size) until the server stamps it.
+      cutSizeId: str(l.cut_piece_size) || (str(l.piece_kind) !== "Cut" && fullSizeId.get(d?.sizeLabel || "")) || "",
+      cutSizeName: cutName.get(str(l.cut_piece_size)) || (str(l.piece_kind) !== "Cut" ? d?.sizeLabel || "" : ""),
       qty: num(l.qty),
       suppliedQty: num(l.supplied_qty),
       suppliedOn: str(l.supplied_on).slice(0, 10),
       note: str(l.note),
-      pcsPerBox: d?.pcsPerBox || 1,
     };
     linesByOrder.set(key, [...(linesByOrder.get(key) ?? []), row]);
   }
@@ -226,21 +224,15 @@ export function deleteSampleOrder(rowid: string, reason?: string): Promise<OpRes
 }
 
 /** CR-368: cancel — reason mandatory for every role; only while nothing has been supplied or loaded. */
-/** CR-487/488: ONE write for the whole Allocate Stock window — `allocation` = cut pieces per key (absolute),
-    `boxes` = full-tile batches per item (absolute per item); the server re-checks need + free for both. */
-export function allocateSample(rowid: string, body: { allocation?: Allocation; boxes?: Record<string, { batch_number: string; qty_boxes: number }[]> }) {
-  return bust(op<{ ROWID: string; allocation: Allocation }>(`sample-order-allocate/${rowid}`, body)).then((r) => {
-    invalidateBatchStock(); // free boxes moved
-    invalidateProductionLogs(); // the claim rows live there
-    return r;
-  });
+/** CR-487: book / release cut pieces — ABSOLUTE per key, the server re-checks need + free (/sample-order-allocate). */
+export function allocateSampleOrder(rowid: string, allocation: Allocation) {
+  return bust(op<{ ROWID: string; allocation: Allocation }>(`sample-order-allocate/${rowid}`, { allocation }));
 }
 
 /** CR-487: this order's cut-piece requirement rows (Cut lines, pending qty) with its booking;
-    `booked` = allocatedByKey(panelOrders, sampleOrders) fills `free`. CR-488: Full-tile lines follow as
-    BOX rows (key `design|full`), have / free from the batch-stock rows. */
-export function sampleRequirements(o: SampleOrderRow, stock: Map<string, number>, booked?: Map<string, number>, batchRows: BatchStockRow[] = []): Requirement[] {
-  return [...requirementsFor(sampleNeedLines(o.lines), new Map(), stock, { allocation: o.allocation, booked }), ...sampleBoxRequirements(o.lines, batchRows, o.allocation)];
+    `booked` = allocatedByKey(panelOrders, sampleOrders) fills `free`. Full tiles never appear. */
+export function sampleRequirements(o: SampleOrderRow, stock: Map<string, number>, booked?: Map<string, number>): Requirement[] {
+  return requirementsFor(sampleNeedLines(o.lines), new Map(), stock, { allocation: o.allocation, booked });
 }
 
 export function cancelSampleOrder(rowid: string, reason: string): Promise<OpResult> {

@@ -3,7 +3,18 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
-## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28
+## 2026-10-28 — Full-tile samples book the sample stock, not batches (CR-489) — LIVE + DEMO 2026-10-28
+
+- **Full tiles book sample stock (CR-489).** The batch picker is gone from a sample order's Allocate Stock window.
+  A full-tile line now books the item's full-size piece on Cut Stock — the separately managed sample stock — in
+  pieces, exactly like a cut-piece line; the load takes those pieces out of Cut Stock. Export box stock and
+  batches are never touched by a sample. Pending Cut Stock, Free and Booked count full-tile sample demand too.
+  Reverses CR-488 (same day) at the user's request: "no need for batch … we have separate sample stock".
+- **Only panel items can be sampled.** The sample order form's Item list shows items that are on Cut Stock
+  (Panel Items); an item already on the order stays pickable. An item not yet in Panel Craft is added there
+  first (Panel Items ▸ Add Item / Add Stock).
+
+## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28, REVERSED by CR-489
 
 - **Full tiles book boxes (CR-488).** A sample order's full-tile line now shows on the Requirements card in boxes
   (the pending pieces at the item's pieces per box). The one Allocate Stock window lists every line: pieces for
