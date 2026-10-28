@@ -111,6 +111,16 @@ export function cachedProductionLogs(): ProductionEntry[] | null {
 export function cachedAllocEntries(): AllocEntry[] {
   return cache.cached()?.allocEntries ?? [];
 }
+/** CR-488: box claims of open sample orders (reserved, not free). */
+export function cachedSampleClaimEntries(): AllocEntry[] {
+  return cache.cached()?.sampleClaimEntries ?? [];
+}
+/** CR-488: Σ sample-claimed boxes per Design ROWID — designStock's `sampleClaimed` term. */
+export function cachedSampleClaimByDesign(): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const a of cachedSampleClaimEntries()) m.set(a.designId, (m.get(a.designId) || 0) + a.qtyBoxes);
+  return m;
+}
 /** Σ allocated boxes per Design ROWID (CR-341; was design NAME) — designStock's `allocated` term.
     Read it during render: it is fresh whenever the production-log cache is. */
 export function cachedAllocByDesign(): Map<string, number> {
@@ -173,6 +183,8 @@ export interface AllocEntry {
   design: string;
   salesOrderId: string;
   orderItemId: string;
+  /** CR-488: set on a SAMPLE order's box claim (request_group `smp-<id>`); "" on an SO allocation. */
+  sampleOrderId: string;
   batchNumber: string;
   boxBrandId: string;
   qtyBoxes: number;
@@ -208,6 +220,8 @@ export interface ProductionLogResult {
   openingEntries: ProductionRecordRow[];
   /** Stock allocations (entry_type "alloc") — free stock claimed by an order item (CR-199). */
   allocEntries: AllocEntry[];
+  /** CR-488: box claims of SAMPLE orders (entry_type "alloc", no order item, request_group `smp-<id>`) — reserved, not free. */
+  sampleClaimEntries: AllocEntry[];
   /** Stock adjustments (entry_type "adjust") — signed on-hand corrections (CR-308). */
   adjustEntries: AdjustEntry[];
   /** Transfer legs (entry_type "transfer", CR-330) — net zero per batch; per-warehouse only. */
@@ -230,7 +244,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     listAll("Customer", { columns: ["name"] }),
     listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
   ]);
-  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], adjustEntries: [], transferEntries: [], error: logs.error };
+  if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], sampleClaimEntries: [], adjustEntries: [], transferEntries: [], error: logs.error };
 
   const designName = mapBy(designs.rows, "design_name");
   const sizeName = mapBy(sizes.rows, "code");
@@ -300,7 +314,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
     });
   }
 
-  const allocEntries: AllocEntry[] = rows
+  const allAllocs: AllocEntry[] = rows
     .filter((r) => str(r.entry_type) === "alloc")
     .map((r) => ({
       id: String(r.ROWID),
@@ -308,12 +322,17 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       design: designName.get(str(r.design)) || str(r.design) || "—",
       salesOrderId: str(r.sales_order),
       orderItemId: str(r.order_item),
+      sampleOrderId: str(r.request_group).startsWith("smp-") ? str(r.request_group).slice(4) : "",
       batchNumber: str(r.batch_number),
       boxBrandId: str(r.box_brand),
       qtyBoxes: num(r.qty_boxes),
       performedBy: str(r.performed_by),
       createdTime: str(r.CREATEDTIME),
     }));
+  // CR-488: an SO allocation moves boxes onto an order line; a sample claim only reserves them — kept apart so
+  // designStock's `allocated` (SO) and `sampleClaimed` (free −) never mix.
+  const allocEntries = allAllocs.filter((a) => a.orderItemId);
+  const sampleClaimEntries = allAllocs.filter((a) => !a.orderItemId && a.sampleOrderId);
 
   const adjustEntries: AdjustEntry[] = rows
     .filter((r) => str(r.entry_type) === "adjust")
@@ -406,7 +425,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
       };
     });
 
-  return { ok: true, entries, openingEntries, allocEntries, adjustEntries, transferEntries };
+  return { ok: true, entries, openingEntries, allocEntries, sampleClaimEntries, adjustEntries, transferEntries };
 }
 
 /** One line of a production request. */

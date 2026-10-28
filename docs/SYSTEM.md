@@ -1170,7 +1170,15 @@ sums open PanelOrder **and** SampleOrder rows — one pool), shown on the Action
 (`SampleRequirementsCard` → the ONE `AllocateCutStockModal`, `save = allocateSampleOrder`); a Cut row is Ready
 only once booked and `/panel-load-save` refuses an unbooked Cut pick (409 "Book N more pcs … before loading");
 the load shrinks the booking, `/panel-load-delete` restores it, an edit while `New` clamps it, Cancel writes `{}`.
-Full tiles never book. `allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
+**CR-488 — Full-tile lines book BOXES** (reverses the 2026-10-08 record-only rule): need = ceil(pending pcs ÷
+`Design.pcs_per_box`); a claim is a `ProductionLog` `alloc` row with no order item, `request_group` `smp-<id>`
+(`sampleBoxClaims`), netted by `serverFreeStock` / `batchStockApi` like an SO claim; `/sample-order-allocate`
+`boxes: {design: [{batch_number, qty_boxes}]}` (absolute per item, ≤ need, ≤ free + own); the load consumes the
+claim oldest batch first and writes signed `adjust` rows (reason "Sample / Display", `request_group`
+`smp-load-<PanelLoad>`), `/panel-load-delete` reverses them; `SampleOrder.allocation["<design>|full"]` mirrors Σ.
+Client: `sampleBoxRequirements` rows (Piece "Full tile · boxes", per-row Book… → `SampleBoxModal`), Ready once
+booked; `productionApi.sampleClaimEntries` + `designStock({ sampleClaimed })` keep Item detail / line stock / Reports
+free figures honest. `allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
 Free / Booked reader (Cut Stock, item detail, panel order detail, Orders, dashboard, Pending Cut Stock) count
 sample bookings and sample Cut-line demand. The header status is never set by hand — it is
 derived from the lines (`sampleStatus` server / `deriveSampleStatus` client): New → Partially Supplied →

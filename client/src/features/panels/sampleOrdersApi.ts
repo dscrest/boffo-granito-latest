@@ -18,7 +18,9 @@ import { listAll, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
 import { listPanels } from "./panelsApi";
-import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
+import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleBoxRequirements, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
+import { invalidateBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
+import { invalidateProductionLogs } from "@/features/stages/productionApi";
 import { deriveSampleStatus, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 export { deriveSampleStatus, remaining, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
@@ -53,6 +55,8 @@ export interface SampleOrderLineRow {
   suppliedQty: number;
   suppliedOn: string; // yyyy-MM-dd of the LAST supply, "" if none
   note: string;
+  /** CR-488: the item's pieces per box — a Full-tile line books ceil(pending ÷ this) boxes. */
+  pcsPerBox: number;
 }
 
 export interface SampleOrderRow {
@@ -136,6 +140,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       suppliedQty: num(l.supplied_qty),
       suppliedOn: str(l.supplied_on).slice(0, 10),
       note: str(l.note),
+      pcsPerBox: d?.pcsPerBox || 1,
     };
     linesByOrder.set(key, [...(linesByOrder.get(key) ?? []), row]);
   }
@@ -227,9 +232,20 @@ export function allocateSampleOrder(rowid: string, allocation: Allocation) {
 }
 
 /** CR-487: this order's cut-piece requirement rows (Cut lines, pending qty) with its booking;
-    `booked` = allocatedByKey(panelOrders, sampleOrders) fills `free`. Full tiles never appear. */
-export function sampleRequirements(o: SampleOrderRow, stock: Map<string, number>, booked?: Map<string, number>): Requirement[] {
-  return requirementsFor(sampleNeedLines(o.lines), new Map(), stock, { allocation: o.allocation, booked });
+    `booked` = allocatedByKey(panelOrders, sampleOrders) fills `free`. CR-488: Full-tile lines follow as
+    BOX rows (key `design|full`), have / free from the batch-stock rows. */
+export function sampleRequirements(o: SampleOrderRow, stock: Map<string, number>, booked?: Map<string, number>, batchRows: BatchStockRow[] = []): Requirement[] {
+  return [...requirementsFor(sampleNeedLines(o.lines), new Map(), stock, { allocation: o.allocation, booked }), ...sampleBoxRequirements(o.lines, batchRows, o.allocation)];
+}
+
+/** CR-488: book / release BOXES of one item for its Full-tile line — ABSOLUTE per batch; the server re-checks
+    need + free and replaces this order's claim rows for that item (/sample-order-allocate `boxes`). */
+export function allocateSampleBoxes(rowid: string, designId: string, rows: { batch_number: string; qty_boxes: number }[]) {
+  return bust(op<{ ROWID: string; allocation: Allocation }>(`sample-order-allocate/${rowid}`, { boxes: { [designId]: rows } })).then((r) => {
+    invalidateBatchStock(); // free boxes moved
+    invalidateProductionLogs(); // the claim rows live there
+    return r;
+  });
 }
 
 export function cancelSampleOrder(rowid: string, reason: string): Promise<OpResult> {

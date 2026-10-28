@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useOrders } from "@/features/orders/useOrders";
 import { useMasters } from "@/features/masters/useMasters";
-import { cachedAllocByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
+import { cachedAllocByDesign, cachedSampleClaimByDesign, cachedProductionLogs, listProductionLogs, type ProductionEntry } from "@/features/stages/productionApi";
 import { cachedAdjustedByDesign, cachedOpeningByDesign, listBatchStock } from "@/features/stages/batchStockApi";
 import { designStock, openingStockFor, type DesignStock } from "@/lib/stock";
 import { fmt } from "@/lib/format";
@@ -32,10 +32,12 @@ export function useStockLookup(): (designId: string) => DesignStock {
   // ponytail: the returned fn is still a fresh closure each render, so callers'
   // useMemo([stockFor]) never hits; fix by moving allocs into state if it lags.
   let allocBy: Map<string, number> | undefined;
+  let claimBy: Map<string, number> | undefined; // CR-488
   return (designId: string) => {
     const opening = openingStockFor(designById.get(designId), openingByDesign);
     allocBy ??= cachedAllocByDesign();
-    return designStock(designId, { openingStock: opening, adjusted: adjustedByDesign.get(designId), allocated: allocBy.get(designId), orders, prodLogs });
+    claimBy ??= cachedSampleClaimByDesign();
+    return designStock(designId, { openingStock: opening, adjusted: adjustedByDesign.get(designId), allocated: allocBy.get(designId), sampleClaimed: claimBy.get(designId), orders, prodLogs });
   };
 }
 

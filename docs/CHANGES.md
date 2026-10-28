@@ -3,6 +3,16 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28
+
+- **Full tiles book boxes (CR-488).** A sample order's full-tile line now shows on the Requirements card in boxes
+  (the pending pieces at the item's pieces per box) with Book… on the row: pick the batches, book or release.
+  The row is Ready only once its boxes are booked, and the load is refused until then. The load takes the booked
+  boxes out of stock as a "Sample / Display" adjustment (what the godown wrote off by hand); deleting the load
+  puts them back. Boxes booked to a sample are no longer free for a Sales Order, and the item page, line stock
+  and Reports show that. Cut-piece lines keep booking cut pieces (CR-487). This reverses the 2026-10-08
+  record-only decision for full tiles at the user's request.
+
 ## 2026-10-28 — Sample orders book cut pieces like panel orders (CR-487) — LIVE + DEMO 2026-10-28
 
 - **Allocate Stock on a sample order (CR-487).** The Actions tab of a sample order now has the Requirements card

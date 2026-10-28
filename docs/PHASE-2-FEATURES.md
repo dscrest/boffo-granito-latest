@@ -684,6 +684,10 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Sample order pick slip** (CR-486, 2026-10-28). More ▸ Print order PDF: items with photo + item code, piece,
   Requested · Supplied · Remaining, line remarks, a blank Broken / Adjustment box per row, the Stock Adjustments
   reminder and sign-off lines. ≈ 1.2 h.
+- **Full-tile samples book boxes; no dispatch until booked** (CR-488, 2026-10-28). Full-tile lines appear on the
+  sample Requirements card in boxes (pending pieces ÷ pieces per box) with a per-row Book… batch picker; the load is
+  refused until booked, consumes the booked boxes as a "Sample / Display" adjustment and a load delete restores
+  them; boxes booked to a sample are not free for a Sales Order. Reverses the 2026-10-08 record-only rule. ≈ 4 h.
 - **Allocate Stock on sample orders** (CR-487, 2026-10-28). The sample order's Actions tab carries the panel order's
   Requirements card (Need · In Stock · Allocated · Short) and the same Allocate Stock window; a cut-piece row loads
   only once booked and the load consumes the booking; panel and sample bookings share one pool (no piece promised

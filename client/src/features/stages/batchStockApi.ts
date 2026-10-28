@@ -103,7 +103,7 @@ export function listBatchStock(): Promise<BatchStockResult> {
 
 async function fetchBatchStock(): Promise<BatchStockResult> {
   const [logs, designs, sizes, palPlans, pbatches, plines, loadings, items, warehouses] = await Promise.all([
-    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item", "warehouse"] }),
+    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item", "warehouse", "request_group"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "is_batched", "accounting_stock"] }),
     listAll("Size", { columns: ["code"] }),
     listPalPlans(),
@@ -167,6 +167,9 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     const oi = str(r.order_item);
     if (oi && (type === "record" || type === "alloc" || type === "plan"))
       claims.push({ designId, batch: type === "plan" ? "" : str(r.batch_number), orderItemId: oi, qty });
+    // CR-488: a sample order's box claim — an alloc row with no order item, keyed by its `smp-<id>` group. Nothing
+    // ever "loads" against that key, so it stays reserved until the sample load removes the row itself.
+    else if (type === "alloc" && str(r.request_group).startsWith("smp-")) claims.push({ designId, batch: str(r.batch_number), orderItemId: str(r.request_group), qty });
     if (type === "record") {
       supply.push({ designId, batch: str(r.batch_number), qty, kind: "produced", date });
       whMoves.push({ key: `${designId}|${str(r.batch_number)}`, warehouse: whOf(r), qty });

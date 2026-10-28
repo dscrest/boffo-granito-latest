@@ -58,9 +58,10 @@ export interface DesignStock {
     lists — filtering by Design ROWID happens here. */
 export function designStock(
   designId: string,
-  opts: { openingStock?: number; adjusted?: number; allocated?: number; orders: Order[]; prodLogs: ProductionEntry[] },
+  opts: { openingStock?: number; adjusted?: number; allocated?: number; sampleClaimed?: number; orders: Order[]; prodLogs: ProductionEntry[] },
 ): DesignStock {
-  const { openingStock = 0, adjusted = 0, allocated = 0, orders, prodLogs } = opts;
+  // CR-488: `sampleClaimed` = boxes booked by open sample orders — still on hand, no longer free.
+  const { openingStock = 0, adjusted = 0, allocated = 0, sampleClaimed = 0, orders, prodLogs } = opts;
   // CR-341: key on the Design ROWID. The plain design_name is shared by every size · finish
   // of a design, so keying on it merged their stock (and disagreed with AllocateStockModal).
   const ords = orders.filter((o) => o.designId === designId);
@@ -108,6 +109,6 @@ export function designStock(
     inLoading: ords.reduce((s, o) => s + Math.max(0, o.palletizedQty - o.loadedQty), 0),
     awaitingPalletization: ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.palletizedQty), 0),
     available: openingStock + adjusted + producedTot - loadedTot,
-    free: Math.max(0, openingStock + adjusted + producedTot - loadedTot - ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.loadedQty), 0)),
+    free: Math.max(0, openingStock + adjusted + producedTot - loadedTot - ords.reduce((s, o) => s + Math.max(0, o.producedQty - o.loadedQty), 0) - sampleClaimed),
   };
 }
