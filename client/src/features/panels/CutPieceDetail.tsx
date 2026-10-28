@@ -10,6 +10,7 @@
    pieces stays on the Panel Item page (Masters), linked from Actions.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { cachedSampleOrders, listSampleOrders, type SampleOrderRow } from "./sampleOrdersApi"; // CR-487
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Chip } from "@/ui/Chip";
@@ -57,6 +58,7 @@ export function CutPieceDetail() {
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
+  const [samples, setSamples] = useState<SampleOrderRow[]>(() => cachedSampleOrders() ?? []); // CR-487: sample bookings count
   const [entries, setEntries] = useState<CutStockEntryRow[]>([]);
 
   useEffect(() => {
@@ -67,6 +69,7 @@ export function CutPieceDetail() {
       setPanels(r.panels);
     });
     void listPanelOrders().then((r) => r.ok && setOrders(r.orders));
+    void listSampleOrders().then((r) => r.ok && setSamples(r.orders));
     void listCutStock().then((r) => r.ok && setStock(r.rows));
     void listCutStockEntries().then((r) => r.ok && setEntries(r.rows));
   }, [designId, cutSizeId]);
@@ -77,7 +80,7 @@ export function CutPieceDetail() {
   const design = byId.get(designId);
   const row = stock.find((r) => r.designId === designId && r.cutSizeId === cutSizeId);
   const cut = cutName.get(cutSizeId) || "";
-  const booked = useMemo(() => allocatedByKey(orders).get(key) ?? 0, [orders, key]);
+  const booked = useMemo(() => allocatedByKey(orders, samples).get(key) ?? 0, [orders, samples, key]);
 
   const railItems = useMemo(
     () =>

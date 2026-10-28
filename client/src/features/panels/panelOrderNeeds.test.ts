@@ -3,6 +3,7 @@
 import assert from "node:assert";
 import {
   allocatedByKey,
+  sampleNeedLines,
   demandByKey,
   lineCheckpoint,
   lineLoadRows,
@@ -297,4 +298,28 @@ console.log("panelOrderNeeds: booking + progress checks passed");
   assert.strictEqual(d[3].done, true, "loaded pieces = done, booked or not");
   assert.strictEqual(lineStages(lines[1], { checkpoints: cp, loads }, requirementsFor(lines, panels, stock), true, panels)[3].done, false, "unbooked, not loaded = pending");
 }
-console.log("panelOrderNeeds: loads + weight split checks passed");
+// CR-487: sample orders book cut pieces too — Cut lines' PENDING qty are need lines, Full tiles never; open = New / PartiallySupplied.
+{
+  const sLines = [
+    { pieceKind: "Cut", designId: "grey", cutSizeId: "300x300", designName: "Grey", cutSizeName: "300x300", qty: 10, suppliedQty: 4 },
+    { pieceKind: "Full", designId: "grey", cutSizeId: "", designName: "Grey", cutSizeName: "", qty: 3, suppliedQty: 0 },
+    { pieceKind: "Cut", designId: "ivory", cutSizeId: "600x300", designName: "Ivory", cutSizeName: "600x300", qty: 2, suppliedQty: 2 },
+  ];
+  const need = sampleNeedLines(sLines);
+  assert.deepStrictEqual(need.map((l) => [l.designId, l.qty]), [["grey", 6]], "pending Cut pieces only; a Full tile and a supplied line drop out");
+  const k = stockKey("grey", "300x300");
+  const panelsOpen = [{ status: "Received", allocation: { [k]: 5 } }];
+  const samples = [
+    { status: "New", allocation: { [k]: 4 } },
+    { status: "PartiallySupplied", allocation: { [k]: 1 } },
+    { status: "Supplied", allocation: { [k]: 9 } },
+    { status: "Cancelled", allocation: { [k]: 9 } },
+  ];
+  assert.strictEqual(allocatedByKey(panelsOpen, samples).get(k), 10, "panel 5 + open samples 4 + 1; supplied / cancelled drop out");
+  assert.strictEqual(allocatedByKey(panelsOpen).get(k), 5, "no samples = the CR-312 figure");
+  const [r] = requirementsFor(need, new Map(), new Map([[k, 12]]), { allocation: { [k]: 4 }, booked: allocatedByKey(panelsOpen, samples) });
+  assert.deepStrictEqual([r.need, r.allocated, r.free, r.toCut], [6, 4, 2, 0], "need 6, 4 booked, 12 − 10 free, nothing to cut");
+  const demand = demandByKey([], new Map(), new Map([[k, 12]]), [], [{ id: "s1", orderNumber: "SMP/1", status: "New", lines: need, allocation: { [k]: 4 } }]);
+  assert.deepStrictEqual(demand.map((d) => [d.key, d.required, d.allocated]), [[k, 6, 4]], "a sample order's Cut lines are demand on Pending Cut Stock");
+}
+console.log("panelOrderNeeds: loads + weight split + sample booking checks passed");

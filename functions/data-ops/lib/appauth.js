@@ -179,6 +179,7 @@ const ROUTE_PERM = {
   "panel-load-delete": ["panel_craft", "delete"], // CR-347
   "panel-order-checkpoint": ["panel_craft", "edit"], // CR-313
   "panel-order-allocate": ["panel_craft", "edit"], // CR-312
+  "sample-order-allocate": ["panel_craft", "edit"], // CR-487
   "cut-stock-entry": ["panel_craft", "edit"],
   "cut-piece-save": ["panel_craft", "edit"],
   "cut-piece-delete": ["panel_craft", "delete"],

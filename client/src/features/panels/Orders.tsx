@@ -244,7 +244,7 @@ export function Orders() {
   }, []);
 
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
-  const booked = useMemo(() => allocatedByKey(panelOrders), [panelOrders]); // CR-312
+  const booked = useMemo(() => allocatedByKey(panelOrders, sampleOrders), [panelOrders, sampleOrders]); // CR-312 / CR-487
 
   // Search + filters apply to both views; every row carries its derived bits once.
   const shown = useMemo((): Row[] => {

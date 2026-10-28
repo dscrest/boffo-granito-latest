@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 188 |
+| Completed | 189 |
 | In progress | 19 |
 | Future | 27 |
-| **Total** | **234** |
+| **Total** | **235** |
 
 ## Foundation & workspace
 
@@ -240,6 +240,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Panel form opens with a blank size | New Panel no longer prefills 1200x2100; the size is typed. | Completed | 2026-10-28 | CR-484 |
 | Sample order Actions tab | A sample order has the panel order's tabs (Details · Readiness · Actions · Dispatch · Activity). Loads are recorded on the Actions tab — quantity per row, + Load… on one row, Dispatch, Load Copy per trip — the header Record Load button is gone. | Completed | 2026-10-28 | CR-485 |
 | Sample order pick slip | More ▸ Print order PDF on a sample order: every item with its photo, name and item code, full tile / cut piece size, Requested · Supplied · Remaining, the remark typed on the line and an empty Broken / Adjustment box to fill in by hand; the Stock Adjustments reminder and Taken out by / Checked by lines. | Completed | 2026-10-28 | CR-486 |
+| Allocate Stock on sample orders | A sample order books cut pieces the way a panel order does: Requirements card on its Actions tab (Need · In Stock · Allocated · Short) and the same Allocate Stock window; a cut-piece row loads only once booked, the load consumes the booking; panel and sample bookings share one pool so no piece is promised twice; Pending Cut Stock counts sample demand. | Completed | 2026-10-28 | CR-487 |
 | Remarks on a panel | Free-text Remarks on New / Edit Panel for the old reference ID; shown on the panel page and searchable in the panel list. | In progress |  | CR-425 |
 | Cut Piece Size master under Panel Items | The cut piece size list is maintained from the Panel Items page (Cut Piece Sizes button) instead of Settings ▸ Masters. | In progress |  | CR-426 |
 | Panel Items with weighed cut pieces | Designs picked from the Item master into Panel Craft, each with its cut pieces (add, weigh, remove); the Panel form offers only these. | Completed | 2026-10-07 | CR-306 |

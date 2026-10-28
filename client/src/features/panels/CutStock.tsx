@@ -23,6 +23,7 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { allocatedByKey, cachedCutStockRows, cachedPanelOrders, listCutStock, listPanelOrders, type CutStockRow, type PanelOrderRow } from "./panelOrdersApi";
+import { cachedSampleOrders, listSampleOrders, type SampleOrderRow } from "./sampleOrdersApi";
 import { weightPerPc } from "./cutPieceWeight";
 import { cutPiecePath } from "./CutPieceDetail";
 
@@ -83,6 +84,7 @@ export function CutStock() {
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
+  const [samples, setSamples] = useState<SampleOrderRow[]>(() => cachedSampleOrders() ?? []); // CR-487: sample bookings count
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("cutStock.query", "");
@@ -92,10 +94,11 @@ export function CutStock() {
 
   const load = async () => {
     setLoading(true);
-    const [stockRes, designsRes, panelsRes, ordersRes] = await Promise.all([listCutStock(), listDesigns(), listPanels(), listPanelOrders()]);
+    const [stockRes, designsRes, panelsRes, ordersRes, samplesRes] = await Promise.all([listCutStock(), listDesigns(), listPanels(), listPanelOrders(), listSampleOrders()]);
     setLoading(false);
     if (panelsRes.ok) setCutSizes(panelsRes.cutSizes);
     if (ordersRes.ok) setOrders(ordersRes.orders);
+    if (samplesRes.ok) setSamples(samplesRes.orders);
     if (!stockRes.ok) {
       setError(stockRes.error || "Failed to load cut-piece stock");
       return;
@@ -112,7 +115,7 @@ export function CutStock() {
   const items = useMemo(() => {
     const byId = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
-    const booked = allocatedByKey(orders);
+    const booked = allocatedByKey(orders, samples);
     const byDesign = new Map<string, GridRow[]>();
     for (const r of rows) {
       const d = byId.get(r.designId);

@@ -110,6 +110,7 @@ const OP_LABELS: Record<string, string> = {
   checkpoint: "Checkpoint",
   "panel-order-load": "Panel Order Loaded",
   "sample-order-request": "Sample Order Requested",
+  "sample-order-allocate": "Sample Stock Allocated", // CR-487
   "sample-supplied": "Sample Supplied",
   "send-to-loading": "Sent to Loading",
   "vehicle-assign": "Vehicle Assigned",

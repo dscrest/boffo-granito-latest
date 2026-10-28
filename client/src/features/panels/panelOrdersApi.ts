@@ -55,6 +55,8 @@ export {
   pieceLabel,
   rowKey,
   rowLabel,
+  SAMPLE_ORDER_OPEN,
+  sampleNeedLines,
   shortagesFor,
   stockKey,
   type Allocation,
@@ -215,7 +217,7 @@ const parseJsonCol = <T extends object>(raw: string): T => {
   }
 };
 const parseChecklist = (raw: string) => parseJsonCol<Record<string, boolean>>(raw);
-const parseAllocation = (raw: string): Allocation =>
+export const parseAllocation = (raw: string): Allocation => // CR-487: SampleOrder.allocation parses the same way
   Object.fromEntries(Object.entries(parseJsonCol<Record<string, unknown>>(raw)).map(([k, v]) => [k, num(v)]).filter(([, v]) => (v as number) > 0));
 
 const asStatus = (s: string): PanelOrderStatus =>

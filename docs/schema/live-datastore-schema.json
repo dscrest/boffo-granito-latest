@@ -383,6 +383,15 @@
           "is_unique": false,
           "search_index_enabled": false,
           "default_value": null
+        },
+        {
+          "column_name": "allocation",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false
         }
       ]
     },

@@ -18,7 +18,7 @@ import { listAll, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
 import { listPanels } from "./panelsApi";
-import { invalidateCutStock, parseLoads, type LoadRow } from "./panelOrdersApi";
+import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
 import { deriveSampleStatus, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 export { deriveSampleStatus, remaining, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
@@ -73,6 +73,8 @@ export interface SampleOrderRow {
   lines: SampleOrderLineRow[];
   /** CR-347: vehicle trips (= supplies) recorded against this order, oldest first. */
   loads: LoadRow[];
+  /** CR-487: cut pieces BOOKED to this order, keyed stockKey(design, cutSize) — the panel-order claim, set via /sample-order-allocate. */
+  allocation: Allocation;
   totalQty: number;
   suppliedQty: number;
   createdTime: string;
@@ -157,6 +159,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       note: str(o.note),
       lines: ls,
       loads: loadsByOrder.get(id) ?? [],
+      allocation: parseAllocation(str(o.allocation)),
       totalQty: ls.reduce((s, l) => s + l.qty, 0),
       suppliedQty: ls.reduce((s, l) => s + l.suppliedQty, 0),
       createdTime: str(o.CREATEDTIME),
@@ -218,6 +221,17 @@ export function deleteSampleOrder(rowid: string, reason?: string): Promise<OpRes
 }
 
 /** CR-368: cancel — reason mandatory for every role; only while nothing has been supplied or loaded. */
+/** CR-487: book / release cut pieces — ABSOLUTE per key, the server re-checks need + free (/sample-order-allocate). */
+export function allocateSampleOrder(rowid: string, allocation: Allocation) {
+  return bust(op<{ ROWID: string; allocation: Allocation }>(`sample-order-allocate/${rowid}`, { allocation }));
+}
+
+/** CR-487: this order's cut-piece requirement rows (Cut lines, pending qty) with its booking;
+    `booked` = allocatedByKey(panelOrders, sampleOrders) fills `free`. Full tiles never appear. */
+export function sampleRequirements(o: SampleOrderRow, stock: Map<string, number>, booked?: Map<string, number>): Requirement[] {
+  return requirementsFor(sampleNeedLines(o.lines), new Map(), stock, { allocation: o.allocation, booked });
+}
+
 export function cancelSampleOrder(rowid: string, reason: string): Promise<OpResult> {
   return bust(op(`sample-order-cancel/${rowid}`, { reason }));
 }

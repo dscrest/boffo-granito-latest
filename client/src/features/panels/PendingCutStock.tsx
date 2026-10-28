@@ -23,7 +23,8 @@ import { usePersistedState } from "@/lib/usePersistedState";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
-import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, pendingNeedLines, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
+import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, pendingNeedLines, sampleNeedLines, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
+import { cachedSampleOrders, listSampleOrders, type SampleOrderRow } from "./sampleOrdersApi";
 import { cutPiecePath } from "./CutPieceDetail";
 
 const dash = <span className="dim">—</span>;
@@ -80,6 +81,7 @@ const COLUMNS: ColumnDef<Row>[] = [
 export function PendingCutStock() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<PanelOrderRow[]>(() => cachedPanelOrders() ?? []);
+  const [samples, setSamples] = useState<SampleOrderRow[]>(() => cachedSampleOrders() ?? []); // CR-487: sample Cut lines are demand + booking
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
@@ -94,7 +96,7 @@ export function PendingCutStock() {
 
   const load = async () => {
     setLoading(true);
-    const [o, p, s, d] = await Promise.all([listPanelOrders(), listPanels(), listCutStock(), listDesigns()]);
+    const [o, p, s, d, so] = await Promise.all([listPanelOrders(), listPanels(), listCutStock(), listDesigns(), listSampleOrders()]);
     setLoading(false);
     if (!o.ok) {
       setError(o.error || "Failed to load panel orders");
@@ -102,6 +104,7 @@ export function PendingCutStock() {
     }
     setError(null);
     setOrders(o.orders);
+    if (so.ok) setSamples(so.orders);
     if (p.ok) {
       setPanels(p.panels);
       setCutSizes(p.cutSizes);
@@ -118,11 +121,17 @@ export function PendingCutStock() {
     const byId = new Map(designs.map((d) => [d.id, d]));
     const cutName = new Map(cutSizes.map((c) => [c.id, c.label]));
     // CR-347: only what is still PENDING to load counts as demand.
-    return demandByKey(orders.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads, panelById) })), panelById, stock, stock.keys()).map((r) => {
+    return demandByKey(
+      orders.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads, panelById) })),
+      panelById,
+      stock,
+      stock.keys(),
+      samples.map((s) => ({ ...s, lines: sampleNeedLines(s.lines) })), // CR-487
+    ).map((r) => {
       const d = byId.get(r.designId);
       return { ...r, design: d, designName: r.designName || (d ? d.uniqueName || d.designName : ""), cutSizeName: r.cutSizeName || cutName.get(r.cutSizeId) || "", sizeLabel: d?.sizeLabel || "" };
     });
-  }, [orders, panels, stock, designs, cutSizes]);
+  }, [orders, samples, panels, stock, designs, cutSizes]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

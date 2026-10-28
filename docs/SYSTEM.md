@@ -1163,7 +1163,16 @@ optional source SO / Quote, note) + `SampleOrderLine` (`piece_kind`, `cut_piece_
 `supplied_qty`, `supplied_on`, `note`) save in one `/sample-order-save` call; edit / delete only while
 `New`. Supply is recorded per line on `/sample-orders/:id` as a LOAD since CR-347 (the **Actions** tab — `SampleActionsTab`, CR-485: Load Now per row, "+" Load…, Dispatch, Load Copy per trip — or the Dispatch tab's Record Load; the header button is gone
 → `/panel-load-save`: date, vehicle, photos + qty per line, partial allowed; 0 skips a line; the old
-`/sample-order-supply` is gone). The header status is never set by hand — it is
+`/sample-order-supply` is gone). **CR-487 — a sample order BOOKS cut pieces exactly like a panel order:**
+`SampleOrder.allocation` (JSON `{design|cutSize: pcs}`, a claim never a movement) set by
+`POST /sample-order-allocate/:rowid` (absolute per key, ≤ pending need, ≤ on hand − `otherAllocations`, which
+sums open PanelOrder **and** SampleOrder rows — one pool), shown on the Actions tab's **Requirements** card
+(`SampleRequirementsCard` → the ONE `AllocateCutStockModal`, `save = allocateSampleOrder`); a Cut row is Ready
+only once booked and `/panel-load-save` refuses an unbooked Cut pick (409 "Book N more pcs … before loading");
+the load shrinks the booking, `/panel-load-delete` restores it, an edit while `New` clamps it, Cancel writes `{}`.
+Full tiles never book. `allocatedByKey(panelOrders, sampleOrders)` / `demandByKey(…, samples)` make every
+Free / Booked reader (Cut Stock, item detail, panel order detail, Orders, dashboard, Pending Cut Stock) count
+sample bookings and sample Cut-line demand. The header status is never set by hand — it is
 derived from the lines (`sampleStatus` server / `deriveSampleStatus` client): New → Partially Supplied →
 Supplied. Stock: a **Cut** line deducts cut-piece stock through `adjustCutStock` with ledger kind
 `sample` (409 when free stock — on hand minus open panel-order bookings — is short); a **Full** tile is

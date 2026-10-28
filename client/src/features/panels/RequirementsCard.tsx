@@ -11,7 +11,88 @@ import { toast } from "@/ui/Toast";
 import { can } from "@/lib/auth";
 import { fmt } from "@/lib/format";
 import { AllocateCutStockModal } from "./AllocateCutStockModal";
-import { PANEL_ORDER_OPEN, saveChecklist, type PanelOrderRow, type Requirement } from "./panelOrdersApi";
+import { PANEL_ORDER_OPEN, SAMPLE_ORDER_OPEN, saveChecklist, type PanelOrderRow, type Requirement } from "./panelOrdersApi";
+import { allocateSampleOrder, type SampleOrderRow } from "./sampleOrdersApi";
+
+/* CR-487: the sample order's Requirements card — the panel card's Need · In Stock · Allocated · Short
+   columns + the same Allocate Stock modal, writing through /sample-order-allocate. No Panels column, no
+   Available tick (a sample has no godown checklist). Cut lines only; Full tiles never book. */
+export function SampleRequirementsCard({ order, reqs, onChanged }: { order: SampleOrderRow; reqs: Requirement[]; onChanged: () => void }) {
+  const canEdit = can("panel_craft", "edit");
+  const [allocating, setAllocating] = useState(false);
+  const isOpen = SAMPLE_ORDER_OPEN.has(order.status);
+  const openReason = isOpen ? "" : order.status === "Cancelled" ? "Order cancelled" : "Order supplied";
+  const unbookedPcs = reqs.reduce((s, r) => s + Math.max(0, r.need - r.allocated), 0);
+  return (
+    <div className="card">
+      <div className="card-head">
+        <span style={{ fontWeight: 600 }}>Requirements</span>
+        {canEdit && (
+          <button
+            className="hbtn primary"
+            style={{ marginLeft: "auto" }}
+            disabled={!isOpen || reqs.length === 0}
+            title={openReason || (reqs.length === 0 ? "No cut pieces required" : unbookedPcs ? `Book free cut pieces to this order — ${fmt(unbookedPcs)} pcs still unbooked` : "Every piece is booked — open to release pieces")}
+            onClick={() => setAllocating(true)}
+          >
+            <Icon name="package" size={13} /> Allocate Stock
+          </button>
+        )}
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Design</th>
+              <th>Cut Piece Size</th>
+              <th className="num" style={{ textAlign: "right" }}>Need</th>
+              <th className="num" style={{ textAlign: "right" }}>In Stock</th>
+              <th className="num" style={{ textAlign: "right" }}>Allocated</th>
+              <th className="num" style={{ textAlign: "right" }}>Short</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reqs.map((r) => (
+              <tr key={r.key}>
+                <td>
+                  <Link className="linkish" to={`/design/${encodeURIComponent(r.designId)}`} title="Open item">
+                    <span className="design-name">{r.designName}</span>
+                  </Link>
+                </td>
+                <td className="mono">{r.cutSizeName || <span className="dim">—</span>}</td>
+                <td className="num mono">{fmt(r.need)}</td>
+                <td className="num mono" style={{ color: r.short ? "var(--c-red)" : undefined, fontWeight: r.short ? 600 : undefined }} title={r.short ? `Short by ${fmt(r.need - r.have)}` : undefined}>
+                  {fmt(r.have)}
+                </td>
+                <td className="num mono" style={{ color: r.allocated >= r.need ? "var(--c-green)" : undefined }} title={`Booked to this order · ${fmt(r.free)} free to book`}>
+                  {fmt(r.allocated)}
+                </td>
+                <td className="num mono" style={r.toCut > 0 ? { color: "var(--c-red)", fontWeight: 600 } : undefined} title="Need − allocated − free: pieces that must still be cut for this order">
+                  {r.toCut > 0 ? fmt(r.toCut) : <span className="dim">—</span>}
+                </td>
+              </tr>
+            ))}
+            {reqs.length === 0 && (
+              <tr>
+                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: 18 }}>No cut pieces pending — full tiles are record-only.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {allocating && (
+        <AllocateCutStockModal
+          orderId={order.id}
+          title={`${order.orderNumber || "Sample Order"} · ${order.customerName}`}
+          reqs={reqs}
+          save={allocateSampleOrder}
+          onDone={onChanged}
+          onClose={() => setAllocating(false)}
+        />
+      )}
+    </div>
+  );
+}
 
 export function RequirementsCard({ order, reqs, onChanged }: { order: PanelOrderRow; reqs: Requirement[]; onChanged: () => void }) {
   const canEdit = can("panel_craft", "edit");

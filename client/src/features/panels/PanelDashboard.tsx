@@ -5,6 +5,7 @@
    latest orders. Every number is a useMemo over the three cached lists.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { cachedSampleOrders, listSampleOrders, type SampleOrderRow } from "./sampleOrdersApi"; // CR-487
 import { Link, useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { KPI } from "@/ui/primitives";
@@ -30,6 +31,7 @@ import {
   panelProgress,
   PROGRESS_STATES,
   requirementsFor,
+  sampleNeedLines,
   type CutStockRow,
   type PanelOrderRow,
   type PanelProgress,
@@ -49,6 +51,7 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 export function PanelDashboard() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<PanelOrderRow[] | null>(() => cachedPanelOrders());
+  const [samples, setSamples] = useState<SampleOrderRow[]>(() => cachedSampleOrders() ?? []); // CR-487: sample Cut lines are demand + booking
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
   const [stockRows, setStockRows] = useState<CutStockRow[]>(() => cachedCutStockRows() ?? []);
@@ -56,6 +59,7 @@ export function PanelDashboard() {
 
   const load = () => {
     void listPanelOrders().then((r) => (r.ok ? setOrders(r.orders) : setError(r.error || "Failed to load panel orders")));
+    void listSampleOrders().then((r) => r.ok && setSamples(r.orders));
     void listPanels().then((r) => r.ok && setPanels(r.panels));
     void listCutStock().then((r) => {
       if (r.ok) {
@@ -70,7 +74,7 @@ export function PanelDashboard() {
   const panelById = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
   const open = useMemo(() => all.filter((o) => PANEL_ORDER_OPEN.has(o.status)), [all]);
   // CR-312: short = pieces that must still be cut after this order's booking + what nobody has booked.
-  const booked = useMemo(() => allocatedByKey(all), [all]);
+  const booked = useMemo(() => allocatedByKey(all, samples), [all, samples]);
   const reqsOf = (o: PanelOrderRow) => requirementsFor(pendingNeedLines(o.lines, o.loads, panelById), panelById, stock, { allocation: o.allocation, booked }); // CR-347: pending pieces only
   const shortagesOf = (o: PanelOrderRow) => reqsOf(o).filter((r) => r.toCut > 0);
   const progressOf = (o: PanelOrderRow) => panelProgress(o, reqsOf(o)); // CR-367/400: the ONE status
@@ -91,7 +95,8 @@ export function PanelDashboard() {
 
   // Shortfall across every open order: what the godown must cut, by design × cut size (the Pending Cut Stock page's top rows).
   const pendingOrders = useMemo(() => all.map((o) => ({ ...o, lines: pendingNeedLines(o.lines, o.loads, panelById) })), [all, panelById]); // CR-347
-  const shortages = useMemo(() => demandByKey(pendingOrders, panelById, stock).filter((r) => r.shortage > 0).sort((a, b) => b.shortage - a.shortage).slice(0, 8), [pendingOrders, panelById, stock]);
+  const pendingSamples = useMemo(() => samples.map((s) => ({ ...s, lines: sampleNeedLines(s.lines) })), [samples]); // CR-487
+  const shortages = useMemo(() => demandByKey(pendingOrders, panelById, stock, [], pendingSamples).filter((r) => r.shortage > 0).sort((a, b) => b.shortage - a.shortage).slice(0, 8), [pendingOrders, pendingSamples, panelById, stock]);
   // CR-347/348: open orders with something still to load.
   const pendingToLoad = useMemo(() => open.map((o) => pendingText(loadProgress(o.lines, o.loads, panelById))).filter(Boolean), [open, panelById]);
   const topPanels = useMemo(() => {

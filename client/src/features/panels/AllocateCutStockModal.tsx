@@ -21,6 +21,7 @@ export function AllocateCutStockModal({
   orderId,
   title,
   reqs,
+  save = allocatePanelOrder,
   onDone,
   onClose,
 }: {
@@ -29,6 +30,8 @@ export function AllocateCutStockModal({
   title: string;
   /** The order's requirement rows with `allocated` (this order) and `free` (nobody's) filled. */
   reqs: Requirement[];
+  /** CR-487: the write — the panel-order route by default, allocateSampleOrder for a sample order. */
+  save?: (orderId: string, allocation: Allocation) => Promise<{ ok: boolean; error?: string }>;
   onDone: () => void;
   onClose: () => void;
 }) {
@@ -48,7 +51,7 @@ export function AllocateCutStockModal({
   const submit = async () => {
     if (saving || !changed) return;
     setSaving(true);
-    const res = await allocatePanelOrder(orderId, booked);
+    const res = await save(orderId, booked);
     setSaving(false);
     if (!res.ok) {
       toast.error(res.error || "Could not update the booking");
@@ -72,7 +75,7 @@ export function AllocateCutStockModal({
         </div>
 
         <div className="df-body">
-          {reqs.length === 0 && <div className="dim" style={{ padding: 8 }}>No cut pieces required — these panels have no designs yet.</div>}
+          {reqs.length === 0 && <div className="dim" style={{ padding: 8 }}>No cut pieces required.</div>}
           {reqs.length > 0 && (
             <div style={{ border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
               <div style={{ display: "flex", gap: 12, padding: "8px 12px", borderBottom: "1px solid var(--border)", fontSize: "var(--t-sm)" }}>

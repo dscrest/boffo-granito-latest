@@ -3273,11 +3273,17 @@ const parseJsonCol = (raw) => {
    adds its output and books it, so it cannot break it. */
 // CR-400: an order is workable from birth — marks, booking and loads need no Accept any more.
 const PANEL_ORDER_OPEN = new Set(["NewRequest", "Received", "InCutting", "Ready"]);
+// CR-487: a sample order books cut pieces too (SampleOrder.allocation, same JSON shape) while open.
+const SAMPLE_ORDER_OPEN = new Set(["New", "PartiallySupplied"]);
 async function otherAllocations(catalyst, excludeOrderId) {
-  const rows = await zcqlAllRows(
-    catalyst,
-    `SELECT ROWID, allocation FROM PanelOrder WHERE (status = 'NewRequest' OR status = 'Received' OR status = 'InCutting' OR status = 'Ready') AND deleted_at is null`,
-  );
+  // Catalyst ROWIDs are unique project-wide, so one exclude id serves both tables.
+  const rows = [
+    ...(await zcqlAllRows(
+      catalyst,
+      `SELECT ROWID, allocation FROM PanelOrder WHERE (status = 'NewRequest' OR status = 'Received' OR status = 'InCutting' OR status = 'Ready') AND deleted_at is null`,
+    )),
+    ...(await zcqlAllRows(catalyst, `SELECT ROWID, allocation FROM SampleOrder WHERE (status = 'New' OR status = 'PartiallySupplied') AND deleted_at is null`)),
+  ];
   const sum = new Map();
   for (const r of rows) {
     if (excludeOrderId && String(r.ROWID) === String(excludeOrderId)) continue;
@@ -3738,6 +3744,23 @@ function sampleStatus(lines) {
   return all ? "Supplied" : any ? "PartiallySupplied" : "New";
 }
 
+/* CR-487: a sample order's cut-piece need per design|cutSize — Cut lines only (a Full
+   tile is record-only, user decision 2026-10-08), the PENDING qty (qty − supplied)
+   unless explicit picks [{line, qty}] are given (a load, or its reversal). */
+async function sampleOrderNeeds(catalyst, orderId, picks) {
+  const needs = new Map();
+  const src = picks || (await sampleOrderLines(catalyst, orderId)).map((l) => ({ line: l, qty: (Number(l.qty) || 0) - (Number(l.supplied_qty) || 0) }));
+  for (const p of src) {
+    const l = p.line || {};
+    if (String(l.piece_kind) !== "Cut" || !rowidParam(l.cut_piece_size) || !(p.qty > 0)) continue;
+    const k = `${l.design}|${l.cut_piece_size}`;
+    const cur = needs.get(k) || { design: String(l.design), cut_piece_size: String(l.cut_piece_size), need: 0 };
+    cur.need += p.qty;
+    needs.set(k, cur);
+  }
+  return needs;
+}
+
 app.post("/sample-order-save", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -3791,14 +3814,23 @@ app.post("/sample-order-save", async (req, res) => {
         let orderNumber = "";
         if (id) {
           const cur = rowList(
-            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status, order_number FROM SampleOrder WHERE ROWID = ${id} AND deleted_at is null`),
+            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status, order_number, allocation FROM SampleOrder WHERE ROWID = ${id} AND deleted_at is null`),
           )[0];
           if (!cur) throw badRequest(`Sample order not found: ${id}`, 404);
           if (String(cur.status) !== "New") throw badRequest("Samples have already been supplied — items and quantities are locked", 409);
           orderNumber = String(cur.order_number || "");
           const stamp = stampNow();
           for (const l of await sampleOrderLines(catalyst, id)) await ds.table("SampleOrderLine").updateRow({ ROWID: l.ROWID, deleted_at: stamp });
-          await ds.table("SampleOrder").updateRow({ ROWID: id, ...header });
+          // CR-487: the booking survives an edit only for keys still on the order, clamped to the new qty
+          // (New = nothing supplied, so the need IS the qty) — the /panel-order-save clamp.
+          const oldAlloc = parseJsonCol(cur.allocation);
+          const kept = {};
+          for (const l of clean) {
+            if (l.piece_kind !== "Cut") continue;
+            const q = Math.min(Number(oldAlloc[`${l.design}|${l.cut_piece_size}`]) || 0, l.qty);
+            if (q > 0) kept[`${l.design}|${l.cut_piece_size}`] = q;
+          }
+          await ds.table("SampleOrder").updateRow({ ROWID: id, ...header, allocation: JSON.stringify(kept) });
         } else {
           orderNumber = await nextOrderNumber(catalyst, "SampleOrder", "SMP");
           await assertUnique(catalyst, "SampleOrder", "order_number", orderNumber);
@@ -3880,7 +3912,7 @@ app.post("/sample-order-cancel/:rowid", async (req, res) => {
         if (from === "Supplied" || lines.some((l) => (Number(l.supplied_qty) || 0) > 0)) throw badRequest("Samples have been supplied — this order cannot be cancelled", 409);
         const n = (await panelLoadsOf(catalyst, "sample_order", rid)).loads.length;
         if (n) throw badRequest(`Delete the ${n} load${n === 1 ? "" : "s"} in the Dispatch tab first`, 409);
-        await ds.table("SampleOrder").updateRow({ ROWID: rid, status: "Cancelled" });
+        await ds.table("SampleOrder").updateRow({ ROWID: rid, status: "Cancelled", allocation: "{}" }); // CR-487: a cancelled order books nothing
         await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: rid, from_status: from, to_status: "Cancelled", note: reason });
         await logRelated(
           catalyst,
@@ -3897,9 +3929,62 @@ app.post("/sample-order-cancel/:rowid", async (req, res) => {
   }
 });
 
+/* CR-487: book cut pieces to a sample order — the /panel-order-allocate rule verbatim:
+   ABSOLUTE per design|cutSize figure (lower = release, 0 / missing = none, unknown keys
+   ignored), 0 ≤ q ≤ pending need AND ≤ on hand − what OTHER open orders (panel + sample)
+   have booked; every key verified before the single write. Full-tile lines never book. */
+app.post("/sample-order-allocate/:rowid", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const rid = rowidParam(req.params.rowid);
+    const wanted = (req.body || {}).allocation;
+    const result = await withOpLog(
+      catalyst,
+      { table_name: "SampleOrder", operation: "allocate", payload: { ROWID: rid, allocation: wanted } },
+      async () => {
+        if (!wanted || typeof wanted !== "object" || Array.isArray(wanted)) throw badRequest("allocation must be an object of design|cutSize → pcs");
+        const order = rowList(
+          await catalyst.zcql().executeZCQLQuery(
+            `SELECT ROWID, order_number, status, sales_order, quote, customer FROM SampleOrder WHERE ROWID = ${rid} AND deleted_at is null`,
+          ),
+        )[0];
+        if (!order) throw badRequest(`Sample order not found: ${rid}`, 404);
+        if (!SAMPLE_ORDER_OPEN.has(String(order.status)))
+          throw badRequest(String(order.status) === "Cancelled" ? `${order.order_number} is cancelled` : `${order.order_number} is fully supplied`, 409);
+        const needs = await sampleOrderNeeds(catalyst, rid);
+        const others = await otherAllocations(catalyst, rid);
+        const next = {};
+        for (const [k, n] of needs) {
+          const q = Number(wanted[k] == null || wanted[k] === "" ? 0 : wanted[k]);
+          if (!Number.isInteger(q) || q < 0) throw badRequest("Booked pcs must be a whole number ≥ 0");
+          if (q === 0) continue;
+          if (q > n.need) throw badRequest(`Only ${n.need} pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} are needed`);
+          const free = (await cutOnHand(catalyst, n.design, n.cut_piece_size)) - (others.get(k) || 0);
+          if (q > free)
+            throw badRequest(`Only ${Math.max(0, free)} pcs free of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} — the rest are booked by other orders`, 409);
+          next[k] = q;
+        }
+        // ponytail: read-check-write, single-writer app — the /panel-order-allocate ceiling.
+        await ds.table("SampleOrder").updateRow({ ROWID: rid, allocation: JSON.stringify(next) });
+        await logRelated(
+          catalyst,
+          [{ table: "SampleOrder", rowid: rid }, { table: "SalesOrder", rowid: order.sales_order }, { table: "Quote", rowid: order.quote }, { table: "Customer", rowid: order.customer }],
+          "sample-order-allocate",
+          { ROWID: rid, order_number: order.order_number, allocation: next },
+        );
+        return { rowid: rid, data: { ROWID: rid, allocation: next } };
+      },
+    );
+    res.json({ ok: true, rowid: result.rowid, data: result.data });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 /* CR-316: record what went out — {date, note?, lines:[{line, qty}]}. Every
-   quantity is verified (≤ remaining; Cut lines ≤ free cut stock = on hand −
-   open panel-order bookings, the /cut-stock-entry removal rule) BEFORE any
+   quantity is verified (≤ remaining; CR-487: Cut lines must be BOOKED to the
+   order and on hand — the panel-order load gate) BEFORE any
    write. Cut → adjustCutStock(−qty, kind "sample"); Full → record only.
    Header status is re-derived from the lines; the supply mirrors onto the
    source SO / Quote and the Customer's Activity. */
@@ -3929,28 +4014,19 @@ async function verifySampleSupply(catalyst, order, picksIn) {
     picks.push({ line, qty: q });
   }
   if (!picks.length) throw badRequest(`Enter a quantity on at least one line of ${order.order_number}`);
-  // Cut pieces: free = on hand − Σ booked by open panel orders (booking is their dispatch gate).
-  const want = new Map();
-  for (const p of picks) {
-    if (String(p.line.piece_kind) !== "Cut") continue;
-    const k = `${p.line.design}|${p.line.cut_piece_size}`;
-    want.set(k, { design: p.line.design, cut: p.line.cut_piece_size, qty: (want.get(k) ? want.get(k).qty : 0) + p.qty });
+  // CR-487: the pieces leave with the load — they must be BOOKED to this order (the CR-312/347
+  // panel-order gate; Σ open bookings ≤ on hand makes the free check redundant) and on hand.
+  const needs = await sampleOrderNeeds(catalyst, rid, picks);
+  const booked = parseJsonCol(order.allocation);
+  for (const [k, n] of needs) {
+    const have = Number(booked[k]) || 0;
+    if (have < n.need)
+      throw badRequest(`Book ${n.need - have} more pcs of ${await cutPieceLabel(catalyst, n.design, n.cut_piece_size)} before loading ${order.order_number}`, 409);
+    if ((await cutOnHand(catalyst, n.design, n.cut_piece_size)) < n.need) throw badRequest(`Insufficient cut-piece stock for ${order.order_number}`, 409);
   }
-  if (want.size) {
-    const booked = await otherAllocations(catalyst, null);
-    for (const [k, w] of want) {
-      const have = await cutOnHand(catalyst, w.design, w.cut);
-      const b = booked.get(k) || 0;
-      if (have - b < w.qty)
-        throw badRequest(
-          `Only ${Math.max(0, have - b)} pcs free of ${await cutPieceLabel(catalyst, w.design, w.cut)}${b ? ` — ${b} are booked by open panel orders` : ""}`,
-          409,
-        );
-    }
-  }
-  return { picks, lines };
+  return { picks, lines, needs };
 }
-async function applySampleSupply(catalyst, ds, order, { picks, lines }, { date, note, actor, load, vehicle }) {
+async function applySampleSupply(catalyst, ds, order, { picks, lines, needs }, { date, note, actor, load, vehicle }) {
   const rid = String(order.ROWID);
   for (const p of picks) {
     if (String(p.line.piece_kind) === "Cut")
@@ -3960,9 +4036,16 @@ async function applySampleSupply(catalyst, ds, order, { picks, lines }, { date, 
     p.line.supplied_qty = (Number(p.line.supplied_qty) || 0) + p.qty;
     await ds.table("SampleOrderLine").updateRow({ ROWID: p.line.ROWID, supplied_qty: p.line.supplied_qty, supplied_on: date });
   }
+  // CR-487: the booking shrinks with the stock — Σ open bookings ≤ on hand still holds.
+  const alloc = parseJsonCol(order.allocation);
+  for (const [k, n] of needs || []) {
+    const left = (Number(alloc[k]) || 0) - n.need;
+    if (left > 0) alloc[k] = left;
+    else delete alloc[k];
+  }
   const status = sampleStatus(lines);
+  await ds.table("SampleOrder").updateRow({ ROWID: rid, allocation: JSON.stringify(alloc), ...(status !== String(order.status) ? { status } : {}) });
   if (status !== String(order.status)) {
-    await ds.table("SampleOrder").updateRow({ ROWID: rid, status });
     await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: rid, from_status: order.status, to_status: status, note: load || "" });
   }
   await logRelated(
@@ -4011,7 +4094,7 @@ app.post("/panel-load-save", async (req, res) => {
           if (type === "Sample") {
             const order = rowList(
               await catalyst.zcql().executeZCQLQuery(
-                `SELECT ROWID, status, order_number, customer, sales_order, quote FROM SampleOrder WHERE ROWID = ${oid} AND deleted_at is null`,
+                `SELECT ROWID, status, order_number, customer, sales_order, quote, allocation FROM SampleOrder WHERE ROWID = ${oid} AND deleted_at is null`,
               ),
             )[0];
             if (!order) throw badRequest(`Sample order not found: ${oid}`, 404);
@@ -4150,26 +4233,31 @@ app.post("/panel-load-delete/:rowid", async (req, res) => {
         if (String(load.order_type) === "Sample") {
           const oid = rowidParam(load.sample_order);
           const order = rowList(
-            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status, order_number, customer, sales_order, quote FROM SampleOrder WHERE ROWID = ${oid} AND deleted_at is null`),
+            await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, status, order_number, customer, sales_order, quote, allocation FROM SampleOrder WHERE ROWID = ${oid} AND deleted_at is null`),
           )[0];
           if (!order) throw badRequest("Sample order not found", 404);
           if (String(order.status) === "Supplied") throw badRequest(`${order.order_number} is fully supplied — a final load cannot be removed`, 409);
           const olines = await sampleOrderLines(catalyst, oid);
           const byId = new Map(olines.map((l) => [String(l.ROWID), l]));
+          const alloc = parseJsonCol(order.allocation);
           for (const l of lines) {
             const line = byId.get(String(l.order_line));
             if (!line) continue;
             const q = Number(l.qty) || 0;
-            if (String(line.piece_kind) === "Cut")
+            if (String(line.piece_kind) === "Cut") {
               await adjustCutStock(catalyst, ds, line.design, line.cut_piece_size, q, {
                 kind: "sample", entry_date: todayDate(), note: `Reversed ${load.order_number} (${reason})`, ref_table: "SampleOrder", ref_rowid: oid, performed_by: actor,
               });
+              // CR-487: stock and booking come back together (the /panel-load-delete rule).
+              const k = `${line.design}|${line.cut_piece_size}`;
+              alloc[k] = (Number(alloc[k]) || 0) + q;
+            }
             line.supplied_qty = Math.max(0, (Number(line.supplied_qty) || 0) - q);
             await ds.table("SampleOrderLine").updateRow({ ROWID: line.ROWID, supplied_qty: line.supplied_qty });
           }
           const status = sampleStatus(olines);
+          await ds.table("SampleOrder").updateRow({ ROWID: oid, allocation: JSON.stringify(alloc), ...(status !== String(order.status) ? { status } : {}) });
           if (status !== String(order.status)) {
-            await ds.table("SampleOrder").updateRow({ ROWID: oid, status });
             await logTransition(catalyst, { entity_type: "SampleOrder", entity_rowid: oid, from_status: order.status, to_status: status, note: `Load ${load.order_number} removed` });
           }
           await logRelated(catalyst, [{ table: "SampleOrder", rowid: oid }, { table: "Customer", rowid: order.customer }], "sample-load-removed", { load: load.order_number, reason });
@@ -4482,7 +4570,7 @@ app.post("/cut-stock-entry", async (req, res) => {
           merged.set(k, cur);
         }
         if (!merged.size) throw badRequest("Add at least one line");
-        // CR-312: a removal may never dip below what open panel orders have booked — booking is the dispatch gate.
+        // CR-312/487: a removal may never dip below what open panel + sample orders have booked — booking is the dispatch gate.
         const booked = [...merged.values()].some((m) => m.qty < 0) ? await otherAllocations(catalyst, null) : new Map();
         // The booking gate is location-agnostic: sum every line of a pair across locations (CR-438).
         const byPair = new Map();
@@ -4503,7 +4591,7 @@ app.post("/cut-stock-entry", async (req, res) => {
           if (have + m.qty < 0) throw badRequest(`Only ${have} pcs on hand of ${await designLabel(catalyst, m.d)} for that cut size`, 409);
           const b = booked.get(`${m.d}|${m.c}`) || 0;
           if (have + m.qty < b)
-            throw badRequest(`Only ${have - b} pcs free of ${await designLabel(catalyst, m.d)} for that cut size — ${b} are booked by open panel orders`, 409);
+            throw badRequest(`Only ${have - b} pcs free of ${await designLabel(catalyst, m.d)} for that cut size — ${b} are booked by open orders`, 409);
         }
         // CR-329/330: a removal or a transfer may not exceed what THAT warehouse holds.
         // CR-446: netted PER BAY across the finer (date · reason) lines.
@@ -8054,6 +8142,7 @@ const STATE_COLUMNS = [
   ["PanelOrder", "checkpoints", "Panel order checkpoints are set via /panel-order-checkpoint"], // CR-313
   ["PanelOrder", "allocation", "Cut-piece booking is set via /panel-order-allocate"], // CR-312
   ["SampleOrder", "status", "Sample order status is derived by /panel-load-save"], // CR-316 / CR-347
+  ["SampleOrder", "allocation", "Cut-piece booking is set via /sample-order-allocate"], // CR-487
   ["SampleOrderLine", "supplied_qty", "Supplies are recorded as loads via /panel-load-save"],
   ["SampleOrderLine", "supplied_on", "Supplies are recorded as loads via /panel-load-save"],
   ["Warehouse", "is_primary", "The primary warehouse is set via /warehouse-primary"], // CR-329

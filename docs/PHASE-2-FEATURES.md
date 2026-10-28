@@ -684,6 +684,11 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Sample order pick slip** (CR-486, 2026-10-28). More ▸ Print order PDF: items with photo + item code, piece,
   Requested · Supplied · Remaining, line remarks, a blank Broken / Adjustment box per row, the Stock Adjustments
   reminder and sign-off lines. ≈ 1.2 h.
+- **Allocate Stock on sample orders** (CR-487, 2026-10-28). The sample order's Actions tab carries the panel order's
+  Requirements card (Need · In Stock · Allocated · Short) and the same Allocate Stock window; a cut-piece row loads
+  only once booked and the load consumes the booking; panel and sample bookings share one pool (no piece promised
+  twice); Cut Stock, the item page, the dashboard and Pending Cut Stock count sample bookings and demand. Full
+  tiles stay record-only. ≈ 2.5 h.
 
 ## 12 · Documentation & process
 

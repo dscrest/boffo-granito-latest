@@ -22,6 +22,7 @@
    stays visible but disabled afterwards (house rule).
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
+import { cachedSampleOrders, listSampleOrders, type SampleOrderRow } from "./sampleOrdersApi"; // CR-487
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { Chip } from "@/ui/Chip";
@@ -79,6 +80,7 @@ export function PanelOrderDetail() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [orders, setOrders] = useState<PanelOrderRow[] | null>(() => cachedPanelOrders());
+  const [samples, setSamples] = useState<SampleOrderRow[]>(() => cachedSampleOrders() ?? []); // CR-487: sample bookings count
   const [panels, setPanels] = useState<PanelRow[]>(() => cachedPanels() ?? []);
   const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs()); // CR-344
   const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
@@ -88,8 +90,9 @@ export function PanelOrderDetail() {
   const { enabled: whEnabled, nameOf: whName } = useWarehouses();
 
   const load = async () => {
-    const [o, p, s, m] = await Promise.all([listPanelOrders(), listPanels(), listCutStock(), listMdfs()]);
+    const [o, p, s, m, so] = await Promise.all([listPanelOrders(), listPanels(), listCutStock(), listMdfs(), listSampleOrders()]);
     setOrders(o.ok ? o.orders : (cachedPanelOrders() ?? []));
+    if (so.ok) setSamples(so.orders);
     if (p.ok) setPanels(p.panels);
     if (m.ok) setMdfs(m.rows);
     if (s.ok) {
@@ -131,7 +134,7 @@ export function PanelOrderDetail() {
   const loadStatus = order ? loadingStatus(progress, order.status) : "Not loaded";
   const pending = pendingText(progress);
   // CR-312: free = on hand − every open order's booking; this order's own booking rides on each row.
-  const booked = useMemo(() => allocatedByKey(orders ?? []), [orders]);
+  const booked = useMemo(() => allocatedByKey(orders ?? [], samples), [orders, samples]);
   const reqs = order ? requirementsFor(pendingNeedLines(order.lines, order.loads, panelById), panelById, stock, { allocation: order.allocation, booked }) : [];
   const short = reqs.filter((r) => r.short);
   const isOpen = !!order && PANEL_ORDER_OPEN.has(order.status);

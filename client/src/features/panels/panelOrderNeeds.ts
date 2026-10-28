@@ -102,13 +102,31 @@ export function requirementsFor(lines: NeedLine[], panelsById: Map<string, Panel
   return [...acc.values()];
 }
 
-/** CR-312: Σ booking per key over every OPEN order (Dispatched rows drop out). */
-export function allocatedByKey(orders: { status: string; allocation: Allocation }[]): Map<string, number> {
+/** CR-487: sample-order stages whose booking counts (mirrors the server SAMPLE_ORDER_OPEN). */
+export const SAMPLE_ORDER_OPEN: ReadonlySet<string> = new Set(["New", "PartiallySupplied"]);
+
+/** CR-487: a sample order's Cut lines as need lines — the PENDING qty, one piece per unit
+    (a Full tile is record-only and never books). Feed to requirementsFor / demandByKey. */
+export function sampleNeedLines(
+  lines: { pieceKind: string; designId: string; cutSizeId: string; designName: string; cutSizeName: string; qty: number; suppliedQty: number }[],
+): NeedLine[] {
+  return lines
+    .filter((l) => l.pieceKind === "Cut" && l.cutSizeId && l.qty - l.suppliedQty > 0)
+    .map((l) => ({ panelId: "", qty: l.qty - l.suppliedQty, designId: l.designId, cutSizeId: l.cutSizeId, designName: l.designName, cutSizeName: l.cutSizeName }));
+}
+
+/** CR-312: Σ booking per key over every OPEN order (Dispatched rows drop out).
+    CR-487: `samples` = sample orders, whose bookings count while New / PartiallySupplied. */
+export function allocatedByKey(
+  orders: { status: string; allocation: Allocation }[],
+  samples: { status: string; allocation: Allocation }[] = [],
+): Map<string, number> {
   const sum = new Map<string, number>();
-  for (const o of orders) {
-    if (!PANEL_ORDER_OPEN.has(o.status)) continue;
+  const add = (o: { allocation: Allocation }) => {
     for (const [k, q] of Object.entries(o.allocation)) if (q > 0) sum.set(k, (sum.get(k) ?? 0) + q);
-  }
+  };
+  for (const o of orders) if (PANEL_ORDER_OPEN.has(o.status)) add(o);
+  for (const o of samples) if (SAMPLE_ORDER_OPEN.has(o.status)) add(o);
   return sum;
 }
 
@@ -133,8 +151,10 @@ export function demandByKey(
   panelsById: Map<string, PanelRow>,
   stock: Map<string, number>,
   allKeys: Iterable<string> = [],
+  /** CR-487: open sample orders' Cut lines (sampleNeedLines) are demand and their bookings count. */
+  samples: { id: string; orderNumber: string; status: string; lines: NeedLine[]; allocation: Allocation }[] = [],
 ): DemandRow[] {
-  const booked = allocatedByKey(orders);
+  const booked = allocatedByKey(orders, samples);
   const rows = new Map<string, DemandRow>();
   const blank = (key: string): DemandRow => {
     const [designId, cutSizeId] = key.split("|");
@@ -142,8 +162,8 @@ export function demandByKey(
     const allocated = booked.get(key) ?? 0;
     return { key, designId, cutSizeId, designName: "", cutSizeName: "", required: 0, onHand, allocated, free: Math.max(0, onHand - allocated), shortage: 0, orders: [] };
   };
-  for (const o of orders) {
-    if (o.status === "Dispatched" || o.status === "Cancelled") continue; // CR-368: a cancelled order needs nothing
+  const open = [...orders.filter((o) => PANEL_ORDER_OPEN.has(o.status)), ...samples.filter((o) => SAMPLE_ORDER_OPEN.has(o.status))]; // CR-368: a cancelled order needs nothing
+  for (const o of open) {
     for (const r of requirementsFor(o.lines, panelsById, stock)) {
       const cur = rows.get(r.key) ?? blank(r.key);
       cur.designName = r.designName;

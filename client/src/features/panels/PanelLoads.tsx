@@ -41,15 +41,22 @@ import type { DesignImage } from "@/features/masters/designsApi";
 import { formatVehicleNumber } from "@/features/masters/vehiclesApi";
 import { MoreMenu } from "@/features/common/DetailBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { RequirementsCard } from "./RequirementsCard";
+import { RequirementsCard, SampleRequirementsCard } from "./RequirementsCard";
 import { mdfLabel, type PanelRow } from "./panelsApi";
 import { cachedMdfs } from "./mdfApi";
 import { checkpointTone, LOADING_TONE } from "./pcBits";
 import { deleteLoad, saveLoad, type LoadPick } from "./panelLoadsApi";
 import {
+  allocatedByKey,
+  cachedCutStock,
+  cachedPanelOrders,
   CHECKPOINT_LABEL,
   CHECKPOINT_STATUSES,
   LINE_CHECKPOINT_KEYS,
+  listCutStock,
+  listPanelOrders,
+  sampleNeedLines,
+  stockKey,
   lineCheckpoint,
   lineCheckpointMark,
   loadingStatus,
@@ -74,7 +81,7 @@ import {
   type ProgressRow,
   type Requirement,
 } from "./panelOrdersApi";
-import { remaining, SAMPLE_PIECE_LABEL, type SampleOrderRow } from "./sampleOrdersApi";
+import { cachedSampleOrders, listSampleOrders, remaining, SAMPLE_PIECE_LABEL, sampleRequirements, type SampleOrderRow } from "./sampleOrdersApi";
 
 /** CR-402: short column heads for the per-panel marks (the full names stay in CHECKPOINT_LABEL). */
 const LINE_CHECKPOINT_HEAD: Record<LineCheckpointKey, string> = { mdf: "MDF", vinyl: "Vinyl", pasted: "Pasted" };
@@ -178,12 +185,19 @@ const loadCopy = (o: LoadableOrder, ld: LoadRow) => void import("./panelLoadCopy
 
 /** This order's requirements with its booking (the detail page passes the same thing to the Actions tab). */
 function reqsOf(o: LoadableOrder, panelsById: Map<string, PanelRow> | undefined, stock: Map<string, number> | undefined): Requirement[] {
-  if (o.type !== "Panel" || !panelsById || !stock) return [];
+  // CR-487: a sample order's Cut lines carry a booking too (stock only colours In Stock — readiness reads `allocated`).
+  if (o.type === "Sample") return requirementsFor(sampleNeedLines(o.lines), new Map(), stock ?? new Map(), { allocation: o.allocation });
+  if (!panelsById || !stock) return [];
   return requirementsFor(pendingNeedLines(o.lines, o.loads, panelsById), panelsById, stock, { allocation: o.allocation });
 }
-/** CR-381: readiness of one row — sample rows have no marks and are always loadable. */
+/** CR-381: readiness of one row — a sample row has no marks; CR-487: its Cut pieces must be BOOKED (Full tiles always load). */
 export function readinessOf(o: LoadableOrder, r: ProgressRow, reqs: Requirement[]): { ready: boolean; missing: string[] } {
-  if (o.type !== "Panel") return { ready: true, missing: [] };
+  if (o.type !== "Panel") {
+    const l = o.lines.find((x) => x.id === r.lineId);
+    if (!l || l.pieceKind !== "Cut") return { ready: true, missing: [] };
+    const short = Math.max(0, r.pending - (reqs.find((q) => q.key === stockKey(l.designId, l.cutSizeId))?.allocated ?? 0));
+    return short > 0 ? { ready: false, missing: [`Book ${fmt(short)} more pcs`] } : { ready: true, missing: [] };
+  }
   return materialReadiness(r, o.lines.find((l) => l.id === r.lineId) ?? {}, o.checkpoints, reqs);
 }
 /** Booking gate text for a panel order's picks (the server refuses the same way). */
@@ -694,28 +708,39 @@ export function PanelActionsTab({
 }
 
 /* ---------------- Actions tab — sample orders (CR-485) ---------------- */
-/** The panel tab's shape for a sample order: one row per sample line (always Ready — no marks, no booking),
-    Load Now + "+" Load… per row, Load Copy per trip and Dispatch in the card head. One card — no pieces
-    card, no Requirements. The header Record Load button is gone; the Dispatch tab keeps its own. */
+/** The panel tab's shape for a sample order: one row per sample line (no marks; CR-487: a Cut row is Ready once
+    its pieces are BOOKED, a Full row always), Load Now + "+" Load… per row, Load Copy per trip and Dispatch in
+    the card head, and the Requirements card (booking + Allocate Stock) under it — the panel order's CR-450 home.
+    The header Record Load button is gone; the Dispatch tab keeps its own. */
 export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; onChanged: () => void }) {
   const o: LoadableOrder = { ...order, type: "Sample" };
-  const rows: ReadyRow[] = progressOf(o).map((r) => ({ ...r, rd: readinessOf(o, r, []) }));
+  // CR-487: free = on hand − every open order's booking (panel + sample); the detail page holds neither, so load here.
+  const [stock, setStock] = useState<Map<string, number>>(() => cachedCutStock() ?? new Map());
+  const [booked, setBooked] = useState<Map<string, number>>(() => allocatedByKey(cachedPanelOrders() ?? [], cachedSampleOrders() ?? []));
+  useEffect(() => {
+    void listCutStock().then((r) => r.ok && setStock(r.stock));
+    void Promise.all([listPanelOrders(), listSampleOrders()]).then(([p, s]) => setBooked(allocatedByKey(p.ok ? p.orders : [], s.ok ? s.orders : [])));
+  }, [order]);
+  const reqs = sampleRequirements(order, stock, booked);
+  const rows: ReadyRow[] = progressOf(o).map((r) => ({ ...r, rd: readinessOf(o, r, reqs) }));
   const open = isOpen(o);
   const canEdit = can("panel_craft", "edit");
   const keyOf = (r: ProgressRow) => `${order.id}|${rowKey(r)}`;
   const [qty, setQty] = useState<Record<string, number>>({});
   const [recording, setRecording] = useState<false | { only?: Set<string> }>(false);
-  const val = (r: ReadyRow) => qty[keyOf(r)] ?? r.pending;
+  const val = (r: ReadyRow) => qty[keyOf(r)] ?? (r.rd.ready ? r.pending : 0); // CR-381: blocked rows sit at 0
   const set = (r: ProgressRow, v: number) => setQty((p) => ({ ...p, [keyOf(r)]: Math.max(0, Math.min(r.pending, Math.floor(v) || 0)) }));
   const total = rows.reduce((s, r) => s + val(r), 0);
   const pendingRows = rows.filter((r) => r.pending > 0).length;
+  const readyRows = rows.filter((r) => r.pending > 0 && r.rd.ready).length;
+  const warn = bookingWarning(reqs);
   const lineOf = (id: string) => order.lines.find((l) => l.id === id);
   return (
     <div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="card-head">
           <span style={{ fontWeight: 600 }}>Ready to Dispatch</span>
-          {pendingRows > 0 && <Chip tone="green" label={`${pendingRows} of ${pendingRows} ready`} />}
+          {pendingRows > 0 && <Chip tone={readyRows === pendingRows ? "green" : "amber"} label={`${readyRows} of ${pendingRows} ready`} />}
           <span style={{ flex: 1 }} />
           <MoreMenu
             label="Load Copy"
@@ -727,7 +752,7 @@ export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; 
             }))}
           />
           {canEdit && (
-            <button className="hbtn primary" disabled={!open || total === 0} onClick={() => setRecording({})} title={!open ? "Order is closed" : total === 0 ? "Type a quantity to dispatch" : "Record the vehicle load for these quantities"}>
+            <button className="hbtn primary" disabled={!open || total === 0} onClick={() => setRecording({})} title={!open ? "Order is closed" : total === 0 ? warn || "Type a quantity to dispatch" : "Record the vehicle load for these quantities"}>
               <Icon name="truck" size={13} /> Dispatch
             </button>
           )}
@@ -758,7 +783,7 @@ export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; 
                     <td className="num mono" style={r.pending > 0 ? { color: "var(--c-amber)", fontWeight: 600 } : undefined}>{fmt(r.pending)}</td>
                     <td style={{ whiteSpace: "nowrap" }}><StatusCell pending={r.pending} rd={r.rd} /></td>
                     <td className="num">
-                      <NumberInput min={0} value={val(r)} onChange={(e) => set(r, Number(e.target.value))} placeholder="0" style={{ width: 100, textAlign: "right" }} aria-label={`${l?.designName || "line"} loading now`} disabled={!open || !canEdit || r.pending === 0} />
+                      <NumberInput min={0} value={val(r)} onChange={(e) => set(r, Number(e.target.value))} placeholder="0" style={{ width: 100, textAlign: "right" }} aria-label={`${l?.designName || "line"} loading now`} disabled={!open || !canEdit || r.pending === 0 || !r.rd.ready} title={r.rd.ready ? undefined : r.rd.missing.join(" · ")} />
                     </td>
                     {canEdit && (
                       <td>
@@ -777,9 +802,12 @@ export function SampleActionsTab({ order, onChanged }: { order: SampleOrderRow; 
           </table>
         </div>
       </div>
+      {/* CR-487: booking + Allocate Stock for the Cut lines — hidden when the order has none (full tiles never book). */}
+      {reqs.length > 0 && <SampleRequirementsCard order={order} reqs={reqs} onChanged={onChanged} />}
       {recording && (
         <RecordLoadModal
           orders={[o]}
+          stock={stock}
           initialQty={Object.fromEntries(rows.map((r) => [keyOf(r), recording.only ? (recording.only.has(keyOf(r)) ? val(r) || r.pending : 0) : val(r)]))}
           onDone={onChanged}
           onClose={() => setRecording(false)}
