@@ -20,7 +20,6 @@ import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
 import { fmt } from "@/lib/format";
 import { usePersistedState } from "@/lib/usePersistedState";
-import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
 import { cachedCutStock, cachedPanelOrders, demandByKey, listCutStock, listPanelOrders, pendingNeedLines, sampleNeedLines, type DemandRow, type PanelOrderRow } from "./panelOrdersApi";
@@ -36,7 +35,6 @@ interface Row extends DemandRow {
 }
 
 const COLUMNS: ColumnDef<Row>[] = [
-  { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.design?.images ?? []} alt={r.designName} /> },
   { key: "design", label: "Item", render: (r) => <span className="design-name">{r.designName || "—"}</span> },
   { key: "size", label: "Size", render: (r) => (r.sizeLabel ? <span className="chip size">{r.sizeLabel}</span> : dash) },
   { key: "cutSize", label: "Cut Piece Size", className: "mono", render: (r) => r.cutSizeName || dash },
@@ -92,7 +90,7 @@ export function PendingCutStock() {
   const [designFilter, setDesignFilter] = useState("");
   const [shortOnly, setShortOnly] = usePersistedState("pendingCutStock.shortOnly", false);
   const [zeroOnly, setZeroOnly] = usePersistedState("pendingCutStock.zeroOnly", false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("pendingCutStockColumns", COLUMNS);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("pendingCutStockColumns.v2", COLUMNS); // .v2: Image column dropped (user 2026-10-28)
 
   const load = async () => {
     setLoading(true);

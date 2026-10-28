@@ -34,7 +34,7 @@ import { useWarehouses } from "@/features/masters/useWarehouses";
 import { Note } from "@/ui/States";
 import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
-import { cachedCutSizes, cachedPanels, createCutSize, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
+import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { cachedCutStock, cachedCutStockRows, cachedCutWeights, listCutStock, requirementsFor, stockKey, type NeedLine, type PanelOrderInput } from "./panelOrdersApi";
 import { panelWeightSplit } from "./panelOrderNeeds";
@@ -173,15 +173,7 @@ export function PanelOrderForm({
     [designs, itemIds, lines],
   );
   const cutOptions = useMemo(() => cutSizes.map((c) => ({ value: c.id, label: c.label })), [cutSizes]);
-  const onCreateCutSize = async (i: number, name: string) => {
-    const res = await createCutSize(name);
-    if (!res.ok || !res.rowid) {
-      toast.error(res.error || "Could not add the cut piece size to the master");
-      return;
-    }
-    setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-    setLine(i, { cutSizeId: res.rowid });
-  };
+  // CR-489 follow-up (user 2026-10-28): sizes are selected only — "Create …" removed; use Cut Piece Sizes.
   const panelOptions = useMemo(
     () => panels.map((p) => ({ value: p.id, label: p.panelCode, hint: p.lines.map((l) => l.designName).join(", ") || undefined })),
     [panels],
@@ -359,7 +351,6 @@ export function PanelOrderForm({
                     value={l.cutSizeId}
                     options={cutOptions}
                     onChange={(v) => setLine(i, { cutSizeId: v })}
-                    onCreate={(name) => void onCreateCutSize(i, name)}
                     placeholder={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"}
                     ariaLabel="Cut piece size"
                   />

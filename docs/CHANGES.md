@@ -3,6 +3,10 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-28 — Add Stock off the Panel Orders list (CR-490) — deploy pending
+
+- **Add Stock button removed from `/panel-orders` (CR-490).** Stock is received on Cut Stock, Panel Items, the item's Actions tab or the cut-piece page, not from the order list.
+
 ## 2026-10-28 — Full-tile samples book the sample stock, not batches (CR-489) — LIVE + DEMO 2026-10-28
 
 - **Full tiles book sample stock (CR-489).** The batch picker is gone from a sample order's Allocate Stock window.
@@ -14,7 +18,11 @@
   (Panel Items); an item already on the order stays pickable. An item not yet in Panel Craft is added there
   first (Panel Items ▸ Add Item / Add Stock).
 - **Tidy-ups.** No image thumbnails on sample rows (Orders grid, the sample order's Samples card, the Customer
-  page's Samples section); the Cut Stock bar shows pieces only, no weight.
+  page's Samples section) or on Pending Cut Piece; the Cut Stock bar shows pieces only, no weight; the Orders
+  page bar no longer has an Add Stock button.
+- **Cut piece sizes are picked, never typed in.** The "Create …" row is gone from every Cut Piece Size dropdown
+  (panel, panel order, sample order, panel item, cut-stock receipt). New sizes are added on Panel Items ▸ Cut
+  Piece Sizes only.
 
 ## 2026-10-28 — Full-tile samples book boxes too; no dispatch until booked (CR-488) — LIVE + DEMO 2026-10-28, REVERSED by CR-489
 

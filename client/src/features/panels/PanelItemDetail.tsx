@@ -28,7 +28,7 @@ import { DetailRail } from "@/features/common/DetailRail";
 import { ImageThumb } from "@/features/common/ImageLightbox";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { PanelsPanel } from "./PanelsPanel";
-import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
+import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import {
   cachedCutStockRows,
   CUT_ENTRY_KIND_LABEL,
@@ -127,15 +127,7 @@ export function PanelItemDetail() {
     toast.success(qty > 0 ? `Cut piece added · ${fmt(qty)} pcs received` : "Cut piece added");
     reload();
   };
-  const onCreateSize = async (name: string) => {
-    const res = await createCutSize(name);
-    if (!res.ok || !res.rowid) {
-      toast.error(res.error || "Could not add the cut piece size to the master");
-      return;
-    }
-    setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-    setNewSize(res.rowid);
-  };
+  // CR-489 follow-up (user 2026-10-28): sizes are selected only — "Create …" removed; use Cut Piece Sizes.
   const removePiece = async (row: CutStockRow) => {
     const reason = await confirmDelete({ title: "Remove cut piece?", message: `Remove ${cutName.get(row.cutSizeId) || "this cut piece"} from ${design?.uniqueName || design?.designName}? Only possible with 0 on hand and no panel using it.` });
     if (reason === null) return;
@@ -228,7 +220,7 @@ export function PanelItemDetail() {
               {editable && canEdit && (
                 <tr>
                   <td style={{ minWidth: 220 }}>
-                    <Combobox value={newSize} options={sizeOptions} onChange={setNewSize} onCreate={(n) => void onCreateSize(n)} placeholder="+ Cut piece size…" ariaLabel="New cut piece size" />
+                    <Combobox value={newSize} options={sizeOptions} onChange={setNewSize} placeholder="+ Cut piece size…" ariaLabel="New cut piece size" />
                   </td>
                   <td className="num">
                     <input

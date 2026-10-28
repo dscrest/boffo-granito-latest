@@ -437,11 +437,6 @@ export function Orders() {
           <input type="text" placeholder="Search order, panel, item, customer or source…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
         {view === "sheet" && <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />}
-        {can("panel_craft", "edit") && (
-          <button className="btn" onClick={() => navigate("/cut-stock/record")} title="Bulk Add Stock sheet (CR-307)">
-            Add Stock
-          </button>
-        )}
         {can("panel_craft", "create") && (
           <button className="hbtn primary" onClick={() => navigate(typeFilter === "Sample" ? "/panel-orders/new?type=Sample" : "/panel-orders/new")}>
             <Icon name="plus" size={13} />

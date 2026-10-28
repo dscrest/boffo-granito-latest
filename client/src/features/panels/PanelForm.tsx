@@ -16,7 +16,7 @@ import { NumberInput } from "@/ui/NumberInput";
 import { FormPage, useFormSave } from "@/ui/FormPage";
 import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
-import { createCutSize, listPanels, cachedCutSizes, type CutSizeOption, type PanelInput, type PanelRow } from "./panelsApi";
+import { listPanels, cachedCutSizes, type CutSizeOption, type PanelInput, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { cachedCutStockRows, listCutStock, saveCutPiece, type CutStockRow } from "./panelOrdersApi";
 
@@ -109,23 +109,8 @@ export function PanelForm({
     setLines(fn);
   };
 
-  // "Create …" on the Cut Piece Size picker — write-through to the master,
-  // then select the new row (same pattern as DesignForm.createPartyBrand).
-  const onCreateCutSize = async (i: number, name: string) => {
-    const res = await createCutSize(name);
-    if (!res.ok || !res.rowid) {
-      toast.error(res.error || "Could not add the cut piece size to the master");
-      return;
-    }
-    setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-    // CR-306: the new size becomes a cut piece OF THIS ITEM (weight set later on Panel Items).
-    const design = lines[i]?.design;
-    if (design) {
-      const reg = await saveCutPiece({ design, cut_piece_size: res.rowid });
-      if (reg.ok) setPieces((prev) => [...prev, { id: reg.rowid || `${design}|${res.rowid}`, designId: design, cutSizeId: res.rowid!, qty: 0, weightKg: null, modifiedTime: "" }]);
-    }
-    setLine(i, { cut_piece_size: res.rowid });
-  };
+  // CR-489 follow-up (user 2026-10-28): cut piece sizes are SELECTED only — no "Create …" on any picker;
+  // the master is kept on Panel Items ▸ Cut Piece Sizes.
 
   // CR-289: a blank Cut Piece Size = full size — the server fills it in.
   const completeLines = lines.filter((l) => l.design && l.cut_piece_qty > 0);
@@ -277,7 +262,6 @@ export function PanelForm({
                   value={l.cut_piece_size}
                   options={cutOptionsFor(l.design)}
                   onChange={(v) => setLine(i, { cut_piece_size: v })}
-                  onCreate={l.design ? (name) => void onCreateCutSize(i, name) : undefined}
                   placeholder={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"}
                   ariaLabel="Cut piece size"
                 />

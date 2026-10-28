@@ -25,7 +25,7 @@ import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/d
 import { StockEntrySheet, type StockEntrySpec } from "@/features/common/StockEntrySheet";
 import { StockAdjustForm, type StockAdjustSpec } from "@/features/common/StockAdjustForm";
 import { useWarehouses } from "@/features/masters/useWarehouses";
-import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
+import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { cachedCutStockRows, cutWarehouseCells, listCutStock, listCutStockEntries, postCutStockEntry, type CutStockEntryRow, type CutStockRow } from "./panelOrdersApi";
 import { cutPieceWeight, weightPerPc } from "./cutPieceWeight";
 
@@ -90,17 +90,7 @@ export function CutStockSheetPage({ kind }: { kind: "receipt" | "adjustment" | "
         return [...defined, ...cutSizes.filter((c) => !used.has(c.id)).map((c) => ({ value: c.id, label: c.label, hint: "new cut piece" }))];
       },
       byName: new Map(cutSizes.map((c) => [c.label.trim().toLowerCase(), c.id])),
-      onCreate: receiving
-        ? async (_designId, text) => {
-            const res = await createCutSize(text);
-            if (!res.ok || !res.rowid) {
-              toast.error(res.error || "Could not add the cut piece size to the master");
-              return undefined;
-            }
-            setCutSizes((prev) => [...prev, { id: res.rowid!, label: text.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-            return res.rowid;
-          }
-        : undefined,
+      // CR-489 follow-up (user 2026-10-28): no "Create …" — a receipt picks an existing cut piece size only.
     };
     const warnFor: StockEntrySpec["warnFor"] = (l, h) => {
       const out = transferring ? l.qty : -l.qty;

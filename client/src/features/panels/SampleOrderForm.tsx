@@ -7,7 +7,7 @@
    server mints SMP/FY/NNN. "Request Samples" from a Quote / SO (CR-317)
    opens it with the customer locked and that sale's designs preselected
    as Full-tile lines. Any Item-master design can be sampled; cut sizes
-   come from the Cut Piece Size master (Create … write-through).
+   come from the Cut Piece Size master (selection only — no Create …).
    Sales Person defaults to the logged-in user; Order Date to today.
    ============================================================ */
 import { useEffect, useMemo, useState } from "react";
@@ -23,7 +23,7 @@ import { cachedCustomers, listCustomers, type CustomerRow } from "@/features/mas
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { cachedSalesPersons, currentSalespersonName, listSalesPersons } from "@/features/masters/salespersonApi";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
-import { cachedCutSizes, createCutSize, listPanels, type CutSizeOption } from "./panelsApi";
+import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { cachedCutStockRows, listCutStock, type CutStockRow } from "./panelOrdersApi";
 import { InfoDot } from "./pcBits";
 import { SAMPLE_PIECE_LABEL, type SampleOrderInput, type SamplePieceKind } from "./sampleOrdersApi";
@@ -109,16 +109,7 @@ export function SampleOrderForm({
     form.touch();
     setLines((ls) => ls.filter((_, j) => j !== i));
   };
-  // "Create …" on the Cut Piece Size picker — write-through to the master, then select it.
-  const onCreateCutSize = async (i: number, name: string) => {
-    const res = await createCutSize(name);
-    if (!res.ok || !res.rowid) {
-      toast.error(res.error || "Could not add the cut piece size to the master");
-      return;
-    }
-    setCutSizes((prev) => [...prev, { id: res.rowid!, label: name.trim() }].sort((a, b) => a.label.localeCompare(b.label)));
-    setLine(i, { cutSizeId: res.rowid });
-  };
+  // CR-489 follow-up (user 2026-10-28): sizes are selected only — "Create …" removed; use Cut Piece Sizes.
 
   const dupKeys = useMemo(() => {
     const seen = new Set<string>();
@@ -266,7 +257,6 @@ export function SampleOrderForm({
                     value={l.cutSizeId}
                     options={cutOptions}
                     onChange={(v) => setLine(i, { cutSizeId: v })}
-                    onCreate={(name) => void onCreateCutSize(i, name)}
                     placeholder="Cut piece size…"
                     invalid={!!l.designId && !l.cutSizeId}
                     ariaLabel="Cut piece size"
