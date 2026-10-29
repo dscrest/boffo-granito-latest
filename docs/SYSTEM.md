@@ -259,7 +259,7 @@ if the two ever disagree, the server wins and the client is the bug.
 | Quote | `Draft → PendingApproval → Approved → Sent → Accepted`; `Rejected` from PendingApproval/Sent/Accepted, back to PendingApproval. Terminal `Converted` / `PartiallyConverted` are set by conversion, not by this map. | `QUOTE_TRANSITIONS` [`index.js:1029`](../functions/data-ops/index.js#L1029) |
 | SalesOrder | `Draft → PendingApproval → Confirmed → InProgress`; `Cancelled` from Confirmed/InProgress and back to Confirmed; `Rejected → PendingApproval`. **Auto roll-up (CR-230/233):** `PartiallyCompleted / Completed` written by `rollupSoStatus` after every `recountOrderItems` — SO status is the order LIFECYCLE only; palletization + loading progress are derived grid columns / detail fields (`palStatus`, `loadStatus` in `ordersApi.ts`), and `soLiveStatus` is the one display function for grid + detail (dispatched vs ordered over all lines; promote-only, approval states + Cancelled untouched; an SO edit may demote). **Manual (CR-231):** `/so-status` with `manual: true` = any status, reason mandatory. **Edit (CR-232):** `/update-so-with-items` edits lines in place, allowed after work is recorded (worked line: item frozen, qty ≥ palletised/loaded/dispatched, not removable). | `SO_TRANSITIONS` [`index.js:1109`](../functions/data-ops/index.js#L1109) |
 | PalPlan (plan) | `Planning → Loading → Completed`; Loading may return to Planning; Completed is terminal | `PAL_TRANSITIONS` [`index.js:2275`](../functions/data-ops/index.js#L2275) |
-| PalPlan (line) | `Planning → Palletizing → ReadyToLoad`, freely reversible among the three; **Release** (CR-361) takes a loaded line's boxes out of an Open box, or a ReadyToLoad line's boxes out of the plan and back to free stock; **Discard** (CR-369) does the same for a Planning / Palletizing line; plan Delete (CR-370) and SO Cancel (CR-371) release every line | `PAL_LINE_TRANSITIONS` [`index.js:2281`](../functions/data-ops/index.js#L2281), mirrored [`palPlansApi.ts:35`](../client/src/features/stages/palPlansApi.ts#L35) |
+| PalPlan (line) | `Planning → Palletizing → ReadyToLoad`, freely reversible among the three; **Release** (CR-361) takes a loaded line's boxes out of an Open box, or (CR-500) a ReadyToLoad line's boxes back to the Ready for Palletization queue row of the same item + batch, allocation kept; **Cancel Palletization** (CR-501) does the same for a Palletizing line; **Discard** (CR-369) sends a Planning line's boxes to free stock; plan Delete (CR-370) and SO Cancel (CR-371) release every line | `PAL_LINE_TRANSITIONS` [`index.js:2281`](../functions/data-ops/index.js#L2281), mirrored [`palPlansApi.ts:35`](../client/src/features/stages/palPlansApi.ts#L35) |
 | LoadBox | `Open → Dispatched` | `/load-box-dispatch` [`index.js:2948`](../functions/data-ops/index.js#L2948) |
 | Production | `New → InProduction → Completed` (auto-stepped) | `PRODUCTION_STAGE_ORDER` [`productionApi.ts:433`](../client/src/features/stages/productionApi.ts#L433) |
 | PanelOrder | `NewRequest ("New") → Received → InCutting → Ready → Dispatched` (+ direct `Received → Dispatched` when stock covers), **forward-only**; every order is born `NewRequest` (CR-294) | `PANEL_ORDER_TRANSITIONS` [`index.js:2851`](../functions/data-ops/index.js#L2851), `INSERT_INITIAL` [`index.js:5773`](../functions/data-ops/index.js#L5773) |
@@ -436,9 +436,12 @@ and the board's read-only Done rows are gone.
 **Release (CR-361) / Discard (CR-369)** — ONE server route `POST /pal-line-release/:rowid {boxes?, reason}` reverses
 palletization work for one line, partial or whole, **reason mandatory for every role** (`requireReason`, CR-369 — no Admin exemption):
 a line in an **Open** container loses `boxes` (the existing `writeLineIntoBox` split, remainder un-boxed)
-and they return to **Ready for Loading**; an un-boxed line of ANY stage (ReadyToLoad = Release, Planning /
-Palletizing = **Discard…** in the "+" menu) shrinks / soft-deletes and the
-boxes return to **free stock** — `releaseLineToStock`: the order's `alloc` rows are returned through `deallocateCore` (same
+and they return to **Ready for Loading**; an un-boxed **ReadyToLoad** line (Release, **CR-500** 2026-10-29 — reverses the
+CR-361 free-stock half) shrinks / soft-deletes and the boxes return to **Ready for Palletization** — `returnLineToQueue` merges them
+into the live Planning line of the same plan + item + batch with no `pallet_group` (else inserts one from the released line), recounts,
+logs ReadyToLoad → Planning; the allocation is untouched; a **Palletizing** line takes the same road (**Cancel Palletization…**, CR-501,
+Palletizing → Planning; a mixed pallet left with one member loses its `pallet_group`); an un-boxed **Planning** line (**Discard…** in the "+" menu)
+shrinks / soft-deletes and the boxes return to **free stock** — `releaseLineToStock`: the order's `alloc` rows are returned through `deallocateCore` (same
 batch first), after `recountOrderItems` so the palletized counter has already dropped; refused when the
 order's allocation does not cover the count and when the box is dispatched. The same core serves **plan Delete (CR-370)** —
 `discardPlanLines` returns every live line first, 409 while any line sits in a container — and **SO Cancel (CR-371)** —
@@ -448,14 +451,15 @@ lines (they keep drag-back / partial Complete). Entry points: the "+" menu on `/
 `/loading` rows (Ready rows → stock; loaded rows → Ready for Loading, replacing the old reason-less
 "Unload item"). Stock card effect: loaded release → In loading ↑ Available ↑; stock release →
 Available ↑ (Awaiting palletization unchanged, since produced fell with palletized).
-Group, Today's Report and New Palletization Plan sit in the header (the Kanban/Sheet toggle is hidden since CR-418 — Sheet only). The Sheet is
-ColumnDef-driven (CR-161/279/472/481, key `packingSheetColumns.v5.<stage>` — each `ColumnDef` may carry
+**ONE toolbar (CR-491):** the search + customer / country / item / size filters (+ Clear filters) fill its left half; right of them Today's Report, Group, the column picker and the split button **New Palletization Plan ▾** whose menu holds **Sheet Mode** (omitted on `/palletized`); Cancel / Save (N) replace the ▾ while Sheet Mode is on (the Kanban/Sheet toggle is hidden since CR-418 — Sheet only). The Sheet is
+ColumnDef-driven (CR-161/279/472/481/495/499, key `packingSheetColumns.v7.<stage>` — each `ColumnDef` may carry
 `stages`, so every page shows its own figures): Customer, Item, **PO Number** (CR-482; **SO Number** last, hidden),
-Batch, then per page — *Ready for Palletization*: Boxes (queued), Ordered Boxes, **Possible Pallets**; *In
-Palletization*: **Pending Boxes** (batch total − recorded), Possible Pallets (of the pending), **Prepared Pallets**,
-**Boxes** (= prepared pallets × capacity), Ordered Boxes; *Ready for Loading*: **Pallets**, **Boxes** (= pallets ×
-capacity; a Mix Batch row shows its own boxes) — then **Pallet** = the master's `pallet_type` (line `palletKind`,
-composite name on hover), Location, Date, Status, Age, **PAL** last and hideable; checkbox / edit inputs / "+"
+Batch, then **Pallet Type** (CR-499 — the master's `pallet_type`, line `palletKind`; composite name + capacity on hover — it
+comes BEFORE the counts because its capacity explains them), then per page the counts as one left → right story —
+*Ready for Palletization*: **Boxes** (queued) · **Pallets** (whole) · **Loose** (CR-495, amber); *In Palletization*:
+**Pending** (batch total − recorded) · **Pallets** (of the pending) · **Loose** · **Prepared** (`N (boxes)`, `readyPalletsLabel`);
+*Palletization Completed*: **Pallets** · **Boxes** (= pallets × capacity; a Mix Batch row shows its own boxes). Ordered Boxes and
+the prepared-Boxes column went with CR-499 (user: three "…Boxes" columns confused). Then Location, Date, Status, Age, **PAL** last and hideable; checkbox / edit inputs / "+"
 cell fixed) and has **no stage band**. **Pallets are WHOLE (CR-481):** `wholePallets` = floor(boxes ÷
 `Pallet.boxes_per_pallet`), `palletBoxes` = pallets × capacity, `looseBoxes` = the rest (palLoadGate.ts);
 23 boxes on an 18-box pallet = 1 pallet · 18 boxes · 5 pending for a mixed-batch pallet. Boxes / Pallet and
@@ -470,13 +474,14 @@ Palletization records PALLETS (CR-481):** with a capacity known the per-line inp
 (prefilled with every pallet the line can fill, "= N boxes · M stay back"); boxes = pallets × capacity go to
 the server as before, the remainder stays Palletizing for a Top Up; capacity 0 keeps the boxes input.
 A **partial Complete** (Palletizing → ReadyToLoad with fewer boxes than the line) splits off the
-recorded slice and sends the **remainder back to Planning** (CR-281, server) so it re-queues on
-`/packing` with Start available. Under the grid (both views) sits the **totals /
+recorded slice and the **remainder stays In Palletization** (CR-492, server — reverses CR-281's re-queue):
+the loose boxes read Pending · Loose Boxes · chip Partial on `/palletizing` until a Top Up merges them;
+nothing returns to `/packing`. Under the grid (both views) sits the **totals /
 selection bar** (CR-178): idle it reads **Total · N pallets · N boxes** in Kanban only (`palletsOf`;
 blank on the Sheet, whose tfoot carries the totals), with rows ticked it reads *N selected · N boxes*
 + actions. Every row
-carries the one "+" menu (CR-168). Sheet **Edit** mode (CR-153) stages Palletise qty / Top Up
-donor per row; **✓ / ✗ per row** commit or discard that row alone, the header Save (N) commits
+carries the one "+" menu (CR-168). **Sheet Mode** (CR-153, reached from New Palletization Plan ▾ since CR-491) stages Palletise qty / Top Up
+donor per row; **✓ / ✗ per row** commit or discard that row alone, the toolbar Save (N) commits
 all (CR-169).
 Plans are `PAL/FY/NNN` and may span sales orders. Plan detail (`/packing/:id`) is Edit + More + ✕
 only — the legacy plan-level Begin Dispatch / Mark Dispatched / Assign Vehicle buttons went in
@@ -556,9 +561,12 @@ button (and load-together checkboxes): it opens `LoadContainerModal` through the
   ([`containerPlanPrefill.ts`](../client/src/features/stages/containerPlanPrefill.ts)); the
   pallet picker on Record Output is hidden.
 - **Mix Batch top-up (CR-149)** — "Top Up Batch" in the "+" menu on In-Palletization
-  cards/rows (`TopUpModal`) moves boxes from a same-design queue line (donor list is
-  same-design only) onto the open pallet via `POST /pal-topup/:rowid`, stamping
+  cards/rows (`TopUpModal`) moves boxes from **another batch of the same item on Ready for
+  Palletization or In Palletization** (CR-497, widening CR-493 — never a line already on a
+  mixed pallet; the donor list and the server rule agree; the dialog shows each donor's stage
+  code) onto the open pallet via `POST /pal-topup/:rowid`, stamping
   `pallet_group` on both ends. Complete Palletisation then records the whole group together
+  as ONE pallet (CR-494 — grouped lines take a boxes input prefilled with every box)
   and the pallet slip prints it as one page listing every batch.
 - **One batch per customer** is the target: plan lines are per-batch, and a mixed-batch pallet
   raises a warning rather than a block.
@@ -780,7 +788,7 @@ State is still boxes per line id; pallets/loose are derived (`floor(v/bpp)`, `v%
 Round 2 (2026-09-30): **the Item Table types PALLETS** (Pallets column typed → `pick.setDesignPallets` →
 `spreadPallets(lines, n, skip)` = whole pallets oldest batch first, `min(line.boxes, k×bpp)`; Boxes is the read-only
 conversion; loaded rows the same via `setGroupPallets`); a Mix Batch pallet is a parent + `└` children tree with
-an `MXBATCH` chip (`MxChip`, also on `/loading/:id`); `/loading/:id` Loaded Items and the `/loading` grid carry a
+the Mix Batch icon (`MxChip` → `MixBatchMark`, CR-498 — ONE amber icon + hint app-wide, no text chip; also on `/loading/:id`); `/loading/:id` Loaded Items and the `/loading` grid carry a
 Pallets column + totals (`palletsOf` / `palletsOfLine`). Loaded
 lines (Edit) group by `salesOrderId|designId`; a typed total is spread FIFO into the per-line
 `loadedDraft` (newest batch gives way first). `batchOptions` / `pickable` below are gone;

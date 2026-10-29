@@ -542,7 +542,8 @@ export function setPalVehicle(rowid: string, vehicle: string) {
 /** Move one item between pre-loading stages without touching its plan;
     optionally sets the line's pallet in the same call (Palletization drop).
     `boxes` < the line's boxes = partial move: the server splits the line and
-    only that slice transitions — the remainder keeps its current stage. */
+    only that slice transitions — the remainder keeps its current stage (CR-492:
+    a partial Complete's loose boxes stay In Palletization; CR-281's re-queue is gone). */
 export function setPalLineStatus(lineId: string, status: PalLineStatus, pallet?: string, boxes?: number, warehouse?: string) {
   return bust(
     op<{ ROWID: string; status: string }>(`pal-line-status/${lineId}`, {
@@ -570,10 +571,11 @@ export function setPalLineLocation(lineIds: string[], warehouse: string): Promis
   );
 }
 
-/** Mix-batch top-up: move `boxes` from a Ready-for-Palletization donor line
+/** Mix-batch top-up: move `boxes` from a donor line of the same item (Ready for
+    Palletization or In Palletization, CR-497; never a line already on a mixed pallet)
     onto an In-Palletization target's physical pallet. The server splits the
     donor when partial and stamps `pallet_group` on both ends — the lines are
-    then ONE physical pallet (Mix Batch chip, single combined pallet slip). */
+    then ONE physical pallet (Mix Batch icon, single combined pallet slip). */
 export function palTopUp(targetLineId: string, donorLineId: string, boxes: number) {
   return bust(
     op<{ ROWID: string; pallet_group: string }>(`pal-topup/${targetLineId}`, {
@@ -637,11 +639,12 @@ export function setLineBox(lineId: string, box: string, boxes?: number, reason?:
   return bust(op<{ ROWID: string; load_box: string | null }>(`pal-line-box/${lineId}`, { box, ...(boxes ? { boxes } : {}), ...(reason ? { reason } : {}) }));
 }
 
-/** CR-361 Release: a loaded line's boxes go back to Ready for Loading; an
-    un-boxed palletized line's boxes go back to free stock (allocation returned).
-    `boxes` below the line's total releases that many. Reason per CR-270. */
+/** CR-361 Release: a loaded line's boxes go back to Ready for Loading; a palletized
+    (un-boxed ReadyToLoad) line's boxes go back to Ready for Palletization (CR-500, was free
+    stock); Cancel Palletization (CR-501) does the same for a Palletizing line; Discard (CR-369) on a Planning line sends them to free stock
+    (allocation returned). `boxes` below the line's total releases that many. Reason per CR-270. */
 export function releasePalLine(lineId: string, boxes: number, reason: string) {
-  return bust(op<{ to: "ReadyToLoad" | "stock"; boxes: number }>(`pal-line-release/${lineId}`, { boxes, ...(reason ? { reason } : {}) }));
+  return bust(op<{ to: "ReadyToLoad" | "queue" | "stock"; boxes: number }>(`pal-line-release/${lineId}`, { boxes, ...(reason ? { reason } : {}) }));
 }
 
 /** Put several Ready lines into one Open container in a single all-or-nothing

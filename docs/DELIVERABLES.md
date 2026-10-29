@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 190 |
+| Completed | 197 |
 | In progress | 19 |
 | Future | 27 |
-| **Total** | **236** |
+| **Total** | **243** |
 
 ## Foundation & workspace
 
@@ -162,6 +162,11 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Columns, totals footer and selection bar | Customer · Item · Order · Batch · Boxes · Remaining · Age · Ready Pallets (N (boxes)) · Pallet type; totals footer; selection bar when rows are ticked. | Completed | Phase 1 (by 01-Oct-2026) | CR-279 |
 | Counts per batch: Ordered · Ready Pallets · Boxes / Pallet · Remaining | Every palletization page counts the row's own batch — a loaded batch of the same item no longer shows on its sibling. Columns Boxes · Ordered Boxes · Ready Pallets (N (boxes)) · Boxes / Pallet · Remaining with totals; the Complete Palletization dialog shows the same figures. | Completed | 2026-10-27 | CR-472 |
 | Whole pallets: Possible / Prepared Pallets, pallets recorded | No fractions — 23 boxes on an 18-box pallet is 1 pallet · 18 boxes, the 5 wait for a mixed-batch pallet. Ready for Palletization shows Possible Pallets; In Palletization shows Pending Boxes, Possible Pallets, Prepared Pallets and the boxes on them; Ready for Loading shows Pallets and Boxes. Boxes / Pallet and Remaining removed; Complete Palletization asks for pallets. | Completed | 2026-10-28 | CR-481 |
+| One toolbar with the filters on top; Sheet Mode | Search and the customer / country / item / size filters sit in the page toolbar; Today's Report, Group, columns and New Palletization Plan ▾ on the right. The ▾ menu opens Sheet Mode — record boxes or a batch top-up across many rows, then Save. | Completed | 2026-10-29 | CR-491 |
+| Partial completion keeps the rest In Palletization | Complete fewer pallets than possible: those pallets move to Palletization Completed, the loose boxes stay on In Palletization for a mixed-batch pallet. Nothing goes back to the queue. | Completed | 2026-10-29 | CR-492 |
+| Top Up from either page; mixed pallet completes as one | A pallet is topped up from another batch of the same item on Ready for Palletization or In Palletization (the dialog shows which); a batch already on a mixed pallet cannot donate again. A mixed pallet completes as one pallet. | Completed | 2026-10-29 | CR-493/494/497 |
+| Mix Batch icon | One amber icon with a hover hint marks a shared (mixed-batch) pallet on every screen — no text chips. | Completed | 2026-10-29 | CR-498 |
+| Columns that read as one story | On every palletization page the pallet type comes first, then the counts left to right: Ready for Palletization shows Boxes · Pallets · Loose; In Palletization shows Pending · Pallets · Loose · Prepared (pallets with boxes); hover a header for what each number means. No duplicate Boxes columns. | Completed | 2026-10-29 | CR-495/499 |
 | Plan detail page | Lines with status, batches, pallets; Edit + More; activity. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Prints on demand | Pallet Packing Report; Pallet Slips (one per physical pallet, mixed pallet lists every batch); pallet QR labels; batch QR slips. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Board rules | Planned boxes never exceed the order; batches attributed oldest-first; a hand-edited plan is pinned; the palletized part of a batch can be loaded while the rest is in progress. | Completed | Phase 1 (by 01-Oct-2026) | CR-129, 248 |
@@ -173,6 +178,8 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Plan edit keeps Box Brand and batches | Editing a plan carries carton brand and batch of each line; a Completed plan is refused. | Completed | 2026-10-13 | CR-340 |
 | Three pages, one stage each | Ready for Palletization, In Palletization, Palletization Completed (waiting to load); no status filter — each page lists its own rows. | Completed | 2026-10-21 | CR-360, 364 |
 | Release palletized boxes | From the + menu on Palletization Completed and Loading: boxes + reason. Loaded boxes return to Ready for Loading; palletized boxes return to free stock with the allocation; partial or whole; dispatched refused. | Completed | 2026-10-21 | CR-361 |
+| Release returns boxes to Ready for Palletization | Release on Palletization Completed puts the boxes back on the queue row of the same item and batch (counts recompute); the order keeps its allocation. Discard, Delete and Cancel Order still return boxes to free stock. | Completed | 2026-10-29 | CR-500 |
+| Cancel Palletization | On In Palletization: boxes + reason send the pallet back to Ready for Palletization on the same item and batch row, still booked to the order. Discard (free stock) stays on Ready for Palletization only. | Completed | 2026-10-29 | CR-501 |
 | Discard the current palletization task | + menu on Ready for / In Palletization: boxes + reason; boxes return to free stock and the allocation is returned. Reason required for every role. | Completed | 2026-10-24 | CR-369 |
 | Delete a plan returns its boxes | Deleting a palletization returns every line to free stock first; refused while any box sits in a container. | In progress |  | CR-370 |
 | Partial Start Palletization | Start only part of a Ready row (today Start takes the whole line; partial is on Complete). | Future |  | Panel Craft list #9 |

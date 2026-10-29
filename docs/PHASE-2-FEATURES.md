@@ -354,8 +354,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   shows the pallet type (Jungli …) rather than the full size-packing-type name. The footer sums the same way.
 - **Complete dialog shows progress** (CR-280, 2026-10-06). Complete Palletization lists, per item, the ready
   pallets (boxes) already palletized and the boxes still remaining.
-- **Partial Complete re-queues the rest** (CR-281, 2026-10-06). Completing part of an In-Palletization line
-  sends the leftover boxes back to Ready for Palletization, where Start Palletization applies to them again.
+- **Partial Complete re-queues the rest** (CR-281, 2026-10-06 — REVERSED by CR-492, 2026-10-29). Completing part of an In-Palletization line
+  sent the leftover boxes back to Ready for Palletization; since CR-492 they stay In Palletization.
 - **Plan edit keeps Box Brand and batches** (CR-340, 2026-10-13). Editing a palletization plan carries the
   carton brand and batch of each replaced line, attributes new items to their real batches, refuses a
   Completed plan. ≈ 1 h.
@@ -382,6 +382,27 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 - **Whole pallets, per-page columns, Complete Palletization in pallets** (CR-481, 2026-10-28). Floor arithmetic
   (23 boxes / 18 = 1 pallet · 18 boxes · 5 pending); Possible / Prepared Pallets; Boxes / Pallet and Remaining
   removed; the dialog records pallets and the remainder waits for a Top Up. ≈ 1.5 h.
+- **One toolbar + Sheet Mode in the New ▾ menu** (CR-491, 2026-10-29). Filters moved up into the page toolbar's empty
+  left half; Today's Report · Group · columns · New Palletization Plan ▾ (Sheet Mode) on the right. ≈ 1 h.
+- **Partial Complete keeps the rest In Palletization** (CR-492, 2026-10-29). Reverses CR-281: the recorded pallets go to
+  Palletization Completed, the loose boxes stay In Palletization for a mixed-batch pallet. ≈ 0.25 h.
+- **Top Up donor rule** (CR-493 → CR-497, 2026-10-29). Donors are other batches of the item on Ready for Palletization
+  or In Palletization (CR-493 briefly limited it to In Palletization; corrected the same day), never a batch already
+  on a mixed pallet; the dialog shows each donor's stage. ≈ 0.75 h.
+- **Mix Batch icon** (CR-498, 2026-10-29). One amber icon with a hint replaces every "Mix Batch" / "MXBATCH" text chip. ≈ 0.5 h.
+- **Columns read as one story** (CR-499, 2026-10-29). Pallet Type before the counts; queue = Boxes · Pallets · Loose, In
+  Palletization = Pending · Pallets · Loose · Prepared "N (boxes)"; Ordered Boxes and the duplicate Boxes column removed. ≈ 0.5 h.
+- **Release goes back to Ready for Palletization** (CR-500, 2026-10-29). Release… on Palletization Completed
+  returns the boxes to the queue row of the same item + batch (counts recompute); the order keeps its
+  allocation. Discard / Delete / Cancel Order still return boxes to free stock. ≈ 1 h.
+- **Cancel Palletization** (CR-501, 2026-10-29). In Palletization "+" menu: boxes + reason, back to Ready
+  for Palletization on the same item + batch row, still booked to the order; replaces Discard there
+  (Discard stays on Ready for Palletization). ≈ 0.5 h.
+- **Mix Batch pallet completes as one pallet** (CR-494, 2026-10-29). Complete Palletization records every box of a
+  grouped line instead of whole pallets per line. ≈ 0.5 h.
+- **Loose Boxes column** (CR-495, 2026-10-29). Boxes short of a whole pallet on Ready for Palletization and In
+  Palletization, with totals. ≈ 0.5 h.
+- **New Palletization footer** (CR-496, 2026-10-29). Instruction sentence removed. ≈ 0.1 h.
 
 ## 8 · Loading & Dispatch
 

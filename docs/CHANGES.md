@@ -3,7 +3,45 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
-## 2026-10-28 — Add Stock off the Panel Orders list (CR-490) — deploy pending
+## 2026-10-29 — Release and Cancel Palletization go back to Ready for Palletization (CR-500, CR-501) — LIVE + DEMO 2026-10-29
+
+- **Cancel Palletization (CR-501).** The "+" menu on In Palletization offers Cancel Palletization… (boxes +
+  reason) instead of Discard…: the boxes return to Ready for Palletization on the same item + batch row,
+  still booked to the order. To free stock from Ready for Palletization, deallocate on the order (or
+  Discard… there). A mixed pallet left with one batch stops showing the Mix Batch mark.
+
+- **Release returns boxes to the queue (CR-500, reverses the free-stock half of CR-361).** Release… on a
+  Palletization Completed row (boxes + reason) now puts those boxes back on Ready for Palletization, on the
+  same item + batch row they were palletised from (a new row when none is left); Boxes · Pallets · Loose
+  recompute. The order keeps its allocation — nothing goes to free stock. Partial or whole. Discard… on
+  Ready for / In Palletization, Delete plan and Cancel Order still return boxes to free stock.
+
+## 2026-10-29 — Palletization pages: one toolbar, Sheet Mode, remainder stays In Palletization, Top Up + Mix Batch icon + readable columns (CR-491…499) — LIVE + DEMO 2026-10-29
+
+- **One toolbar, filters on top (CR-491).** The search and the customer / country / item / size filters moved out of
+  the grid card into the left half of the page toolbar; Today's Report, Group, the column picker and **New
+  Palletization Plan ▾** sit right. The old **Edit** button is now **Sheet Mode** inside that ▾ menu (not offered
+  on Palletization Completed, where nothing is editable).
+- **Partial Complete keeps the rest In Palletization (CR-492, reverses CR-281).** Recording fewer pallets than
+  possible moves only those pallets to Palletization Completed; the loose boxes stay on In Palletization
+  (Pending · Loose Boxes · chip Partial) for a mixed-batch pallet. Nothing goes back to Ready for Palletization.
+- **Top Up from both pages (CR-493 → CR-497).** A pallet is topped up from another batch of the same item on Ready
+  for Palletization or In Palletization (CR-493 had limited it to In Palletization; the user corrected that the
+  same day — a queue row short of a pallet must still be able to join one); a batch already on a mixed pallet
+  cannot donate again. The Top Up dialog shows each donor's stage code.
+- **Mix Batch is one icon (CR-498).** The "Mix Batch" / "MXBATCH" text chips are gone; a single amber icon with a
+  hover hint marks a shared pallet on the palletization sheet, the Loading bay, the bulk-load picker, the
+  Palletization Completed Pallets cell and the Complete Palletization dialog.
+- **A Mix Batch pallet completes as one pallet (CR-494).** Complete Palletization records every box of each
+  grouped line instead of asking for whole pallets per line.
+- **Loose Boxes column (CR-495)** on Ready for Palletization and In Palletization: the boxes short of a whole
+  pallet, with a footer total.
+- **New Palletization footer (CR-496):** the instruction sentence is gone; the totals line appears once boxes are entered.
+- **Columns read as one story (CR-499).** Pallet Type now sits before the counts on every palletization page; Ready
+  for Palletization reads Boxes · Pallets · Loose, In Palletization reads Pending · Pallets · Loose · Prepared
+  "2 (100)". Ordered Boxes and the second Boxes column are gone; hover a header for what the number means.
+
+## 2026-10-28 — Add Stock off the Panel Orders list (CR-490) — LIVE 2026-10-28, DEMO pending
 
 - **Add Stock button removed from `/panel-orders` (CR-490).** Stock is received on Cut Stock, Panel Items, the item's Actions tab or the cut-piece page, not from the order list.
 

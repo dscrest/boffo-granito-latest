@@ -525,9 +525,7 @@ export function PalPlanForm({
           </span>
         ) : totalBoxes > 0 ? (
           `${fmt(totalBoxes)} boxes · ${saveLines.length} line${saveLines.length > 1 ? "s" : ""} · ${[...new Set(saveLines.map((l) => l.sales_order))].length} order(s)`
-        ) : (
-          <span className="dim">Enter Palletize Boxes and a pallet for the items to palletize</span>
-        )
+        ) : null // CR-496: no how-to sentence (CR-416) — the totals line appears once boxes are entered
       }
     >
           {loading && <div className="muted" style={{ padding: 8 }}>Loading palletizable items…</div>}

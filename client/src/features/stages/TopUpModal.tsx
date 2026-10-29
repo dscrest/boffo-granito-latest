@@ -11,7 +11,8 @@ import { NumberInput } from "@/ui/NumberInput";
 import { fmt } from "@/lib/format";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, type PalletRow } from "@/features/masters/palletsApi";
-import type { PalPlanLine } from "./palPlansApi";
+import { PAL_LINE_STATUS_LABEL, type PalPlanLine } from "./palPlansApi";
+import { codeOf } from "@/ui/statusCode";
 
 export function TopUpModal({
   target,
@@ -137,6 +138,8 @@ export function TopUpModal({
                       ) : (
                         <span className="dim">—</span>
                       )}
+                      {/* CR-497: donors come from two pages — say which. */}
+                      <span className="chip" style={{ fontSize: 13, marginLeft: 4 }} title={PAL_LINE_STATUS_LABEL[d.status]}>{codeOf(PAL_LINE_STATUS_LABEL[d.status])}</span>
                     </td>
                     <td className="num">{fmt(d.boxes)}</td>
                     <td className="num">

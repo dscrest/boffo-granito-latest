@@ -15,11 +15,10 @@ import { NumberInput } from "@/ui/NumberInput";
 import { useModalA11y } from "@/ui/useModalA11y";
 import { fmt } from "@/lib/format";
 import { batchLabel, palletBoxesLabel, palletSplit, partialNote, pickerEntries, type PickEntry, type SoBand } from "./newLoadingRows";
+import { MixBatchMark } from "./MixBatchMark";
 
-/** The Mix Batch marker: one physical pallet shared by more than one batch/item. */
-export const MxChip = () => (
-  <span className="chip mx" style={{ marginLeft: 6 }} title="Mix Batch: one physical pallet shared by more than one batch/item">MXBATCH</span>
-);
+/** The Mix Batch marker (CR-498: one icon + hint, was an MXBATCH chip). */
+export const MxChip = () => <MixBatchMark title="Mix Batch: one physical pallet shared by more than one batch/item" />;
 
 export function BulkLoadItemsModal({ bands, initial, title = "Add Items in Bulk", onAdd, onClose }: {
   /** The scope: every band, or one band narrowed to a single item. */

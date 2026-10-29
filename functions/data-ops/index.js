@@ -290,7 +290,7 @@ async function logRelated(catalyst, refs, operation, payload) {
 async function logTransition(catalyst, t) {
   const from = String(t.from_status ?? "");
   const to = String(t.to_status ?? "");
-  if (from === to) return;
+  if (from === to && !t.note) return; // a same-stage move still logs when it carries a note (CR-493 top-up)
   try {
     await catalyst.datastore().table("StatusTransition").insertRow({
       occurred_at: new Date().toISOString().slice(0, 19).replace("T", " "),
@@ -2964,10 +2964,10 @@ app.post("/pal-status/:rowid", async (req, res) => {
    item-wise move on the kanban — advancing one line never touches its plan or siblings.
    Optional body.boxes < line.boxes = PARTIAL move (CR): only that many boxes
    transition (split off as a new line); the remainder keeps the old status, so a
-   partial palletise never flips the whole line to Ready for Loading. One
-   exception (CR-281): a partial COMPLETE (Palletizing → ReadyToLoad) sends the
-   remainder back to Planning — those boxes are not on a pallet, so they re-queue
-   under Ready for Palletization where Start applies to them again. */
+   partial palletise never flips the whole line to Ready for Loading. CR-492
+   (reverses CR-281): a partial COMPLETE (Palletizing → ReadyToLoad) leaves the
+   remainder IN PALLETIZATION too — loose boxes wait there for a mixed-batch
+   pallet (Top Up); nothing ever goes back to the Ready for Palletization queue. */
 app.post("/pal-line-status/:rowid", async (req, res) => {
   try {
     const catalyst = init(req);
@@ -3017,12 +3017,9 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
             // CR-412: the moving slice takes the new location, else keeps the line's.
             ...(warehouse ? { warehouse } : line.warehouse ? { warehouse: String(line.warehouse) } : {}),
           });
-          // CR-281: the un-palletized remainder of a partial Complete re-queues.
-          const remainderStatus = from === "Palletizing" && to === "ReadyToLoad" ? "Planning" : from;
+          // CR-492: the remainder keeps its stage (a partial Complete's loose boxes stay In Palletization).
           try {
-            await ds.table("PalletizationPlanLine").updateRow({
-              ROWID: lineId, boxes: lineBoxes - reqBoxes, ...(remainderStatus !== from ? { status: remainderStatus } : {}),
-            });
+            await ds.table("PalletizationPlanLine").updateRow({ ROWID: lineId, boxes: lineBoxes - reqBoxes });
           } catch (e) {
             try { await ds.table("PalletizationPlanLine").deleteRow(slice.ROWID); } catch (_) {}
             throw e;
@@ -3031,12 +3028,6 @@ app.post("/pal-line-status/:rowid", async (req, res) => {
             entity_type: "PalletizationPlanLine", entity_rowid: String(slice.ROWID), from_status: from, to_status: to,
             note: `partial — ${reqBoxes} of ${lineBoxes} boxes`,
           });
-          if (remainderStatus !== from) {
-            await logTransition(catalyst, {
-              entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: remainderStatus,
-              note: `remainder — ${lineBoxes - reqBoxes} boxes back to Ready for Palletization`,
-            });
-          }
           await recountOrderItems(catalyst, ds, [line.order_item]);
           return { rowid: String(slice.ROWID), data: { ROWID: String(slice.ROWID), status: to, boxes: reqBoxes } };
         }
@@ -4882,7 +4873,7 @@ app.post("/pal-topup/:rowid", async (req, res) => {
         const pick = async (id) =>
           rowList(
             await catalyst.zcql().executeZCQLQuery(
-              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, warehouse FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
+              `SELECT ROWID, status, plan, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, warehouse, pallet_group FROM PalletizationPlanLine WHERE ROWID = ${id} AND deleted_at is null`,
             ),
           )[0];
         const target = await pick(targetId);
@@ -4892,8 +4883,14 @@ app.post("/pal-topup/:rowid", async (req, res) => {
         if (!String(target.pallet || "")) throw badRequest("The top-up target has no pallet", 409);
         const donor = await pick(donorId);
         if (!donor) throw badRequest(`Palletization line not found: ${donorId}`, 404);
-        if (String(donor.status) !== "Planning")
-          throw badRequest("Only a Ready-for-Palletization item can top up a pallet", 409);
+        // CR-497 (widens CR-493): the donor is another batch of the same item from Ready for
+        // Palletization OR In Palletization — the queue stays a source (a queue row short of a pallet
+        // could never move forward otherwise); a line already on a mixed pallet never donates.
+        if (!["Planning", "Palletizing"].includes(String(donor.status)))
+          throw badRequest("Only a Ready for Palletization or In Palletization batch of this item can top up a pallet", 409);
+        if (String(donor.design || "") !== String(target.design || ""))
+          throw badRequest("Top up only from another batch of the same item", 409);
+        if (String(donor.pallet_group || "")) throw badRequest("That batch already shares a mixed pallet", 409);
         const donorBoxes = Number(donor.boxes) || 0;
         if (n > donorBoxes) throw badRequest("Cannot move more boxes than the donor line has");
 
@@ -4906,7 +4903,8 @@ app.post("/pal-topup/:rowid", async (req, res) => {
             ...(target.warehouse ? { warehouse: String(target.warehouse) } : {}),
           });
           await logTransition(catalyst, {
-            entity_type: "PalletizationPlanLine", entity_rowid: donorId, from_status: "Planning", to_status: "Palletizing",
+            entity_type: "PalletizationPlanLine", entity_rowid: donorId, from_status: String(donor.status), to_status: "Palletizing",
+            note: `top up — joins the mixed pallet of line ${group}`,
           });
         } else {
           // Split: insert the moved slice first, then shrink the donor — a
@@ -4933,7 +4931,8 @@ app.post("/pal-topup/:rowid", async (req, res) => {
             throw e;
           }
           await logTransition(catalyst, {
-            entity_type: "PalletizationPlanLine", entity_rowid: String(slice.ROWID), from_status: "Planning", to_status: "Palletizing",
+            entity_type: "PalletizationPlanLine", entity_rowid: String(slice.ROWID), from_status: String(donor.status), to_status: "Palletizing",
+            note: `top up — ${n} boxes join the mixed pallet of line ${group}`,
           });
         }
         // The target carries the marker too, so both ends of the shared pallet show it.
@@ -5505,21 +5504,83 @@ app.post("/pal-line-box/:rowid", async (req, res) => {
 });
 
 /* CR-361 — Release palletized boxes (body: { boxes?, reason }). ONE route,
-   two directions decided by the line itself:
+   three directions decided by the line itself:
      · line in an OPEN box  → the boxes leave the container and return to
        Ready for Loading (partial = the existing load split, remainder un-boxed);
-     · un-boxed ReadyToLoad → the boxes leave the palletization altogether and
-       return to FREE STOCK: the line shrinks / soft-deletes and the order's
-       allocation is returned through deallocateCore (user decision 2026-10-21).
-   A dispatched box is immutable; Planning / Palletizing lines keep their own
-   paths (drag back, partial Complete). Reason mandatory unless Admin (CR-270). */
-/* CR-369: the "→ free stock" half of a release, shared by /pal-line-release (any stage),
+     · un-boxed ReadyToLoad → CR-500 (2026-10-29, reverses the CR-361 free-stock
+       half): the boxes leave the pallet and return to READY FOR PALLETIZATION —
+       merged into the queue row of the same item + batch on the same plan (or a
+       fresh Planning line); the order keeps its allocation (returnLineToQueue);
+     · Palletizing → CR-501 "Cancel Palletization": same road back to the queue;
+     · Planning (Discard, CR-369) → the boxes leave the palletization altogether
+       and return to FREE STOCK: the line shrinks / soft-deletes and the order's
+       allocation is returned through deallocateCore (or deallocate on the order).
+   A dispatched box is immutable. Reason mandatory for every role (CR-369). */
+/* CR-369: the "→ free stock" half of a release, shared by /pal-line-release (Discard: Planning / Palletizing — ReadyToLoad goes to the queue since CR-500),
    palletization delete (CR-370) and SO cancel (CR-371). line = a live PalletizationPlanLine
    row with PAL_LINE_RELEASE_COLS; n = boxes to return (≤ line.boxes). Verifies the order
    item's allocation covers n BEFORE writing; shrinks / soft-deletes the line, recounts (so
    palletized_qty drops first), then deallocates same-batch-first. A line with no order item
    holds no allocation — it is simply dropped. */
-const PAL_LINE_RELEASE_COLS = "ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, pallet_group";
+const PAL_LINE_RELEASE_COLS = "ROWID, status, plan, load_box, sales_order, order_item, design, pallet, boxes, position, batch_number, manual_edit, box_brand, pallet_group, warehouse";
+
+/* CR-500: the "→ Ready for Palletization" half of a release — a ReadyToLoad, un-boxed line
+   gives n boxes back to the queue. CR-501: a Palletizing line takes the same road ("Cancel
+   Palletization" — the boxes stay booked to the order; Discard = free stock is Planning-only now). They merge into the live Planning line of the same plan +
+   item + batch that is not on a mixed pallet (the row they were palletised from), else a new
+   Planning line is born from the released line (no pallet_group — the released boxes leave the
+   mixed pallet, the partner line stays). Insert/merge first, shrink second; a mid-write failure
+   undoes the insert (the /pal-line-status pattern). The allocation is untouched. */
+async function returnLineToQueue(catalyst, ds, line, n, reason) {
+  const lineId = String(line.ROWID);
+  const lineBoxes = Number(line.boxes) || 0;
+  const oiId = String(line.order_item || "");
+  const planId = String(line.plan || "");
+  const batch = String(line.batch_number || "");
+  const refs = [{ table: "SalesOrder", rowid: line.sales_order }, { table: "PalletizationPlan", rowid: planId }];
+  const siblings = planId
+    ? await zcqlAllRows(catalyst, `SELECT ROWID, boxes, order_item, batch_number, pallet_group FROM PalletizationPlanLine WHERE plan = ${planId} AND status = 'Planning' AND deleted_at is null`)
+    : [];
+  const mine = siblings.find(
+    (l) => String(l.order_item || "") === oiId && String(l.batch_number || "") === batch && !String(l.pallet_group || ""),
+  );
+  let inserted = null;
+  if (mine) await ds.table("PalletizationPlanLine").updateRow({ ROWID: mine.ROWID, boxes: (Number(mine.boxes) || 0) + n });
+  else {
+    inserted = await ds.table("PalletizationPlanLine").insertRow({
+      plan: planId || undefined,
+      sales_order: line.sales_order ? String(line.sales_order) : undefined,
+      order_item: oiId || undefined,
+      design: line.design ? String(line.design) : undefined,
+      pallet: line.pallet ? String(line.pallet) : undefined,
+      boxes: n,
+      position: Number(line.position) || 0,
+      status: "Planning",
+      batch_number: batch,
+      ...(line.box_brand ? { box_brand: String(line.box_brand) } : {}),
+      ...(line.warehouse ? { warehouse: String(line.warehouse) } : {}),
+    });
+  }
+  try {
+    await ds.table("PalletizationPlanLine").updateRow(n >= lineBoxes ? { ROWID: lineId, deleted_at: stampNow() } : { ROWID: lineId, boxes: lineBoxes - n });
+  } catch (e) {
+    if (inserted) { try { await ds.table("PalletizationPlanLine").deleteRow(inserted.ROWID); } catch (_) {} }
+    else if (mine) { try { await ds.table("PalletizationPlanLine").updateRow({ ROWID: mine.ROWID, boxes: Number(mine.boxes) || 0 }); } catch (_) {} }
+    throw e;
+  }
+  // CR-501: a mixed pallet left with ONE member is no longer mixed — drop its group mark.
+  const group = String(line.pallet_group || "");
+  if (n >= lineBoxes && group) {
+    const left = await zcqlAllRows(catalyst, `SELECT ROWID FROM PalletizationPlanLine WHERE pallet_group = ${group} AND deleted_at is null`);
+    if (left.length === 1) await ds.table("PalletizationPlanLine").updateRow({ ROWID: left[0].ROWID, pallet_group: null });
+  }
+  if (oiId) await recountOrderItems(catalyst, ds, [oiId]);
+  const from = String(line.status || "");
+  const word = from === "Palletizing" ? "cancelled" : "released";
+  await logTransition(catalyst, { entity_type: "PalletizationPlanLine", entity_rowid: lineId, from_status: from, to_status: "Planning", note: `${word} — ${n} boxes to Ready for Palletization` });
+  await logRelated(catalyst, refs, "released", { boxes: n, to: "queue", reason });
+  return { to: "queue", boxes: n };
+}
 async function releaseLineToStock(catalyst, ds, line, n, reason) {
   const lineId = String(line.ROWID);
   const lineBoxes = Number(line.boxes) || 0;
@@ -5627,7 +5688,9 @@ app.post("/pal-line-release/:rowid", async (req, res) => {
           return { rowid: lineId, data: { to: "ReadyToLoad", boxes: n } };
         }
 
-        // Palletized (CR-361) or still planned / in palletization (CR-369 Discard) → free stock.
+        // Palletized (CR-500) or in palletization (CR-501 Cancel Palletization) → back to the Ready for Palletization queue.
+        if (String(line.status) !== "Planning") return { rowid: lineId, data: await returnLineToQueue(catalyst, ds, line, n, reason) };
+        // Still planned (CR-369 Discard) → free stock.
         if (!oiId) throw badRequest("This line is not tied to an order item — nothing to return to stock", 409);
         return { rowid: lineId, data: await releaseLineToStock(catalyst, ds, line, n, reason) };
       },

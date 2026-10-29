@@ -23,9 +23,11 @@ export function DetailRow({ label, value, dim }: { label: string; value: ReactNo
 /** "More ▾" actions dropdown (Zoho-style) — reuses the .hdr-menu styles.
     `kebab` swaps the trigger for a compact icon-only ⋮ button (row menus);
     `icon` swaps that glyph (e.g. "plus"). Disabled items stay visible but dim. */
-export function MoreMenu({ items, kebab, label, icon, title }: {
+export function MoreMenu({ items, kebab, label, icon, title, triggerClass }: {
   items: { label: string; danger?: boolean; disabled?: boolean; title?: string; onClick: () => void }[];
   kebab?: boolean;
+  /** CR-491: trigger button classes (a split button's ▾ half) — default kebab = `btn x plain`, else `hbtn`. */
+  triggerClass?: string;
   label?: string;
   icon?: string;
   title?: string;
@@ -76,7 +78,7 @@ export function MoreMenu({ items, kebab, label, icon, title }: {
   if (items.length === 0) return null;
   return (
     <div className="hdr-pop" ref={ref}>
-      <button className={kebab ? "btn x plain" : "hbtn"} onClick={() => setOpen((v) => !v)} title={title ?? "More actions"}>
+      <button className={triggerClass ?? (kebab ? "btn x plain" : "hbtn")} onClick={() => setOpen((v) => !v)} title={title ?? "More actions"}>
         {kebab ? <Icon name={icon ?? "more-v"} size={14} /> : <>{label ?? "More"} <Icon name="more" size={13} /></>}
       </button>
       {open && createPortal(

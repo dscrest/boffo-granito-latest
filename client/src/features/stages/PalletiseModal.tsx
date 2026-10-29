@@ -16,6 +16,7 @@ import { useModalA11y } from "@/ui/useModalA11y";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { batchKey, readyPalletsLabel, wholePallets, type PalPlanLine } from "./palPlansApi";
+import { MixBatchMark } from "./MixBatchMark";
 
 export interface PalletiseEntry {
   lineId: string;
@@ -97,9 +98,11 @@ export function PalletiseModal({
     const d = palletsByLine[l.id];
     return d === undefined || d === "" ? max : Math.min(Math.max(0, Math.floor(Number(d) || 0)), max);
   };
+  // CR-494: a Mix Batch line shares ONE physical pallet with its group — the group is the pallet,
+  // so every box of the line records (whole-pallet maths would read 0 pallets per line and block it).
   const boxesOf = (l: PalPlanLine) => {
     const cap = capOf(l.id);
-    if (cap > 0) return palletsOfLine(l) * cap;
+    if (cap > 0 && !l.palletGroup) return palletsOfLine(l) * cap;
     return Math.min(Math.max(0, Math.floor(Number(boxesByLine[l.id]) || 0)), l.boxes);
   };
   const entries: PalletiseEntry[] = lines.map((l) => ({
@@ -198,7 +201,7 @@ export function PalletiseModal({
                     <td className="num">
                       {/* Editable: palletise part of the line now, the rest later —
                           the remainder stays in its current stage. */}
-                      {cap > 0 ? (
+                      {cap > 0 && !l.palletGroup ? (
                         // CR-481: whole PALLETS; boxes follow (pallets × capacity).
                         <>
                           <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
@@ -236,6 +239,9 @@ export function PalletiseModal({
                               of {fmt(l.boxes)} — {fmt(l.boxes - moving)} stay back
                             </div>
                           )}
+                          {l.palletGroup && (
+                            <div style={{ fontSize: "var(--t-xs)", marginTop: 2, color: "var(--c-amber)" }}><MixBatchMark style={{ marginLeft: 0, marginRight: 4 }} />Mix Batch pallet · all boxes</div>
+                          )}
                         </>
                       )}
                     </td>
@@ -249,7 +255,9 @@ export function PalletiseModal({
                       />
                     </td>
                     <td>
-                      {cap > 0 ? (
+                      {l.palletGroup ? (
+                        <span style={{ fontSize: "var(--t-sm)" }} title="Shares one physical pallet with another batch — the group records as one pallet"><MixBatchMark style={{ marginLeft: 0, marginRight: 4 }} />Mix Batch · one shared pallet</span>
+                      ) : cap > 0 ? (
                         <span style={{ fontSize: "var(--t-sm)" }}>
                           {full > 0 && <strong>{full} full pallet{full === 1 ? "" : "s"}</strong>}
                           {full > 0 && rem > 0 && " + "}

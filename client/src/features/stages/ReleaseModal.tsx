@@ -4,9 +4,13 @@
    CR-369 — user decision 2026-10-22). The server decides the direction
    from the line itself:
      · loaded (Open box)   → boxes leave the container, back to Ready for Loading
-     · palletized (no box) → boxes leave the palletization, back to FREE STOCK
-                             (the order's allocation is returned)
-     · planned / in palletization (no box) → "Discard": same as above
+     · palletized (no box) → CR-500 (2026-10-29): boxes leave the pallet, back to
+                             READY FOR PALLETIZATION (same item + batch row); the
+                             order keeps its allocation
+     · in palletization (no box) → CR-501 "Cancel Palletization": back to
+                             READY FOR PALLETIZATION, still booked to the order
+     · planned (no box)    → "Discard": boxes leave the palletization, back to
+                             FREE STOCK (allocation returned)
    Opened from the row's "+" menu on /packing, /palletizing, /palletized
    and /loading.
    ============================================================ */
@@ -34,8 +38,12 @@ export function ReleaseModal({ line, box, onDone, onClose }: {
   const boxes = Math.floor(Number(boxesDraft) || 0);
   const boxesOk = boxes >= 1 && boxes <= line.boxes;
   const reasonOk = reason.trim().length > 0; // CR-369: every role
-  const toStock = !box;
-  const verb = !box && line.status !== "ReadyToLoad" ? "Discard" : "Release"; // CR-369
+  // CR-369 Discard (Planning → free stock); CR-500 Release (ReadyToLoad → queue); CR-501 Cancel Palletization (Palletizing → queue).
+  const verb = box || line.status === "ReadyToLoad" ? "Release" : line.status === "Palletizing" ? "Cancel Palletization" : "Discard";
+  const past = verb === "Discard" ? "Discarded" : verb === "Release" ? "Released" : "Cancelled";
+  const doing = verb === "Discard" ? "Discarding" : verb === "Release" ? "Releasing" : "Cancelling";
+  const toStock = verb === "Discard";
+  const dest = box ? "Ready for Loading" : toStock ? "free stock" : "Ready for Palletization";
 
   const submit = async () => {
     if (!boxesOk || !reasonOk) { setShowErrors(true); return; }
@@ -43,7 +51,7 @@ export function ReleaseModal({ line, box, onDone, onClose }: {
     const res = await releasePalLine(line.id, boxes, reason.trim());
     setBusy(false);
     if (!res.ok) { toast.error(res.error || "Could not release"); return; }
-    toast.success(`${verb === "Discard" ? "Discarded" : "Released"} ${fmt(boxes)} boxes of ${line.itemCode} to ${toStock ? "free stock" : "Ready for Loading"}`);
+    toast.success(`${past} ${fmt(boxes)} boxes of ${line.itemCode} to ${dest}`);
     onDone();
     onClose();
   };
@@ -84,16 +92,18 @@ export function ReleaseModal({ line, box, onDone, onClose }: {
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 className={showErrors && !reasonOk ? "error" : undefined}
-                placeholder={`Why these boxes are ${verb === "Discard" ? "discarded" : "released"} (required)`}
+                placeholder={`Why these boxes are ${past.toLowerCase()} (required)`}
                 rows={2}
               />
             </label>
           </div>
 
           <Note style={{ marginTop: 10 }}>
-            {toStock
-              ? "Boxes leave this palletization and return to free stock; the order's allocation is returned."
-              : `Boxes leave ${boxLabel(box!)} and return to Ready for Loading.`}
+            {box
+              ? `Boxes leave ${boxLabel(box)} and return to Ready for Loading.`
+              : toStock
+                ? "Boxes leave this palletization and return to free stock; the order's allocation is returned."
+                : "Boxes return to Ready for Palletization (same batch), still booked to the order."}
           </Note>
         </div>
 
@@ -106,7 +116,7 @@ export function ReleaseModal({ line, box, onDone, onClose }: {
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="hbtn primary" disabled={busy} onClick={() => void submit()}>
             <Icon name="check" size={13} />
-            {busy ? `${verb === "Discard" ? "Discarding" : "Releasing"}…` : verb}
+            {busy ? `${doing}…` : verb}
           </button>
         </div>
       </div>

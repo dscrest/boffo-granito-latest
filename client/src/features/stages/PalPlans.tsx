@@ -134,64 +134,57 @@ export function PalPlans({
     </button>
   );
 
+  // CR-491: the page's toolbar buttons render inside the board's ONE toolbar (right of the filters).
+  const actions = (
+    <>
+      <button
+        className="hbtn sm"
+        data-tour="pal-report"
+        title="Print the pallet packing report for everything palletized today"
+        onClick={() =>
+          void import("./packingReportPdf")
+            .then((m) => m.downloadTodaysPackingReport(plans))
+            .then(
+              (n) => { if (n === 0) toast.error("Nothing palletized today"); },
+              () => toast.error("Failed to load today's palletization activity"),
+            )
+        }
+      >
+        <Icon name="printer" size={13} /> Today's Report
+      </button>
+      <ColumnPicker
+        columns={groupCols}
+        hidden={groupHidden}
+        onToggle={toggleGroup}
+        onMove={moveGroup}
+        onClear={() => setGroupBy([])}
+        active={groupBy.length > 0}
+        label={groupBy.length ? `Group: ${groupBy.map((d) => DISPATCH_GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
+        icon="menu"
+        title="Group into sections — check dimensions, drag to set order"
+      />
+    </>
+  );
+
   return (
     <div>
-
       {error && <ErrorCard message={`${error} — check the Operations log (/ops).`} onRetry={() => void load()} />}
-
-      <div className="fbar" style={{ marginBottom: 12 }}>
-        <div style={{ flex: 1 }} />
-        <button
-          className="hbtn sm"
-          data-tour="pal-report"
-          title="Print the pallet packing report for everything palletized today"
-          onClick={() =>
-            void import("./packingReportPdf")
-              .then((m) => m.downloadTodaysPackingReport(plans))
-              .then(
-                (n) => { if (n === 0) toast.error("Nothing palletized today"); },
-                () => toast.error("Failed to load today's palletization activity"),
-              )
-          }
-        >
-          <Icon name="printer" size={13} /> Today's Report
-        </button>
-        {/* CR-418: Kanban | Sheet toggle hidden — {_viewBtn("kanban", "kanban", "Kanban")}{_viewBtn("sheet", "orders", "Sheet")} */}
-        <ColumnPicker
-          columns={groupCols}
-          hidden={groupHidden}
-          onToggle={toggleGroup}
-          onMove={moveGroup}
-          onClear={() => setGroupBy([])}
-          active={groupBy.length > 0}
-          label={groupBy.length ? `Group: ${groupBy.map((d) => DISPATCH_GROUP_DIMS.find((o) => o.id === d)!.label).join(" › ")}` : "Group"}
-          icon="menu"
-          title="Group into sections — check dimensions, drag to set order"
-        />
-        {STAGE_DEFS.length > 1 && (
-          <ColumnPicker
-            columns={stageCols.ordered}
-            hidden={stageCols.hidden}
-            onToggle={stageCols.toggle}
-            onMove={stageCols.move}
-            active={stageCols.customised}
-            label="Sections"
-            icon="menu"
-            title="Show or hide board sections"
-          />
-        )}
-        {can("stages", "create") && (
-          <button className="hbtn primary sm" onClick={() => navigate("/packing/new")}>
-            <Icon name="plus" size={13} />
-            New Palletization Plan
-          </button>
-        )}
-      </div>
 
       {loading && plans.length === 0 ? (
         <div className="card"><SkeletonRows rows={6} /></div>
       ) : (
-        <DispatchBoard plans={plans} allPlans={plans} boxes={boxes} view={view} canEdit={can("stages", "edit")} groupBy={groupBy} visibleStages={boardStages} onChanged={() => void load()} />
+        <DispatchBoard
+          plans={plans}
+          allPlans={plans}
+          boxes={boxes}
+          view={view}
+          canEdit={can("stages", "edit")}
+          groupBy={groupBy}
+          visibleStages={boardStages}
+          onChanged={() => void load()}
+          actions={actions}
+          onNew={can("stages", "create") ? () => navigate("/packing/new") : undefined}
+        />
       )}
     </div>
   );

@@ -221,6 +221,11 @@ select:focus, textarea:focus {
 .btn.x { border-radius: var(--radius-sm); }
 .btn:disabled, .hbtn:disabled, .pc-ibtn:disabled { opacity: 0.35; cursor: not-allowed; }
 .hbtn.danger, .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* CR-491: split button — a primary action joined to its ▾ menu trigger (MoreMenu) */
+.splitbtn { display: inline-flex; align-items: center; }
+.splitbtn > .hbtn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.splitbtn > .hdr-pop:not(:first-child) > .hbtn { border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0 6px; }
+.splitbtn > .hdr-pop:not(:first-child) > .hbtn.primary { border-left-color: rgba(255, 255, 255, 0.45); }
 
 /* toolbar icon button */
 .pc-ibtn {

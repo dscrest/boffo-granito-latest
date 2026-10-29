@@ -13,7 +13,7 @@
    Lines allocated to a load box (and legacy Completed plans) leave this
    board entirely — they live on the Loading (/loading) and Dispatch (/dispatch) pages (CR-480).
    ============================================================ */
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "@/ui/Icon";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
@@ -31,9 +31,11 @@ import {
   batchProgressOf,
   PAL_LINE_STATUS_LABEL,
   palLineStatusLabel,
+  looseBoxes,
   palletBoxes,
   palletsOf,
   palTopUp,
+  readyPalletsLabel,
   wholePallets,
   setPalLineLocation,
   setPalLineStatus,
@@ -43,6 +45,7 @@ import {
   type PalLineStatus,
 } from "./palPlansApi";
 import { MoreMenu } from "@/features/common/DetailBits";
+import { MixBatchMark } from "./MixBatchMark";
 import { SetLocationModal } from "@/features/common/SetLocationModal";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { codeOf } from "@/ui/statusCode";
@@ -95,6 +98,8 @@ export function DispatchBoard({
   groupBy,
   visibleStages,
   onChanged,
+  actions,
+  onNew,
 }: {
   plans: PalPlan[];
   allPlans?: PalPlan[]; // UNFILTERED plans — the gates below need every line (palLoadGate contract)
@@ -104,6 +109,8 @@ export function DispatchBoard({
   groupBy: DispatchGroupBy[];
   visibleStages?: string[]; // ordered stage keys from the Sections picker; empty/undefined = all
   onChanged: () => void;
+  actions?: ReactNode; // CR-491: the page's own toolbar buttons (Today's Report, Group) — rendered right of the filters
+  onNew?: () => void; // CR-491: "New Palletization Plan" (undefined = no create permission)
 }) {
   // Stage sections the board renders (kanban lanes + sheet rows + footer chips).
   // All-hidden falls back to all-visible so the board can never render blank.
@@ -207,11 +214,7 @@ export function DispatchBoard({
           return (
             <>
               {l.batchNumber || "—"}
-              {l.palletGroup && (
-                <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
-                  Mix Batch
-                </span>
-              )}
+              {l.palletGroup && <MixBatchMark />}
               {partialItem && done && (
                 <span className="chip palstatus p-ready" style={{ fontSize: 13, marginLeft: 6, whiteSpace: "nowrap" }} title="Already palletized. Load it from Loading">
                   Palletized
@@ -226,24 +229,25 @@ export function DispatchBoard({
           );
         },
       },
-      // CR-481 (reshapes CR-472): pallets are WHOLE — floor, never a fraction; each page shows
-      // its own figures (`stages`), per BATCH where progress is involved:
-      //   Ready for Palletization: Boxes (queued) · Possible Pallets
-      //   In Palletization:        Pending Boxes · Possible Pallets · Prepared Pallets · Boxes (= pallets × capacity)
-      //   Ready for Loading:       Pallets · Boxes (= pallets × capacity; a Mix Batch pallet shows its own boxes)
-      // Boxes / Pallet (capacity) and Remaining are gone — the user reads pallets, not arithmetic.
+      // CR-499 (reshapes CR-481/495): the numbers read as ONE story left → right, per page —
+      //   identity (Customer · Item · PO · Batch) → Pallet Type (its capacity explains the counts) →
+      //   Ready for Palletization: Boxes · Pallets · Loose
+      //   In Palletization:        Pending · Pallets · Loose · Prepared "N (boxes)"
+      //   Palletization Completed: Pallets · Boxes
+      //   → Location. Pallets are WHOLE (floor); Ordered Boxes / prepared Boxes / Boxes-per-pallet are
+      // gone — the user reads pallets, not arithmetic (user 2026-10-29: "Confusing details. Boxes, loose boxes. Ordered boxes").
+      {
+        key: "pallet",
+        label: "Pallet Type",
+        className: "nw",
+        render: ({ l }) => (
+          <span title={`${l.palletName}${l.boxesPerPallet > 0 ? ` — ${fmt(l.boxesPerPallet)} boxes per pallet` : ""}`}>{l.palletKind || l.palletName}</span>
+        ),
+      },
       { key: "boxes", label: "Boxes", stages: ["Planning"], className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
       {
-        key: "ordered",
-        label: "Ordered Boxes",
-        stages: ["Planning", "Palletizing"],
-        className: "num mono",
-        style: { textAlign: "right" },
-        render: ({ l }) => fmt(oiProgress.get(batchKey(l))?.total ?? l.boxes),
-      },
-      {
         key: "pending",
-        label: "Pending Boxes",
+        label: "Pending",
         stages: ["Palletizing"],
         className: "num mono",
         style: { textAlign: "right" },
@@ -251,36 +255,40 @@ export function DispatchBoard({
       },
       {
         key: "possible",
-        label: "Possible Pallets",
+        label: "Pallets",
         stages: ["Planning", "Palletizing"],
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => {
           const n = wholePallets(l.status === "Palletizing" ? pendingOf(l) : l.boxes, l.boxesPerPallet);
-          return n ? <span title="Whole pallets these boxes can fill">{fmt(n)}</span> : <span className="dim" title={l.boxesPerPallet > 0 ? "Less than one pallet — top up from another batch (Mix Batch)" : "Pick a pallet to see the count"}>—</span>;
+          return n ? (
+            <span title={`Whole pallets these boxes fill (${fmt(l.boxesPerPallet)} boxes per ${l.palletKind || l.palletName || "pallet"})`}>{fmt(n)}</span>
+          ) : (
+            <span className="dim" title={l.boxesPerPallet > 0 ? "Less than one pallet — Top Up Batch merges them with another batch" : "Pick a pallet to see the count"}>—</span>
+          );
+        },
+      },
+      {
+        key: "loose",
+        label: "Loose",
+        stages: ["Planning", "Palletizing"],
+        className: "num mono",
+        style: { textAlign: "right" },
+        render: ({ l }) => {
+          const n = looseBoxes(l.status === "Palletizing" ? pendingOf(l) : l.boxes, l.boxesPerPallet);
+          return n ? <span style={{ color: "var(--c-amber)" }} title="Boxes short of a whole pallet — Top Up Batch merges them with another batch of this item">{fmt(n)}</span> : <span className="dim">—</span>;
         },
       },
       {
         key: "prepared",
-        label: "Prepared Pallets",
+        label: "Prepared",
         stages: ["Palletizing"],
         className: "num mono nw",
         style: { textAlign: "right" },
         render: ({ l }) => {
           const done = oiProgress.get(batchKey(l))?.done ?? 0;
-          const n = wholePallets(done, l.boxesPerPallet);
-          return n ? <span style={{ color: "var(--c-green)" }} title="Whole pallets already palletized for this batch">{fmt(n)}</span> : <span className="dim">—</span>;
-        },
-      },
-      {
-        key: "preparedBoxes",
-        label: "Boxes",
-        stages: ["Palletizing"],
-        className: "num mono",
-        style: { textAlign: "right" },
-        render: ({ l }) => {
-          const n = palletBoxes(oiProgress.get(batchKey(l))?.done ?? 0, l.boxesPerPallet);
-          return n ? <span style={{ color: "var(--c-green)" }} title="Boxes on the prepared pallets (pallets × boxes per pallet)">{fmt(n)}</span> : <span className="dim">—</span>;
+          const label = readyPalletsLabel(done, l.boxesPerPallet, fmt);
+          return label === "—" ? <span className="dim">—</span> : <span style={{ color: "var(--c-green)" }} title="Whole pallets already palletized for this batch (boxes on them)">{label}</span>;
         },
       },
       {
@@ -289,7 +297,7 @@ export function DispatchBoard({
         stages: ["Ready"],
         className: "num mono",
         style: { textAlign: "right" },
-        render: ({ l }) => (l.palletGroup ? <span title="Shares one physical pallet with another batch (Mix Batch)">Mix</span> : fmt(wholePallets(l.boxes, l.boxesPerPallet))),
+        render: ({ l }) => (l.palletGroup ? <MixBatchMark title="One shared pallet (Mix Batch)" style={{ marginLeft: 0 }} /> : fmt(wholePallets(l.boxes, l.boxesPerPallet))),
       },
       {
         key: "readyBoxes",
@@ -298,12 +306,6 @@ export function DispatchBoard({
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => fmt(l.palletGroup || l.boxesPerPallet <= 0 ? l.boxes : palletBoxes(l.boxes, l.boxesPerPallet)),
-      },
-      {
-        key: "pallet",
-        label: "Pallet",
-        className: "nw",
-        render: ({ l }) => <span title={l.palletName}>{l.palletKind || l.palletName}</span>,
       },
       // CR-412: where the pallet stands (Warehouse ▸ Location); "—" until placed.
       {
@@ -336,7 +338,9 @@ export function DispatchBoard({
   // .v3 (CR-412): Location column (hidden while no warehouse exists).
   // .v4 (CR-472): Ordered Boxes + Boxes / Pallet columns; Remaining shown again for everyone.
   // .v5 (CR-481/482): per-stage pallet columns (whole pallets), PO Number leads, SO Number hidden last.
-  const sheetCols = useColumns(`packingSheetColumns.v5.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
+  // .v6 (CR-495): Loose Boxes after Possible Pallets on the queue + In Palletization pages.
+  // .v7 (CR-499): Pallet Type before the counts; Ordered Boxes + prepared Boxes gone; Prepared = N (boxes).
+  const sheetCols = useColumns(`packingSheetColumns.v7.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -376,8 +380,8 @@ export function DispatchBoard({
   // one call (`to` = Palletizing from the Palletise button, ReadyToLoad from
   // Record Palletised / "+" / pallet-less drop on Ready — a line never
   // reaches Ready for Loading without a pallet on record). A partial qty
-  // splits the line server-side; the remainder stays in its stage — except a
-  // partial Complete, whose remainder re-queues to Ready for Palletization (CR-281).
+  // splits the line server-side; the remainder stays in its stage (CR-492 — a
+  // partial Complete's loose boxes stay In Palletization for a Top Up; CR-281's re-queue is gone).
   const confirmPalletise = async (entries: PalletiseEntry[]) => {
     if (busy || entries.length === 0 || !palletise) return;
     const to = palletise.to;
@@ -396,11 +400,12 @@ export function DispatchBoard({
     if (err && ok > 0) { invalidatePalPlans(); onChanged(); }
   };
 
-  // Same-item queue lines that can top up an In-Palletization pallet
-  // (usually another batch — that's the Mix Batch flow).
+  // CR-497 (widens CR-493): a donor is another batch of the same item from Ready for Palletization
+  // OR In Palletization (a queue row short of a pallet must still be able to join one), never a
+  // line already on a mixed pallet.
   const topUpDonors = (l: PalPlanLine) =>
     allLines
-      .filter(({ l: d }) => d.status === "Planning" && !!l.designId && d.designId === l.designId && d.id !== l.id)
+      .filter(({ l: d }) => (d.status === "Planning" || d.status === "Palletizing") && !d.palletGroup && !!l.designId && d.designId === l.designId && d.id !== l.id)
       .map(({ l: d }) => d);
 
   const confirmTopUp = async (donorLineId: string, boxes: number) => {
@@ -572,7 +577,6 @@ export function DispatchBoard({
   // batch's first row's boxes-per-pallet; CR-472 keyed per batch).
   const bKeys = [...new Set(sheetLines.map(batchKey))];
   const bppOf = (k: string) => sheetLines.find((l) => batchKey(l) === k)?.boxesPerPallet ?? 0;
-  const totalOrdered = bKeys.reduce((s, k) => s + (oiProgress.get(k)?.total ?? 0), 0);
   // CR-481: whole-pallet footers, per batch.
   const doneOf = (k: string) => oiProgress.get(k)?.done ?? 0;
   const pendOf = (k: string) => Math.max(0, (oiProgress.get(k)?.total ?? 0) - doneOf(k));
@@ -582,6 +586,9 @@ export function DispatchBoard({
   const totalPossible = pageStages.has("Palletizing")
     ? bKeys.reduce((s, k) => s + wholePallets(pendOf(k), bppOf(k)), 0)
     : sheetLines.reduce((s, l) => s + wholePallets(l.boxes, l.boxesPerPallet), 0);
+  const totalLoose = pageStages.has("Palletizing")
+    ? bKeys.reduce((s, k) => s + looseBoxes(pendOf(k), bppOf(k)), 0)
+    : sheetLines.reduce((s, l) => s + looseBoxes(l.boxes, l.boxesPerPallet), 0);
   const totalReadyBoxes = sheetLines.reduce((s, l) => s + (l.palletGroup || l.boxesPerPallet <= 0 ? l.boxes : palletBoxes(l.boxes, l.boxesPerPallet)), 0);
 
   // ---- selection ----------------------------------------------
@@ -634,8 +641,8 @@ export function DispatchBoard({
       onClick: () => flow.setPicker({ lineIds: loadTargets(l) }),
     },
     ...(whEnabled ? [locateItem(l)] : []),
-    // CR-361: undo palletization — boxes return to free stock, allocation returned.
-    { label: "Release…", disabled: flow.busy, title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease(l) },
+    // CR-361 → CR-500: undo palletization — boxes return to Ready for Palletization (same batch); allocation kept.
+    { label: "Release…", disabled: flow.busy, title: "Return boxes to Ready for Palletization (same batch)", onClick: () => setRelease(l) },
   ] : [
     {
       label: `Start Palletization${stage === "Planning" && palletiseTargets(l).length > 1 ? ` (${palletiseTargets(l).length})` : ""}`,
@@ -649,8 +656,8 @@ export function DispatchBoard({
       title: stage !== "Palletizing"
         ? "Start palletization first"
         : !l.palletId || topUpDonors(l).length === 0
-          ? "No same-design batch waiting to top up from"
-          : "Top up this pallet from another batch of the same design (Mix Batch)",
+          ? "No other batch of this item to top up from"
+          : "Top up this pallet from another batch of this item (Mix Batch)",
       onClick: () => setTopUp(l),
     },
     {
@@ -664,8 +671,10 @@ export function DispatchBoard({
       onClick: () => openPalletise(stage === "Palletizing" ? recordTargets(l) : palletiseTargets(l), "ReadyToLoad"),
     },
     ...(whEnabled ? [locateItem(l)] : []),
-    // CR-369: abandon this palletization task — boxes return to free stock, allocation returned (reason required).
-    { label: "Discard…", danger: true, disabled: flow.busy || l.status === "ReadyToLoad", title: l.status === "ReadyToLoad" ? "Already palletized — release it from Palletization Completed" : "Abandon this task: boxes return to free stock, the order's allocation is returned", onClick: () => setRelease(l) },
+    // CR-369 Discard (Planning → free stock); CR-501 Cancel Palletization (Palletizing → back to Ready for Palletization, booked to the order).
+    l.status === "Palletizing"
+      ? { label: "Cancel Palletization…", danger: true, disabled: flow.busy, title: "Boxes return to Ready for Palletization, still booked to the order (reason required)", onClick: () => setRelease(l) }
+      : { label: "Discard…", danger: true, disabled: flow.busy || l.status === "ReadyToLoad", title: l.status === "ReadyToLoad" ? "Already palletized — release it from Palletization Completed" : "Abandon this task: boxes return to free stock, the order's allocation is returned", onClick: () => setRelease(l) },
   ];
 
   // ---- item card ----------------------------------------------
@@ -742,13 +751,7 @@ export function DispatchBoard({
               </span>
             )}
             {l.palletGroup && (
-              <span
-                className="chip"
-                style={{ fontSize: 13, color: "var(--c-amber)", borderColor: "var(--c-amber)" }}
-                title="This item shares a physical pallet with another batch/item"
-              >
-                Mix Batch
-              </span>
+              <MixBatchMark style={{ marginLeft: 0 }} />
             )}
           </div>
         )}
@@ -882,75 +885,85 @@ export function DispatchBoard({
   // ---- render -------------------------------------------------
   const selectStyle: React.CSSProperties = { flex: "0 1 auto", minWidth: 0, maxWidth: 150 };
 
+  // CR-491: ONE toolbar above the card — filters left, page actions + the New ▾ Sheet Mode
+  // split button right. The filter bar used to sit inside the card under an action bar whose
+  // left half was empty; Sheet Mode (the old "Edit", CR-153/169) lives in the ▾ menu.
+  const canSheet = canEdit && view === "sheet" && (pageStages.has("Planning") || pageStages.has("Palletizing"));
   return (
     <div>
-      <div className="dispatch-fill" style={{ display: "flex", alignItems: "stretch", height: "calc(100vh - 172px)", minHeight: 480 }}>
-        <section className="card" style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
-          <div className="fbar" style={{ margin: 0, padding: "8px 10px", borderBottom: "1px solid var(--border)", flexWrap: "nowrap" }}>
-            <span className="gsearch" style={{ minWidth: 0 }}>
-              <Icon name="search" size={13} />
-              <input type="text" placeholder="Search item, SO, customer…" value={q} onChange={(e) => setQ(e.target.value)} />
-            </span>
-            <select value={fCustomer} onChange={(e) => setFCustomer(e.target.value)} title="Customer" style={selectStyle}>
-              <option value="">All customers</option>
-              {opts.customers.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-            <select value={fCountry} onChange={(e) => setFCountry(e.target.value)} title="Country" style={selectStyle}>
-              <option value="">All countries</option>
-              {opts.countries.map((o) => <option key={o} value={o}>{isoInfo(o).country}</option>)}
-            </select>
-            <select value={fDesign} onChange={(e) => setFDesign(e.target.value)} title="Item" style={selectStyle}>
-              <option value="">All items</option>
-              {opts.designs.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-            <select value={fSize} onChange={(e) => setFSize(e.target.value)} title="Size" style={selectStyle}>
-              <option value="">All sizes</option>
-              {opts.sizes.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flex: "0 0 auto" }}>
-              {anyFilter && (
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); }}
-                >
-                  Clear filters
+      <div className="fbar" style={{ marginBottom: 12, flexWrap: "nowrap" }}>
+        <span className="gsearch" style={{ minWidth: 0 }}>
+          <Icon name="search" size={13} />
+          <input type="text" placeholder="Search item, SO, customer…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </span>
+        <select value={fCustomer} onChange={(e) => setFCustomer(e.target.value)} title="Customer" style={selectStyle}>
+          <option value="">All customers</option>
+          {opts.customers.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <select value={fCountry} onChange={(e) => setFCountry(e.target.value)} title="Country" style={selectStyle}>
+          <option value="">All countries</option>
+          {opts.countries.map((o) => <option key={o} value={o}>{isoInfo(o).country}</option>)}
+        </select>
+        <select value={fDesign} onChange={(e) => setFDesign(e.target.value)} title="Item" style={selectStyle}>
+          <option value="">All items</option>
+          {opts.designs.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <select value={fSize} onChange={(e) => setFSize(e.target.value)} title="Size" style={selectStyle}>
+          <option value="">All sizes</option>
+          {opts.sizes.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, flex: "0 0 auto", alignItems: "center" }}>
+          {anyFilter && (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => { setQ(""); setFCustomer(""); setFCountry(""); setFDesign(""); setFSize(""); }}
+            >
+              Clear filters
+            </button>
+          )}
+          {actions}
+          {view === "sheet" && (
+            <ColumnPicker columns={sheetCols.ordered} hidden={sheetCols.hidden} onToggle={sheetCols.toggle} onMove={sheetCols.move} active={sheetCols.customised} />
+          )}
+          {/* Sheet Mode: Palletise qty + Top Up donor go editable across every row; nothing is written until Save. */}
+          {editMode ? (
+            <>
+              <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
+                Cancel
+              </button>
+              <button
+                className="hbtn primary sm"
+                disabled={!editRows.length || editBad || savingEdits}
+                onClick={() => void saveEdits()}
+                title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
+              >
+                {savingEdits ? "Saving…" : `Save${editRows.length ? ` (${editRows.length})` : ""}`}
+              </button>
+            </>
+          ) : (onNew || canSheet) ? (
+            <span className="splitbtn">
+              {onNew && (
+                <button className="hbtn primary sm" onClick={onNew}>
+                  <Icon name="plus" size={13} />
+                  New Palletization Plan
                 </button>
               )}
-              {view === "sheet" && (
-                <ColumnPicker columns={sheetCols.ordered} hidden={sheetCols.hidden} onToggle={sheetCols.toggle} onMove={sheetCols.move} active={sheetCols.customised} />
+              {canSheet && (
+                <MoreMenu
+                  kebab
+                  icon="chev-d"
+                  triggerClass={onNew ? "hbtn primary sm" : "hbtn sm"}
+                  title="More"
+                  items={[{ label: "Sheet Mode", title: "Record palletized boxes or a batch top-up across rows, then Save", onClick: () => setEditMode(true) }]}
+                />
               )}
-              {/* Sheet edit mode: Palletise qty + Top Up donor go editable across
-                  every row; nothing is written until Save. */}
-              {view === "sheet" && canEdit && (
-                editMode ? (
-                  <>
-                    <button className="hbtn sm" disabled={savingEdits} onClick={() => void leaveEdit()}>
-                      Cancel
-                    </button>
-                    <button
-                      className="hbtn primary sm"
-                      disabled={!editRows.length || editBad || savingEdits}
-                      onClick={() => void saveEdits()}
-                      title={editBad ? "Fix the highlighted cells first" : "Save every edited line"}
-                    >
-                      {savingEdits ? "Saving…" : `Save${editRows.length ? ` (${editRows.length})` : ""}`}
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="hbtn sm"
-                    onClick={() => setEditMode(true)}
-                    title="Record palletized boxes or a batch top-up across rows, then Save"
-                  >
-                    <Icon name="edit" size={13} />
-                    Edit
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="dispatch-fill" style={{ display: "flex", alignItems: "stretch", height: "calc(100vh - 172px)", minHeight: 480 }}>
+        <section className="card" style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
           {view === "kanban" ? (
             groupBy.length === 0 ? (
               stageGrid(visible, "", true)
@@ -967,7 +980,15 @@ export function DispatchBoard({
                     <th style={{ width: 34 }} aria-label="Select" />
                     {sheetCols.visible.map((c) => (
                       <th key={c.key} className={c.className?.includes("num") ? "num" : undefined} style={c.style}
-                          title={c.key === "ordered" ? "Boxes of this batch sent to palletization" : c.key === "bpp" ? "Boxes one pallet holds (Pallet Master)" : c.key === "remaining" ? "Boxes of this batch still to palletize" : undefined}>
+                          title={
+                            c.key === "pallet" ? "The pallet master this batch is built on — its capacity drives the counts"
+                            : c.key === "boxes" ? "Boxes waiting in this row"
+                            : c.key === "pending" ? "Boxes of this batch still to palletize"
+                            : c.key === "possible" ? "Whole pallets these boxes fill"
+                            : c.key === "loose" ? "Boxes short of a whole pallet — Top Up Batch merges them"
+                            : c.key === "prepared" ? "Pallets already palletized for this batch (boxes on them)"
+                            : undefined
+                          }>
                         {c.label}
                       </th>
                     ))}
@@ -1059,7 +1080,7 @@ export function DispatchBoard({
                                     }))}
                                   />
                                 ) : (
-                                  <span className="dim" title="Top-up needs an In-Palletization line with a same-design batch waiting">—</span>
+                                  <span className="dim" title="Top-up needs another batch of this item (queue or In Palletization)">—</span>
                                 )}
                               </td>
                               {/* Per-row ✓ / ✗ (CR-169) — visible once the row has a draft. */}
@@ -1116,11 +1137,10 @@ export function DispatchBoard({
                         {ci === 0
                           ? `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"}`
                           : c.key === "boxes" ? fmt(totalBoxes)
-                          : c.key === "ordered" ? fmt(totalOrdered)
                           : c.key === "pending" ? fmt(totalPending)
                           : c.key === "possible" ? fmt(totalPossible)
-                          : c.key === "prepared" ? fmt(totalPrepared)
-                          : c.key === "preparedBoxes" ? fmt(totalPreparedBoxes)
+                          : c.key === "loose" ? fmt(totalLoose)
+                          : c.key === "prepared" ? (totalPrepared ? `${fmt(totalPrepared)} (${fmt(totalPreparedBoxes)})` : "—")
                           : c.key === "pallets" ? fmt(totalPallets)
                           : c.key === "readyBoxes" ? fmt(totalReadyBoxes)
                           : ""}

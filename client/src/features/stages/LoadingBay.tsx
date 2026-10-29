@@ -44,6 +44,7 @@ import { SetLocationModal } from "@/features/common/SetLocationModal";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { DispatchEntryOverlay } from "./DispatchEntryOverlay";
 import { useLoadFlow } from "./useLoadFlow";
+import { MixBatchMark } from "./MixBatchMark";
 import { nextPlanContainer } from "./containerPlanPrefill";
 import { hasLoadOps, resolveLoadSheetEdit, UNLOAD, type LoadSheetDraft, type LoadSheetOps } from "./loadSheetEdit";
 import {
@@ -136,11 +137,7 @@ function loadColumns(nameOf: (id: string) => string): ColumnDef<Row>[] {
       render: (r) => (
         <>
           {r.l.batchNumber || "—"}
-          {r.l.palletGroup && (
-            <span className="chip" style={{ fontSize: 13, marginLeft: 6, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="Shares a physical pallet with another batch/item">
-              Mix Batch
-            </span>
-          )}
+          {r.l.palletGroup && <MixBatchMark />}
         </>
       ),
     },
@@ -727,13 +724,13 @@ export function LoadingBay({ stages = STAGES.map((s) => s.key) }: { stages?: Loa
   // Per-row container actions (Edit option) by stage.
   const menuFor = (r: Row): MenuItem[] => {
     const box = r.box;
-    // Ready for Loading (CR-170): Load → LoadContainerModal; Release (CR-361) → free stock.
+    // Ready for Loading (CR-170): Load → LoadContainerModal; Release (CR-361 → CR-500) → Ready for Palletization.
     if (!box) return r.stage === "Ready"
       ? [
           { label: "Load", disabled: flow.busy, title: "Load into a container", onClick: () => flow.setPicker({ lineIds: [r.l.id] }) },
           // CR-412: where the pallet stands while it waits for a container.
           ...(canEdit && whEnabled ? [{ label: "Set Location…", title: "Where this pallet stands (Warehouse ▸ Location)", onClick: () => setLocate(r.l) }] : []),
-          ...(canEdit ? [{ label: "Release…", title: "Return boxes to free stock (the order's allocation is returned)", onClick: () => setRelease({ line: r.l }) }] : []),
+          ...(canEdit ? [{ label: "Release…", title: "Return boxes to Ready for Palletization (same batch)", onClick: () => setRelease({ line: r.l }) }] : []),
         ]
       : [];
     const items: MenuItem[] = [];
@@ -829,11 +826,7 @@ export function LoadingBay({ stages = STAGES.map((s) => s.key) }: { stages?: Loa
                 Batch {l.batchNumber}
               </span>
             )}
-            {l.palletGroup && (
-              <span className="chip" style={{ fontSize: 13, color: "var(--c-amber)", borderColor: "var(--c-amber)" }} title="This item shares a physical pallet with another batch/item">
-                Mix Batch
-              </span>
-            )}
+            {l.palletGroup && <MixBatchMark style={{ marginLeft: 0 }} />}
             {stage === "Dispatched" && box?.dispatchDate && (
               <span className="chip mono" style={{ fontSize: 13 }} title="Dispatch date">{box.dispatchDate}</span>
             )}
