@@ -42,6 +42,8 @@ import {
   type CutStockRow,
 } from "./panelOrdersApi";
 import { cutPieceWeight, weightPerPc } from "./cutPieceWeight";
+import { piecePrice, pieceSqft } from "./panelPrice";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 import { panelItemRows } from "./PanelItems";
 
@@ -196,6 +198,9 @@ export function PanelItemDetail() {
               <tr>
                 <th>Cut Piece Size</th>
                 <th className="num" style={{ textAlign: "right", width: 150 }}>Weight / pc (kg)</th>
+                {/* CR-504: ƒx from the cut size × the item's Rate/sqft — never typed. */}
+                <th className="num" style={{ textAlign: "right" }}>Sqft / pc</th>
+                <th className="num" style={{ textAlign: "right" }}>Price / pc</th>
                 <th className="num" style={{ textAlign: "right" }}>On Hand (pcs)</th>
                 <th className="num" style={{ textAlign: "right" }}>Stock Wt (kg)</th>
                 {editable && <th style={{ width: 40 }} />}
@@ -206,6 +211,15 @@ export function PanelItemDetail() {
                 <tr key={p.id}>
                   <td className="mono">{cutName.get(p.cutSizeId) || <span className="dim">—</span>}</td>
                   <td className="num mono">{p.weightKg == null ? <span className="dim">—</span> : p.weightKg}</td>
+                  {(() => {
+                    const sq = pieceSqft(cutName.get(p.cutSizeId) || "", design ?? undefined);
+                    return (
+                      <>
+                        <td className="num mono">{sq == null ? <span className="dim" title="Cut size does not read as W x H">—</span> : sq.toFixed(2)}</td>
+                        <td className="num mono" title="Sqft / pc × the item's Rate/sqft">{moneyFor("INR")(piecePrice(design ?? undefined, cutName.get(p.cutSizeId) || ""))}</td>
+                      </>
+                    );
+                  })()}
                   <td className="num mono" style={p.qty === 0 ? { color: "var(--c-red)" } : undefined}>{fmt(p.qty)}</td>
                   <td className="num mono">{p.weightKg == null ? <span className="dim">—</span> : Math.round(p.weightKg * p.qty * 100) / 100}</td>
                   {editable && (
@@ -234,6 +248,8 @@ export function PanelItemDetail() {
                       aria-label="New cut piece weight"
                     />
                   </td>
+                  <td className="num mono dim">{newSize ? (pieceSqft(newSizeName, design ?? undefined)?.toFixed(2) ?? "—") : ""}</td>
+                  <td className="num mono dim">{newSize ? moneyFor("INR")(piecePrice(design ?? undefined, newSizeName)) : ""}</td>
                   <td className="num">
                     <NumberInput
                       maxDecimals={0}

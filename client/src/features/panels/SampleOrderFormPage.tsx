@@ -62,7 +62,11 @@ export function SampleOrderFormPage() {
   const initial: SampleOrderInput | undefined = existing
     ? editing
       ? sampleOrderToInput(existing)
-      : { ...sampleOrderToInput(existing), order_date: todayISO(), sales_order: undefined, quote: undefined }
+      : (() => {
+          // CR-504: a clone prices from today's Item rates, never the source's frozen ones.
+          const i = sampleOrderToInput(existing);
+          return { ...i, order_date: todayISO(), sales_order: undefined, quote: undefined, lines: i.lines.map((l) => ({ ...l, price: null })) };
+        })()
     : undefined;
 
   const onSave = async (input: SampleOrderInput) => {

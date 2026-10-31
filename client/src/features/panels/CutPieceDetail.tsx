@@ -39,6 +39,8 @@ import {
   type PanelOrderRow,
 } from "./panelOrdersApi";
 import { ORDER_STATUS_TONE } from "./pcBits";
+import { piecePrice, pieceSqft } from "./panelPrice";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 
 const kg2 = (n: number) => Math.round(n * 100) / 100;
 const dash = <span className="dim">—</span>;
@@ -121,6 +123,9 @@ export function CutPieceDetail() {
         { key: "cut", label: "Cut Piece Size", value: cut || "Not set" },
         { key: "size", label: "Item Size", value: design?.sizeLabel || "Not set" },
         { key: "weight", label: "Weight / Piece", value: row.weightKg == null ? "Not weighed" : `${row.weightKg} kg` },
+        // CR-504: ƒx — the cut size × the item's Rate/sqft.
+        { key: "sqft", label: "Sqft / Piece", value: pieceSqft(cut, design)?.toFixed(2) ?? "Size not W x H" },
+        { key: "price", label: "Price / Piece", value: moneyFor("INR")(piecePrice(design, cut)) },
         { key: "onHand", label: "On Hand", value: `${fmt(row.qty)} pcs` },
         { key: "booked", label: "Booked", value: `${fmt(booked)} pcs` },
         { key: "free", label: "Free", value: `${fmt(free)} pcs` },

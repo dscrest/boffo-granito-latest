@@ -287,6 +287,16 @@
           "is_unique": false,
           "search_index_enabled": false,
           "default_value": null
+        },
+        {
+          "column_name": "price",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
         }
       ]
     },
@@ -630,6 +640,16 @@
           "is_unique": false,
           "search_index_enabled": false,
           "default_value": null
+        },
+        {
+          "column_name": "rate_per_kg",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
         }
       ]
     },
@@ -701,6 +721,36 @@
           "column_name": "cut_piece_size",
           "data_type": "bigint",
           "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vinyl_price",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "mdf_price",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "pieces_price",
+          "data_type": "double",
+          "max_length": 15,
           "decimal_digits": 2,
           "is_mandatory": false,
           "is_unique": false,
@@ -1415,6 +1465,16 @@
           "column_name": "remarks",
           "data_type": "text",
           "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "vinyl_rate_sqft",
+          "data_type": "double",
+          "max_length": 15,
           "decimal_digits": 2,
           "is_mandatory": false,
           "is_unique": false,
@@ -3593,6 +3653,16 @@
           "is_mandatory": false,
           "is_unique": false,
           "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "box_brand",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": true,
           "default_value": null
         }
       ]
@@ -6043,6 +6113,148 @@
           "column_name": "matrix",
           "data_type": "text",
           "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "CustomerItemCode",
+      "source_table_id": "69851000000430381",
+      "columns": [
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "design",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "barcode",
+          "data_type": "varchar",
+          "max_length": 100,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer_item_name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        }
+      ]
+    },
+    {
+      "table_name": "LabelTemplate",
+      "source_table_id": "69851000000430740",
+      "columns": [
+        {
+          "column_name": "name",
+          "data_type": "varchar",
+          "max_length": 255,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "customer",
+          "data_type": "bigint",
+          "max_length": 19,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "layout",
+          "data_type": "varchar",
+          "max_length": 40,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "width_mm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "height_mm",
+          "data_type": "double",
+          "max_length": 15,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "texts",
+          "data_type": "text",
+          "max_length": 10000,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "active",
+          "data_type": "boolean",
+          "max_length": null,
+          "decimal_digits": 2,
+          "is_mandatory": false,
+          "is_unique": false,
+          "search_index_enabled": false,
+          "default_value": null
+        },
+        {
+          "column_name": "deleted_at",
+          "data_type": "datetime",
+          "max_length": 50,
           "decimal_digits": 2,
           "is_mandatory": false,
           "is_unique": false,

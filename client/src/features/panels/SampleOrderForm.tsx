@@ -26,10 +26,14 @@ import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/d
 import { cachedCutSizes, listPanels, type CutSizeOption } from "./panelsApi";
 import { cachedCutStockRows, listCutStock, type CutStockRow } from "./panelOrdersApi";
 import { InfoDot } from "./pcBits";
+import { piecePrice, round2 } from "./panelPrice";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 import { SAMPLE_PIECE_LABEL, type SampleOrderInput, type SamplePieceKind } from "./sampleOrdersApi";
 
-type Line = { designId: string; pieceKind: SamplePieceKind; cutSizeId: string; qty: number; note: string };
-const emptyLine = (designId = ""): Line => ({ designId, pieceKind: "Full", cutSizeId: "", qty: 1, note: "" });
+/** CR-504: price = ₹/pc as typed text; null = follow the Item's Rate/sqft × the piece's sqft (frozen on save). */
+type Line = { designId: string; pieceKind: SamplePieceKind; cutSizeId: string; qty: number; note: string; price: string | null };
+const emptyLine = (designId = ""): Line => ({ designId, pieceKind: "Full", cutSizeId: "", qty: 1, note: "", price: null });
+const money = moneyFor("INR");
 const lineKey = (l: Line) => `${l.designId}|${l.pieceKind}|${l.pieceKind === "Cut" ? l.cutSizeId : ""}`;
 
 export function SampleOrderForm({
@@ -67,7 +71,7 @@ export function SampleOrderForm({
   const [custSearch, setCustSearch] = useState(false);
   const [lines, setLines] = useState<Line[]>(
     () =>
-      initial?.lines.map((l) => ({ designId: l.design, pieceKind: l.piece_kind, cutSizeId: l.cut_piece_size || "", qty: l.qty, note: l.note || "" })) ??
+      initial?.lines.map((l) => ({ designId: l.design, pieceKind: l.piece_kind, cutSizeId: l.cut_piece_size || "", qty: l.qty, note: l.note || "", price: l.price == null ? null : String(l.price) })) ??
       (presetDesignIds?.length ? presetDesignIds.map((d) => emptyLine(d)) : [emptyLine()]),
   );
   const [orderDate, setOrderDate] = useState(initial?.order_date || todayISO());
@@ -97,10 +101,15 @@ export function SampleOrderForm({
   }, [designs, stockRows, lines]);
   const cutOptions = useMemo(() => cutSizes.map((c) => ({ value: c.id, label: c.label })), [cutSizes]);
 
+  // CR-504: another item / piece / cut size re-prices the line from the Item master.
   const setLine = (i: number, patch: Partial<Line>) => {
     form.touch();
-    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+    const reprice = "designId" in patch || "pieceKind" in patch || "cutSizeId" in patch ? { price: null } : {};
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...reprice, ...patch } : l)));
   };
+  // A Full tile = the item's own size (blank name → its dimensions).
+  const defaultPrice = (l: Line) => piecePrice(designById.get(l.designId), l.pieceKind === "Cut" ? cutSizes.find((c) => c.id === l.cutSizeId)?.label || "" : "");
+  const priceOf = (l: Line) => (l.price == null ? defaultPrice(l) : round2(Number(l.price) || 0));
   const addLine = () => {
     form.touch();
     setLines((ls) => [...ls, emptyLine()]);
@@ -124,6 +133,7 @@ export function SampleOrderForm({
   }, [lines]);
   const totalQty = lines.reduce((s, l) => s + (l.qty || 0), 0);
   const filled = lines.filter((l) => l.designId);
+  const totalAmount = round2(filled.reduce((s, l) => s + priceOf(l) * (l.qty || 0), 0));
   const lineOk = (l: Line) => !!l.designId && l.qty > 0 && (l.pieceKind === "Full" || !!l.cutSizeId);
   const canSave = !!customer && lines.length > 0 && lines.every(lineOk) && dupKeys.size === 0;
 
@@ -141,6 +151,7 @@ export function SampleOrderForm({
           cut_piece_size: l.pieceKind === "Cut" ? l.cutSizeId : undefined,
           qty: l.qty,
           note: l.note.trim() || undefined,
+          price: priceOf(l), // CR-504: frozen on the line
         })),
       }),
     );
@@ -231,6 +242,8 @@ export function SampleOrderForm({
             <span>
               Qty<span className="req"> *</span>
             </span>
+            <span>Rate</span>
+            <span>Amount</span>
             <span>Note</span>
             <span />
           </div>
@@ -265,6 +278,8 @@ export function SampleOrderForm({
                   <input value={d?.sizeLabel ? `Full size — ${d.sizeLabel}` : "Full size"} readOnly tabIndex={-1} className="calc" aria-label="Cut piece size" />
                 )}
                 <NumberInput min={1} value={l.qty || ""} onChange={(e) => setLine(i, { qty: Number(e.target.value) || 0 })} placeholder="1" aria-label="Quantity" />
+                <NumberInput value={l.price ?? (l.designId ? String(defaultPrice(l)) : "")} maxDecimals={2} onChange={(e) => setLine(i, { price: e.target.value === "" ? null : e.target.value })} placeholder="0.00" title="Piece sqft × the item's Rate/sqft — type to override" aria-label="Rate" />
+                <input value={l.designId ? money(priceOf(l) * (l.qty || 0)) : ""} readOnly tabIndex={-1} className="calc" title="Rate × qty" aria-label="Amount" />
                 <input value={l.note} onChange={(e) => setLine(i, { note: e.target.value })} placeholder="Optional" aria-label="Line note" />
                 <button type="button" className="btn ord-rm" onClick={() => removeLine(i)} title="Remove line" aria-label="Remove line" tabIndex={-1}>
                   ✕
@@ -282,7 +297,7 @@ export function SampleOrderForm({
           <div className="row total">
             <span>Total</span>
             <span className="mono">
-              {filled.length} item{filled.length === 1 ? "" : "s"} · {fmt(totalQty)} pcs
+              {filled.length} item{filled.length === 1 ? "" : "s"} · {fmt(totalQty)} pcs · {money(totalAmount)}
             </span>
           </div>
         </div>

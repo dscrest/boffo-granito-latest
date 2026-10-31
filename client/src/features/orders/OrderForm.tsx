@@ -18,9 +18,11 @@ import { LineStockChip, useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes } from "@/features/masters/currenciesApi";
 import { listPallets, palletsForSize, type PalletRow } from "@/features/masters/palletsApi";
-import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
+import { useBoxBrands } from "@/features/masters/boxBrands";
+import { Note } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { todayISO } from "@/lib/dates";
+import { duplicateItems, mergeDuplicateLines } from "@/lib/mergeLines";
 import { NumberInput } from "../../ui/NumberInput";
 
 const TAX_TYPES: TaxType[] = ["None", "TDS", "TCS"];
@@ -30,6 +32,8 @@ export interface OrderLine {
   ordered_qty_boxes: string;
   rate: string;
   pallet: string; // Pallet ROWID — optional at SO creation, required at palletisation
+  /** CR-508: Brand ROWID the line's boxes must be packed in — per line, mandatory. */
+  boxBrand: string;
   discount: string;
   description: string;
   /** Edit mode: the existing OrderItem ROWID — the server edits it in place (CR-232). */
@@ -57,7 +61,9 @@ export interface OrderDraft {
   address: string; // billing (SalesOrder.address)
   shipping_address: string;
   salesperson: string;
-  box_brand: string; // Brand ROWID from the Box Brand master ("" = none)
+  /** CR-508: not a field any more — the DEFAULT Box Brand for new lines (customer / quote /
+      header carried in); the payload header value is the first line's brand. */
+  box_brand: string;
   customer_notes: string;
   terms: string;
   docDiscount: string;
@@ -80,7 +86,10 @@ function orderLineSub(l: OrderLine): number {
 
 // Qty defaults to 1 (user mandate 2026-07-20) so a new line is immediately valid
 // once a design is picked.
-const emptyLine = (): OrderLine => ({ design: "", ordered_qty_boxes: "1", rate: "", pallet: "", discount: "", description: "" });
+const emptyLine = (boxBrand = ""): OrderLine => ({ design: "", ordered_qty_boxes: "1", rate: "", pallet: "", boxBrand, discount: "", description: "" });
+
+/** CR-507: lines merge only when item, rate AND discount agree (same price). */
+const mergeKeyOf = (l: OrderLine) => `${l.design.trim().toLowerCase()}|${parseFloat(l.rate) || 0}|${parseFloat(l.discount) || 0}`;
 
 let _seq = 0;
 const newId = () =>
@@ -152,6 +161,7 @@ export function OrderForm({
         ordered_qty_boxes: String(o.orderQty || ""),
         rate: o.rate ? String(o.rate) : "",
         pallet: o.palletId || "",
+        boxBrand: o.boxBrandId || "", // CR-508: line-first, SO header as fallback (ordersApi)
         discount: o.discount ? String(o.discount) : "",
         description: o.description || "",
         // A clone is a NEW order: no row identity, no work carried over.
@@ -171,6 +181,7 @@ export function OrderForm({
         ordered_qty_boxes: String((l.qty || 0) - (l.converted || 0)),
         rate: String(l.rate || ""),
         pallet: "",
+        boxBrand: q.boxBrandId || "", // CR-508: the quote's brand seeds every line
         discount: l.discount ? String(l.discount) : "",
         description: l.description || "",
       }));
@@ -213,6 +224,12 @@ export function OrderForm({
     // Transactions inherit customer fields: picking a customer carries their
     // payment term, currency and handling sales person (mirrors QuoteForm).
     const cust = k === "customer" ? customers.find((x) => x.name === val) : undefined;
+    // CR-508: the customer's default carton follows onto every line still on the old
+    // default (or blank); a brand the user picked by hand on a line stays.
+    if (cust?.boxBrandId) {
+      const prev = h.box_brand;
+      setLines((ls) => ls.map((l) => (!l.boxBrand || l.boxBrand === prev ? { ...l, boxBrand: cust.boxBrandId! } : l)));
+    }
     setH((p) => {
       const next = { ...p, [k]: val } as typeof p;
       if (cust) {
@@ -231,11 +248,14 @@ export function OrderForm({
     form.touch();
     setLines((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: val } : l)));
   };
-  const addLine = () => setLines((ls) => [...ls, emptyLine()]);
+  // A new line takes the previous line's carton, else the order default (CR-508).
+  const addLine = () => setLines((ls) => [...ls, emptyLine(ls[ls.length - 1]?.boxBrand || h.box_brand)]);
   const removeLine = (i: number) => {
     form.touch();
     setLines((ls) => (ls.length > 1 ? ls.filter((_, j) => j !== i) : ls));
   };
+  // CR-507: the same item on more than one line — warned live, folded on save.
+  const dups = useMemo(() => duplicateItems(lines, (l) => l.design, mergeKeyOf), [lines]);
 
   const totalBoxes = useMemo(
     () => lines.reduce((s, l) => s + (parseInt(l.ordered_qty_boxes, 10) || 0), 0),
@@ -271,6 +291,8 @@ export function OrderForm({
   // Lines with a design but no rate must block the save (rather than being
   // silently dropped from validLines) so the operator sees the error.
   const rateMissing = lines.some((l) => l.design && !String(l.rate).trim());
+  // CR-508 (carries CR-483): every line with a design needs its Box Brand.
+  const brandMissing = lines.some((l) => l.design && !l.boxBrand);
   // Pallet is OPTIONAL at SO creation (2026-07-30) — it becomes mandatory at
   // palletisation (PalPlanForm), which is where the capacity math needs it.
   // Convert mode: requested qty per design must fit within the quote's
@@ -293,9 +315,9 @@ export function OrderForm({
   const missing =
     !h.customer.trim() ||
     !h.po_number.trim() ||
-    !h.box_brand || // CR-483: Box Brand is mandatory on an order
     validLines.length === 0 ||
     rateMissing ||
+    brandMissing ||
     lines.some(belowFloor) ||
     !!overCap;
 
@@ -303,7 +325,6 @@ export function OrderForm({
   const [showErrors, setShowErrors] = useState(false);
   const customerErr = showErrors && !h.customer.trim() ? "Customer is required" : null;
   const poErr = showErrors && !h.po_number.trim() ? "PO Number is required" : null;
-  const brandErr = showErrors && !h.box_brand ? "Box Brand is required" : null; // CR-483
   const [custSearch, setCustSearch] = useState(false);
   // Convert mode: customer + currency are fixed by the source quote.
   const locked = !!q;
@@ -315,7 +336,14 @@ export function OrderForm({
       setShowErrors(true);
       return;
     }
-    void form.run(() => onSave({ ...h, _id: newId(), lines: validLines }));
+    // CR-507: same item + same price → one line; a line with work recorded is the anchor.
+    const merged = mergeDuplicateLines(validLines, {
+      mergeKey: mergeKeyOf,
+      qty: (l) => parseInt(l.ordered_qty_boxes, 10) || 0,
+      withQty: (l, q) => ({ ...l, ordered_qty_boxes: String(q) }),
+      keep: (l) => !!l.worked,
+    });
+    void form.run(() => onSave({ ...h, _id: newId(), box_brand: merged[0]?.boxBrand || h.box_brand, lines: merged }));
   };
 
   return (
@@ -420,23 +448,7 @@ export function OrderForm({
                   />
                 )}
               </label>
-              {/* Box Brand master pick list (CR-162) — prefilled from the customer's
-                  default, carried from the quote on convert, feeds the Customer Sheet. */}
-              <label className="form-field">
-                <span className="lbl">Box Brand *</span>
-                <div className="ctl-row">
-                  <Combobox
-                    className={`grow${brandErr ? " invalid" : ""}`}
-                    value={h.box_brand}
-                    onChange={(v) => setHead("box_brand", v)}
-                    placeholder="Search box brand…"
-                    options={boxBrands.options}
-                    clearable
-                  />
-                  <BoxBrandPreview src={boxBrands.logoUrlOf(h.box_brand)} />
-                </div>
-                {brandErr && <span className="field-err">{brandErr}</span>}
-              </label>
+              {/* CR-508: Box Brand moved off the header onto every line (below). */}
             </div>
           </div>
 
@@ -446,6 +458,7 @@ export function OrderForm({
             <div className="ord-lines">
               <div className="ord-line ord-line-head qt-line so-line">
                 <span>Design</span>
+                <span>Box Brand<span className="req"> *</span></span>
                 <span>Pallet</span>
                 <span>Qty (boxes)</span>
                 <span>Rate / box<span className="req"> *</span></span>
@@ -491,6 +504,17 @@ export function OrderForm({
                           placeholder="Add a description to your item"
                         />
                       </div>
+                    </div>
+                    {/* CR-508: carton brand per line — prefilled from the customer / quote / previous line. */}
+                    <div className="form-field" style={{ gap: 2 }}>
+                      <Combobox
+                        value={l.boxBrand}
+                        onChange={(v) => setLine(i, "boxBrand", v)}
+                        options={boxBrands.options}
+                        placeholder="Box brand…"
+                        invalid={showErrors && !!l.design && !l.boxBrand}
+                      />
+                      {showErrors && !!l.design && !l.boxBrand && <span className="field-err">Box Brand is required</span>}
                     </div>
                     <div className="form-field" style={{ gap: 2 }}>
                       {(() => {
@@ -542,6 +566,17 @@ export function OrderForm({
                 );
               })}
             </div>
+            {/* CR-507: live duplicate warning — same item on more than one line. */}
+            {[...dups].map(([item, d]) => {
+              const label = lines.find((l) => l.design.trim().toLowerCase() === item)?.design || item;
+              return (
+                <Note key={item} tone="warn">
+                  {d.mergeable
+                    ? <span><b>{label}</b> is on {d.lines} lines — the quantities will be merged into one line when you save.</span>
+                    : <span><b>{label}</b> is on {d.lines} lines with different rates — they stay separate lines.</span>}
+                </Note>
+              );
+            })}
             <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
               <Icon name="plus" size={12} /> Add line
             </button>

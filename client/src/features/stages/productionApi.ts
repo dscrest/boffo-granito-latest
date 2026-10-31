@@ -93,6 +93,9 @@ export interface ProductionEntry {
   palletized: number;
   /** Pallet spec chosen on the SO line — the Record Output default ("" = none). */
   palletId: string;
+  /** CR-508: Box Brand the SO LINE must be packed in (line, else the SO header); "" on independent jobs. */
+  orderBoxBrandId: string;
+  orderBoxBrand: string; // its name, for the grid / sheet / detail
   createdTime: string;
   modifiedTime: string;
 }
@@ -221,14 +224,15 @@ export function listProductionLogs(): Promise<ProductionLogResult> {
 }
 
 async function fetchProductionLogs(): Promise<ProductionLogResult> {
-  const [logs, designs, sizes, finishes, sos, customers, items] = await Promise.all([
+  const [logs, designs, sizes, finishes, sos, customers, items, brands] = await Promise.all([
     listAll("ProductionLog", { order: "ROWID desc" }),
     listAll("Design", { columns: ["design_name", "size", "finish"] }),
     list("Size", { limit: 300, columns: ["code"] }),
     list("Finish", { limit: 300, columns: ["name"] }),
-    listAll("SalesOrder", { columns: ["order_number", "po_number", "customer"] }),
+    listAll("SalesOrder", { columns: ["order_number", "po_number", "customer", "box_brand"] }),
     listAll("Customer", { columns: ["name"] }),
-    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet"] }),
+    listAll("OrderItem", { columns: ["ordered_qty_boxes", "produced_qty_boxes", "palletized_qty_boxes", "pallet", "box_brand"] }),
+    listAll("Brand", { columns: ["name"] }), // CR-508: the carton each job must pack into
   ]);
   if (!logs.ok) return { ok: false, entries: [], openingEntries: [], allocEntries: [], adjustEntries: [], transferEntries: [], error: logs.error };
 
@@ -236,6 +240,7 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
   const sizeName = mapBy(sizes.rows, "code");
   const finishName = mapBy(finishes.rows, "name");
   const custName = mapBy(customers.rows, "name");
+  const brandNameById = mapBy(brands.rows, "name");
   const designRow = new Map<string, DSRow>();
   (designs.rows || []).forEach((d) => designRow.set(String(d.ROWID), d));
   const soById = new Map<string, DSRow>();
@@ -401,6 +406,8 @@ async function fetchProductionLogs(): Promise<ProductionLogResult> {
         produced: oi ? num(oi.produced_qty_boxes) : 0,
         palletized: oi ? num(oi.palletized_qty_boxes) : 0,
         palletId: oi ? str(oi.pallet) : "",
+        orderBoxBrandId: (oi && str(oi.box_brand)) || (so ? str(so.box_brand) : ""),
+        orderBoxBrand: brandNameById.get((oi && str(oi.box_brand)) || (so ? str(so.box_brand) : "")) || "",
         createdTime: str(r.CREATEDTIME),
         modifiedTime: str(r.MODIFIEDTIME),
       };
@@ -661,6 +668,7 @@ export interface ProductionRequestGroup {
   records: ProductionRecordRow[]; // every dated output record in the group
   designs: string[]; // unique design names in the production
   designSummary: string; // "Design A" or "Design A +2"
+  boxBrand: string; // CR-508: distinct line Box Brands, " · " joined ("" when none)
   totalRequested: number;
   totalProduced: number;
   ordered: number; // summed order-line target (0 for independent)
@@ -705,6 +713,7 @@ function buildGroup(group: string, es: ProductionEntry[]): ProductionRequestGrou
     records: es.flatMap((e) => e.records).sort((a, b) => (a.createdTime < b.createdTime ? -1 : 1)),
     designs,
     designSummary: designs.length <= 1 ? designs[0] || "—" : `${designs[0]} +${designs.length - 1}`,
+    boxBrand: [...new Set(es.map((e) => e.orderBoxBrand).filter(Boolean))].join(" · "),
     totalRequested: es.reduce((s, e) => s + e.qtyRequested, 0),
     totalProduced: es.reduce((s, e) => s + e.producedSoFar, 0),
     ordered: [...oi.values()].reduce((s, v) => s + v.ordered, 0),

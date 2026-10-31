@@ -24,6 +24,11 @@ import { MoreMenu } from "@/features/common/DetailBits";
 import { DetailRail } from "@/features/common/DetailRail";
 import { Chip } from "@/ui/Chip";
 import { LOADING_TONE } from "./pcBits";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
+
+const money = moneyFor("INR");
+/** CR-504: a frozen ₹ value, or "—" on a line saved before pricing. */
+const priced = (v: number | null) => (v == null ? <span className="dim" title="Edit and save the order to price it">—</span> : money(v));
 import { loadStatusOf, PanelLoadsTab, SampleActionsTab } from "./PanelLoads";
 import { OrderReadinessTab, type ReadinessRow } from "./OrderReadinessTab";
 import {
@@ -245,6 +250,8 @@ export function SampleOrderDetail() {
                       <th className="num" style={{ textAlign: "right" }}>Requested</th>
                       <th className="num" style={{ textAlign: "right" }}>Supplied</th>
                       <th className="num" style={{ textAlign: "right" }}>Remaining</th>
+                      <th className="num" style={{ textAlign: "right" }}>Rate</th>
+                      <th className="num" style={{ textAlign: "right" }}>Amount</th>
                       <th>Last Supplied</th>
                       <th>Note</th>
                     </tr>
@@ -262,6 +269,8 @@ export function SampleOrderDetail() {
                           <td className="num mono">{fmt(l.qty)}</td>
                           <td className="num mono">{fmt(l.suppliedQty)}</td>
                           <td className="num mono" style={rem > 0 ? { color: "var(--c-amber)", fontWeight: 600 } : undefined}>{fmt(rem)}</td>
+                          <td className="num mono">{priced(l.price)}</td>
+                          <td className="num mono">{priced(l.amount)}</td>
                           <td className="mono muted">{l.suppliedOn || <span className="dim">—</span>}</td>
                           <td className="muted" style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={l.note}>{l.note || <span className="dim">—</span>}</td>
                         </tr>
@@ -269,7 +278,7 @@ export function SampleOrderDetail() {
                     })}
                     {order.lines.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="muted" style={{ textAlign: "center", padding: 18 }}>No samples on this order.</td>
+                        <td colSpan={10} className="muted" style={{ textAlign: "center", padding: 18 }}>No samples on this order.</td>
                       </tr>
                     )}
                   </tbody>
@@ -279,6 +288,8 @@ export function SampleOrderDetail() {
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.totalQty)}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.suppliedQty)}</td>
                       <td className="num mono" style={{ fontWeight: 600 }}>{fmt(order.totalQty - order.suppliedQty)}</td>
+                      <td />
+                      <td className="num mono" style={{ fontWeight: 600 }}>{priced(order.amount)}</td>
                       <td colSpan={2} />
                     </tr>
                   </tfoot>

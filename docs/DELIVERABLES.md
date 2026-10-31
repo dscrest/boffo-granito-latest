@@ -5,10 +5,10 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 
 | Status | Count |
 |---|---|
-| Completed | 197 |
+| Completed | 204 |
 | In progress | 19 |
 | Future | 27 |
-| **Total** | **243** |
+| **Total** | **250** |
 
 ## Foundation & workspace
 
@@ -84,6 +84,7 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 |---|---|---|---|---|
 | Customer master (full page) | Code, name, contacts, billing and shipping addresses side by side, country, currency, payment terms, default Box Brand, sales person, brand. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Customer Brands | Several brand names per customer on the Customer detail (add / delete); the Item form offers them as the buyer's Customer Brand. | Completed | 2026-10-23 | CR-393 |
+| Customer box labels | Customer ▸ Labels: the customer's own EAN-13 barcode per item (add, edit or import their Excel list; wrong check digits and duplicates refused) and the stickers that print for them — barcode strip, batch strip and a compliance box label in their language, each with its size, texts and a live preview. Print Box Labels from a production record, a Sales Order or a Palletization plan: one PDF per sticker, one label per page, copies = boxes. | Completed | 2026-10-30 | CR-502 |
 | Customer detail | Quotes, sales orders and dispatches for that customer in one place; Showcase Panels and Customer Samples sections. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Transactions inherit customer fields | Every quote and order fills currency, terms, addresses, brand and box brand from the customer on pick — nothing retyped. | Completed | Phase 1 (by 01-Oct-2026) |  |
 | Sign in with Zoho | Login page leads with a Zoho button; password form stays as fallback; only existing active app users get in; roles stay Admin-controlled. | Completed | 2026-10-12 | CR-324 |
@@ -134,6 +135,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Sales Order page without Panel Orders tab | Production, Palletization and Container Planning tabs only; Request Panels stays in the More menu. | Completed | 2026-10-24 | CR-422 |
 | Sales Order without a Location field | The order form no longer asks for a Location; location is recorded where stock is written (production, cut stock, pallets). | Completed | 2026-10-27 | CR-468 |
 | Box Brand mandatory | A Sales Order cannot be saved without a box brand; the customer's default still prefills it. | Completed | 2026-10-28 | CR-483 |
+| One line per item | Adding an item that is already on the quote or order shows a warning; on save the quantities merge into one line when the rate is the same (a different rate keeps two lines). | Completed | 2026-10-31 | CR-507 |
+| Box Brand per line | Each Sales Order line has its own Box Brand (prefilled from the customer, the quote or the line above) instead of one for the whole order; shown per line on the order page and on the Production list, sheet and production page. | Completed | 2026-10-31 | CR-508 |
+| Allocate Stock by Box Brand | Allocate Stock offers only batches packed in the line's Box Brand and says how many boxes in other brands were left out. | Completed | 2026-10-31 | CR-509 |
 
 ## Production
 
@@ -295,6 +299,9 @@ Feature-wise list of what has been delivered, what is being built and what is pl
 | Godown print — issue / request | A printed issue / request slip for the godown. | Future |  | Panel Craft list #5 |
 | Missing items to fulfil an order | A view of what is missing per order (Pending Cut Piece + requirements exist; the extra needed is to be clarified). | Future |  | Panel Craft list #6 |
 | Bill / expense | Record expenses or bills against panel work. New area, scope to be defined. | Future |  | Panel Craft list #12 |
+| Panel Craft pricing | Every panel is priced from three parts — Vinyl (vinyl size sqft × the panel's vinyl rate per sqft), MDF (board weight × the MDF rate per kg) and Cut pieces (each piece's sqft × the item's rate per sqft). Worked out when the order is saved and frozen on the order, each part editable; sample orders priced by piece size. Prices show on the panel order page and PDF, the sample order, the Orders list (Amount), the panel master's Pricing tab and every cut piece (sqft and price per piece). | Completed | 2026-10-31 | CR-504 |
+| Your own Panel Codes | Type the panel's code on New / Edit Panel (mandatory, saved in capitals, no duplicates) instead of an automatic PANEL-001 number; rename an old panel and every order, load and print shows the new code. | Completed | 2026-10-31 | CR-506 |
+| Bulk Update of rates | Filter the list, tick the rows, Bulk Update, pick the field, type the value — one save sets Rate / sqft on many Panel Items (new filter by size, finish, brand, category, rate, stock), Vinyl Rate on many panels, Rate/kg on MDF rows. The Item master's bulk edit works the same way, now with Rate / sqft. | Completed | 2026-10-31 | CR-505 |
 | Panel Order PDF — one page per panel | More ▸ Print order PDF on a panel order: a cover page with the order details and lines, then one page per panel with the showcase photo as large as the page allows, the panel's sizes and its cut pieces with totals for the ordered quantity. | Completed | 2026-10-27 | CR-474 |
 | Boffo / Bonza company separation | Two companies in one system — login-time company selection; the Export module mainly for Bonza. On hold at the user's request (docs/ON-HOLD.md #1). | Future |  | ON-HOLD #1 |
 

@@ -80,6 +80,7 @@ export function OrderFormPage() {
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,
       rate: parseFloat(l.rate) || 0,
       pallet: l.pallet || "",
+      box_brand: l.boxBrand || d.box_brand, // CR-508 per line
       discount: parseFloat(l.discount) || 0,
       description: l.description || "",
     }));
@@ -91,7 +92,7 @@ export function OrderFormPage() {
     });
     const res = await convertQuote(q.id, isFull ? "Full" : "Partial", lines, {
       po_number: d.po_number,
-      box_brand: d.box_brand,
+      box_brand: d.lines[0]?.boxBrand || d.box_brand, // CR-508: header = first line's brand
       order_date: d.order_date,
       shipment_date: d.shipment_date,
       payment_term: d.payment_term,

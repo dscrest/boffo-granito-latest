@@ -11,7 +11,11 @@
 import type { Column, Content, ContentText, TDocumentDefinitions } from "pdfmake/interfaces";
 import { downloadPdf, imageDataUrl } from "@/lib/pdf";
 import { designImageUrl } from "@/lib/api";
-import { COMPANY, QP, logoDataUrl, prettyDate } from "@/features/quotes/quoteTemplate";
+import { COMPANY, QP, logoDataUrl, moneyFor, prettyDate } from "@/features/quotes/quoteTemplate";
+import { lineRate } from "./panelPrice";
+
+const money = moneyFor("INR");
+const moneyOr = (v: number | null) => (v == null ? "—" : money(v)); // CR-504: "—" = saved before pricing
 import type { PanelOrderRow } from "./panelOrdersApi";
 import type { PanelRow } from "./panelsApi";
 
@@ -127,7 +131,13 @@ function panelPage(order: PanelOrderRow, line: PanelOrderRow["lines"][number], p
         margin: [0, 0, 0, 2],
       },
       {
-        text: [`Panel ${panel?.panelSize || "—"}`, `MDF ${panel?.mdfSize || "—"}`, `Vinyl ${panel?.vinylSize || "—"}`].join("   ·   "),
+        text: [
+          `Panel ${panel?.panelSize || "—"}`,
+          `MDF ${panel?.mdfSize || "—"}`,
+          `Vinyl ${panel?.vinylSize || "—"}`,
+          // CR-504: the frozen price parts of one panel
+          ...(lineRate(line) == null ? [] : [`Vinyl ${money(line.vinylPrice ?? 0)} + MDF ${money(line.mdfPrice ?? 0)} + Cut pieces ${money(line.piecesPrice ?? 0)} = ${money(lineRate(line) ?? 0)} / panel`]),
+        ].join("   ·   "),
         fontSize: 8.5,
         color: QP.dim,
         margin: [0, 0, 0, 10],
@@ -170,6 +180,8 @@ async function buildPanelOrderDoc(order: PanelOrderRow, panelsById: Map<string, 
       td(l.panelId ? p?.panelSize || "—" : "Cut piece"),
       td(l.panelId ? `${p?.lines.length ?? 0} design${(p?.lines.length ?? 0) === 1 ? "" : "s"}` : "—"),
       { ...td(nfmt(l.qty), true), bold: true, color: QP.ink },
+      td(moneyOr(lineRate(l)), true),
+      { ...td(moneyOr(l.amount), true), bold: true, color: QP.ink },
     ];
   };
 
@@ -200,10 +212,14 @@ async function buildPanelOrderDoc(order: PanelOrderRow, panelsById: Map<string, 
       {
         table: {
           headerRows: 1,
-          widths: [18, "*", 90, 80, 60],
-          body: [[th("#"), th("Panel"), th("Size"), th("Designs"), th("Qty", true)], ...order.lines.map(lineRow)],
+          widths: [18, "*", 70, 56, 36, 68, 76],
+          body: [
+            [th("#"), th("Panel"), th("Size"), th("Designs"), th("Qty", true), th("Rate", true), th("Amount", true)],
+            ...order.lines.map(lineRow),
+            [{ ...td("Total"), colSpan: 6, bold: true, color: QP.ink }, {}, {}, {}, {}, {}, { ...td(moneyOr(order.amount), true), bold: true, color: QP.ink }],
+          ],
         },
-        layout: tableLayout(4),
+        layout: tableLayout(6),
       },
       {
         text: "Each panel follows on its own page with its photo and cut pieces.",

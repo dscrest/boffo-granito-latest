@@ -3,6 +3,84 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-31 — One line per item, Box Brand per line, Allocate Stock by brand (CR-507…509) — LIVE + DEMO
+
+- **Same item twice on a Quote or Sales Order.** While you add lines, an amber note says the item is already
+  on another line and that the quantities will be merged when you save (same rate). With a different rate the
+  two lines stay as they are. Panel orders, sample orders, palletization and loading are unchanged.
+  SO/2026-27/004 (Reya Impex) now has one Portland Tease line of 260 boxes.
+- **Box Brand on every Sales Order line.** The order form no longer has one Box Brand at the top: each line
+  has its own, prefilled from the customer's default (or the quote, or the line above) and required. It shows
+  per line on the order page, and on the Production list, sheet and production page as the carton to pack into.
+- **Allocate Stock shows only matching cartons.** Stock packed in another Box Brand is hidden (with a line
+  saying how many boxes were left out); the server refuses such an allocation too. Stock with no brand recorded
+  still shows.
+
+## 2026-10-31 — Panel Code is yours to type (CR-506) — built, deploy pending
+
+- **Type the Panel Code yourself.** New / Edit Panel has a mandatory Panel Code field; it is saved in capitals and
+  must be unique ("already used" if not). The system no longer assigns PANEL-001-style numbers. Existing panels
+  can be renamed too, and the new code shows at once on every order, load, PDF and list that mentions the panel.
+- Test data for trying prices: items **ZZZ Stone A / B** (₹45 / ₹60 per sqft) and panels **ZZZ-PANEL-A / B**
+  (vinyl ₹12 / ₹15 per sqft) on LIVE and DEMO — delete when done.
+
+## 2026-10-31 — Bulk Update for prices on Panel Items, Panels and MDF (CR-505) — LIVE + DEMO 2026-10-31
+
+- **Set many rates at once.** Filter the list, tick the rows (the header tick takes every filtered row), click
+  **Bulk Update**, pick the field, type the value, **Update N**. Panel Items: Rate / sqft (new Advanced Filter —
+  Size, Finish, Brand, Category, Rate / ft², On Hand — and a Rate / sqft column). Panels: Vinyl Rate / sqft (new
+  column). MDF: Rate/kg. One save for every ticked row; each record's Activity shows the change.
+- **Item master Bulk edit becomes Bulk Update** — the same window: one field at a time (Status, Brand, Grade, Box
+  Weight, and now Rate / sqft, which also sets Rate / sqm). Saved orders keep their frozen prices.
+
+## 2026-10-31 — Panel Craft pricing: Vinyl + MDF + Cut pieces per panel (CR-504) — LIVE + DEMO 2026-10-31
+
+- **Every panel now has a price, made of three parts.** Vinyl = Vinyl Size sqft (Panel Size when blank) × the
+  panel's new **Vinyl Rate/sqft**; MDF = board weight × the MDF row's new **Rate/kg**; Cut pieces = each piece's
+  sqft (from its cut size) × the Item's **Rate/sqft** × pieces on the panel. A loose cut piece or a sample piece
+  = its sqft × the Item's Rate/sqft (a full tile = the item's own size).
+- **Worked out when the order is saved, then frozen.** The Panel Order form fills Vinyl ₹ · MDF ₹ · Cut pieces ₹
+  under each panel row plus Rate and Amount; any part can be typed over. Changing the panel, MDF thickness, item
+  or cut size re-prices that line; later master changes never rewrite a saved order. A Clone prices fresh.
+- **Where prices show:** Panel Order page (new Pricing card + total), Sample Order form and page (Rate · Amount),
+  Orders list (**Amount** column), Panel Order PDF (Rate · Amount · total, and the split on each panel page),
+  Panel Master ▸ **Pricing** tab (what one panel costs per MDF thickness), Panel Item and Cut Piece pages
+  (**Sqft / pc**, **Price / pc**). Rates are set on Panel (Vinyl Rate/sqft), Masters ▸ MDF (Rate/kg) and the
+  Item master (Rate/sqft, already there).
+- Orders saved before today show "—" until they are edited and saved once. INR only; no tax or discount.
+
+## 2026-10-30 — Names: only LLP / PVT / LTD… stay in capitals (CR-503) — built, deploy pending
+
+- **Every name word is Title Case except the legal suffixes.** LLP, LLC, LTD, PVT, INC, PLC, FZE, FZCO and GMBH
+  are saved in capitals (also "Pvt.Ltd." → "PVT.LTD."); every other word becomes Title Case even when typed in
+  capitals — "SHREE RAM CERAMIC PVT LTD" saves as "Shree Ram Ceramic PVT LTD" (it used to keep short words like
+  "RAM" or "ABC"). Codes, SKUs, vehicle numbers and sizes are untouched. Existing names change on their next save.
+
+## 2026-10-30 — Customer box labels: barcode, batch and compliance stickers (CR-502) — LIVE + DEMO 2026-10-30
+
+- **The customer's own barcode per item.** Customer ▸ **Labels** tab: Item Barcodes (Item · Customer Item
+  Name · Barcode) — add one, edit, or import the customer's list from Excel (Item code or name · Barcode ·
+  Customer Item Name, with a per-row reason when a row can't be taken). The code is whatever the customer
+  gives — any length, letters allowed (same day, user: "arbitrary, not fixed"); a second barcode on the same
+  item or the same barcode on two items is refused — on the screen and on the server. A code that is a valid
+  EAN-13 prints as EAN-13; anything else prints as Code 128.
+- **Label templates — three sticker shapes, your texts.** Barcode strip (item name + EAN bars), batch strip
+  (item · BATCH.NO · MFG.DATE + extra marks) and the compliance box label (product text, importer, standard +
+  CE, group line, intended use, spec table, buyer note, manufacturer — the manufacturer block starts from
+  Settings ▸ Organization). Each template has its own size in mm, a decimal-separator choice (0,88 / 0.88) and
+  `{placeholders}` for item, size, thickness, finish, batch and mfg date; the form shows a live PDF preview.
+  A template for "All customers" is a house sticker (the batch strip); the rest belong to one customer.
+  House templates are also under Settings ▸ Masters ▸ Export ▸ Label Templates.
+- **Print Box Labels** item-wise from Customer ▸ Labels ▸ Item Barcodes (Print Labels for the whole list, or
+  Print Labels in a row's menu — type the copies, no order needed), from a production output row (🖨 next to
+  the QR), a Sales Order (More ▸ Print Box Labels, one row per line) or a Palletization plan (More ▸ Print Box
+  Labels, one row per line × batch). One
+  modal: Customer, then Item · Customer Item / Barcode · Batch (picked for you when the item has one) · Mfg
+  Date · Copies (= boxes); one **Print** button per sticker template (no template saved yet → the three built-in
+  stickers print as they come) — one PDF each, one label per page at the
+  template's size, ready for a label printer or "Actual size" on any printer. An item without a barcode says so
+  and is skipped. No shade anywhere (batch only).
+
 ## 2026-10-29 — Release and Cancel Palletization go back to Ready for Palletization (CR-500, CR-501) — LIVE + DEMO 2026-10-29
 
 - **Cancel Palletization (CR-501).** The "+" menu on In Palletization offers Cancel Palletization… (boxes +

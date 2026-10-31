@@ -19,12 +19,14 @@ import { createListCache } from "@/lib/cache";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
 import { listPanels } from "./panelsApi";
 import { invalidateCutStock, parseAllocation, parseLoads, requirementsFor, sampleNeedLines, type Allocation, type LoadRow, type Requirement } from "./panelOrdersApi";
+import { lineAmount, orderAmount } from "./panelPrice";
 import { deriveSampleStatus, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 export { deriveSampleStatus, remaining, SAMPLE_STATUSES, type SampleOrderStatus } from "./sampleOrderStatus";
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
+const numOrNull = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 export const SAMPLE_STATUS_LABEL: Record<SampleOrderStatus, string> = {
   New: "New",
@@ -53,6 +55,9 @@ export interface SampleOrderLineRow {
   suppliedQty: number;
   suppliedOn: string; // yyyy-MM-dd of the LAST supply, "" if none
   note: string;
+  /** CR-504: frozen ₹/pc (null = saved before pricing). */
+  price: number | null;
+  amount: number | null;
 }
 
 export interface SampleOrderRow {
@@ -77,6 +82,7 @@ export interface SampleOrderRow {
   allocation: Allocation;
   totalQty: number;
   suppliedQty: number;
+  amount: number | null; // CR-504: Σ line amounts; null when any line is unpriced
   createdTime: string;
   modifiedTime: string;
 }
@@ -139,7 +145,10 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       suppliedQty: num(l.supplied_qty),
       suppliedOn: str(l.supplied_on).slice(0, 10),
       note: str(l.note),
+      price: numOrNull(l.price),
+      amount: null,
     };
+    row.amount = lineAmount({ vinylPrice: null, mdfPrice: null, piecesPrice: row.price, qty: row.qty });
     linesByOrder.set(key, [...(linesByOrder.get(key) ?? []), row]);
   }
   const rows: SampleOrderRow[] = (orders.rows || []).map((o) => {
@@ -165,6 +174,7 @@ async function fetchSampleOrders(): Promise<{ ok: boolean; orders: SampleOrderRo
       allocation: parseAllocation(str(o.allocation)),
       totalQty: ls.reduce((s, l) => s + l.qty, 0),
       suppliedQty: ls.reduce((s, l) => s + l.suppliedQty, 0),
+      amount: orderAmount(ls),
       createdTime: str(o.CREATEDTIME),
       modifiedTime: str(o.MODIFIEDTIME),
     };
@@ -187,6 +197,7 @@ export interface SampleOrderLineInput {
   cut_piece_size?: string; // CutPieceSize ROWID — Cut only
   qty: number;
   note?: string;
+  price?: number | null; // CR-504: frozen ₹/pc; absent = the form prices it from the Item
 }
 
 export interface SampleOrderInput {
@@ -209,7 +220,7 @@ export function sampleOrderToInput(o: SampleOrderRow): SampleOrderInput {
     note: o.note || undefined,
     sales_order: o.salesOrderId || undefined,
     quote: o.quoteId || undefined,
-    lines: o.lines.map((l) => ({ design: l.designId, piece_kind: l.pieceKind, cut_piece_size: l.cutSizeId || undefined, qty: l.qty, note: l.note || undefined })),
+    lines: o.lines.map((l) => ({ design: l.designId, piece_kind: l.pieceKind, cut_piece_size: l.cutSizeId || undefined, qty: l.qty, note: l.note || undefined, price: l.price })),
   };
 }
 

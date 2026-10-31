@@ -28,6 +28,7 @@ import { useBoxBrands } from "@/features/masters/boxBrands";
 import { useStockLookup } from "@/features/masters/LineStock";
 import { currentSalespersonName } from "@/features/masters/salespersonApi";
 import { RecordOutputForm, type RecordOutputResult } from "./RecordOutputForm";
+import { PrintLabelsModal, type PrintLabelInput } from "@/features/labels/PrintLabelsModal";
 import { ProductionCompleteForm, type ProductionCompleteResult } from "./ProductionCompleteForm";
 import {
   cachedProductionLogs,
@@ -55,6 +56,7 @@ const FIELDS: FieldDef[] = [
   { key: "order", label: "PO Number", value: (g) => (g.independent ? "Independent (stock)" : g.poNumber || g.orderNumber || "—") },
   { key: "so", label: "SO Number", value: (g) => (g.independent ? "—" : g.orderNumber || "—") },
   { key: "customer", label: "Customer", value: (g) => g.customer || "—" },
+  { key: "boxBrand", label: "Box Brand", value: (g) => g.boxBrand || "—" }, // CR-508: the carton to pack into
   { key: "requested", label: "Requested (boxes)", value: (g) => fmt(g.totalRequested) },
   { key: "produced", label: "Produced (boxes)", value: (g) => (g.totalProduced ? fmt(g.totalProduced) : "—") },
   { key: "remaining", label: "Remaining (boxes)", value: (g) => fmt(Math.max(0, g.totalRequested - g.totalProduced)) },
@@ -81,6 +83,7 @@ export function ProductionDetail() {
   const [busy, setBusy] = useState<string | null>(null);
   // Completion capture dialog (opened when moving into Completed).
   const [completeOpen, setCompleteOpen] = useState(false);
+  const [labelsFor, setLabelsFor] = useState<PrintLabelInput[] | null>(null); // CR-502: stickers for one output record
 
   const { salesPersons, designRows } = useMasters();
   const loggedBy = useMemo(() => currentSalespersonName(salesPersons), [salesPersons]);
@@ -245,6 +248,7 @@ export function ProductionDetail() {
         <RecordOutputForm entries={recordEntries} onSave={onRecordSave} onClose={() => setRecordEntries(null)} />
       )}
       {completeOpen && group && <ProductionCompleteForm group={group} onSave={onCompleteSave} onClose={() => setCompleteOpen(false)} />}
+      {labelsFor && group && <PrintLabelsModal customerName={group.customer} inputs={labelsFor} onClose={() => setLabelsFor(null)} />}
 
       {/* Production list — resizable, sticky, own scroll (mirrors OrderDetail). */}
       <div
@@ -409,6 +413,7 @@ export function ProductionDetail() {
                       <th>Design</th>
                       <th>Batch</th>
                       <th>Size / Finish</th>
+                      <th>Box Brand</th>{/* CR-508 */}
                       <th>Status</th>
                       <th className="num" style={{ textAlign: "right" }}>Requested</th>
                       <th className="num" style={{ textAlign: "right" }}>Produced</th>
@@ -438,6 +443,7 @@ export function ProductionDetail() {
                               : <span className="dim">—</span>}
                           </td>
                           <td className="dim">{[e.size, e.finish].filter(Boolean).join(" · ") || "—"}</td>
+                          <td className="nw">{e.orderBoxBrand || <span className="dim">—</span>}</td>
                           <td><span className="chip" style={{ color: lineState.color }} title={lineState.label}>{codeOf(lineState.label)}</span></td>
                           <td className="num mono">{fmt(e.qtyRequested)}</td>
                           <td className="num mono">{e.producedSoFar ? <span style={{ color: "var(--c-green)" }}>{fmt(e.producedSoFar)}</span> : <span className="dim">—</span>}</td>
@@ -535,6 +541,15 @@ export function ProductionDetail() {
                             onClick={() => void import("./batchQrPdf").then((m) => m.downloadBatchQrPdf(r))}
                           >
                             <Icon name="qr" size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            title="Print box labels"
+                            style={{ padding: 0, height: 22, width: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", marginLeft: 4 }}
+                            onClick={() => setLabelsFor([{ designId: designRows.find((d) => d.designName === r.design)?.id || "", batch: r.batchNumber, boxes: r.qtyBoxes }])}
+                          >
+                            <Icon name="printer" size={12} />
                           </button>
                         </td>
                       </tr>

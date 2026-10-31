@@ -38,14 +38,22 @@ import { cachedCutSizes, cachedPanels, listPanels, type CutSizeOption, type Pane
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { cachedCutStock, cachedCutStockRows, cachedCutWeights, listCutStock, requirementsFor, stockKey, type NeedLine, type PanelOrderInput } from "./panelOrdersApi";
 import { panelWeightSplit } from "./panelOrderNeeds";
+import { panelPriceParts, piecePrice, round2, type PriceParts } from "./panelPrice";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 import { PanelPickerModal } from "./PanelPickerModal";
 import { InfoDot } from "./pcBits";
 
-/** CR-346: a line is a showcase PANEL (panelId [+ mdfId]) or a loose CUT PIECE (designId + cutSizeId). */
-type Line = { kind: "panel" | "cut"; panelId: string; qty: number; mdfId: string; designId: string; cutSizeId: string };
+/** CR-346: a line is a showcase PANEL (panelId [+ mdfId]) or a loose CUT PIECE (designId + cutSizeId).
+    CR-504: vinyl / mdf / pieces = the ₹ parts of ONE panel (a cut line uses pieces = ₹/pc) as typed text;
+    null = follow the masters (a new line, a clone, a pre-pricing order) — frozen on save. */
+type Line = { kind: "panel" | "cut"; panelId: string; qty: number; mdfId: string; designId: string; cutSizeId: string; vinyl: string | null; mdf: string | null; pieces: string | null };
 const kg = (n: number) => `${Math.round(n * 100) / 100} kg`;
-const panelLine = (panelId: string, mdfId: string): Line => ({ kind: "panel", panelId, qty: 1, mdfId, designId: "", cutSizeId: "" });
-const cutLine = (): Line => ({ kind: "cut", panelId: "", qty: 1, mdfId: "", designId: "", cutSizeId: "" });
+const money = moneyFor("INR");
+const unpriced = { vinyl: null, mdf: null, pieces: null };
+const panelLine = (panelId: string, mdfId: string): Line => ({ kind: "panel", panelId, qty: 1, mdfId, designId: "", cutSizeId: "", ...unpriced });
+const cutLine = (): Line => ({ kind: "cut", panelId: "", qty: 1, mdfId: "", designId: "", cutSizeId: "", ...unpriced });
+const typed = (v: number | null | undefined) => (v == null ? null : String(v));
+const ZERO: PriceParts = { vinyl: 0, mdf: 0, pieces: 0 };
 
 export function PanelOrderForm({
   initial,
@@ -83,9 +91,12 @@ export function PanelOrderForm({
   const [custSearch, setCustSearch] = useState(false);
   const [lines, setLines] = useState<Line[]>(
     () =>
-      initial?.lines.map((l) =>
-        l.panel ? { ...panelLine(l.panel, l.mdf || ""), qty: l.qty } : { ...cutLine(), qty: l.qty, designId: l.design || "", cutSizeId: l.cut_piece_size || "" },
-      ) ?? [],
+      initial?.lines.map((l) => ({
+        ...(l.panel ? { ...panelLine(l.panel, l.mdf || ""), qty: l.qty } : { ...cutLine(), qty: l.qty, designId: l.design || "", cutSizeId: l.cut_piece_size || "" }),
+        vinyl: typed(l.vinyl_price),
+        mdf: typed(l.mdf_price),
+        pieces: typed(l.pieces_price),
+      })) ?? [],
   );
   const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
   const [cutSizes, setCutSizes] = useState<CutSizeOption[]>(() => cachedCutSizes());
@@ -179,10 +190,36 @@ export function PanelOrderForm({
     [panels],
   );
 
+  // CR-504: picking another panel / item / cut size re-prices the line from the masters; another MDF re-prices the board.
   const setLine = (i: number, patch: Partial<Line>) => {
     form.touch();
-    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+    const reprice: Partial<Line> = {
+      ...("panelId" in patch || "designId" in patch || "cutSizeId" in patch ? unpriced : {}),
+      ...("mdfId" in patch ? { mdf: null } : {}),
+    };
+    setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...reprice, ...patch } : l)));
   };
+  // The masters' price of one panel / piece on this line, and what the line will save (typed override wins).
+  const defaultsOf = (l: Line): PriceParts => {
+    if (l.kind === "cut") return { ...ZERO, pieces: piecePrice(designById.get(l.designId), cutSizes.find((c) => c.id === l.cutSizeId)?.label || "") };
+    const p = panelById.get(l.panelId);
+    return p ? panelPriceParts(p, mdfById.get(l.mdfId), (id) => designById.get(id)) : ZERO;
+  };
+  const partsOf = (l: Line): PriceParts => {
+    const d = defaultsOf(l);
+    const v = (s: string | null, def: number) => (s == null ? def : round2(Number(s) || 0));
+    return { vinyl: l.kind === "cut" ? 0 : v(l.vinyl, d.vinyl), mdf: l.kind === "cut" ? 0 : v(l.mdf, d.mdf), pieces: v(l.pieces, d.pieces) };
+  };
+  const rateOf = (l: Line) => {
+    const x = partsOf(l);
+    return round2(x.vinyl + x.mdf + x.pieces);
+  };
+  const partInput = (i: number, l: Line, k: "vinyl" | "mdf" | "pieces", label: string, hint: string) => (
+    <label title={hint}>
+      {label}
+      <NumberInput value={l[k] ?? String(defaultsOf(l)[k])} maxDecimals={2} onChange={(e) => setLine(i, { [k]: e.target.value === "" ? null : e.target.value })} placeholder="0.00" aria-label={`${label} price`} />
+    </label>
+  );
   const removeLine = (i: number) => {
     form.touch();
     setLines((ls) => ls.filter((_, j) => j !== i));
@@ -211,6 +248,7 @@ export function PanelOrderForm({
   const cutsOn = filled.filter((l) => l.kind === "cut");
   const lineWeights = filled.map(lineWeight);
   const totalWeight = lineWeights.every((w) => w != null) ? lineWeights.reduce((s, w) => s + (w ?? 0), 0) : null;
+  const totalAmount = round2(filled.reduce((s, l) => s + rateOf(l) * (l.qty || 0), 0));
 
   // Requirement preview across every line — panels and loose cut pieces draw from the same stock.
   const needLines = useMemo(
@@ -236,7 +274,12 @@ export function PanelOrderForm({
         salesperson,
         order_date: orderDate,
         warehouse,
-        lines: lines.map((l) => (l.kind === "panel" ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId || undefined, qty: l.qty })),
+        lines: lines.map((l) => {
+          const x = partsOf(l); // CR-504: frozen on the line
+          return l.kind === "panel"
+            ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined, vinyl_price: x.vinyl, mdf_price: x.mdf, pieces_price: x.pieces }
+            : { design: l.designId, cut_piece_size: l.cutSizeId || undefined, qty: l.qty, pieces_price: x.pieces };
+        }),
       }),
     );
   };
@@ -332,6 +375,8 @@ export function PanelOrderForm({
             <span>
               Qty<span className="req"> *</span>
             </span>
+            <span>Rate</span>
+            <span>Amount</span>
             <span />
           </div>
           {lines.map((l, i) => {
@@ -357,6 +402,9 @@ export function PanelOrderForm({
                   <span className="ord-dash" title="A loose cut piece has no board">—</span>
                   <input value={w == null ? "" : kg(w)} readOnly tabIndex={-1} className="calc" placeholder={l.designId ? "—" : ""} title={w == null ? "Needs a weight on this cut piece — set it on Panel Items" : "Weight = cut-piece weight × qty"} aria-label="Weight" />
                   <NumberInput min={1} value={l.qty || ""} onChange={(e) => setLine(i, { qty: Number(e.target.value) || 0 })} placeholder="1" aria-label="Quantity" />
+                  {/* CR-504: ₹/pc = cut-size sqft × the item's Rate/sqft — editable, frozen on save. */}
+                  <NumberInput value={l.pieces ?? (l.designId ? String(defaultsOf(l).pieces) : "")} maxDecimals={2} onChange={(e) => setLine(i, { pieces: e.target.value === "" ? null : e.target.value })} placeholder="0.00" title="Cut size sqft × the item's Rate/sqft — type to override" aria-label="Rate" />
+                  <input value={l.designId ? money(rateOf(l) * (l.qty || 0)) : ""} readOnly tabIndex={-1} className="calc" title="Rate × qty" aria-label="Amount" />
                   <button type="button" className="btn ord-rm" onClick={() => removeLine(i)} title="Remove cut piece" aria-label="Remove cut piece" tabIndex={-1}>
                     ✕
                   </button>
@@ -403,9 +451,19 @@ export function PanelOrderForm({
                   );
                 })()}
                 <NumberInput min={1} value={l.qty || ""} onChange={(e) => setLine(i, { qty: Number(e.target.value) || 0 })} placeholder="1" aria-label="Quantity" />
+                <input value={p ? money(rateOf(l)) : ""} readOnly tabIndex={-1} className="calc" title="Price of one panel = Vinyl + MDF + Cut pieces" aria-label="Rate" />
+                <input value={p ? money(rateOf(l) * (l.qty || 0)) : ""} readOnly tabIndex={-1} className="calc" title="Rate × qty" aria-label="Amount" />
                 <button type="button" className="btn ord-rm" onClick={() => removeLine(i)} title="Remove panel" aria-label="Remove panel" tabIndex={-1}>
                   ✕
                 </button>
+                {/* CR-504: one panel's three parts, from the masters until typed over. */}
+                {p && (
+                  <div className="pnl-price">
+                    {partInput(i, l, "vinyl", "Vinyl ₹", "Vinyl Size sqft × the panel's Vinyl Rate/sqft")}
+                    {partInput(i, l, "mdf", "MDF ₹", "Board weight × the MDF Rate/kg")}
+                    {partInput(i, l, "pieces", "Cut pieces ₹", "Σ cut-piece sqft × the item's Rate/sqft × pcs")}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -433,7 +491,7 @@ export function PanelOrderForm({
           <div className="row total" style={{ gap: 16, whiteSpace: "nowrap" }}>
             <span>Total</span>
             <span className="mono">
-              {panelsOn.length} panel{panelsOn.length === 1 ? "" : "s"}{cutsOn.length > 0 && ` · ${cutsOn.length} cut piece line${cutsOn.length === 1 ? "" : "s"}`} · {fmt(totalQty)} pcs · {totalWeight == null ? <span className="dim" title="Set a weight on every cut piece (Panel Items) to total it">— kg</span> : kg(totalWeight)}
+              {panelsOn.length} panel{panelsOn.length === 1 ? "" : "s"}{cutsOn.length > 0 && ` · ${cutsOn.length} cut piece line${cutsOn.length === 1 ? "" : "s"}`} · {fmt(totalQty)} pcs · {totalWeight == null ? <span className="dim" title="Set a weight on every cut piece (Panel Items) to total it">— kg</span> : kg(totalWeight)} · {money(totalAmount)}
             </span>
           </div>
         </div>

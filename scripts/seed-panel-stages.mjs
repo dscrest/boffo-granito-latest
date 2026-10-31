@@ -131,7 +131,7 @@ async function seedMasters() {
   for (const [k, p] of Object.entries(PLAN.panels)) {
     if (S.panels[k]) continue;
     const r = await post("panel-save", {
-      panel_code: "", // server mints PANEL-NNN
+      panel_code: `ZZT-${k.toUpperCase()}`, // CR-506: codes are typed, never minted
       panel_size: p.size, vinyl_size: p.vinyl, mdf_size: p.mdf ? PLAN.mdfSize : "",
       lines: p.lines.map((l) => ({ design: S.design, cut_piece_size: S.cuts[l.cut], cut_piece_qty: l.qty })),
     });

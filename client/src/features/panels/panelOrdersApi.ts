@@ -23,6 +23,7 @@ import { listAll, op, update, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { invalidatePanels, listPanels } from "./panelsApi";
 import { listDesigns, type DesignImage } from "@/features/masters/designsApi";
+import { lineAmount, orderAmount } from "./panelPrice";
 import type { Allocation, CheckpointKey, Checkpoints, LoadIn, LoadLineIn, Material, Shortage } from "./panelOrderNeeds";
 import { deriveWarehouseStock, type WarehouseIn, type WhCell, type WhMoveIn } from "@/lib/warehouseStock";
 
@@ -80,6 +81,7 @@ export {
 
 const num = (v: unknown) => (v == null || v === "" ? 0 : Number(v) || 0);
 const str = (v: unknown) => (v == null ? "" : String(v));
+const numOrNull = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 export const PANEL_ORDER_STATUSES = ["NewRequest", "Received", "InCutting", "Ready", "Dispatched", "Cancelled"] as const; // CR-368: Cancelled is terminal
 export type PanelOrderStatus = (typeof PANEL_ORDER_STATUSES)[number];
@@ -110,6 +112,11 @@ export interface PanelOrderLineRow {
   cutSizeId: string;
   designName: string;
   cutSizeName: string;
+  /** CR-504: frozen ₹ per ONE panel / piece (null = saved before pricing); a cut-piece line uses piecesPrice only. */
+  vinylPrice: number | null;
+  mdfPrice: number | null;
+  piecesPrice: number | null;
+  amount: number | null; // (parts) × qty
 }
 
 /** CR-347: one vehicle trip for this order (PanelLoad + its lines). */
@@ -203,6 +210,7 @@ export interface PanelOrderRow {
   loads: LoadRow[];
   panelCount: number;
   totalQty: number;
+  amount: number | null; // CR-504: Σ line amounts; null when any line is unpriced
   createdTime: string;
   modifiedTime: string;
 }
@@ -275,7 +283,12 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
       cutSizeId: str(l.cut_piece_size),
       designName: d?.uniqueName || d?.designName || "",
       cutSizeName: cutName.get(str(l.cut_piece_size)) || "",
+      vinylPrice: numOrNull(l.vinyl_price),
+      mdfPrice: numOrNull(l.mdf_price),
+      piecesPrice: numOrNull(l.pieces_price),
+      amount: null,
     };
+    row.amount = lineAmount(row);
     linesByOrder.set(key, [...(linesByOrder.get(key) ?? []), row]);
   }
   const rows: PanelOrderRow[] = (orders.rows || []).map((o) => {
@@ -303,6 +316,7 @@ async function fetchPanelOrders(): Promise<{ ok: boolean; orders: PanelOrderRow[
       loads: loadsByOrder.get(id) ?? [],
       panelCount: ls.length,
       totalQty: ls.reduce((s, l) => s + l.qty, 0),
+      amount: orderAmount(ls),
       createdTime: str(o.CREATEDTIME),
       modifiedTime: str(o.MODIFIEDTIME),
     };
@@ -461,6 +475,10 @@ export interface PanelOrderLineInput {
   /** CR-346: loose cut-piece line. */
   design?: string;
   cut_piece_size?: string;
+  /** CR-504: frozen ₹ per ONE panel / piece; absent = the form prices it from the masters. */
+  vinyl_price?: number | null;
+  mdf_price?: number | null;
+  pieces_price?: number | null;
 }
 
 export interface PanelOrderInput {
@@ -484,9 +502,13 @@ export function panelOrderToInput(o: PanelOrderRow): PanelOrderInput {
     warehouse: o.warehouseId || "",
     sales_order: o.salesOrderId || undefined,
     quote: o.quoteId || undefined,
-    lines: o.lines.map((l) =>
-      l.panelId ? { panel: l.panelId, qty: l.qty, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId, qty: l.qty },
-    ),
+    lines: o.lines.map((l) => ({
+      ...(l.panelId ? { panel: l.panelId, mdf: l.mdfId || undefined } : { design: l.designId, cut_piece_size: l.cutSizeId }),
+      qty: l.qty,
+      vinyl_price: l.vinylPrice,
+      mdf_price: l.mdfPrice,
+      pieces_price: l.piecesPrice,
+    })),
   };
 }
 

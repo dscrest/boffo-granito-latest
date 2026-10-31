@@ -127,3 +127,8 @@ export async function op<T = unknown>(path: string, body: unknown): Promise<OpRe
     return fail(e) as OpResult<T>;
   }
 }
+
+/** CR-505: set one value on many rows in ONE server call (whitelisted fields only — see BULK_FIELDS in data-ops). */
+export function bulkUpdate(table: string, rowids: string[], patch: Record<string, unknown>): Promise<OpResult<{ updated: number }>> {
+  return op<{ updated: number }>("bulk-update", { table, rowids, patch });
+}

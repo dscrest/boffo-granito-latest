@@ -119,7 +119,7 @@ the map.
 
 **Lookups** — `Organization`, `Brand`, `Grade`, `Size`, `Finish`, `Category`, `Glaze`,
 `PartyBrand` (per customer since CR-393), `SurfaceApplication`, `Punch` (with image), `Series`,
-`Catalogue` (the four Design Master lookups, CR-394), `PaymentTerm`, `NumberMaster`,
+`Catalogue` (the four Design Master lookups, CR-394), `CustomerItemCode` + `LabelTemplate` (the customer's EAN-13 per item and its box-sticker templates, CR-502 — see §5.8), `PaymentTerm`, `NumberMaster`,
 `TransactionSeries`, `Currency`.
 
 **Masters** — `Customer`, `Design` (the Item), `Pallet` (pallet *format*), `DesignPallet`
@@ -166,7 +166,7 @@ leaves are additionally filtered per signed-in role by `filterTreeByRole`
 | **Dashboard** | Dashboard |
 | **Inventory** | Items · Stock Details · Stock Adjustments (CR-308) · Transfer Orders (CR-330) · Production |
 | **Sales** | Customers · Quotes · Approvals\* · Sales Orders · Ready for Palletization · In Palletization · Palletization Completed · Loading · Dispatch (CR-480: five leaves, one stage each) · **Panel Craft** (Dashboard · **Stock** (CR-448, was "Cut Piece") · Pending Cut Piece · Orders · Loading) |
-| **Masters** (CR-436; CR-439 layout; **CR-440: NO sidebar entry** — reached from Settings ▸ Masters; `/masters` is only the redirect / ⌘K / tile landing) | `/masters` = the **Settings workspace (`SettingsHome`) opened on its Masters menu**. **CR-439 (2026-10-24): the Settings rail carries Masters ▸ Item · Panel · Export as a menu + sub-menu (`.set-subgroups`); the pane (`MastersPane`, `Masters.tsx`) = the group title + horizontal `.fbar .btn` pill tabs of its masters (CR-440: pills, not the faint underline), master rendered in place; Item first; non-admins see the Masters menu only.** Groups: **Export Master** (Pallet Master · Container Master · Vehicles · Payment Terms · Adjustment Reason · Currencies · Warehouses & Locations) · **Item Master** (Items · Size Master · Finish · Category · Glaze · Box Brand · Customer Brand · Grade · Surface Application · Punch Type · Series · Catalogue) · **Panel Master** (Panel Items · Cut Piece Size · MDF · Panels); each master declares the nav id it needs (or Admin). Visible to Admin and any role whose matrix grants Items or Panel Craft view (`MODULE_NAV` adds `masters` to both) |
+| **Masters** (CR-436; CR-439 layout; **CR-440: NO sidebar entry** — reached from Settings ▸ Masters; `/masters` is only the redirect / ⌘K / tile landing) | `/masters` = the **Settings workspace (`SettingsHome`) opened on its Masters menu**. **CR-439 (2026-10-24): the Settings rail carries Masters ▸ Item · Panel · Export as a menu + sub-menu (`.set-subgroups`); the pane (`MastersPane`, `Masters.tsx`) = the group title + horizontal `.fbar .btn` pill tabs of its masters (CR-440: pills, not the faint underline), master rendered in place; Item first; non-admins see the Masters menu only.** Groups: **Export Master** (Pallet Master · Container Master · Vehicles · Payment Terms · Adjustment Reason · Currencies · Warehouses & Locations · Label Templates (CR-502)) · **Item Master** (Items · Size Master · Finish · Category · Glaze · Box Brand · Customer Brand · Grade · Surface Application · Punch Type · Series · Catalogue) · **Panel Master** (Panel Items · Cut Piece Size · MDF · Panels); each master declares the nav id it needs (or Admin). Visible to Admin and any role whose matrix grants Items or Panel Craft view (`MODULE_NAV` adds `masters` to both) |
 | **Reports** | Reports · Audit Log |
 | *header gear* | Settings (admin only) |
 
@@ -281,6 +281,12 @@ the per-instance cache.
   is no hard-coded currency.
 - Sales Person defaults to the logged-in user.
 - Lines store `unique_name` so a line is size-exact and survives item renames.
+- **One line per item (CR-507).** The same item on two lines shows an amber Note while you type
+  (`duplicateItems`); on save `mergeDuplicateLines` ([`lib/mergeLines.ts`](../client/src/lib/mergeLines.ts))
+  folds lines whose item + rate + discount match into the first one. A different rate keeps the
+  lines apart (user rule). Same on the SO form, where a line with work recorded is the anchor and a
+  second worked line is never folded. Client-only — Panel / Sample / Palletization / Loading keep
+  their own per-part lines.
 - Three renderers (screen, print, PDF) all group lines into **DESIGN bands** — the same
   grouping in all three, by design.
 - **Container plan** — `/quotes/:id/containerise` (`PlanContainerisation.tsx`) plans the
@@ -308,6 +314,14 @@ quotes.** Full or partial; a partial conversion leaves the quote `PartiallyConve
 
 On conversion the quote's container plan is **snapshotted onto the SO**, which then owns its
 own editable copy at `/orders/:id/containerise`. Saving the SO writes only the plan JSON.
+
+**Box Brand is per line (CR-508, 2026-10-31).** Every SO line carries `OrderItem.box_brand`
+(mandatory on the form — prefilled from the customer's default, the quote on convert, or the line
+above; `requireBoxBrand` per line on the server). The header field is gone; `SalesOrder.box_brand`
+is written as the first line's brand and serves as the default / fallback for lines saved before
+CR-508 (readers go line → header: `ordersApi`, `productionApi`, `palPlansApi`). It shows per line on
+the SO Items table and drawer, on the Production grid (default column), sheet and `/prod/:id`, and
+Record Output's per-row brand defaults to it. The Quote keeps its optional header Box Brand.
 
 **Confirming an SO auto-enqueues production.** Entering `Confirmed` (via `/so-status`, or at
 create/convert under the approver bypass) runs `enqueueSoProduction`, seeding `ProductionLog`
@@ -1051,7 +1065,7 @@ wordmark — only its label pulsing, "Processing…" when the caller passes none
 **One order, several panels — header + lines (CR-302, 2026-10-07; reverses CR-193).** A
 `PanelOrder` is a HEADER (customer, server-minted `order_number` `PNL/FY/NNN` via the shared
 `nextOrderNumber(catalyst, "PanelOrder", "PNL")`, order date, sales person, status, source
-Quote / SO, checklist) with `PanelOrderLine` rows (panel × qty — Panel + Qty only, no rate).
+Quote / SO, checklist) with `PanelOrderLine` rows (panel × qty; since CR-504 each line also carries its frozen price parts — see **Panel Craft pricing** below).
 Header + lines save in ONE call, `/panel-order-save` (create mints the number and is born
 `NewRequest`; update is allowed only while `NewRequest` / `Received` and replaces the lines
 wholesale; duplicate panel, empty lines and qty ≤ 0 are 400s). `/panel-order-delete/:rowid`
@@ -1074,6 +1088,34 @@ the Requirements checklist aggregated across lines (same `stockKey` ticks). Grid
 `SourcePanelOrders`, Panel detail and the Customer section list one row per order. Legacy
 `PanelOrder.panel` / `qty` columns stay but are never read or written; `/migrate-panel-orders`
 (admin, idempotent) turns any legacy row into header + one line.
+
+**Panel Craft pricing (CR-504, 2026-10-31; reverses CR-302's "no rate").** One panel = **Vinyl**
+(Vinyl Size sqft, Panel Size when blank, × `Panel.vinyl_rate_sqft`) + **MDF** (the picked thickness's
+`Mdf.weight_kg × Mdf.rate_per_kg`) + **Cut pieces** (Σ piece sqft × the Item's `Design.rate_per_sqft` ×
+pcs on the panel); a loose cut piece / sample piece = its sqft × the Item's rate (blank or the item's own
+size code = the full tile, from `width_mm × length_mm`); sqft = mm² ÷ 92 903.04; a missing rate or an
+unparseable size prices at 0. The ONE owner is the pure
+[`panelPrice.ts`](../client/src/features/panels/panelPrice.ts) (self-check `panelPrice.test.ts`): the
+order forms compute the defaults and SEND the parts; `/panel-order-save` stores `vinyl_price` /
+`mdf_price` / `pieces_price` per ONE panel (a cut line `pieces_price` only), `/sample-order-save`
+stores `price` per piece — both only check ≥ 0 (every part is editable on the form). A line's parts
+re-price when its panel / MDF / item / cut size / piece kind changes, never on a qty change or a later
+master edit (frozen). Amount = parts × qty and the order total are derived on read
+(`PanelOrderLineRow.amount`, `PanelOrderRow.amount`, sample twins via `lineAmount` / `orderAmount`);
+all parts null = a pre-pricing line → "—" everywhere until the order is edited and saved. Clone clears
+the parts (fresh prices). Shown on: the order forms (Rate · Amount, panel rows' Vinyl ₹ · MDF ₹ · Cut
+pieces ₹ sub-row, total), Panel Order **Pricing** card, Sample Order Rate · Amount, Orders list
+**Amount** (`ordersColumns.v5`), Panel Order PDF (Rate · Amount · total + the split per panel page),
+Panel Master ▸ **Pricing** tab (per MDF thickness of the panel's size), Panel Item cut-piece table and
+Cut Piece detail (**Sqft / pc · Price / pc**). INR only, no tax / discount; the sample pick slip stays
+price-free. **Bulk Update (CR-505):** rates are set many at a time — filter → tick (select-all = every filtered
+row) → **Bulk Update** → Field → Value — through the shared [`ui/BulkUpdateModal.tsx`](../client/src/ui/BulkUpdateModal.tsx)
+on Panel Items (Rate / sqft; Advanced Filter incl. Rate / ft²), Panels (Vinyl Rate / sqft), MDF (`MasterDef.bulk`)
+and the Item master (Status · Brand · Grade · Box Weight · Rate / sqft). Writes go through ONE call,
+`POST /bulk-update {table, rowids, patch}` — `BULK_FIELDS` whitelist, `updateRows` in 200s, one OperationLog row
+per record, permission = edit on the table's module (`routeAction`); Rate / sqft also stamps Rate / sqm.
+
+**Panel Code is typed (CR-506, 2026-10-31; reverses CR-284).** The user has no formula for panel codes, so `/panel-save` no longer mints `PANEL-NNN`: the form's **Panel Code \*** is mandatory, uppercased as typed and on save, unique (409 "Panel Code "X" is already used"), ≤ 60 chars, and editable on existing panels. A rename propagates by itself — `PanelOrderLine.panel`, `PanelLine.panel`, the checkpoints JSON and load rows all hold the Panel ROWID and every screen / PDF resolves the code from the Panel list (`panelsApi.ts`); `PanelFormPage` busts the panel-orders cache after a save so order rows re-resolve at once. OperationLog keeps the old text (history). The Panel Code column on `/panels` stays hidden + last (user's choice).
 
 **Panel master UX (CR-282…285, 2026-10-06; CR-425 2026-10-24: `Panel.remarks` free text — old reference ID — on the form, panel page and `/panels` search).** `/panels` opens as a **Photo** view (one
 `PanelTile` per panel — the picker's tile, shared via `pcBits.tsx`) with a Grid toggle; both views
@@ -1200,6 +1242,50 @@ every sample line (order, item, piece, requested, supplied, supplied on, status,
 what each customer received.
 
 ---
+
+### 5.8 Box labels — the customer's stickers (CR-502, 2026-10-30)
+
+Importers scan their **own** EAN-13 on every carton for warehouse location management, and some need a
+compliance label in their language. The app prints those stickers; it does not invent the codes.
+
+- **Data.** `CustomerItemCode` = customer × item → `barcode` (EAN-13) + `customer_item_name` (blank = our
+  design name). `LabelTemplate` = one sticker: `name`, `customer` (blank = **house** template, offered to
+  every customer — the batch strip), `layout`, `width_mm` × `height_mm`, `texts` (JSON per layout), `active`.
+  Server guard `assertItemCode` (`index.js`): 13 digits, check digit, one barcode per customer × item, one
+  item per customer × barcode; `BLOCK_DELETE` keeps a customer / item with rows; both tables are
+  `GET_SHARED` (production and stages print them), writes sit under `customers`.
+- **Barcode.** The code is whatever the customer gives (user 2026-10-30: "arbitrary, not fixed … no
+  restriction of 13 digits") — printable ASCII up to 100 chars, server `assertItemCode`. `barcodeNode`
+  (`labelLayouts.ts`) draws a valid EAN-13 as EAN-13 (`lib/ean13.ts`, `ean13.check.ts` decodes it back
+  with the independent width table) and anything else as **Code 128** (`lib/code128.ts`, subsets B / C,
+  `code128.check.ts`) — pdfmake canvas rects with quiet zones, no barcode library. ponytail: no mid-code
+  subset switching; batch-level GS1-128 via bwip-js when asked.
+- **Layouts (code, `LAYOUTS`).** `barcode-strip` 75×20 (title + bars), `batch-strip` 75×20 (three lines +
+  extra marks), `compliance` 100×60 (two-column bordered label: product type, size line, item + grade,
+  importer, bars, buyer note | standard + CE, product code, group line, intended use, spec table, manufacturer
+  — manufacturer prefilled from the Organization profile). Texts take `{item} {ITEM} {customer_item}
+  {width_cm} {length_cm} {thickness_cm} {thickness_mm} {finish} {batch} {mfg_date} {barcode}`; a
+  decimal-separator field renders `0,88`. Thickness comes from the item's Size.
+- **Screens.** Customer ▸ **Labels** tab (`CustomerLabels.tsx`): Item Barcodes grid (Add / Edit modal with
+  Item Combobox + 🔍 `ItemSearchModal`, EAN via `NumberInput`, live reason; **Import** from Excel with a
+  per-row result; delete with reason) and Label Templates (modal = header fields + the layout's texts in
+  `.form-rows` + live PDF preview via `pdfBlobUrl`; Clone in the row menu). Settings ▸ Masters ▸ Export ▸
+  **Label Templates** = the same list for every customer (house rows live here).
+- **Printing.** `PrintLabelsModal` (ONE modal, four entry points): Customer ▸ Labels ▸ Item Barcodes
+  **Print Labels** (whole list) or a row's menu ▸ Print Labels — item-wise, no order or batch needed
+  (copies typed; batch strip would print a blank batch unless one is picked); production output row 🖨
+  (`ProductionDetail`), SO More ▸ Print Box Labels (`OrderDetail`, one row per line, copies = ordered boxes),
+  Palletization plan More ▸ Print Box Labels (`PalPlanDetail`, one row per line with its batch). Customer is
+  prefilled and changeable; Batch comes from `listBatchStock` (auto when the item has exactly one) and brings
+  its mfg date; one **Print** button per applicable template (`templatesFor` = the customer's + house; **none
+  saved → the three built-in layouts at their default size and texts**, so printing never dead-ends) →
+  `buildLabelDoc` = one PDF, one page per copy at the template's size (`downloadPdf`). A row without a
+  barcode shows the reason and is skipped on barcode layouts. Nothing is saved — Cancel only.
+- **Printer.** Plant printer = **TSC TTP-244 Pro** (4-inch / 108 mm max width, 203 dpi, thermal transfer).
+  In its Windows driver set the label size to the template's mm size and print the PDF at Actual size /
+  100 %; `ean13Node` snaps the bar module to the 0.125 mm dot pitch so bars print whole dots. Templates
+  wider than 108 mm will not fit this printer.
+- **Not built.** A4 sheet grid, per-item spec values, GS1-128, a visual designer.
 
 ## 6 · Stock and the batch ledger
 
@@ -1357,7 +1443,10 @@ allocating**. What changes is **free** stock:
 where a claim is order-linked output (record / legacy plan rows) plus allocations; an order
 item's blank-batch loads net its claims FIFO (`reservedByBatch` / `freeOf` in
 [`batchStockDerive.ts`](../client/src/features/stages/batchStockDerive.ts), self-checked).
-`POST /allocate-stock` re-checks with `serverFreeStock` (a permissive backstop), bumps
+`POST /allocate-stock` re-checks with `serverFreeStock` (a permissive backstop), **refuses a batch
+whose recorded `box_brand` differs from the line's (CR-509 — the Allocate Stock modal hides such
+batches, names the brand beside each batch and says how many boxes were left out; a batch with no
+brand recorded still shows)**, bumps
 `produced_qty_boxes`, inserts the rows and calls `autoEnqueuePalletization` — so the queue,
 palletising, loading and dispatch are untouched. `POST /deallocate-stock/:rowid` returns the whole
 row or, with `boxes` (1…row qty, CR-297), part of it — a partial return trims the row's `qty_boxes`,
@@ -1500,10 +1589,11 @@ where it was reported.
 
 **Names are Title Case (CR-429).** Every human-entered name — item design names, customer / company /
 contact names, drivers, transporters, loading supervisors, users, sales persons, lookup-master values — is
-stored as `Dhiraj Shah Of ABC Exports LLP` by ONE server helper, [`lib/names.js`](../functions/data-ops/lib/names.js)
+stored as `Dhiraj Shah Of Abc Exports LLP` by ONE server helper, [`lib/names.js`](../functions/data-ops/lib/names.js)
 (`titleCase`, `NAME_COLUMNS`, `normalizeNames`), applied in the generic POST / PATCH routes before the
 natural-key check and in every writer that bypasses them (panel loads, load boxes, `appauth`, the Zoho pull
-mappers). A word typed ALL-CAPS with ≤3 letters and the legal suffixes (LLP, LTD, PVT…) keep their capitals;
+mappers). Only the legal suffixes (LLP, LLC, LTD, PVT, INC, PLC, FZE, FZCO, GMBH — also "Pvt.Ltd.") keep
+capitals; every other word is Title Case even when typed ALL-CAPS (CR-503);
 codes, SKUs, `unique_name`, vehicle numbers, Size names and locations are never touched. A new name column =
 add it to `NAME_COLUMNS`; a new bypassing writer calls `titleCase`. The client mirror (`lib/format.ts`) is
 used only where a derived key must match the stored text (Item `unique_name`, the party-brand SKU segment).

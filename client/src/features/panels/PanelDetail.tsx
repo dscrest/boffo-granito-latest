@@ -23,7 +23,10 @@ import { ORDER_STATUS_TONE } from "./pcBits";
 import { ActivityLog, tabStyle } from "@/features/common/RecordDetail";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ImageManager } from "@/features/common/ImageManager";
-import type { DesignImage } from "@/features/masters/designsApi";
+import { cachedDesigns, listDesigns, type DesignImage, type DesignRow } from "@/features/masters/designsApi";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
+import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
+import { mdfPrice, piecePrice, pieceSqft, piecesPrice, vinylPrice } from "./panelPrice";
 import { cachedPanels, deletePanel, listPanels, patchPanelCache, type PanelRow } from "./panelsApi";
 import { cachedPanelOrders, listPanelOrders, PANEL_ORDER_STATUS_LABEL, type PanelOrderRow } from "./panelOrdersApi";
 
@@ -42,14 +45,19 @@ export function PanelDetail() {
   // Overview (default) | Product Showcase | Activity — deep-linkable via ?tab=.
   const [sp, setSp] = useSearchParams();
   const spTab = sp.get("tab");
-  const tab = spTab === "showcase" ? "showcase" : spTab === "activity" ? "activity" : "overview";
-  const setTab = (t: "overview" | "showcase" | "activity") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
+  const tab = spTab === "showcase" || spTab === "pricing" || spTab === "activity" ? spTab : "overview";
+  const setTab = (t: "overview" | "showcase" | "pricing" | "activity") => setSp(t === "overview" ? {} : { tab: t }, { replace: true });
 
   const refresh = () => listPanels().then((res) => setPanels(res.ok ? res.panels : (cachedPanels() ?? [])));
   const refreshOrders = () => listPanelOrders().then((res) => setOrders(res.ok ? res.orders : (cachedPanelOrders() ?? [])));
+  // CR-504: the Pricing tab reads the Item rates + MDF rows of the panel's size.
+  const [designs, setDesigns] = useState<DesignRow[]>(() => cachedDesigns() ?? []);
+  const [mdfs, setMdfs] = useState<MdfRow[]>(() => cachedMdfs());
   useEffect(() => {
     void refresh();
     void refreshOrders();
+    void listDesigns().then((r) => r.ok && setDesigns(r.designs));
+    void listMdfs().then((r) => r.ok && setMdfs(r.rows));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -193,6 +201,7 @@ export function PanelDetail() {
               <div className="row" style={{ gap: 4, marginTop: 12, borderBottom: "1px solid var(--border)" }}>
                 <button onClick={() => setTab("overview")} style={tabStyle(tab === "overview")}>Overview</button>
                 <button onClick={() => setTab("showcase")} style={tabStyle(tab === "showcase")}>Product Showcase</button>
+                <button onClick={() => setTab("pricing")} style={tabStyle(tab === "pricing")}>Pricing</button>
                 <button onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>Activity</button>
               </div>
 
@@ -258,6 +267,8 @@ export function PanelDetail() {
               </div>
               )}
 
+              {tab === "pricing" && <PanelPricing panel={panel} designs={designs} mdfs={mdfs} />}
+
               {tab === "overview" && (
               <>
               <div className="form-section-title" style={{ margin: "14px 0 8px" }}>Orders</div>
@@ -314,6 +325,76 @@ export function PanelDetail() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** CR-504: what one panel costs from today's masters — Vinyl + Cut pieces, plus MDF per thickness of its size.
+    Informative only; an order freezes these on save. */
+function PanelPricing({ panel, designs, mdfs }: { panel: PanelRow; designs: DesignRow[]; mdfs: MdfRow[] }) {
+  const money = moneyFor("INR");
+  const byId = new Map(designs.map((d) => [d.id, d]));
+  const itemOf = (id: string) => byId.get(id);
+  const vinyl = vinylPrice(panel);
+  const pieces = piecesPrice(panel, itemOf);
+  const norm = (v: string) => v.trim().toLowerCase();
+  const boards = panel.mdfSize.trim() ? mdfs.filter((m) => norm(m.size) === norm(panel.mdfSize)) : [];
+  const sq = (n: number | null) => (n == null ? "—" : n.toFixed(2));
+  return (
+    <div style={{ overflow: "auto", marginTop: 14 }}>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>Part</th>
+            <th>Size</th>
+            <th className="num" style={{ textAlign: "right" }}>Sqft / kg</th>
+            <th className="num" style={{ textAlign: "right" }}>Rate</th>
+            <th className="num" style={{ textAlign: "right" }}>Pcs</th>
+            <th className="num" style={{ textAlign: "right" }}>Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Vinyl</td>
+            <td className="mono">{panel.vinylSize || panel.panelSize || <span className="dim">—</span>}</td>
+            <td className="num mono">{sq(pieceSqft(panel.vinylSize) ?? pieceSqft(panel.panelSize))}</td>
+            <td className="num mono" title="Vinyl Rate/sqft on this panel">{money(panel.vinylRateSqft)}</td>
+            <td className="num mono">1</td>
+            <td className="num mono">{money(vinyl)}</td>
+          </tr>
+          {panel.lines.map((l) => {
+            const d = itemOf(l.designId);
+            return (
+              <tr key={l.id}>
+                <td>{l.designName}</td>
+                <td className="mono">{l.cutSizeName || l.sizeLabel || <span className="dim">—</span>}</td>
+                <td className="num mono">{sq(pieceSqft(l.cutSizeName, d))}</td>
+                <td className="num mono" title="Rate/sqft on the Item">{money(d?.ratePerSqft ?? 0)}</td>
+                <td className="num mono">{fmt(l.qty)}</td>
+                <td className="num mono">{money(piecePrice(d, l.cutSizeName) * l.qty)}</td>
+              </tr>
+            );
+          })}
+          {boards.map((m) => (
+            <tr key={m.id}>
+              <td>MDF {m.thickness}</td>
+              <td className="mono">{m.size}</td>
+              <td className="num mono">{m.weightKg == null ? "—" : `${m.weightKg} kg`}</td>
+              <td className="num mono" title="Rate/kg on the MDF master">{money(m.ratePerKg)}</td>
+              <td className="num mono">1</td>
+              <td className="num mono">{money(mdfPrice(m))}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          {(boards.length ? boards : [undefined]).map((m) => (
+            <tr key={m?.id ?? "none"}>
+              <td colSpan={5} style={{ fontWeight: 600 }}>{m ? `Panel price with MDF ${m.thickness}` : "Panel price (no MDF)"}</td>
+              <td className="num mono" style={{ fontWeight: 600 }}>{money(vinyl + pieces + mdfPrice(m))}</td>
+            </tr>
+          ))}
+        </tfoot>
+      </table>
     </div>
   );
 }

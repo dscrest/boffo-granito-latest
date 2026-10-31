@@ -121,6 +121,7 @@ const GROUPS: SettingGroup[] = [
       { label: "Currencies", icon: "chart", route: "/masters?g=export&m=currencies", desc: "Rates and default currency", keywords: "money exchange inr usd" },
       // CR-329 · CR-409: warehouses hold locations (A1 … F12)
       { label: "Warehouses & Locations", icon: "package", route: "/masters?g=export&m=warehouses", desc: "Godowns and the locations inside them", keywords: "warehouse godown location rack bay bin stock store primary" },
+      { label: "Label Templates", icon: "printer", route: "/masters?g=export&m=label_templates", desc: "Box stickers: barcode, batch and compliance labels", keywords: "label sticker barcode ean print box" }, // CR-502
     ],
   },
   {

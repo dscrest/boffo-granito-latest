@@ -25,9 +25,14 @@ import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/d
 import { IconBtn } from "./pcBits";
 import { cachedCutStockRows, listCutStock, saveCutPiece, type CutStockRow } from "./panelOrdersApi";
 import { weightPerPc } from "./cutPieceWeight";
+import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
+import { BulkUpdateModal } from "@/ui/BulkUpdateModal";
+import { bulkUpdateDesigns } from "@/features/masters/designsApi";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 
 const dash = <span className="dim">—</span>;
 const kg = (n: number) => `${Math.round(n * 100) / 100} kg`;
+const money = moneyFor("INR");
 
 export interface PanelItemRow {
   design: DesignRow;
@@ -59,6 +64,8 @@ const COLUMNS: ColumnDef<PanelItemRow>[] = [
   { key: "image", label: "Image", style: { width: 44 }, render: (r) => <ImageThumb images={r.design.images} alt={r.design.designName} /> },
   { key: "item", label: "Item", render: (r) => <span className="design-name">{r.design.uniqueName || r.design.designName}</span> },
   { key: "size", label: "Size", render: (r) => (r.design.sizeLabel ? <span className="chip size">{r.design.sizeLabel}</span> : dash) },
+  // CR-504/505: the Item's Rate/sqft prices every cut piece — set many at once with Bulk Update.
+  { key: "rate", label: "Rate / sqft", className: "num mono", style: { textAlign: "right" }, render: (r) => (r.design.ratePerSqft ? money(r.design.ratePerSqft) : dash) },
   { key: "pieces", label: "Cut Pieces", className: "num mono", style: { textAlign: "right" }, render: (r) => fmt(r.pieces) },
   {
     key: "onHand",
@@ -84,7 +91,12 @@ export function PanelItems() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = usePersistedState("panelItems.query", "");
   const [adding, setAdding] = useState(false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelItemsColumns", COLUMNS, []);
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelItemsColumns.v2", COLUMNS, []); // .v2 (CR-505: Rate / sqft)
+  // CR-505: filter → tick → Bulk Update (the Item master's CR-427 select-all-filtered rule).
+  const [criteria, setCriteria] = usePersistedState<FilterCriteria>("panelItems.criteria", {});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -103,15 +115,64 @@ export function PanelItems() {
   }, []);
 
   const rows = useMemo(() => panelItemRows(designs, stock), [designs, stock]);
+  const filterFields = useMemo<FilterField<PanelItemRow>[]>(() => {
+    const opts = (get: (r: PanelItemRow) => string) => [...new Set(rows.map(get).filter(Boolean))].sort();
+    return [
+      { key: "name", label: "Item", type: "text", get: (r) => `${r.design.designName} ${r.design.uniqueName}` },
+      { key: "itemCode", label: "Item Code", type: "text", get: (r) => r.design.itemCode },
+      { key: "size", label: "Size", type: "multiselect", options: opts((r) => r.design.sizeLabel), get: (r) => r.design.sizeLabel },
+      { key: "finish", label: "Finish", type: "multiselect", options: opts((r) => r.design.finishLabel), get: (r) => r.design.finishLabel },
+      { key: "brand", label: "Brand", type: "multiselect", options: opts((r) => r.design.brandLabel), get: (r) => r.design.brandLabel },
+      { key: "category", label: "Category", type: "multiselect", options: opts((r) => r.design.categoryLabel), get: (r) => r.design.categoryLabel },
+      { key: "rate", label: "Rate / ft²", type: "numrange", get: (r) => r.design.ratePerSqft },
+      { key: "onHand", label: "On Hand (pcs)", type: "numrange", get: (r) => r.onHand },
+    ];
+  }, [rows]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? rows.filter((r) => `${r.design.uniqueName} ${r.design.designName} ${r.design.sku} ${r.design.sizeLabel}`.toLowerCase().includes(q)) : rows;
-  }, [rows, query]);
-  const sort = useSortRows(filtered, (r, k) => (k === "item" ? r.design.uniqueName || r.design.designName : k === "size" ? r.design.sizeLabel : (r as unknown as Record<string, number>)[k]), "item");
-  const pager = usePagination(sort.sorted.length, "panelItemsPageSize", `${query}|${sort.sortKey}|${sort.dir}`);
+    const base = q ? rows.filter((r) => `${r.design.uniqueName} ${r.design.designName} ${r.design.sku} ${r.design.sizeLabel}`.toLowerCase().includes(q)) : rows;
+    return applyFilters(base, criteria, filterFields);
+  }, [rows, query, criteria, filterFields]);
+  const sort = useSortRows(
+    filtered,
+    (r, k) => (k === "item" ? r.design.uniqueName || r.design.designName : k === "size" ? r.design.sizeLabel : k === "rate" ? r.design.ratePerSqft : (r as unknown as Record<string, number>)[k]),
+    "item",
+  );
+  const pager = usePagination(sort.sorted.length, "panelItemsPageSize", `${query}|${JSON.stringify(criteria)}|${sort.sortKey}|${sort.dir}`);
   const pageRows = pager.slice(sort.sorted);
   const canEdit = can("panel_craft", "edit");
   const inModule = useMemo(() => new Set(rows.map((r) => r.design.id)), [rows]);
+  const canBulk = can("items", "edit"); // the rate lives on the Item master (Design = items module)
+  const allShownSelected = filtered.length > 0 && filtered.every((r) => selected.has(r.design.id));
+  const toggleOne = (id: string) =>
+    setSelected((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const toggleAll = () =>
+    setSelected((p) => {
+      const n = new Set(p);
+      for (const r of filtered) {
+        if (allShownSelected) n.delete(r.design.id);
+        else n.add(r.design.id);
+      }
+      return n;
+    });
+  const onBulk = async (key: string, value: string | number) => {
+    setBusy(true);
+    const res = await bulkUpdateDesigns([...selected], { [key]: value });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.firstError || "Bulk update failed");
+      return;
+    }
+    toast.success(`${res.done} item${res.done === 1 ? "" : "s"} updated`);
+    setBulkOpen(false);
+    setSelected(new Set());
+    void load();
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
@@ -127,8 +188,28 @@ export function PanelItems() {
           }}
         />
       )}
+      {bulkOpen && (
+        <BulkUpdateModal noun="item" count={selected.size} fields={[{ key: "rate_per_sqft", label: "Rate / sqft (₹)", type: "number" }]} busy={busy} onApply={(k, v) => void onBulk(k, v)} onClose={() => setBulkOpen(false)} />
+      )}
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
+      {/* Bulk action bar replaces the filter bar while a selection is active (Item master / Masters pattern). */}
+      {selected.size > 0 ? (
+        <div className="fbar" style={{ borderLeft: "3px solid var(--accent)" }}>
+          <span className="mono" style={{ color: "var(--accent)" }}>
+            {selected.size} selected
+          </span>
+          {canBulk && (
+            <button className="btn" onClick={() => setBulkOpen(true)} disabled={busy}>
+              <Icon name="settings" size={12} className="ic" /> Bulk Update
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : (
       <div className="fbar">
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />
         <span className="muted">{loading ? "Loading…" : null}</span>
@@ -137,6 +218,7 @@ export function PanelItems() {
           <Icon name="search" size={13} />
           <input type="text" placeholder="Search item or size…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </span>
+        <AdvancedFilterButton title="Panel Items" fields={filterFields} criteria={criteria} onChange={setCriteria} />
         <ColumnPicker columns={ordered} hidden={hidden} onToggle={toggle} onMove={move} active={customised} />
         <Link className="hbtn" to="/cut-piece-sizes" title="The cut piece size list (CR-426)">
           <Icon name="tile" size={13} />
@@ -155,6 +237,7 @@ export function PanelItems() {
           </button>
         )}
       </div>
+      )}
 
       <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
@@ -164,6 +247,11 @@ export function PanelItems() {
             <table className="tbl">
               <thead>
                 <tr>
+                  {canBulk && (
+                    <th style={{ width: 34, textAlign: "center" }}>
+                      <input type="checkbox" checked={allShownSelected} onChange={toggleAll} title={allShownSelected ? "Deselect all" : `Select all ${filtered.length}`} aria-label="Select all filtered" />
+                    </th>
+                  )}
                   {visible.map((c) => (
                     <SortTh key={c.key} id={c.key} label={c.label} sort={sort} style={c.style} />
                   ))}
@@ -172,8 +260,15 @@ export function PanelItems() {
               <tbody>
                 {pageRows.map((r) => {
                   const open = () => navigate(`/panel-items/${encodeURIComponent(r.design.id)}`);
+                  const sel = selected.has(r.design.id);
                   return (
-                    <tr key={r.design.id} tabIndex={0} style={{ cursor: "pointer" }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & stock">
+                    <tr key={r.design.id} tabIndex={0} style={{ cursor: "pointer", background: sel ? "var(--accent-soft)" : undefined }} onClick={open} onKeyDown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) open(); }} title="Open item — cut pieces & stock">
+                      {canBulk && (
+                        // checkbox cell stops propagation so ticking never opens the item
+                        <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <input type="checkbox" checked={sel} onChange={() => toggleOne(r.design.id)} aria-label={r.design.uniqueName || r.design.designName} />
+                        </td>
+                      )}
                       {visible.map((c) => (
                         <td key={c.key} className={c.className} style={c.style}>
                           {c.render!(r)}
@@ -184,7 +279,7 @@ export function PanelItems() {
                 })}
                 {!loading && !error && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={visible.length}>
+                    <td colSpan={visible.length + (canBulk ? 1 : 0)}>
                       {rows.length > 0 ? (
                         <EmptyState title="No matching results" hint="Try a different search" />
                       ) : (

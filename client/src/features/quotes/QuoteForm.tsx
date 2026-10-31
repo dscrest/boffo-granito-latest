@@ -23,8 +23,10 @@ import { BoxBrandPreview, useBoxBrands } from "@/features/masters/boxBrands";
 import { CustomerSearchModal } from "@/features/masters/CustomerSearchModal";
 import { currentSalespersonName, salesPersonOptions } from "@/features/masters/salespersonApi";
 import { currencyCodes, rateFor } from "@/features/masters/currenciesApi";
+import { Note } from "@/ui/States";
 import { fmt } from "@/lib/format";
 import { todayISO, addDays } from "@/lib/dates";
+import { duplicateItems, mergeDuplicateLines } from "@/lib/mergeLines";
 import { NumberInput } from "../../ui/NumberInput";
 import { ContainerOptionsPanel } from "./ContainerOptionsPanel";
 
@@ -56,6 +58,8 @@ const toLine = (l: LineDraft): QuoteLine => ({
   discount: Number(l.discount) || 0,
   description: l.description,
 });
+/** CR-507: lines merge only when item, rate AND discount agree (same price). */
+const mergeKeyOf = (l: QuoteLine) => `${l.item.trim().toLowerCase()}|${l.rate || 0}|${l.discount || 0}`;
 
 let _seq = 0;
 const newId = () =>
@@ -199,6 +203,8 @@ export function QuoteForm({
   };
 
   const validLines = lines.map(toLine).filter((l) => l.item && l.qty > 0);
+  // CR-507: the same item on more than one line — warned live, folded on save.
+  const dups = useMemo(() => duplicateItems(lines.map(toLine), (l) => l.item, mergeKeyOf), [lines]);
   const charge = useMemo(
     () => ({
       docDiscount: Number(charges.docDiscount) || 0,
@@ -236,7 +242,8 @@ export function QuoteForm({
       taxType: charge.taxType,
       taxPct: charge.taxPct,
       taxAmount: totals.taxAmt,
-      lines: validLines,
+      // CR-507: same item + same price → one line.
+      lines: mergeDuplicateLines(validLines, { mergeKey: mergeKeyOf, qty: (l) => l.qty, withQty: (l, q) => ({ ...l, qty: q }) }),
     });
 
   return (
@@ -406,6 +413,17 @@ export function QuoteForm({
                 );
               })}
             </div>
+            {/* CR-507: live duplicate warning — same item on more than one line. */}
+            {[...dups].map(([item, d]) => {
+              const label = lines.find((l) => l.item.trim().toLowerCase() === item)?.item || item;
+              return (
+                <Note key={item} tone="warn">
+                  {d.mergeable
+                    ? <span><b>{label}</b> is on {d.lines} lines — the quantities will be merged into one line when you save.</span>
+                    : <span><b>{label}</b> is on {d.lines} lines with different rates — they stay separate lines.</span>}
+                </Note>
+              );
+            })}
             <button className="btn" style={{ marginTop: 10 }} onClick={addLine}>
               <Icon name="plus" size={12} /> Add line
             </button>

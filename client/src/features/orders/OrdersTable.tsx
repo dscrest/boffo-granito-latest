@@ -71,7 +71,8 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
     shipping_address: dr.shipping_address,
     warehouse: dr.warehouse, // CR-453
     salesperson: dr.salesperson,
-    box_brand: dr.box_brand,
+    // CR-508: the header brand is the first line's (default / fallback for old readers).
+    box_brand: dr.lines[0]?.boxBrand || dr.box_brand,
     customer_notes: dr.customer_notes,
     terms: dr.terms,
     discount: parseFloat(dr.docDiscount) || 0,
@@ -84,6 +85,7 @@ export function draftToInput(dr: OrderDraft): NewSalesOrderInput {
       qty: parseInt(l.ordered_qty_boxes, 10) || 0,
       rate: parseFloat(l.rate) || 0,
       pallet: l.pallet || "",
+      box_brand: l.boxBrand || dr.box_brand, // CR-508 per line
       discount: parseFloat(l.discount) || 0,
       description: l.description || "",
       stage: "po",

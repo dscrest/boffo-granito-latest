@@ -20,6 +20,8 @@ import { ErrorCard, SkeletonRows } from "@/ui/States";
 import { canDelete, canUpdate, hasFeature, isAdmin } from "@/lib/auth";
 import { nextSeqCode } from "@/lib/seq";
 import { createMaster, deleteMaster, listMaster, updateMaster, type MasterRow } from "./mastersApi";
+import { BulkUpdateModal } from "@/ui/BulkUpdateModal";
+import { bulkUpdate } from "@/lib/dataOps";
 import { formatVehicleNumber } from "./vehiclesApi";
 
 /** "image" = one File Store file id (design_images folder), uploaded via ImageUploader. */
@@ -46,6 +48,8 @@ export interface MasterDef {
   /** column field that visually leads the row (rendered as a chip) */
   lead: string;
   fields: Field[];
+  /** CR-505: number fields offered by Bulk Update on ticked rows (server BULK_FIELDS must list them too). */
+  bulk?: string[];
 }
 
 type Row = MasterRow;
@@ -181,8 +185,10 @@ const MASTERS: MasterDef[] = [
       { key: "size", label: "Size", required: true },
       { key: "thickness", label: "Thickness" },
       { key: "weight_kg", label: "Weight (kg)", type: "number" },
+      { key: "rate_per_kg", label: "Rate/kg (₹)", type: "number" }, // CR-504: MDF price = weight × this
       { key: "seq_code", label: "Seq", auto: true },
     ],
+    bulk: ["rate_per_kg"], // CR-505
   },
   // CR-308: why stock was adjusted (breakage, theft, count correction…) — both modules' adjustment sheets.
   {
@@ -319,6 +325,7 @@ export function MasterTable({ def }: { def: MasterDef }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<{ id: string | null } | null>(null); // null = closed, {id:null} = new
+  const [bulkOpen, setBulkOpen] = useState(false); // CR-505
 
   const fieldKeys = useMemo(() => def.fields.map((f) => f.key), [def]);
 
@@ -411,14 +418,35 @@ export function MasterTable({ def }: { def: MasterDef }) {
     await load();
   };
 
+  // CR-505: one value on every ticked row, one server call.
+  const bulkFields = def.fields.filter((f) => def.bulk?.includes(f.key)).map((f) => ({ key: f.key, label: f.label, type: "number" as const }));
+  const onBulk = async (key: string, value: string | number) => {
+    setBusy(true);
+    const res = await bulkUpdate(def.table, [...selected], { [key]: value });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Bulk update failed");
+      return;
+    }
+    toast.success(`${selected.size} updated`);
+    setBulkOpen(false);
+    await load();
+  };
+
   return (
     <div>
+      {bulkOpen && <BulkUpdateModal noun="row" count={selected.size} fields={bulkFields} busy={busy} onApply={(k, v) => void onBulk(k, v)} onClose={() => setBulkOpen(false)} />}
       {/* Bulk action bar replaces the filter bar while a selection is active. */}
       {selected.size > 0 ? (
         <div className="fbar" style={{ borderLeft: "3px solid var(--accent)" }}>
           <span className="mono" style={{ color: "var(--accent)" }}>
             {selected.size} selected
           </span>
+          {bulkFields.length > 0 && canUpdate() && (
+            <button className="btn" onClick={() => setBulkOpen(true)} disabled={busy}>
+              <Icon name="settings" size={12} className="ic" /> Bulk Update
+            </button>
+          )}
           {canDelete() && (
             <button className="btn" onClick={() => void removeSelected()} disabled={busy}>
               Delete
@@ -528,6 +556,7 @@ const DesignMaster = lazy(() => import("./DesignMaster").then((m) => ({ default:
 const Sizes = lazy(() => import("./Sizes").then((m) => ({ default: m.Sizes })));
 const PanelItems = lazy(() => import("@/features/panels/PanelItems").then((m) => ({ default: m.PanelItems })));
 const Panels = lazy(() => import("@/features/panels/Panels").then((m) => ({ default: m.Panels })));
+const LabelTemplatesMaster = lazy(() => import("@/features/labels/CustomerLabels").then((m) => ({ default: m.LabelTemplatesMaster }))); // CR-502
 
 interface HubMaster {
   key: string;
@@ -585,6 +614,8 @@ export const HUB_GROUPS: HubGroup[] = [
       lookup("adjustment_reason"),
       { key: "currencies", label: "Currencies", icon: "chart", feature: "admin", render: () => <CurrenciesAdmin /> },
       { key: "warehouses", label: "Warehouses & Locations", icon: "package", feature: "admin", render: () => <Warehouses /> },
+      // CR-502: box-sticker templates — the house ones (all customers) live here; a customer's own sit on its Labels tab.
+      { key: "label_templates", label: "Label Templates", icon: "printer", feature: "parties", render: () => <LabelTemplatesMaster /> },
     ],
   },
 ];

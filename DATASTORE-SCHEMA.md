@@ -61,6 +61,8 @@
 | Punch | 69851000000375013 (live) | Lookup — punch types with image (CR-394) |
 | Series | 69851000000373011 (live) | Lookup — marketing series (CR-394) |
 | Catalogue | 69851000000372021 (live) | Lookup — catalogues (CR-394) |
+| CustomerItemCode | 69851000000430381 (live) · 69851000000434036 (demo) | Customer × item → the customer's EAN-13 + item name (CR-502) |
+| LabelTemplate | 69851000000430740 (live) · 69851000000425638 (demo) | Box-sticker templates per customer; blank customer = house (CR-502) |
 | Currency | 69851000000065195 (live) | Currency master + INR exchange rates |
 | StatusTransition | 69851000000066173 (live) | Status/stage flip audit (Quote/SO/OrderItem) — added 2026-07-13 |
 | Notification | 69851000000062554 (live) | Per-user in-app notifications — added 2026-07-13 |
@@ -531,6 +533,7 @@ largest `total_boxes`.
 | sub_total | double | |
 | final_total | double | |
 | box_weight_kg | double | **CR-427 — created on live 2026-10-24 (col 69851000000394132).** Snapshot of `Design.box_weight_kg` at line creation (`createSalesOrder`, `/update-so-with-items` insert; an existing line re-stamps only when its `design` changes); null on legacy lines = Container Planning reads the live Item. `/load-container` / `/fit-suggest` never read it |
+| box_brand | bigint | **CR-508 — created 2026-10-31 via the Catalyst MCP on LIVE (col 69851000000435492, search-indexed) and DEMO (col 69851000000434471).** Logical FK → Brand: the carton THIS LINE must be packed in. Written by `createSalesOrder` + `/update-so-with-items` (`requireBoxBrand(l.box_brand \|\| body.box_brand)`, mandatory per line, never frozen); `SalesOrder.box_brand` = the first line's brand (default / fallback). Readers take line → SO header (`ordersApi` `boxBrandId`, `productionApi` `orderBoxBrand`, `palPlansApi` `soBoxBrandId`); null on lines saved before CR-508 (no backfill — stamped on the order's next save). `/allocate-stock` compares it with the batch's `ProductionLog.box_brand` (CR-509) |
 
 ### OrderItemEvent (76673000000053367)
 | Column | Type | Notes |
@@ -768,9 +771,10 @@ is also the cut-piece ITEM (weight) and a design with one is "in Panel Craft"
 Natural key = `panel_code`.
 | Column | Type | Notes |
 |---|---|---|
-| panel_code | varchar(60) | unique; **server-assigned `PANEL-NNN` on create** when sent blank (CR-284, `/panel-save` → `nextPanelCode`); legacy typed codes like "C01-F11-S03-118" stay |
+| panel_code | varchar(60) | unique; **CR-506 (2026-10-31, reverses CR-284): TYPED by the user, mandatory, stored UPPERCASE, editable later** — `/panel-save` 400 blank / > 60, 409 duplicate; `nextPanelCode` deleted. Every reader (order lines, loads, checkpoints, PDFs) keys on the Panel ROWID, so a rename shows everywhere at once; old `PANEL-NNN` codes stay until edited |
 | panel_size | varchar(30) | e.g. "1200x2100" |
 | vinyl_size | varchar(30) | |
+| vinyl_rate_sqft | double(2) | **CR-504** ₹ per sqft of vinyl; vinyl price = Vinyl Size sqft (Panel Size when blank) × this; written by `/panel-save` (≥ 0) (live col 69851000000437164 · demo 69851000000424945, added 2026-10-31) |
 | mdf_size | varchar(30) | the panel's MDF size, e.g. "1200x2400" — matches `Mdf.size` on the size-keyed master; the order line offers that size's thicknesses (CR-342 col 69851000000351002, added 2026-10-15; semantics CR-344) |
 | image_urls | text | JSON `[{id,name}]` File Store ids (max 5, same shape as Design.image_urls; shared ImageManager) — added 2026-08-26 |
 | remarks | text | free text, e.g. the old reference ID (CR-425, col 69851000000396065 added 2026-10-24) |
@@ -826,7 +830,7 @@ One showcase panel × qty — or, since CR-346, one loose CUT PIECE (`design` + 
 no `panel`) × qty — on a panel order (CR-302, added 2026-10-07). Written only by
 `/panel-order-save` (replace-wholesale; refused once a `PanelLoad` exists, CR-347) and
 `/migrate-panel-orders` (legacy backfill); soft-deleted with the order by `/panel-order-delete`.
-No rate / amount (user's choice). `/panel-delete` refuses a Panel that a live line references (409).
+**CR-504 (2026-10-31) reverses CR-302's "no rate":** each line stores its FROZEN ₹ parts per ONE panel (`vinyl_price` · `mdf_price` · `pieces_price`; a cut-piece line uses `pieces_price` = ₹/pc), computed by the order form from the masters (`panels/panelPrice.ts`) and editable there; the server only checks ≥ 0. Amount = parts × qty, never stored. All three null = saved before pricing ("—" until the order is edited and saved). `/panel-delete` refuses a Panel that a live line references (409).
 | Column | Type | Notes |
 |---|---|---|
 | panel_order | bigint | logical FK → PanelOrder (col 69851000000316450) |
@@ -835,6 +839,7 @@ No rate / amount (user's choice). `/panel-delete` refuses a Panel that a live li
 | design | bigint | logical FK → Design — a loose cut-piece line (CR-346, col 69851000000352019, added 2026-10-15); one piece per unit joins every need |
 | cut_piece_size | bigint | logical FK → CutPieceSize — with `design` (CR-346, col 69851000000352020, added 2026-10-15) |
 | mdf | bigint | logical FK → Mdf — the thickness picked for this line (CR-309, col 69851000000325548, added 2026-10-07); **CR-344: a master row whose `size` = the panel's `mdf_size` (400 otherwise), required once that size has rows; never on a cut-piece line** |
+| vinyl_price · mdf_price · pieces_price | double(2) | **CR-504** frozen ₹ per ONE panel (cut-piece line: `pieces_price` only = ₹/pc; vinyl/mdf on a cut line → 400) (live cols 69851000000432631 / …432632 / …432633 · demo 69851000000420908 / …420909 / …420910, added 2026-10-31) |
 | deleted_at | datetime | soft delete (col 69851000000316453) |
 
 ### SampleOrder (live id 69851000000322323) — added 2026-10-08 (CR-315)
@@ -868,6 +873,7 @@ IS a load; the old `/sample-order-supply` is gone); soft-deleted with the order.
 | supplied_qty | int | pieces supplied so far, 0…qty; `STATE_COLUMNS` (col 69851000000318663) |
 | supplied_on | date | date of the LAST supply; `STATE_COLUMNS` (col 69851000000318664) |
 | note | text | line remark (col 69851000000318665) |
+| price | double(2) | **CR-504** frozen ₹ per piece = piece sqft (Full = the item's size) × the Item's `rate_per_sqft`, editable on the form; null = saved before pricing (live col 69851000000420906 · demo 69851000000436287, added 2026-10-31) |
 | deleted_at | datetime | soft delete (col 69851000000318666) |
 
 ### PanelLoad (live id 69851000000351032) — added 2026-10-15 (CR-347)
@@ -985,6 +991,7 @@ CR-342 (2026-10-15, same day) had parented rows per panel — reversed by CR-344
 | size | varchar(60) | the MDF size, e.g. "1200x2400" — matched case-insensitively against `Panel.mdf_size` (col 69851000000316960) |
 | thickness | varchar(30) | e.g. "8 mm"; unique per size (col 69851000000316961) |
 | weight_kg | double(3) | board weight for this thickness; joins the line weight, stamped onto `PanelLoadLine.weight_kg` at load time (col 69851000000316962) |
+| rate_per_kg | double(2) | **CR-504** ₹ per kg; MDF price of one board = weight_kg × this (generic master editor) (live col 69851000000436285 · demo 69851000000438023, added 2026-10-31) |
 | seq_code | varchar(10) | assigned by the Masters editor (col 69851000000316963) |
 | panel | bigint | **dormant since CR-344** — the CR-342 per-panel owner; never read or written now (col 69851000000348003, added 2026-10-15) |
 | deleted_at | datetime | soft delete (col 69851000000316964) |
@@ -1036,6 +1043,33 @@ Settings ▸ Masters ▸ Catalogue — Marketing Data "Catalogue Name" on the It
 | name | varchar(255) | unique (col 69851000000375378) |
 | seq_code | varchar(10) | auto-assigned (col 69851000000375379) |
 | deleted_at | datetime | soft delete (col 69851000000375380) |
+
+### CustomerItemCode (live id 69851000000430381 · demo 69851000000434036) — added 2026-10-30 (CR-502)
+Customer ▸ Labels ▸ Item Barcodes. The customer's OWN barcode per item, scanned at their warehouse for
+location management. Server `assertItemCode`: non-blank printable ASCII ≤ 100 (user: "arbitrary, not fixed"), one row per customer × design,
+one design per customer × barcode (soft-deleted rows ignored). No natural key column — the pair is the key.
+| Column | Type | Notes |
+|---|---|---|
+| customer | bigint | logical FK → Customer (`BLOCK_DELETE.Customer`) |
+| design | bigint | logical FK → Design (`BLOCK_DELETE.Design`) |
+| barcode | varchar(100) | the customer's own code, any printable text (widened from 20 the same day); prints as EAN-13 when it is one, else Code 128 |
+| customer_item_name | varchar(255) | the customer's name for the item; blank = our design name |
+| deleted_at | datetime | soft delete |
+
+### LabelTemplate (live id 69851000000430740 · demo 69851000000425638) — added 2026-10-30 (CR-502)
+One box sticker a customer needs (Customer ▸ Labels ▸ Label Templates; house rows under Settings ▸ Masters ▸
+Export ▸ Label Templates). The layout is code (`client/src/features/labels/labelLayouts.ts`); the row holds
+the size and the texts.
+| Column | Type | Notes |
+|---|---|---|
+| name | varchar(255) | |
+| customer | bigint | logical FK → Customer; **null = house template, offered to every customer** |
+| layout | varchar(40) | `barcode-strip` · `batch-strip` · `compliance` |
+| width_mm | double | label width |
+| height_mm | double | label height |
+| texts | text | JSON `{ field: text }` per layout, with `{placeholders}` |
+| active | boolean | inactive templates are not offered at print time |
+| deleted_at | datetime | soft delete |
 
 ### Activity (76673000000054380)
 | Column | Type | Notes |

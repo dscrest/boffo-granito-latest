@@ -124,6 +124,7 @@ const TABLE_MODULE = {
   AdjustmentReason: "items",
   Warehouse: "items", // CR-329
   SurfaceApplication: "items", Punch: "items", Series: "items", Catalogue: "items", // CR-394 Design Master lookups
+  CustomerItemCode: "customers", LabelTemplate: "customers", // CR-502: box labels — written on the customer's Labels tab
   Container: "stages", ContainerLoading: "stages",
   PalletizationPlan: "stages", PalletizationPlanLine: "stages", LoadBox: "stages",
   Invoice: "invoices",
@@ -140,6 +141,7 @@ const GET_SHARED = new Set([
   "PartyBrand", "StatusTransition", "Vehicle", "TransactionSeries",
   "AdjustmentReason", // CR-308: both modules' adjustment sheets read the reasons
   "Warehouse", // CR-329: every stock sheet / Locations panel reads the warehouse list
+  "CustomerItemCode", "LabelTemplate", // CR-502: production / palletization print box labels
 ]);
 
 /* Business route (first path segment) -> [module, action]. Approval verdicts
@@ -238,6 +240,11 @@ function routeAction(path, method, body) {
     return { module: biz[0], action };
   }
   if (READONLY_POST.has(path)) return { readonly: true };
+  // CR-505: one route for many tables — edit on the TARGET table's module; an unmapped table = Admin only (the route 400s).
+  if (low === "bulk-update") {
+    const m = TABLE_MODULE[String((body && body.table) || "")];
+    return m ? { module: m, action: "edit" } : { admin: true };
+  }
   const module = TABLE_MODULE[seg];
   if (!module) return null;
   const action =

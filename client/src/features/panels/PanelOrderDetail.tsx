@@ -44,6 +44,8 @@ import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
 import { lineStages, lineWeightSplit, loadingStatus, loadProgress, pendingNeedLines, pendingText, stockKey, type ProgressRow } from "./panelOrderNeeds";
 import { OrderReadinessTab } from "./OrderReadinessTab";
 import { LOADING_TONE } from "./pcBits";
+import { lineRate } from "./panelPrice";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 import { LineCell, PanelActionsTab, PanelLoadsTab, type LoadableOrder } from "./PanelLoads";
 import {
   allocatedByKey,
@@ -417,9 +419,62 @@ export function PanelOrderDetail() {
                 </table>
               </div>
             </div>
+            <PricingCard lines={order.lines} amount={order.amount} />
 
           </RecordDetail>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** CR-504: the ₹ frozen on each line at save — Vinyl · MDF · Cut pieces per ONE panel, × qty. Informative;
+    prices change on Edit. A line saved before pricing reads "—" until the order is edited and saved. */
+function PricingCard({ lines, amount }: { lines: PanelOrderRow["lines"]; amount: number | null }) {
+  const money = moneyFor("INR");
+  const cell = (v: number | null, title?: string) => (v == null ? <span className="dim" title="Edit and save the order to price it">—</span> : <span title={title}>{money(v)}</span>);
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card-head">
+        <span style={{ fontWeight: 600 }}>Pricing</span>
+      </div>
+      <div style={{ overflow: "auto" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Panel</th>
+              <th className="num" style={{ textAlign: "right" }}>Vinyl</th>
+              <th className="num" style={{ textAlign: "right" }}>MDF</th>
+              <th className="num" style={{ textAlign: "right" }}>Cut Pieces</th>
+              <th className="num" style={{ textAlign: "right" }}>Rate</th>
+              <th className="num" style={{ textAlign: "right" }}>Qty</th>
+              <th className="num" style={{ textAlign: "right" }}>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => {
+              const priced = lineRate(l) != null;
+              const cut = !l.panelId;
+              return (
+                <tr key={l.id}>
+                  <td className="mono">{l.panelId ? l.panelCode : [l.designName, l.cutSizeName].filter(Boolean).join(" · ") || "Cut piece"}</td>
+                  <td className="num mono">{cut && priced ? <span className="dim">—</span> : cell(l.vinylPrice)}</td>
+                  <td className="num mono">{cut && priced ? <span className="dim">—</span> : cell(l.mdfPrice)}</td>
+                  <td className="num mono">{cell(l.piecesPrice)}</td>
+                  <td className="num mono">{cell(lineRate(l), "Price of one panel / piece")}</td>
+                  <td className="num mono">{fmt(l.qty)}</td>
+                  <td className="num mono">{cell(l.amount)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={6} style={{ fontWeight: 600 }}>Total</td>
+              <td className="num mono" style={{ fontWeight: 600 }}>{cell(amount)}</td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </div>
   );

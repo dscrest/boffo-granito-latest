@@ -33,6 +33,7 @@ import { CustomerSamples } from "@/features/panels/CustomerSamples";
 import { DetailRow, MoreMenu } from "@/features/common/DetailBits";
 import { ADDRESS_LABELS, COUNTRY_NAME_OPTIONS } from "./PartyForm";
 import { CustomerBrands } from "./CustomerBrands";
+import { CustomerLabels } from "@/features/labels/CustomerLabels";
 import { ZohoSearchModal, type ZohoPick } from "./ZohoSearchModal";
 import { getZohoRecord, isReauth, pushCustomerToZoho, REAUTH_HINT, ZOHO, ZOHO_LINK, zohoStatus } from "./zohoApi";
 import {
@@ -250,7 +251,7 @@ export function CustomerDetail() {
   const [addingAddr, setAddingAddr] = useState(false);
   const [editingAddr, setEditingAddr] = useState<number | null>(null);
   const [zohoOpen, setZohoOpen] = useState(false); // CR-325/359 Map to Zoho
-  const [tab, setTab] = useState<"details" | "transactions" | "dispatch" | "activity">("details");
+  const [tab, setTab] = useState<"details" | "transactions" | "dispatch" | "labels" | "activity">("details");
   // Quotes for the Transactions tab — same SWR cache the Quotes grid uses.
   const [quotes, setQuotes] = useState<Quote[]>(() => cachedQuotes() ?? []);
   useEffect(() => {
@@ -562,6 +563,9 @@ export function CustomerDetail() {
                 <button className={`tabish ${tab === "dispatch" ? "active" : ""}`} onClick={() => setTab("dispatch")} style={tabStyle(tab === "dispatch")}>
                   Dispatch
                 </button>
+                <button className={`tabish ${tab === "labels" ? "active" : ""}`} onClick={() => setTab("labels")} style={tabStyle(tab === "labels")}>
+                  Labels
+                </button>
                 <button className={`tabish ${tab === "activity" ? "active" : ""}`} onClick={() => setTab("activity")} style={tabStyle(tab === "activity")}>
                   Activity
                 </button>
@@ -731,6 +735,9 @@ export function CustomerDetail() {
 
             {/* Everything shipped to this customer, across all their orders. */}
             {tab === "dispatch" && <DispatchTab scope={{ kind: "customer", customerId: party.id }} />}
+
+            {/* CR-502: the customer's own item barcodes + the box-sticker templates that print for them. */}
+            {tab === "labels" && <div style={{ marginTop: 14 }}><CustomerLabels customerId={party.id} /></div>}
 
             {/* Audit trail: who created / changed this customer, from OperationLog. */}
             {tab === "activity" && <ActivityLog table="Customer" entityId={party.id} />}

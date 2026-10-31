@@ -53,6 +53,8 @@ export interface BatchStockRow {
   over: number; // consumption this row's supply could not cover — anomaly
   reserved: number; // claimed by order items (order-linked output + allocations), not yet loaded
   free: number; // max(0, current − reserved) — what Allocate Stock may still hand out (CR-199)
+  /** CR-509: Box Brand the batch was packed in (first recorded ProductionLog.box_brand, CR-197); "" = not recorded. */
+  boxBrandId: string;
 }
 
 const cache = createListCache(fetchBatchStock);
@@ -103,7 +105,7 @@ export function listBatchStock(): Promise<BatchStockResult> {
 
 async function fetchBatchStock(): Promise<BatchStockResult> {
   const [logs, designs, sizes, palPlans, pbatches, plines, loadings, items, warehouses] = await Promise.all([
-    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item", "warehouse"] }),
+    listAll("ProductionLog", { columns: ["entry_type", "design", "qty_boxes", "batch_number", "production_date", "order_item", "warehouse", "box_brand"] }),
     listAll("Design", { columns: ["design_name", "unique_name", "size", "is_batched", "accounting_stock"] }),
     listAll("Size", { columns: ["code"] }),
     listPalPlans(),
@@ -144,11 +146,17 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
   // CR-329: the same supply, per warehouse (null = primary); consumption is added below from the derived rows.
   const whMoves: WhMoveIn[] = [];
   const whOf = (r: DSRow) => (str(r.warehouse) ? str(r.warehouse) : null);
+  // CR-509: the carton a batch was packed in — first brand recorded wins (same rule as the server's unqueuedBatches).
+  const brandByKey = new Map<string, string>();
   for (const r of logs.rows || []) {
     const type = str(r.entry_type);
     const designId = str(r.design);
     const qty = num(r.qty_boxes);
     if (!designId) continue;
+    if (str(r.box_brand) && ["record", "opening", "adjust"].includes(type)) {
+      const k = `${designId}|${str(r.batch_number)}`;
+      if (!brandByKey.has(k)) brandByKey.set(k, str(r.box_brand));
+    }
     const date = str(r.production_date).slice(0, 10);
     // CR-330: a transfer leg is net zero per batch — only the warehouse split sees it.
     if (type === "transfer") {
@@ -273,6 +281,7 @@ async function fetchBatchStock(): Promise<BatchStockResult> {
     over: r.over,
     reserved: r.current - freeOf(r, reserved),
     free: freeOf(r, reserved),
+    boxBrandId: brandByKey.get(`${r.designId}|${r.batch}`) || "",
   }));
   return { ok: true, rows, openingByDesign, adjustedByDesign, byWarehouse };
 }

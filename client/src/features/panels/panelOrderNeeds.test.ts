@@ -37,6 +37,7 @@ const panel = (id: string, lines: { d: string; c: string; q: number }[]): PanelR
     panelCode: id,
     panelSize: "",
     vinylSize: "",
+    vinylRateSqft: 0,
     mdfSize: "",
     remarks: "",
     images: [],

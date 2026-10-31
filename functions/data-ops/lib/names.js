@@ -1,25 +1,22 @@
 "use strict";
 /* CR-429 — human-entered NAMES are stored Title Case, once, at the server.
-   Rule: every word capitalised, rest lower-cased; a word typed ALL-CAPS with ≤3
-   letters is kept as typed (ABC, MDF, A12); legal suffixes are always upper
-   (LLP, LLC, LTD, PVT, INC, PLC, FZE, FZCO, GMBH). Mirror: client/src/lib/format.ts
-   titleCase (the Item form needs the same text for unique_name / the SKU segment).
+   Rule: every word capitalised, rest lower-cased; ONLY legal suffixes are upper
+   (LLP, LLC, LTD, PVT, INC, PLC, FZE, FZCO, GMBH — also run together, "Pvt.Ltd.").
+   CR-503: the old "ALL-CAPS ≤3 letters kept" rule is gone ("SHREE RAM" → "Shree Ram").
+   Mirror: client/src/lib/format.ts titleCase (the Item form needs the same text for
+   unique_name / the SKU segment).
    ponytail: whitespace words only — "o'brien" → "O'brien"; add '/- splitting if a
    real name needs it. */
 
 const UPPER = new Set(["LLP", "LLC", "LTD", "PVT", "INC", "PLC", "FZE", "FZCO", "GMBH"]);
-const keep = (w) => w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w);
+const legal = (w) => /[A-Z]/i.test(w) && w.toUpperCase().split(/[.,]+/).filter(Boolean).every((p) => UPPER.has(p));
 
 function titleCase(s) {
   return String(s == null ? "" : s)
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map((w) => {
-      const bare = w.replace(/[.,]+$/, "");
-      if (UPPER.has(bare.toUpperCase())) return w.toUpperCase();
-      return keep(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase();
-    })
+    .map((w) => (legal(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()))
     .join(" ");
 }
 
@@ -79,11 +76,16 @@ function normalizeNames(table, row) {
 /* Self-check: `node lib/names.js` */
 if (require.main === module) {
   const assert = require("assert");
-  assert.strictEqual(titleCase("dhiraj SHAH of ABC exports llp"), "Dhiraj Shah Of ABC Exports LLP");
+  assert.strictEqual(titleCase("dhiraj SHAH of ABC exports llp"), "Dhiraj Shah Of Abc Exports LLP");
   assert.strictEqual(titleCase("  a12 "), "A12");
   assert.strictEqual(titleCase("MAIN GODOWN"), "Main Godown");
   assert.strictEqual(titleCase("acme pvt. ltd."), "Acme PVT. LTD.");
-  assert.strictEqual(titleCase("MDF board"), "MDF Board");
+  // CR-503: only legal suffixes stay upper
+  assert.strictEqual(titleCase("MDF board"), "Mdf Board");
+  assert.strictEqual(titleCase("SHREE RAM CERAMIC PVT LTD"), "Shree Ram Ceramic PVT LTD");
+  assert.strictEqual(titleCase("acme Pvt.Ltd."), "Acme PVT.LTD.");
+  assert.strictEqual(titleCase("abc llc"), "Abc LLC");
+  assert.strictEqual(titleCase("."), ".");
   assert.strictEqual(titleCase(""), "");
   assert.strictEqual(titleCase(null), "");
   const r = normalizeNames("Customer", { name: "boffo granito", code: "bg01", contact_persons: JSON.stringify([{ first_name: "ravi", last_name: "PATEL" }]) });

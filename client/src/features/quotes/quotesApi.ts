@@ -233,7 +233,7 @@ export async function ensureShareToken(quote: Quote): Promise<{ ok: boolean; tok
 export function convertQuote(
   rowid: string,
   mode: "Full" | "Partial",
-  lines: { item: string; qty: number; rate: number; pallet?: string; discount?: number; description?: string }[],
+  lines: { item: string; qty: number; rate: number; pallet?: string; box_brand?: string; discount?: number; description?: string }[],
   // order_number omitted → data-ops assigns the next SO number server-side.
   extra: {
     order_number?: string;

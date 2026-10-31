@@ -39,6 +39,7 @@ import {
   type PalPlan,
 } from "./palPlansApi";
 import { SetLocationModal } from "@/features/common/SetLocationModal";
+import { PrintLabelsModal } from "@/features/labels/PrintLabelsModal";
 import { useWarehouses } from "@/features/masters/useWarehouses";
 
 type DetailTab = "items" | "dispatch" | "timeline" | "activity";
@@ -57,6 +58,7 @@ export function PalPlanDetail() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<DetailTab>("items");
   const [locating, setLocating] = useState(false); // CR-412: place every un-loaded pallet of the plan
+  const [labelsOpen, setLabelsOpen] = useState(false); // CR-502: box stickers per line × batch
   const { enabled: whEnabled, nameOf: whName } = useWarehouses();
 
   const load = async () => {
@@ -150,11 +152,15 @@ export function PalPlanDetail() {
     ...(can("stages", "edit") && whEnabled && placeable.length ? [{ label: "Set Location…", onClick: () => setLocating(true) }] : []),
     { label: "Print Palletization slip", onClick: onPrint },
     { label: "Print Packing Report", onClick: onPrintPacking },
+    { label: "Print Box Labels", onClick: () => setLabelsOpen(true) },
     ...(can("stages", "delete") ? [{ label: "Delete", danger: true, onClick: () => void onDelete() }] : []),
   ];
 
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      {labelsOpen && (
+        <PrintLabelsModal customerId={plan.lines[0]?.customerId || ""} inputs={plan.lines.map((l) => ({ designId: l.designId, batch: l.batchNumber, boxes: l.boxes }))} onClose={() => setLabelsOpen(false)} />
+      )}
 
       {/* Plan list — sticky, resizable, own scroll (mirrors Quote detail). */}
       <DetailRail

@@ -76,6 +76,8 @@ function productionColumns(): ColumnDef<ProductionRequestGroup>[] {
   return [
     { key: "customer", label: "Customer", className: "nw", render: (g) => g.customer || (g.independent ? "—" : "") },
     { key: "design", label: "Design", className: "nw", render: (g) => <span className="design-name">{g.designSummary}</span> },
+    // CR-508: the carton the job must pack into — from the SO line.
+    { key: "brand", label: "Box Brand", className: "nw", render: (g) => g.boxBrand || <span className="dim">—</span> },
     {
       key: "order",
       label: "PO Number", // CR-482: the customer's PO leads; SO Number is the hidden last column
@@ -232,7 +234,7 @@ export function ProductionTable() {
   // Fresh storage key (old productionTableColumns prefs were per-line columns).
   // Key bumped to .v2 (CR-161): Customer→Design default + hideable Production ID;
   // .v3 (CR-236): Batch + Mfg Date columns.
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v6", COLS, ["items", "created", "modified", "code", "batch", "mfg", "so"]); // .v5 (CR-390): Batch / Mfg Date hidden (empty on group rows; the Sheet shows them); .v6 (CR-482): PO Number leads, SO Number hidden last
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("productionGroupColumns.v7", COLS, ["items", "created", "modified", "code", "batch", "mfg", "so"]); // .v5 (CR-390): Batch / Mfg Date hidden (empty on group rows; the Sheet shows them); .v6 (CR-482): PO Number leads, SO Number hidden last; .v7 (CR-508): Box Brand column
 
   const [entries, setEntries] = useState(() => cachedProductionLogs() ?? []);
   const [loading, setLoading] = useState(() => cachedProductionLogs() == null);
@@ -270,6 +272,7 @@ export function ProductionTable() {
     const opts = (get: (r: ProductionRequestGroup) => string) => [...new Set(groups.map(get).filter(Boolean))].sort();
     return [
       { key: "customer", label: "Customer", type: "multiselect", options: opts((r) => r.customer), get: (r) => r.customer },
+      { key: "brand", label: "Box Brand", type: "multiselect", options: opts((r) => r.boxBrand), get: (r) => r.boxBrand }, // CR-508
       { key: "stage", label: "Status", type: "multiselect", options: [...PRODUCTION_STAGE_ORDER], get: (r) => r.stage },
       { key: "by", label: "Requested By", type: "multiselect", options: opts((r) => r.performedBy), get: (r) => r.performedBy },
       { key: "requested", label: "Requested (boxes)", type: "numrange", get: (r) => r.totalRequested },
@@ -708,6 +711,7 @@ export function ProductionTable() {
                     {/* CR-355: Customer → Design lead; the PRD code is the last data column. */}
                     <th>Customer</th>
                     <th>Design</th>
+                    <th>Box Brand</th>{/* CR-508 */}
                     <th>Batch</th>
                     <th>Mfg Date</th>
                     <th>Order</th>
@@ -731,7 +735,7 @@ export function ProductionTable() {
                         const key = groupKeyOf(g);
                         if (key !== prevKey) {
                           prevKey = key;
-                          out.push(bandRow(key, 6, true, canEdit ? 2 : 1));
+                          out.push(bandRow(key, 7, true, canEdit ? 2 : 1)); // CR-508: + Box Brand
                         }
                       }
                       const d = (editMode && draft[e.id]) || {};
@@ -752,6 +756,7 @@ export function ProductionTable() {
                         >
                           <td>{g.customer || (g.independent ? "—" : "")}</td>
                           <td><span className="design-name">{g.designSummary}</span></td>
+                          <td className="nw">{e.orderBoxBrand || <span className="dim">—</span>}</td>
                           <td className="mono nw">{batchCell(rec)}</td>
                           <td className="mono muted nw">{mfgCell(rec)}</td>
                           <td className="mono">{g.independent ? "Independent" : g.poNumber || g.orderNumber || "—"}</td>

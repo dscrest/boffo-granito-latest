@@ -7,7 +7,7 @@
    OperationLog. Lookup key columns are NOT uniform: Size keys on `code`,
    the rest (Finish/Category/Glaze/Brand/Grade) key on `name`.
    ============================================================ */
-import { list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
+import { bulkUpdate, list, listAll, insert, update, remove, type DSRow, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { nextSeqCode } from "@/lib/seq";
 
@@ -587,9 +587,11 @@ async function fanOut(rowids: string[], fn: (id: string) => Promise<OpResult>): 
   };
 }
 
-/** Apply a partial patch (already column-named) to every selected design. */
+/** Apply a partial patch (already column-named) to every selected design — ONE server call (CR-505 /bulk-update). */
 export function bulkUpdateDesigns(rowids: string[], patch: Record<string, unknown>): Promise<BulkResult> {
-  return bust(fanOut(rowids, (id) => update("Design", id, patch)));
+  return bust(
+    bulkUpdate("Design", rowids, patch).then((r) => (r.ok ? { ok: true, done: rowids.length, failed: 0 } : { ok: false, done: 0, failed: rowids.length, firstError: r.error })),
+  );
 }
 
 export function bulkDeleteDesigns(rowids: string[], reason?: string): Promise<BulkResult> {

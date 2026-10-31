@@ -76,7 +76,7 @@ export interface PalPlanLine {
   finish: string; // via Design.finish → Finish.name ("" = unknown)
   poNumber: string; // SalesOrder.po_number ("" = none) — customer's PO
   boxBrandId: string; // line's own Brand override ("" = inherit the SO's, then the customer's default)
-  soBoxBrandId: string; // SalesOrder.box_brand — the order's Box Brand pick ("" = none, CR-162)
+  soBoxBrandId: string; // the order LINE's Box Brand (CR-508), else SalesOrder.box_brand ("" = none, CR-162)
   customerBoxBrandId: string; // Customer.box_brand default ("" = none)
   loadBoxId: string; // LoadBox ROWID ("" = not loaded into a box yet)
   batchNumber: string; // production batch this line's boxes come from ("" = legacy aggregate)
@@ -293,7 +293,7 @@ export function listPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
 
 async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: LoadBox[]; error?: string }> {
   // FKs are bigint ROWID strings; no JOINs — resolve names client-side (house convention).
-  const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats] = await Promise.all([
+  const [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats, orderItems] = await Promise.all([
     listAll("PalletizationPlan", { order: "ROWID desc" }),
     listAll("PalletizationPlanLine"),
     listAll("SalesOrder", { columns: ["order_number", "po_number", "customer", "box_brand"] }),
@@ -307,10 +307,11 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     listAll("Finish", { columns: ["name"] }),
     // Container Master (CR-261): box capacity of one container, per size.
     listAll("ContainerFormat", { columns: ["size", "total_boxes"] }),
+    listAll("OrderItem", { columns: ["box_brand"] }), // CR-508: per-line carton brand
   ]);
   // ANY failed read fails the load — a swallowed lines/lookup failure rendered
   // an empty board with no error (and got cached).
-  const failed = [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats].find((r) => !r.ok);
+  const failed = [plans, lines, sos, designs, pallets, reps, vehicles, customers, sizes, loadBoxes, finishes, formats, orderItems].find((r) => !r.ok);
   if (failed) return { ok: false, plans: [], boxes: [], error: failed.error };
 
   const vehicleById = new Map<string, { number: string; driver: string; mobile: string }>();
@@ -328,6 +329,8 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
     soCustomer.set(String(s.ROWID), str(s.customer));
     soBoxBrand.set(String(s.ROWID), str(s.box_brand));
   });
+  const oiBoxBrand = new Map<string, string>(); // OrderItem ROWID → Brand ROWID (CR-508)
+  (orderItems.rows || []).forEach((it) => oiBoxBrand.set(String(it.ROWID), str(it.box_brand)));
   const customerById = new Map<string, { name: string; countryCode: string; boxBrandId: string }>();
   (customers.rows || []).forEach((c) =>
     customerById.set(String(c.ROWID), { name: str(c.name), countryCode: str(c.country_code), boxBrandId: str(c.box_brand) }),
@@ -437,7 +440,7 @@ async function fetchPalPlans(): Promise<{ ok: boolean; plans: PalPlan[]; boxes: 
       finish: finishNameById.get(designFinish.get(designId) || "") || "",
       poNumber: soPo.get(soId) || "",
       boxBrandId: str(l.box_brand),
-      soBoxBrandId: soBoxBrand.get(soId) || "",
+      soBoxBrandId: oiBoxBrand.get(str(l.order_item)) || soBoxBrand.get(soId) || "", // CR-508: line first
       customerBoxBrandId: customer?.boxBrandId || "",
       loadBoxId: str(l.load_box),
       batchNumber: str(l.batch_number),

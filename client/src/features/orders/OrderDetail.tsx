@@ -25,6 +25,7 @@ import { soNextStep } from "@/features/stages/nextStep";
 import type { PalPlanLine } from "@/features/stages/palPlansApi";
 import { batchProductionDate, listProductionLogs, type ProductionLogResult } from "@/features/stages/productionApi";
 import { AllocateStockModal } from "./AllocateStockModal";
+import { PrintLabelsModal } from "@/features/labels/PrintLabelsModal";
 import { ChangeStatusModal } from "./ChangeStatusModal";
 import { useOrders } from "./useOrders";
 import { useStockLookup } from "@/features/masters/LineStock";
@@ -380,6 +381,7 @@ export function OrderDetail() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [printing, setPrinting] = useState(false);
+  const [labelsOpen, setLabelsOpen] = useState(false); // CR-502: box stickers per line
   const [sendLoad, setSendLoad] = useState(false);
   // CR-175/203: New Loading from palletised stock = the Loading Session page, this SO only.
   const newLoading = () => navigate(`/loading/new?so=${encodeURIComponent(head?.salesOrderId || "")}`);
@@ -576,7 +578,7 @@ export function OrderDetail() {
     { key: "orderDate", label: "Order Date", value: head.orderDate },
     { key: "dueDate", label: "Due Date", value: head.dueDate },
     { key: "salesperson", label: "Salesperson", value: head.salesperson || "—" },
-    { key: "boxBrand", label: "Box Brand", value: head.boxBrandLabel || head.boxBranding || "—" },
+    // CR-508: Box Brand is per line now — shown on the Items table, not repeated here.
     // Same commercial facts the Quote detail shows (detail-page consistency).
     { key: "paymentTerm", label: "Payment Term", value: head.paymentTerm || "—" },
     { key: "currency", label: "Currency", value: head.currency || "—" },
@@ -735,6 +737,7 @@ export function OrderDetail() {
                 ? [{ label: "Plan Containerisation", onClick: () => navigate(`/orders/${head.salesOrderId}/containerise`) }]
                 : []),
               { label: "Print Order", onClick: () => setPrinting(true) },
+              { label: "Print Box Labels", onClick: () => setLabelsOpen(true) },
               ...(head.salesOrderId && can("orders", "edit")
                 ? [{ label: "Change Status", onClick: () => setChangingStatus(true) }]
                 : []),
@@ -862,6 +865,7 @@ export function OrderDetail() {
                 <th>Design</th>
                 <th>Size</th>
                 <th>Finish</th>
+                <th>Box Brand</th>
                 <th className="num" style={{ textAlign: "right" }}>Ordered</th>
                 <th className="num" style={{ textAlign: "right" }}>Allocated</th>
                 <th className="num" style={{ textAlign: "right" }}>Remaining</th>
@@ -875,6 +879,7 @@ export function OrderDetail() {
                   <td><span className="design-name">{o.design}</span></td>
                   <td><span className={`chip size ${o.size.startsWith("200") || o.size.startsWith("75") ? "b" : ""}`}>{o.size}</span></td>
                   <td><span className={`chip finish ${finishClass(o.finish)}`}>{o.finish}</span></td>
+                  <td className="nw">{o.boxBrandLabel || o.boxBranding || <span className="dim">—</span>}</td>{/* CR-508 per line */}
                   <td className="num mono">{fmt(o.orderQty)}</td>
                   <td className="num mono">{fmt(o.producedQty)}</td>
                   {/* CR-263: Remaining = Ordered − Allocated (what Allocate Stock still has to find). */}
@@ -892,7 +897,7 @@ export function OrderDetail() {
             {/* CR-263: totals row — sums of the order's lines. */}
             <tfoot>
               <tr>
-                <td colSpan={3} style={{ fontWeight: 600 }}>Total · {items.length} item{items.length === 1 ? "" : "s"}</td>
+                <td colSpan={4} style={{ fontWeight: 600 }}>Total · {items.length} item{items.length === 1 ? "" : "s"}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + o.orderQty, 0))}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + o.producedQty, 0))}</td>
                 <td className="num mono" style={{ fontWeight: 600 }}>{fmt(items.reduce((s, o) => s + remainingOf(o), 0))}</td>
@@ -908,6 +913,9 @@ export function OrderDetail() {
 
       {/* SO print — the quotation sheet with Sales Order labels; the SO's
           header + lines are mapped into the Quote shape the template reads. */}
+      {labelsOpen && (
+        <PrintLabelsModal customerId={head.customerId || ""} customerName={head.party} inputs={items.map((o) => ({ designId: o.designId, boxes: o.orderQty }))} onClose={() => setLabelsOpen(false)} />
+      )}
       {printing && (
         <QuotePrint
           doc={{ title: "SALES ORDER", eyebrow: "Sales Order For", noLabel: "SO NO.", validLabel: "DUE DATE" }}

@@ -22,6 +22,7 @@ import { ErrorCard, SkeletonRows, EmptyState } from "@/ui/States";
 import { Chip } from "@/ui/Chip";
 import { codeOf } from "@/ui/statusCode";
 import { GridFooter, SortTh, usePagination, useSortRows } from "@/ui/GridFooter";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { fmt, fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/auth";
@@ -84,6 +85,7 @@ const statusTone = (o: Row) => (o.type === "Panel" ? PROGRESS_TONE[o.progress] :
 const statusIndex = (o: Row) => (o.type === "Panel" ? PROGRESS_STATES.indexOf(o.progress) : 10 + SAMPLE_STATUSES.indexOf(o.status));
 const detailUrl = (o: LoadableOrder) => `/${o.type === "Panel" ? "panel-orders" : "sample-orders"}/${encodeURIComponent(o.id)}`;
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+const money = moneyFor("INR");
 const STATUS_OPTIONS = [...new Set<string>([...PROGRESS_STATES, ...SAMPLE_STATUSES.map((s) => SAMPLE_STATUS_LABEL[s])])];
 
 /** CR-318: the Panels cell = a count chip; clicking it opens the order's panels as cards (thumb · code · designs · qty · MDF). */
@@ -181,6 +183,8 @@ const ORDER_COLUMNS: ColumnDef<Row>[] = [
     style: { textAlign: "right" },
     render: (o) => (o.type === "Panel" ? fmt(o.totalQty) : <span title="supplied / requested">{fmt(o.suppliedQty)} / {fmt(o.totalQty)}</span>),
   },
+  // CR-504: Σ the ₹ frozen on the lines; "—" while any line was saved before pricing.
+  { key: "amount", label: "Amount", className: "num mono", style: { textAlign: "right" }, render: (o) => (o.amount == null ? <span className="dim" title="Edit and save the order to price it">—</span> : money(o.amount)) },
   { key: "date", label: "Order Date", className: "mono muted", render: (o) => o.orderDate || "—" },
   { key: "sales", label: "Sales Person", render: (o) => o.salesperson || "—" },
   // CR-367: Panel rows show the derived progress; Sample rows their derived supply state.
@@ -220,7 +224,7 @@ export function Orders() {
   const [query, setQuery] = usePersistedState("panelOrders.query", "");
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => (params.get("type") === "Sample" ? "Sample" : params.get("type") === "Panel" ? "Panel" : ""));
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("ordersColumns.v4", ORDER_COLUMNS, ["created", "modified", "number", "location"]); // .v4 (CR-410: Location column, default hidden)
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("ordersColumns.v5", ORDER_COLUMNS, ["created", "modified", "number", "location"]); // .v5 (CR-504: Amount column)
   const { warehouses } = useWarehouses(); // CR-410: location labels
 
   const load = async () => {
@@ -282,6 +286,7 @@ export function Orders() {
     shown,
     (o, k) =>
       k === "qty" ? o.totalQty
+      : k === "amount" ? (o.amount ?? -1)
       : k === "items" ? o.lines.length
       : k === "type" ? o.type
       : k === "customer" ? o.customerName

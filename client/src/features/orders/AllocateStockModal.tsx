@@ -16,6 +16,7 @@ import { fmt } from "@/lib/format";
 import type { Order } from "@/data";
 import { cachedBatchStock, listBatchStock, type BatchStockRow } from "@/features/stages/batchStockApi";
 import { allocateStock } from "@/features/stages/productionApi";
+import { useBoxBrands } from "@/features/masters/boxBrands";
 import { remainingOf as needOf } from "./ordersApi";
 // Oldest first; the unbatched bucket ("" mfg date) leads, as in the stock FIFO.
 const byAge = (a: BatchStockRow, b: BatchStockRow) => a.mfgDate.localeCompare(b.mfgDate) || a.batchNumber.localeCompare(b.batchNumber);
@@ -38,6 +39,8 @@ export function AllocateStockModal({
   const [qty, setQty] = useState<Map<string, number>>(new Map()); // `${orderItemId}|${batch}` → boxes
   const [saving, setSaving] = useState(false);
   const [q, setQ] = useState("");
+  const { brands } = useBoxBrands();
+  const brandName = (id: string) => brands.find((b) => b._id === id)?.name || "";
 
   useEffect(() => {
     void listBatchStock().then((r) => r.ok && setStock(r.rows));
@@ -47,7 +50,12 @@ export function AllocateStockModal({
   const shown = open.filter((o) => o.design.toLowerCase().includes(q.trim().toLowerCase()));
   // Join on the unique label (unique_name), never the plain design_name — that is
   // shared across sizes/finishes and the server checks free stock per Design row.
-  const rowsFor = (o: Order) => stock.filter((r) => r.designLabel === o.design && r.free > 0).sort(byAge);
+  const freeRows = (o: Order) => stock.filter((r) => r.designLabel === o.design && r.free > 0);
+  // CR-509: only stock packed in the line's Box Brand is offered. A batch with no brand
+  // recorded (legacy / opening rows) still shows — ponytail: unknown ≠ wrong.
+  const fitsBrand = (o: Order, r: BatchStockRow) => !o.boxBrandId || !r.boxBrandId || r.boxBrandId === o.boxBrandId;
+  const rowsFor = (o: Order) => freeRows(o).filter((r) => fitsBrand(o, r)).sort(byAge);
+  const hiddenBoxes = (o: Order) => freeRows(o).filter((r) => !fitsBrand(o, r)).reduce((s, r) => s + r.free, 0);
   const key = (o: Order, r: BatchStockRow) => `${o.id}|${r.batchNumber}`;
   const pickedFor = (o: Order) => rowsFor(o).reduce((s, r) => s + (qty.get(key(o, r)) || 0), 0);
 
@@ -128,9 +136,15 @@ export function AllocateStockModal({
                         {rows.length === 0 && (
                           <tr><td colSpan={3} style={{ paddingLeft: 28, color: "var(--c-red)" }}>No stock available — needs production</td></tr>
                         )}
+                        {hiddenBoxes(o) > 0 && (
+                          <tr><td colSpan={3} className="dim" style={{ paddingLeft: 28 }}>{fmt(hiddenBoxes(o))} boxes packed in other box brands not shown</td></tr>
+                        )}
                         {rows.map((r) => (
                           <tr key={r.batchNumber}>
-                            <td className="mono" style={{ paddingLeft: 28 }}>{r.batchNumber || "—"}</td>
+                            <td className="mono" style={{ paddingLeft: 28 }}>
+                              {r.batchNumber || "—"}
+                              {r.boxBrandId && <span className="dim" style={{ marginLeft: 8, fontFamily: "inherit" }}>{brandName(r.boxBrandId)}</span>}
+                            </td>
                             <td className="num mono">{fmt(r.free)}</td>
                             <td className="num">
                               <NumberInput

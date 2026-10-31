@@ -143,6 +143,9 @@ const ALLOWED = new Set([
   "Punch",
   "Series",
   "Catalogue",
+  // CR-502: box labels — the customer's own EAN-13 per item + the sticker templates that print for them.
+  "CustomerItemCode",
+  "LabelTemplate",
 ]);
 
 function assertTable(table) {
@@ -442,6 +445,7 @@ const BLOCK_DELETE = {
     ["OrderItem", "design", "sales-order line"],
     ["ProductionLog", "design", "production entry"],
     ["PalletisedBatch", "design", "packed batch"],
+    ["CustomerItemCode", "design", "customer barcode"], // CR-502
   ],
   Customer: [
     ["Quote", "customer", "quotation"],
@@ -450,6 +454,8 @@ const BLOCK_DELETE = {
     ["Design", "design_owner", "item (design owner)"],
     ["Design", "design_buyer", "item (design buyer)"],
     ["PartyBrand", "customer", "customer brand"],
+    ["CustomerItemCode", "customer", "item barcode"], // CR-502
+    ["LabelTemplate", "customer", "label template"],
   ],
   // CR-394: a lookup value picked on an item stays.
   SurfaceApplication: [["Design", "surface_application", "item"]],
@@ -636,6 +642,28 @@ function assertNoNegatives(obj) {
     if (SIGNED_FIELDS.has(k)) continue;
     const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
     if (!Number.isNaN(n) && n < 0) throw badRequest(`${k} cannot be negative`);
+  }
+}
+
+/* CR-502: a customer's item barcode is whatever the customer gives (user 2026-10-30: "arbitrary,
+   not fixed … no restriction of 13 digits") — printable ASCII so Code 128 can draw it; one barcode
+   per customer × item, one item per customer × barcode. Trust boundary — the client repeats the checks. */
+async function assertItemCode(catalyst, row, excludeRowid) {
+  const code = String(row.barcode == null ? "" : row.barcode).trim();
+  if (!code) throw badRequest("Barcode is required");
+  if (!/^[\x20-\x7e]{1,100}$/.test(code)) throw badRequest("A barcode is up to 100 letters, digits or plain punctuation");
+  row.barcode = code;
+  const cust = rowidParam(row.customer);
+  const des = rowidParam(row.design);
+  if (!cust || !des) throw badRequest("Customer and item are required");
+  const rows = rowList(
+    await catalyst.zcql().executeZCQLQuery(
+      `SELECT ROWID, design FROM CustomerItemCode WHERE customer = ${cust} AND (design = ${des} OR barcode = '${code.replace(/'/g, "''")}') AND deleted_at is null`,
+    ),
+  );
+  for (const r of rows) {
+    if (String(r.ROWID) === String(excludeRowid || "")) continue;
+    throw badRequest(String(r.design) === des ? "This item already has a barcode for this customer" : "This barcode is already on another item for this customer", 409);
   }
 }
 
@@ -1609,7 +1637,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           ...(typeof body.shipping_address === "string" ? { shipping_address: body.shipping_address } : {}),
           // Box Brand master pick (Brand FK, CR-162). The legacy free-text
           // box_branding column is left untouched (read-only history).
-          box_brand: requireBoxBrand(body.box_brand),
+          box_brand: headerBoxBrand(body), // CR-508: = first line's brand
           sales_person: salesPerson || undefined,
           customer_notes: body.customer_notes || "",
           terms: body.terms || "",
@@ -1634,6 +1662,7 @@ app.post("/update-so-with-items/:rowid", async (req, res) => {
           const fields = {
             design: designIds[i],
             pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
+            box_brand: requireBoxBrand(l.box_brand || body.box_brand), // CR-508 per line (no freeze: a repack decision is the user's)
             ordered_qty_boxes: Number(l.qty) || 0,
             priority_level: l.priority || "normal",
             due_date: l.due_date || undefined,
@@ -1699,11 +1728,15 @@ async function nextOrderNumber(catalyst, table = "SalesOrder", tag = "SO") {
 
 // CR-483: every Sales Order carries a Box Brand (the floor prints it on the
 // boxes) — the form enforces it and so does every write path here.
+// CR-508: the brand lives on EACH LINE (OrderItem.box_brand); the header keeps the
+// first line's brand as the default / fallback for readers and for lines saved before CR-508.
+// ponytail: no backfill — a legacy line reads line || header until its next save.
 function requireBoxBrand(v) {
   const id = String(v || "").trim();
   if (!/^\d+$/.test(id)) throw badRequest("Box Brand is required");
   return id;
 }
+const headerBoxBrand = (body) => requireBoxBrand((Array.isArray(body.lines) && body.lines[0] && body.lines[0].box_brand) || body.box_brand);
 
 async function createSalesOrder(ds, body, maps) {
   // Blank order_number → the server assigns the next number (clients no
@@ -1751,7 +1784,7 @@ async function createSalesOrder(ds, body, maps) {
     warehouse, // CR-453
     manual_so_number: body.manual_so_number || "",
     // Box Brand master pick (Brand FK, CR-162) — replaces the free-text box_branding.
-    box_brand: requireBoxBrand(body.box_brand),
+    box_brand: headerBoxBrand(body), // CR-508: = first line's brand
     sales_person: salesPerson || undefined,
     customer_notes: body.customer_notes || "",
     terms: body.terms || "",
@@ -1774,6 +1807,7 @@ async function createSalesOrder(ds, body, maps) {
       design: designIds[i],
       box_weight_kg: bwMap.get(String(designIds[i])) || 0, // CR-427 snapshot
       pallet: l.pallet ? String(l.pallet) : null, // pallet spec chosen at SO creation
+      box_brand: requireBoxBrand(l.box_brand || body.box_brand), // CR-508 per line
       ordered_qty_boxes: Number(l.qty) || 0,
       produced_qty_boxes: 0,
       purchased_qty_boxes: 0,
@@ -3526,6 +3560,9 @@ app.post("/panel-order-save", async (req, res) => {
           const p = rowidParam(l.panel);
           const q = Number(l.qty);
           if (!Number.isInteger(q) || q <= 0) throw badRequest("qty must be a positive integer");
+          // CR-504: the form's frozen ₹ parts per ONE panel / piece (blank = unpriced) — editable, so only checked.
+          for (const [k, label] of [["vinyl_price", "Vinyl price"], ["mdf_price", "MDF price"], ["pieces_price", "Cut piece price"]])
+            l[k] = l[k] == null || l[k] === "" ? null : round2(nonNeg(l[k], label));
           if (p) {
             if (seen.has(p)) throw badRequest("A panel is listed twice — change its quantity instead");
             seen.add(p);
@@ -3538,6 +3575,7 @@ app.post("/panel-order-save", async (req, res) => {
           if (!rowidParam(l.cut_piece_size)) l.cut_piece_size = await fullSizeCutPiece(catalyst, ds, d);
           const c = rowidParam(l.cut_piece_size);
           if (rowidParam(l.mdf)) throw badRequest("A cut-piece line has no MDF");
+          if (l.vinyl_price != null || l.mdf_price != null) throw badRequest("A cut-piece line has no vinyl or MDF price");
           if (seenCut.has(`${d}|${c}`)) throw badRequest("A cut piece is listed twice — change its quantity instead");
           seenCut.add(`${d}|${c}`);
         }
@@ -3612,6 +3650,7 @@ app.post("/panel-order-save", async (req, res) => {
             panel_order: id, qty: Number(l.qty),
             ...(rowidParam(l.panel) ? { panel: rowidParam(l.panel) } : { design: rowidParam(l.design), cut_piece_size: rowidParam(l.cut_piece_size) }),
             ...(rowidParam(l.mdf) ? { mdf: rowidParam(l.mdf) } : {}), // bigint cols reject ""
+            ...Object.fromEntries(["vinyl_price", "mdf_price", "pieces_price"].filter((k) => l[k] != null).map((k) => [k, l[k]])), // CR-504; double cols reject ""
           })),
         );
         return { rowid: id, data: { ROWID: id, order_number: orderNumber } };
@@ -3801,7 +3840,8 @@ app.post("/sample-order-save", async (req, res) => {
           seen.add(key);
           designIds.add(d);
           if (c) cutIds.add(c);
-          clean.push({ design: d, piece_kind: kind, cut_piece_size: c, qty: q, note: String(l.note || "").trim() });
+          const price = l.price == null || l.price === "" ? null : round2(nonNeg(l.price, "Rate")); // CR-504: frozen ₹/pc, editable
+          clean.push({ design: d, piece_kind: kind, cut_piece_size: c, qty: q, note: String(l.note || "").trim(), price });
         }
         const found = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM Design WHERE ROWID IN (${[...designIds].join(",")})`));
         if (found.length !== designIds.size) throw badRequest("A picked item no longer exists", 404);
@@ -3851,6 +3891,7 @@ app.post("/sample-order-save", async (req, res) => {
           clean.map((l) => ({
             sample_order: id, design: l.design, piece_kind: l.piece_kind, qty: l.qty, supplied_qty: 0, note: l.note,
             ...(l.cut_piece_size ? { cut_piece_size: l.cut_piece_size } : {}), // bigint cols reject ""
+            ...(l.price != null ? { price: l.price } : {}),
           })),
         );
         return { rowid: id, data: { ROWID: id, order_number: orderNumber } };
@@ -4709,19 +4750,6 @@ app.post("/cut-piece-delete", async (req, res) => {
    /cut-stock-entry ledger (CR-307). Generic writes to PanelLine (and soft Panel
    deletes) are still rejected so lines only change through here.
    ---------------------------------------------------------------- */
-/* Panel numbers PANEL-001… (CR-280) — max numeric suffix + 1 over every Panel
-   row (soft-deleted included, so a number is never reused). ponytail: MAX-scan
-   like nextOrderNumber; assertUnique below is the race backstop. */
-async function nextPanelCode(catalyst) {
-  const rows = rowList(await catalyst.zcql().executeZCQLQuery("SELECT panel_code FROM Panel"));
-  let max = 0;
-  for (const r of rows) {
-    const m = /^PANEL-(\d+)$/.exec(String(r.panel_code || ""));
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return `PANEL-${String(max + 1).padStart(3, "0")}`;
-}
-
 /* CR-289: a line with NO cut piece size means a full-size piece — the design's
    own Size. Resolve it to the CutPieceSize row whose name is the Size code
    (created on first use), so stock and orders key on one row per size. */
@@ -4751,9 +4779,10 @@ app.post("/panel-save", async (req, res) => {
     const rowid = body.rowid ? rowidParam(body.rowid) : null;
     const lines = Array.isArray(body.lines) ? body.lines : [];
     const header = {
-      panel_code: String(body.panel_code || "").trim(),
+      panel_code: String(body.panel_code || "").trim().toUpperCase(), // CR-506: the user's own code, stored in capitals
       panel_size: String(body.panel_size || "").trim(),
       vinyl_size: String(body.vinyl_size || "").trim(),
+      vinyl_rate_sqft: round2(nonNeg(body.vinyl_rate_sqft ?? 0, "Vinyl rate")), // CR-504: ₹/sqft of the vinyl
       mdf_size: String(body.mdf_size || "").trim(), // CR-344: the panel's MDF size — matches Mdf.size on the size-keyed master
       remarks: String(body.remarks || "").trim(), // CR-425: free text, e.g. the old reference ID
     };
@@ -4761,9 +4790,10 @@ app.post("/panel-save", async (req, res) => {
       catalyst,
       { table_name: "Panel", operation: rowid ? "update" : "insert", payload: body },
       async () => {
-        // Create / clone send a blank code → the server assigns the next PANEL-NNN.
-        if (!rowid && !header.panel_code) header.panel_code = await nextPanelCode(catalyst);
-        if (!header.panel_code) throw badRequest("panel_code is required");
+        // CR-506 (reverses CR-284): the code is TYPED — mandatory, never minted; editable later (every reader
+        // resolves it from the Panel ROWID, so a rename shows on past orders too).
+        if (!header.panel_code) throw badRequest("Panel Code is required");
+        if (header.panel_code.length > 60) throw badRequest("Panel Code is at most 60 characters");
         for (const l of lines) {
           if (!rowidParam(l.design)) throw badRequest("Every line needs a design");
           const q = Number(l.cut_piece_qty);
@@ -4771,7 +4801,11 @@ app.post("/panel-save", async (req, res) => {
           // CR-289: blank cut size → the design's full size.
           if (!rowidParam(l.cut_piece_size)) l.cut_piece_size = await fullSizeCutPiece(catalyst, ds, l.design);
         }
-        await assertUnique(catalyst, "Panel", "panel_code", header.panel_code, rowid);
+        try {
+          await assertUnique(catalyst, "Panel", "panel_code", header.panel_code, rowid);
+        } catch (e) {
+          throw e && e.statusCode === 409 ? badRequest(`Panel Code "${header.panel_code}" is already used`, 409) : e;
+        }
         if (rowid) {
           const panel = rowList(
             await catalyst.zcql().executeZCQLQuery(
@@ -6611,11 +6645,11 @@ app.post("/allocate-stock", async (req, res) => {
         const total = [...want.values()].reduce((s, n) => s + n, 0);
 
         const oi = (await loadOrderItems(
-          catalyst, [oiId], "ROWID, sales_order, design, ordered_qty_boxes, produced_qty_boxes, stage",
+          catalyst, [oiId], "ROWID, sales_order, design, ordered_qty_boxes, produced_qty_boxes, stage, box_brand",
         )).get(oiId);
         if (!oi || !oi.sales_order || !oi.design) throw badRequest(`Order item not found: ${oiId}`, 404);
         const soId = String(oi.sales_order);
-        const so = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT status FROM SalesOrder WHERE ROWID = ${soId}`))[0];
+        const so = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT status, box_brand FROM SalesOrder WHERE ROWID = ${soId}`))[0];
         if (!so || ["Draft", "PendingApproval", "Cancelled", "Rejected"].includes(String(so.status || "")))
           throw badRequest("Stock can only be allocated to a confirmed sales order", 409);
         const produced = Number(oi.produced_qty_boxes) || 0;
@@ -6627,6 +6661,29 @@ app.post("/allocate-stock", async (req, res) => {
           const f = Math.max(0, free.get(b) || 0);
           if (n > f) throw badRequest(`Only ${f} free boxes left in ${b ? `batch ${b}` : "unbatched stock"}`, 409);
         }
+        // CR-509: a batch packed in another carton can't serve this line (mirrors the
+        // Allocate Stock filter). The carton the batch was packed in travels with the
+        // claim (CR-197); tolerate a Data Store that predates ProductionLog.box_brand.
+        const lineBrand = String(oi.box_brand || so.box_brand || "");
+        const brandOfBatch = new Map(); // batch → Brand ROWID ("" = none recorded)
+        for (const b of want.keys()) {
+          let brand = "";
+          if (b) {
+            try {
+              const hit = rowList(
+                await catalyst.zcql().executeZCQLQuery(
+                  `SELECT box_brand FROM ProductionLog WHERE design = ${oi.design} AND batch_number = '${b.replace(/'/g, "''")}' AND box_brand is not null AND deleted_at is null LIMIT 1`,
+                ),
+              )[0];
+              brand = hit && hit.box_brand ? String(hit.box_brand) : "";
+            } catch (_) { /* column not created yet */ }
+          }
+          brandOfBatch.set(b, brand);
+          if (lineBrand && brand && brand !== lineBrand) {
+            const names = new Map(rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID, name FROM Brand WHERE ROWID IN (${brand}, ${lineBrand})`)).map((r) => [String(r.ROWID), String(r.name || "")]));
+            throw badRequest(`Batch ${b} is packed in ${names.get(brand) || "another box brand"} — this line needs ${names.get(lineBrand) || "its own box brand"}`, 409);
+          }
+        }
 
         const actor = await currentActor(catalyst);
         const stage = String(oi.stage || "");
@@ -6635,19 +6692,7 @@ app.post("/allocate-stock", async (req, res) => {
         const inserted = [];
         try {
           for (const [b, n] of want) {
-            // The carton the batch was packed in travels with the claim (CR-197);
-            // tolerate a Data Store that predates ProductionLog.box_brand.
-            let brand = null;
-            if (b) {
-              try {
-                const hit = rowList(
-                  await catalyst.zcql().executeZCQLQuery(
-                    `SELECT box_brand FROM ProductionLog WHERE design = ${oi.design} AND batch_number = '${b.replace(/'/g, "''")}' AND box_brand is not null AND deleted_at is null LIMIT 1`,
-                  ),
-                )[0];
-                brand = hit && hit.box_brand ? String(hit.box_brand) : null;
-              } catch (_) { /* column not created yet */ }
-            }
+            const brand = brandOfBatch.get(b) || null; // looked up (and checked) above
             const row = await ds.table("ProductionLog").insertRow({
               entry_type: "alloc",
               design: String(oi.design),
@@ -8167,6 +8212,66 @@ app.get("/:table/:rowid", async (req, res) => {
    pcs/coverage are the item's own, untouched). Overwrites typed weights — warn
    before running. Registered before the generic POST /:table so its
    single-segment path isn't shadowed by it. */
+/* CR-505: Bulk Update — ONE call sets one value on many rows (filter → tick → Bulk Update), instead of a
+   browser fan-out of single PATCHes that trips the org-wide Dev concurrency cap. Whitelisted fields only —
+   never a column that feeds a natural key (unique_name) or a state column. Permission = edit on the table's
+   module (appauth routeAction). One OperationLog row per record so each record's Activity shows it. */
+const BULK_FIELDS = {
+  Design: { rate_per_sqft: "num", box_weight_kg: "num3", status: "text", brand: "id", grade: "id" },
+  Panel: { vinyl_rate_sqft: "num" }, // CR-504
+  Mdf: { rate_per_kg: "num" }, // CR-504
+};
+const chunksOf = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+
+app.post("/bulk-update", async (req, res) => {
+  try {
+    const catalyst = init(req);
+    const ds = catalyst.datastore();
+    const body = req.body || {};
+    const table = String(body.table || "");
+    const allowed = BULK_FIELDS[table];
+    if (!allowed) throw badRequest(`Bulk update is not available for ${table || "this list"}`);
+    const rowids = [...new Set((Array.isArray(body.rowids) ? body.rowids : []).map(rowidParam).filter(Boolean))];
+    if (!rowids.length || rowids.length > 1000) throw badRequest("Pick between 1 and 1000 rows");
+    const patch = {};
+    for (const [k, v] of Object.entries(body.patch || {})) {
+      const kind = allowed[k];
+      if (!kind) throw badRequest(`${k} cannot be bulk updated`);
+      if (kind === "num") patch[k] = round2(nonNeg(v, k));
+      else if (kind === "num3") patch[k] = Math.round(nonNeg(v, k) * 1000) / 1000;
+      else if (kind === "id") {
+        if (!rowidParam(v)) throw badRequest(`${k} must be picked`);
+        patch[k] = rowidParam(v);
+      } else patch[k] = String(v ?? "").trim();
+    }
+    if (!Object.keys(patch).length) throw badRequest("Pick a field and a value");
+    // Item master keeps both rates (DesignForm SQFT_PER_SQM).
+    if (table === "Design" && patch.rate_per_sqft !== undefined) patch.rate_per_sqmt = round2(patch.rate_per_sqft * 10.763915);
+    const started = Date.now();
+    const actor = await currentActor(catalyst);
+    // Every row must be live before anything is written.
+    let live = 0;
+    for (const ids of chunksOf(rowids, 200))
+      live += rowList(await catalyst.zcql().executeZCQLQuery(`SELECT ROWID FROM ${table} WHERE ROWID IN (${ids.join(",")}) AND deleted_at is null`)).length;
+    if (live !== rowids.length) throw badRequest(`${rowids.length - live} of the picked rows no longer exist — refresh and try again`, 404);
+    for (const ids of chunksOf(rowids, 200)) await ds.table(table).updateRows(ids.map((ROWID) => ({ ROWID, ...patch })));
+    delete _cache[table]; // FK-name lookup map is now stale
+    try {
+      const at = new Date().toISOString().slice(0, 19).replace("T", " ");
+      const summary = summarize({ bulk: rowids.length, ...patch });
+      for (const ids of chunksOf(rowids, 200))
+        await ds.table("OperationLog").insertRows(
+          ids.map((id) => ({ occurred_at: at, table_name: table, operation: "bulk-update", entity_rowid: String(id), status: "success", error_text: "", duration_ms: Date.now() - started, actor, payload_summary: summary })),
+        );
+    } catch (e) {
+      console.error("OperationLog bulk write failed:", e && e.message); // logging never fails the write
+    }
+    res.json({ ok: true, data: { updated: rowids.length } });
+  } catch (err) {
+    sendErr(res, err);
+  }
+});
+
 /* CR-473: stamp an item code on every Design that has none (idempotent; Admin via ADMIN_ROUTES).
    Run once per target after the column + deploy; re-runs report stamped: 0. */
 app.post("/backfill-item-codes", async (req, res) => {
@@ -8261,6 +8366,7 @@ app.post("/:table", async (req, res) => {
           assertNoStateWrite(table, r, true);
           assertNoNegatives(r); // rule #5: no negative numeric values
           normalizeNames(table, r); // CR-429: names are stored Title Case (before the natural-key check)
+          if (table === "CustomerItemCode") await assertItemCode(catalyst, r); // CR-502
           if (table === "Design") {
             stampDesignCoverage(r); // CR-391
             delete r.item_code; // CR-473: server-minted, never typed
@@ -8393,6 +8499,11 @@ app.patch("/:table/:rowid", async (req, res) => {
         // Reject natural-key changes that collide with a different existing row.
         assertNoNegatives(req.body); // rule #5: no negative numeric values
         normalizeNames(table, patch); // CR-429: names are stored Title Case (before the natural-key check)
+        if (table === "CustomerItemCode") {
+          // CR-502: validate the merged row — a PATCH may carry only the barcode.
+          const cur = rowList(await catalyst.zcql().executeZCQLQuery(`SELECT customer, design, barcode FROM CustomerItemCode WHERE ROWID = ${rid}`))[0] || {};
+          await assertItemCode(catalyst, { ...cur, ...patch }, rid);
+        }
         const nk = NATURAL_KEY[table];
         if (nk && patch[nk] !== undefined) {
           let scope = "";

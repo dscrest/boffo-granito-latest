@@ -2,8 +2,9 @@
    Panel form — create / edit a showcase Panel (Panel Craft), a full
    FormPage laid out Zoho-style (CR-281, .form-rows). Hosted by
    PanelFormPage (/panels/new|:id/edit|:id/clone).
-   Header: Panel Code (server-assigned PANEL-NNN on create, CR-280 —
-   read-only here), Panel Size, Vinyl Size. Design lines: Design
+   Header: Panel Code (CR-506: TYPED by the user, mandatory, saved in
+   capitals, editable on old panels too — reverses CR-280/284's PANEL-NNN),
+   Panel Size, Vinyl Size. Design lines: Design
    picker (CR-306: the Panel Items only) → its Available Size auto-fills
    read-only; Cut Piece Size picker lists THAT item's cut pieces and offers
    "Create …" (write-through to the CutPieceSize master + registered as a
@@ -18,6 +19,8 @@ import { toast } from "@/ui/Toast";
 import { cachedDesigns, listDesigns, type DesignRow } from "@/features/masters/designsApi";
 import { listPanels, cachedCutSizes, type CutSizeOption, type PanelInput, type PanelRow } from "./panelsApi";
 import { cachedMdfs, listMdfs, type MdfRow } from "./mdfApi";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
+import { vinylPrice } from "./panelPrice";
 import { cachedCutStockRows, listCutStock, saveCutPiece, type CutStockRow } from "./panelOrdersApi";
 
 interface LineDraft {
@@ -36,6 +39,7 @@ export function panelToInput(p: PanelRow): PanelInput {
     panel_code: p.panelCode,
     panel_size: p.panelSize,
     vinyl_size: p.vinylSize,
+    vinyl_rate_sqft: p.vinylRateSqft,
     mdf_size: p.mdfSize,
     remarks: p.remarks,
     lines: p.lines.map((l) => ({ design: l.designId, cut_piece_size: l.cutSizeId, cut_piece_qty: l.qty })),
@@ -54,11 +58,11 @@ export function PanelForm({
   onClose: () => void;
 }) {
   const form = useFormSave(onClose);
-  // Edit keeps the stored code; create / clone send "" and the server assigns
-  // the next PANEL-NNN (form-ux rule 7: no typed short codes).
-  const code = initial?.panel_code ?? "";
+  // CR-506: the one typed-code exception to form-ux rule 7 — the user's own code, in capitals; clone starts blank.
+  const [code, setCode] = useState(initial?.panel_code ?? "");
   const [panelSize, setPanelSize] = useState(initial?.panel_size ?? ""); // CR-484: no default size — the user types it
   const [vinylSize, setVinylSize] = useState(initial?.vinyl_size ?? "");
+  const [vinylRate, setVinylRate] = useState(initial?.vinyl_rate_sqft ? String(initial.vinyl_rate_sqft) : ""); // CR-504: ₹/sqft, typed text
   // CR-344: the panel carries its MDF size; thickness + weight come from the size-keyed MDF master.
   const [mdfSize, setMdfSize] = useState(initial?.mdf_size ?? "");
   const [remarks, setRemarks] = useState(initial?.remarks ?? ""); // CR-425: old reference ID etc.
@@ -114,7 +118,7 @@ export function PanelForm({
 
   // CR-289: a blank Cut Piece Size = full size — the server fills it in.
   const completeLines = lines.filter((l) => l.design && l.cut_piece_qty > 0);
-  const canSave = completeLines.length > 0;
+  const canSave = completeLines.length > 0 && !!code.trim();
 
   const submit = () => {
     if (!canSave) return;
@@ -123,6 +127,7 @@ export function PanelForm({
         panel_code: code.trim(),
         panel_size: panelSize.trim(),
         vinyl_size: vinylSize.trim(),
+        vinyl_rate_sqft: Number(vinylRate) || 0,
         mdf_size: mdfSize.trim(),
         remarks: remarks.trim(),
         lines: completeLines,
@@ -149,14 +154,18 @@ export function PanelForm({
         <div className="form-section-title">Panel Details</div>
         <div className="form-rows">
           <label className="form-field">
-            <span className="lbl">Panel Code</span>
+            <span className="lbl">
+              Panel Code<span className="req"> *</span>
+            </span>
             <input
               value={code}
-              readOnly
-              tabIndex={-1}
-              className="calc"
-              placeholder="Auto-assigned on save (PANEL-001…)"
-              title="Formula field: next PANEL number, assigned when you save"
+              onChange={(e) => {
+                form.touch();
+                setCode(e.target.value.toUpperCase());
+              }}
+              placeholder="e.g. C01-F11-S03"
+              maxLength={60}
+              aria-required="true"
             />
           </label>
           <label className="form-field">
@@ -181,6 +190,29 @@ export function PanelForm({
               }}
               placeholder="e.g. 1200x2100"
               maxLength={30}
+            />
+          </label>
+          {/* CR-504: vinyl price = Vinyl Size sqft (Panel Size when blank) × this rate — ƒx beside it. */}
+          <label className="form-field">
+            <span className="lbl">Vinyl Rate/sqft (₹)</span>
+            <NumberInput
+              value={vinylRate}
+              maxDecimals={2}
+              onChange={(e) => {
+                form.touch();
+                setVinylRate(e.target.value);
+              }}
+              placeholder="0.00"
+            />
+          </label>
+          <label className="form-field">
+            <span className="lbl">Vinyl Price</span>
+            <input
+              value={moneyFor("INR")(vinylPrice({ vinylSize, panelSize, vinylRateSqft: Number(vinylRate) || 0, lines: [] }))}
+              readOnly
+              tabIndex={-1}
+              className="calc"
+              title="Vinyl Size sqft (Panel Size when blank) × Vinyl Rate/sqft"
             />
           </label>
           <label className="form-field">

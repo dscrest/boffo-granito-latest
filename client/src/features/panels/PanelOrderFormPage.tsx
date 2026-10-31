@@ -65,7 +65,11 @@ export function PanelOrderFormPage() {
   const initial: PanelOrderInput | undefined = existing
     ? editing
       ? panelOrderToInput(existing)
-      : { ...panelOrderToInput(existing), order_date: todayISO(), sales_order: undefined, quote: undefined }
+      : (() => {
+          // CR-504: a clone is a new order — its prices come from today's masters, never the source's frozen ones.
+          const i = panelOrderToInput(existing);
+          return { ...i, order_date: todayISO(), sales_order: undefined, quote: undefined, lines: i.lines.map((l) => ({ ...l, vinyl_price: null, mdf_price: null, pieces_price: null })) };
+        })()
     : undefined;
 
   const onSave = async (input: PanelOrderInput) => {

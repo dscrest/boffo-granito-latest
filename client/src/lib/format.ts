@@ -223,18 +223,15 @@ function changeLabel(k: string): string {
 
 /** A bare Catalyst ROWID (15+ digit numeric string). These are system ids and
     must never surface in the UI — only user-friendly codes should. */
-/** CR-429: names are stored Title Case ("Dhiraj Shah Of ABC Exports LLP") — mirror of
-    functions/data-ops/lib/names.js. A word typed ALL-CAPS with ≤3 letters is kept (ABC, MDF, A12);
-    legal suffixes are always upper (LLP, LTD, PVT…).
+/** CR-429: names are stored Title Case ("Dhiraj Shah Of Abc Exports LLP") — mirror of
+    functions/data-ops/lib/names.js. CR-503: ONLY legal suffixes are upper (LLP, LTD, PVT…,
+    also "Pvt.Ltd."); every other word is Title Case, even if typed ALL-CAPS.
     ponytail: whitespace words only — "o'brien" → "O'brien"; split on '/- if a real name needs it. */
 const UPPER_WORDS = new Set(["LLP", "LLC", "LTD", "PVT", "INC", "PLC", "FZE", "FZCO", "GMBH"]);
+const legalWord = (w: string) => /[A-Z]/i.test(w) && w.toUpperCase().split(/[.,]+/).filter(Boolean).every((p) => UPPER_WORDS.has(p));
 export function titleCase(s: unknown): string {
-  const keep = (w: string) => w.length <= 3 && w === w.toUpperCase() && /[A-Z]/.test(w);
   return String(s ?? "").trim().split(/\s+/).filter(Boolean)
-    .map((w) => {
-      if (UPPER_WORDS.has(w.replace(/[.,]+$/, "").toUpperCase())) return w.toUpperCase();
-      return keep(w) ? w : w[0].toUpperCase() + w.slice(1).toLowerCase();
-    })
+    .map((w) => (legalWord(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase()))
     .join(" ");
 }
 

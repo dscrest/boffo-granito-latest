@@ -169,8 +169,9 @@ async function fetchOrders(): Promise<{ ok: boolean; orders: Order[]; error?: st
       portOfDischarge: so ? str(so.port_of_discharge) : "",
       salesperson: so ? salesPersonName.get(str(so.sales_person)) || "" : "",
       boxBranding: so ? str(so.box_branding) : "",
-      boxBrandId: so ? str(so.box_brand) : "",
-      boxBrandLabel: so ? brandName.get(str(so.box_brand)) || "" : "",
+      // CR-508: the LINE's carton brand; the SO header is the fallback for lines saved before it.
+      boxBrandId: str(it.box_brand) || (so ? str(so.box_brand) : ""),
+      boxBrandLabel: brandName.get(str(it.box_brand) || (so ? str(so.box_brand) : "")) || "",
       shipmentDate: so ? str(so.shipment_date) : "",
       customerNotes: so ? str(so.customer_notes) : "",
       address: so ? str(so.address) : "",
@@ -210,7 +211,7 @@ export interface NewSalesOrderInput {
   /** CR-453: Warehouse ▸ Bay node ROWID where the order's stock will sit — required once a warehouse exists. */
   warehouse: string;
   salesperson: string;
-  /** Brand ROWID from the Box Brand master ("" = none). */
+  /** Brand ROWID from the Box Brand master — CR-508: the first line's brand (header default / fallback). */
   box_brand: string;
   customer_notes: string;
   terms: string;
@@ -219,7 +220,7 @@ export interface NewSalesOrderInput {
   tax_type: string;
   tax_pct: number;
   /** `id` = existing OrderItem ROWID (edit in place, CR-232); absent = new line. */
-  lines: { id?: string; item: string; qty: number; rate: number; pallet?: string; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
+  lines: { id?: string; item: string; qty: number; rate: number; pallet?: string; box_brand?: string; discount?: number; description?: string; stage?: string; priority?: string; due_date?: string }[];
 }
 
 /* SO status chips reuse the quote-status palette (no new CSS). Shared by

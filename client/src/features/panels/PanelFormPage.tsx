@@ -11,6 +11,7 @@ import { EmptyState } from "@/ui/States";
 import { can } from "@/lib/auth";
 import { PanelForm, panelToInput } from "./PanelForm";
 import { cachedPanels, createPanel, listPanels, updatePanel, type PanelInput, type PanelRow } from "./panelsApi";
+import { invalidatePanelOrders } from "./panelOrdersApi";
 
 const detailUrl = (rowid: string) => `/panels/${encodeURIComponent(rowid)}`;
 
@@ -33,7 +34,7 @@ export function PanelFormPage() {
   const panel = panelId ? panels?.find((p) => p.id === panelId) : undefined;
   if (panelId && !panel) return <EmptyState title="Panel not found" />;
 
-  // Clone never copies the identity — the server assigns the next PANEL-NNN.
+  // Clone never copies the identity — the user types a new Panel Code (CR-506).
   const initial: PanelInput | undefined = panel ? (editing ? panelToInput(panel) : { ...panelToInput(panel), panel_code: "" }) : undefined;
 
   const onSave = async (input: PanelInput) => {
@@ -43,6 +44,8 @@ export function PanelFormPage() {
       return;
     }
     toast.success(editing ? "Panel updated" : "Panel created");
+    // CR-506: order rows carry the code resolved at fetch — drop them so a renamed code shows on every order now.
+    invalidatePanelOrders();
     navigate(editing ? detailUrl(panelId) : res.rowid ? detailUrl(res.rowid) : "/panels", { replace: true });
   };
 

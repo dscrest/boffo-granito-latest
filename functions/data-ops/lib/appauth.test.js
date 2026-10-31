@@ -74,3 +74,11 @@ test("signed OAuth state round-trips, rejects tampering and expiry", () => {
   assert.equal(verifyState("abc.login.1.zz", now, "secret"), null);
   assert.equal(verifyState("", now, "secret"), null);
 });
+
+test("CR-505 bulk-update needs edit on the target table's module", () => {
+  assert.equal(allowed("/bulk-update", "POST", { table: "Design" }), false, "Staff cannot bulk edit items");
+  assert.equal(allowed("/bulk-update", "POST", { table: "Mdf" }), false);
+  assert.equal(allowed("/bulk-update", "POST", { table: "AppSetting" }), false, "unmapped table = Admin only");
+  assert.deepEqual(routeAction("/bulk-update", "POST", { table: "Panel" }), { module: "panel_craft", action: "edit" });
+  assert.deepEqual(routeAction("/bulk-update", "POST", { table: "Design" }), { module: "items", action: "edit" });
+});

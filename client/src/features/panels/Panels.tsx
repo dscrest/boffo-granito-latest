@@ -23,9 +23,12 @@ import { can } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
 import { FilterSelect, IconBtn, PanelTile } from "./pcBits";
 import { ImageThumb } from "@/features/common/ImageLightbox";
-import { bulkDeletePanels, listPanels, type PanelRow } from "./panelsApi";
+import { bulkDeletePanels, bulkUpdatePanels, listPanels, type PanelRow } from "./panelsApi";
+import { BulkUpdateModal } from "@/ui/BulkUpdateModal";
+import { moneyFor } from "@/features/quotes/quoteTemplate";
 
 const dash = <span className="dim">—</span>;
+const money = moneyFor("INR");
 const detailPath = (r: PanelRow) => `/panels/${encodeURIComponent(r.id)}`;
 
 const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
@@ -38,6 +41,7 @@ const PANEL_COLUMNS: ColumnDef<PanelRow>[] = [
   },
   { key: "panelSize", label: "Panel Size", className: "muted mono", render: (r) => r.panelSize || dash },
   { key: "vinylSize", label: "Vinyl Size", className: "muted mono", render: (r) => r.vinylSize || dash },
+  { key: "vinylRate", label: "Vinyl Rate / sqft", className: "num mono", style: { textAlign: "right" }, render: (r) => (r.vinylRateSqft ? money(r.vinylRateSqft) : dash) }, // CR-504/505
   {
     key: "cutSizes",
     label: "Cut Piece Sizes",
@@ -69,7 +73,7 @@ export function Panels() {
   const [designFilter, setDesignFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns.v3", PANEL_COLUMNS, ["remarks", "created", "modified", "code"]); // .v3 (CR-425; .v2 CR-355)
+  const { ordered, visible, hidden, toggle, move, customised } = useColumns("panelsTableColumns.v4", PANEL_COLUMNS, ["remarks", "created", "modified", "code"]); // .v4 (CR-505 Vinyl Rate; .v3 CR-425; .v2 CR-355)
 
   const load = async () => {
     setLoading(true);
@@ -111,6 +115,7 @@ export function Panels() {
       k === "designs" ? r.lines.length
       : k === "panelSize" ? r.panelSize
       : k === "vinylSize" ? r.vinylSize
+      : k === "vinylRate" ? r.vinylRateSqft
       : k === "cutSizes" ? r.lines.map((l) => l.cutSizeName).join(", ")
       : k === "remarks" ? r.remarks
       : k === "created" ? r.createdTime
@@ -153,6 +158,22 @@ export function Panels() {
     } else {
       toast.success(`${res.done} panel${res.done === 1 ? "" : "s"} deleted`);
     }
+    await load();
+  };
+
+  // CR-505: Bulk Update — one field (Vinyl Rate/sqft) on every ticked panel, one server call.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const onBulkUpdate = async (key: string, value: string | number) => {
+    setBusy(true);
+    const res = await bulkUpdatePanels(ids, { [key]: value });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error || "Bulk update failed");
+      return;
+    }
+    toast.success(`${ids.length} panel${ids.length === 1 ? "" : "s"} updated`);
+    setBulkOpen(false);
+    setSelected(new Set());
     await load();
   };
 
@@ -235,12 +256,18 @@ export function Panels() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
+      {bulkOpen && (
+        <BulkUpdateModal noun="panel" count={ids.length} fields={[{ key: "vinyl_rate_sqft", label: "Vinyl Rate / sqft (₹)", type: "number" }]} busy={busy} onApply={(k, v) => void onBulkUpdate(k, v)} onClose={() => setBulkOpen(false)} />
+      )}
       {error && <ErrorCard message={`${error} — check the Audit log (/ops).`} onRetry={() => void load()} />}
 
-      {/* One toolbar; bulk Delete enables off the selection (dim, never hide). */}
+      {/* One toolbar; bulk Delete / Update enable off the selection (dim, never hide). */}
       <div className="fbar">
         {can("panel_craft", "delete") && (
           <IconBtn icon="trash" title="Delete selected" danger disabled={ids.length === 0 || busy} onClick={() => void onBulkDelete()} />
+        )}
+        {can("panel_craft", "edit") && (
+          <IconBtn icon="settings" title="Bulk Update selected" disabled={ids.length === 0 || busy} onClick={() => setBulkOpen(true)} />
         )}
         <span className="pc-divider" />
         <IconBtn icon="refresh" title="Refresh" onClick={() => void load()} disabled={loading} />

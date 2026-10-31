@@ -16,12 +16,11 @@ import { newestFirst } from "@/lib/dates";
 import { Icon } from "@/ui/Icon";
 import { toast } from "@/ui/Toast";
 import { confirmDelete } from "@/ui/ConfirmDialog";
-import { Combobox } from "@/ui/Combobox";
-import { NumberInput } from "@/ui/NumberInput";
 import { EmptyState, ErrorCard, SkeletonRows } from "@/ui/States";
 import { ColumnPicker, useColumns, type ColumnDef } from "@/ui/ColumnPicker";
 import { GridFooter, usePagination } from "@/ui/GridFooter";
 import { AdvancedFilterButton, applyFilters, type FilterCriteria, type FilterField } from "@/ui/AdvancedFilter";
+import { BulkUpdateModal, type BulkField } from "@/ui/BulkUpdateModal";
 import { finishClass, fmtDateTime } from "@/lib/format";
 import { can, canUpdate } from "@/lib/auth";
 import { usePersistedState } from "@/lib/usePersistedState";
@@ -84,113 +83,19 @@ const DESIGN_COLUMNS: ColumnDef<DesignRow>[] = [
 ];
 
 
-/* Bulk-edit fields: Status, Brand, Grade and (CR-427) Box Weight. Never a field
-   that feeds unique_name (design_name/size/finish) — a bulk reclassification
-   must not desync that key. A box-weight patch is safe: the server's
-   stampDesignCoverage ignores it and the Size fan-out treats it as a manual
-   override. Brand/Grade feed the SKU's seq segments; the stored sku is not
-   rebuilt here (Readable-SKU rework owns that). */
-function BulkEditModal({
-  count,
-  lookups,
-  busy,
-  onApply,
-  onClose,
-}: {
-  count: number;
-  lookups: DesignLookups;
-  busy: boolean;
-  onApply: (patch: Record<string, unknown>) => void;
-  onClose: () => void;
-}) {
-  const [status, setStatus] = useState("");
-  const [brand, setBrand] = useState("");
-  const [grade, setGrade] = useState("");
-  const [bw, setBw] = useState(""); // CR-427: Box Weight (kg)
-
-  const patch: Record<string, unknown> = {};
-  if (status) patch.status = status;
-  if (brand) patch.brand = brand;
-  if (grade) patch.grade = grade;
-  if (bw.trim() !== "" && Number(bw) >= 0) patch.box_weight_kg = Number(bw);
-  const nothing = Object.keys(patch).length === 0;
-
-  return (
-    <div className="modal-backdrop">
-      <div className="modal-panel card df-modal" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
-        <div className="df-head">
-          <div className="ico">
-            <Icon name="settings" size={18} />
-          </div>
-          <div>
-            <div className="ttl">Bulk edit {count} item{count > 1 ? "s" : ""}</div>
-          </div>
-          <button className="btn x" onClick={onClose} title="Close">
-            ✕
-          </button>
-        </div>
-        <div className="df-body">
-          <div className="form-section">
-            <div className="form-grid">
-              <label className="form-field">
-                <span className="lbl">Status</span>
-                <Combobox
-                  value={status}
-                  options={[
-                    { value: "", label: "— leave unchanged —" },
-                    { value: "Active", label: "Active" },
-                    { value: "Inactive", label: "Inactive" },
-                  ]}
-                  onChange={setStatus}
-                  placeholder="— leave unchanged —"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Brand</span>
-                <Combobox
-                  value={brand}
-                  options={[
-                    { value: "", label: "— leave unchanged —" },
-                    ...lookups.brands.map((o) => ({ value: o.id, label: o.label })),
-                  ]}
-                  onChange={setBrand}
-                  placeholder="— leave unchanged —"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">Grade</span>
-                <Combobox
-                  value={grade}
-                  options={[
-                    { value: "", label: "— leave unchanged —" },
-                    ...lookups.grades.map((o) => ({ value: o.id, label: o.label })),
-                  ]}
-                  onChange={setGrade}
-                  placeholder="— leave unchanged —"
-                />
-              </label>
-              <label className="form-field">
-                <span className="lbl">
-                  Box Weight <span className="hint">(kg)</span>
-                </span>
-                <NumberInput value={bw} maxDecimals={3} onChange={(e) => setBw(e.target.value)} placeholder="— leave unchanged —" />
-              </label>
-            </div>
-          </div>
-        </div>
-        <div className="df-foot">
-          <button className="btn" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="hbtn primary" disabled={nothing || busy} onClick={() => onApply(patch)}>
-            <Icon name="check" size={13} />
-            {busy ? "Applying…" : `Apply to ${count}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+/* Bulk Update fields (CR-505 shared BulkUpdateModal, one field per update): Status, Brand, Grade,
+   (CR-427) Box Weight and (CR-504) Rate / sqft — the server also stamps Rate / sqm. Never a field
+   that feeds unique_name (design_name/size/finish) — a bulk reclassification must not desync that
+   key; the server's BULK_FIELDS whitelist enforces it. A box-weight patch is safe: stampDesignCoverage
+   ignores it and the Size fan-out treats it as a manual override. Brand/Grade feed the SKU's seq
+   segments; the stored sku is not rebuilt here (Readable-SKU rework owns that). */
+const bulkFields = (lookups: DesignLookups): BulkField[] => [
+  { key: "rate_per_sqft", label: "Rate / sqft (₹)", type: "number" },
+  { key: "status", label: "Status", type: "select", options: [{ value: "Active", label: "Active" }, { value: "Inactive", label: "Inactive" }] },
+  { key: "brand", label: "Brand", type: "select", options: lookups.brands.map((o) => ({ value: o.id, label: o.label })) },
+  { key: "grade", label: "Grade", type: "select", options: lookups.grades.map((o) => ({ value: o.id, label: o.label })) },
+  { key: "box_weight_kg", label: "Box Weight (kg)", type: "number", decimals: 3 },
+];
 
 export function DesignMaster() {
   const navigate = useNavigate();
@@ -322,11 +227,12 @@ export function DesignMaster() {
        sits on the window edge — no dead band above or below the table. */
     <div style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - var(--header-h) - 46px)" }}>
       {showBulk && (
-        <BulkEditModal
+        <BulkUpdateModal
+          noun="item"
           count={ids.length}
-          lookups={lookups}
+          fields={bulkFields(lookups)}
           busy={busy}
-          onApply={onBulkApply}
+          onApply={(k, v) => void onBulkApply({ [k]: v })}
           onClose={() => setShowBulk(false)}
         />
       )}
@@ -342,7 +248,7 @@ export function DesignMaster() {
           </span>
           {can("items", "edit") && (
             <button className="btn" onClick={() => setShowBulk(true)} disabled={busy}>
-              <Icon name="settings" size={12} className="ic" /> Bulk edit
+              <Icon name="settings" size={12} className="ic" /> Bulk Update
             </button>
           )}
           {can("items", "delete") && (

@@ -14,7 +14,7 @@ history is `CHANGE-REQUESTS.md` (Phase 2 heading). Phase 1 figures are frozen an
 |---|---|---|---|---|
 | 1 | Foundation & workspace | Organization profile (logo, name, tax, contact, bank on every screen and document); Staff default role (view + create, never edit / delete) + guard hardening; Zoho-linked account status, Zoho-only accounts, self-provisioning for company domains; discard prompt is a Yes / No question; delete asks for a reason (Admin exempt); Zoho-style label-left layout on every form page, tightened (label gap, one-control-wide rows, notes boxes); every grid leads Customer → Design, system numbers hidden, whole-row click | 14.5 | 44.5 |
 | 2 | Masters (Inventory) | Container Master; Pallet Master boxes only; Warehouse master (primary, purposes); Design Master to the new spec — Pcs Per Packing typed per item with its own coverage, Design Owner / Custom Design Buyer, buyer-filtered brands, Base Design picked from items, four new lookups (Surface Application, Punch with image, Series, Catalogue), form in five spec sections with the image on it | 13 | 40 |
-| 3 | Customers | Sign in with Zoho on the login page; Zoho Books connection + hand-mapping of customers to Books contacts (From Zoho Books, Map / Re-pull / Unmap); two-way Books sync (event-driven pull via Catalyst Signals, Import all, Push) + the Books tax / credit / notes fields; Zoho CRM Accounts as the customer source (Books hidden); Zoho link status per customer (CRM & Books / CRM only / Books only); Customer Brands list per customer | 13 | 46 |
+| 3 | Customers | Customer box labels (own EAN-13 per item, three sticker templates, print from production / SO / palletization); Sign in with Zoho on the login page; Zoho Books connection + hand-mapping of customers to Books contacts (From Zoho Books, Map / Re-pull / Unmap); two-way Books sync (event-driven pull via Catalyst Signals, Import all, Push) + the Books tax / credit / notes fields; Zoho CRM Accounts as the customer source (Books hidden); Zoho link status per customer (CRM & Books / CRM only / Books only); Customer Brands list per customer | 19 | 64 |
 | 4 | Quotes & Approvals | Suitable Containers panel; planner picks the container per item row, narrowed by pallet; Customer search modal | 8 | 27 |
 | 5 | Sales Orders | Remaining + totals, per-item Deallocate, partial deallocate with always-visible stock buttons, worked order not deletable; name lookups page past 300 rows; Customer PO leads the order page and the grid, SO number small | 6 | 19 |
 | 6 | Production | Bulk sheet reorder, Date-first grid and detail | 4 | 12 |
@@ -22,9 +22,9 @@ history is `CHANGE-REQUESTS.md` (Phase 2 heading). Phase 1 figures are frozen an
 | 8 | Loading & Dispatch | Date column, LOAD code hidden; several containers per New Loading, each with its own vehicle; Loading Workspace with a tab per container, sheet-first entry, Dispatch and documents per tab; every customer listed with search; "what to do first" reasons on every stage gate; Sheet mode (every container on one grid); plan-container picker (format · pallets · boxes, claim saved) | 15 | 45 |
 | 9 | Stock & batch ledger | Inventory adjustments (Stock Adjustments page + sheet, reasons master, every stock reader adjustment-aware); stock per warehouse (one reducer, server twin), Transfer Orders in both modules, warehouse on every stock entry, Locations on items; stock keyed by item (Design ROWID) | 8.5 | 25.5 |
 | 10 | Reports & audit | Warehouse Stock report (boxes / cut pieces, matrix) | 1 | 3 |
-| 11 | Panel Craft | Add Stock wording; row-click grid + Photo \| Grid view; PANEL-001 numbering; New / Edit Panel as a page; Request Panels from Quote / SO (New Request stage); Panel Order page with status steps + requirements checklist; full-size cut piece default; one image per panel; BOFFO loader on image upload; Panel Items with weighed cut pieces; Cut Stock as cut-piece items + bulk Add / Adjust sheets + ledger; MDF master + per-line MDF and auto weight; picker filters; Panel Craft dashboard; cut-piece booking per order (Dispatch = fully booked); MDF / Vinyl / Cut Pieces checkpoints + readiness; Pending Cut Stock page; Sample Orders (separate order type, per-line supply, cut-stock deduction, Request Samples, Customer Samples section); vehicle + driver on the load, Load Copy print, line (i) cards; Remarks on a panel; Cut Piece Size master under Panel Items | 21.3 | 64.5 |
+| 11 | Panel Craft | Add Stock wording; row-click grid + Photo \| Grid view; PANEL-001 numbering; New / Edit Panel as a page; Request Panels from Quote / SO (New Request stage); Panel Order page with status steps + requirements checklist; full-size cut piece default; one image per panel; BOFFO loader on image upload; Panel Items with weighed cut pieces; Cut Stock as cut-piece items + bulk Add / Adjust sheets + ledger; MDF master + per-line MDF and auto weight; picker filters; Panel Craft dashboard; cut-piece booking per order (Dispatch = fully booked); MDF / Vinyl / Cut Pieces checkpoints + readiness; Pending Cut Stock page; Sample Orders (separate order type, per-line supply, cut-stock deduction, Request Samples, Customer Samples section); vehicle + driver on the load, Load Copy print, line (i) cards; Remarks on a panel; Cut Piece Size master under Panel Items; panel pricing (Vinyl + MDF + Cut pieces, frozen on the order); Bulk Update of rates (Panel Items, Panels, MDF, Item master); typed Panel Codes | 25.8 | 78 |
 | 12 | Documentation & process | Phase 2 inventory, register, schema, Data Flow reference | 3 | 9 |
-| | **Total** | | **≈ 107.8** | **≈ 336** |
+| | **Total** | | **≈ 118.3** | **≈ 368** |
 
 Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 3×, rounded).
 
@@ -158,6 +158,11 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
 
 ## 3 · Customers
 
+- **Customer box labels — barcode, batch and compliance stickers** (CR-502, 2026-10-30, LIVE + DEMO). Customer ▸ Labels: the customer's own EAN-13 per item (add / edit / Excel import, check
+  digit and duplicates refused) and the sticker templates that print for them — barcode strip, batch strip,
+  compliance box label — each with its size, texts, placeholders and a live preview; house templates for every
+  customer under Settings ▸ Masters ▸ Export. Print Box Labels from a production record, a Sales Order or a
+  Palletization plan: one PDF per sticker, one label per page, copies = boxes. ≈ 6 h / 18 h.
 - **Sign in with Zoho** (CR-324, 2026-10-12). The login page leads with a Zoho button; the password
   form stays as the fallback. A Zoho account gets in only when its email is an existing, active app
   user — roles stay Admin-controlled. Consent starts on accounts.zoho.in; other data centres work too.
@@ -297,6 +302,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   the on-hand floor per bay. Recorded ≈ 1.5 h · conventional ≈ 6 h.
 - **Title Case for the Name columns CR-429 missed** (CR-447, 2026-10-25, LIVE 2026-10-25). Collection Name, vessel
   name, extra-address attention, role names. Recorded ≈ 0.2 h · conventional ≈ 1 h.
+- **Only legal suffixes stay in capitals** (CR-503, 2026-10-30). LLP / PVT / LTD… upper (also "Pvt.Ltd."); every
+  other name word Title Case, even typed in capitals ("Shree Ram", not "Shree RAM"). Recorded ≈ 0.2 h · conventional ≈ 0.5 h.
 - **Panel Craft ▸ Stock — items with their cut pieces beneath** (CR-448, 2026-10-25, LIVE 2026-10-25). Menu entry
   renamed; the list is item rows (totals) with ↳ cut-piece rows, fold / search / sort over items. Recorded ≈ 0.6 h ·
   conventional ≈ 3 h.
@@ -718,6 +725,23 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   only once booked and the load consumes the booking; panel and sample bookings share one pool (no piece promised
   twice); Cut Stock, the item page, the dashboard and Pending Cut Stock count sample bookings and demand. Full
   tiles stay record-only. ≈ 2.5 h.
+- **Panel Craft pricing** (CR-504, 2026-10-31, LIVE + DEMO). Panel price = Vinyl (vinyl sqft × the panel's Vinyl
+  Rate/sqft) + MDF (board kg × the MDF Rate/kg) + Cut pieces (piece sqft × the Item's Rate/sqft × pcs), worked out
+  on the order form and frozen on each line, every part editable; samples priced by piece sqft. Shown on the
+  Panel Order page, Sample Order, Orders list (Amount), Panel Order PDF, Panel Master ▸ Pricing tab and the
+  Panel Item / Cut Piece pages (Sqft / pc, Price / pc). ≈ 2.5 h.
+- **Bulk Update of rates** (CR-505, 2026-10-31, LIVE + DEMO). Filter → tick → Bulk Update → field → value, in one save: Panel
+  Items Rate / sqft (new Advanced Filter + Rate column), Panels Vinyl Rate / sqft, MDF Rate/kg; the Item master's
+  Bulk edit becomes the same one-field window (+ Rate / sqft). ≈ 1.5 h.
+- **Panel Code typed by the user** (CR-506, 2026-10-31). Mandatory, saved in capitals, unique, editable on old
+  panels; a rename shows on every past order and print at once. Replaces the auto PANEL-NNN. ≈ 0.5 h.
+- **One line per item on Quotes / Sales Orders** (CR-507, 2026-10-31, LIVE + DEMO). Live warning while adding,
+  quantities merged on save when the rate matches (different rate = separate lines); a line with work recorded is
+  the one kept. ≈ 1 h.
+- **Box Brand per Sales Order line + on Production** (CR-508, 2026-10-31, LIVE + DEMO). New `OrderItem.box_brand`,
+  required per line, header field removed; shown on the SO items, the Production grid / sheet / page. ≈ 2 h.
+- **Allocate Stock filtered by Box Brand** (CR-509, 2026-10-31, LIVE + DEMO). Only batches packed in the line's
+  carton are offered; server 409 for the rest. ≈ 0.5 h.
 
 ## 12 · Documentation & process
 

@@ -7,7 +7,7 @@
    Design names/sizes hydrate from the designsApi cache; cut sizes from
    the CutPieceSize lookup. Every write is recorded in OperationLog.
    ============================================================ */
-import { insert, listAll, op, type OpResult } from "@/lib/dataOps";
+import { bulkUpdate, insert, listAll, op, type OpResult } from "@/lib/dataOps";
 import { createListCache } from "@/lib/cache";
 import { listDesigns, parseImages, type DesignImage } from "@/features/masters/designsApi";
 
@@ -35,6 +35,7 @@ export interface PanelRow {
   panelCode: string;
   panelSize: string;
   vinylSize: string;
+  vinylRateSqft: number; // CR-504: ₹/sqft of the vinyl (0 = not priced)
   mdfSize: string; // CR-344: the panel's MDF size — the order line picks a thickness of that size from the Mdf master
   remarks: string; // CR-425: free text, e.g. the old reference ID
   images: DesignImage[]; // File Store images, same shape as Design.image_urls
@@ -122,6 +123,7 @@ async function fetchPanels(): Promise<{
     panelCode: str(p.panel_code),
     panelSize: str(p.panel_size),
     vinylSize: str(p.vinyl_size),
+    vinylRateSqft: num(p.vinyl_rate_sqft),
     mdfSize: str(p.mdf_size),
     remarks: str(p.remarks),
     images: parseImages(str(p.image_urls)),
@@ -143,6 +145,7 @@ export interface PanelInput {
   panel_code: string;
   panel_size: string;
   vinyl_size: string;
+  vinyl_rate_sqft: number; // CR-504
   mdf_size: string; // CR-344: must match an Mdf master size for the order line to pick a thickness
   remarks: string; // CR-425
   lines: PanelLineInput[];
@@ -164,6 +167,7 @@ function savePanel(input: PanelInput, rowid?: string): Promise<OpResult> {
       panel_code: input.panel_code.trim(),
       panel_size: input.panel_size.trim(),
       vinyl_size: input.vinyl_size.trim(),
+      vinyl_rate_sqft: input.vinyl_rate_sqft,
       mdf_size: input.mdf_size.trim(),
       remarks: input.remarks.trim(),
       lines: input.lines,
@@ -189,6 +193,11 @@ export interface BulkResult {
   done: number;
   failed: number;
   firstError?: string;
+}
+
+/** CR-505: one value on many panels in ONE server call (Vinyl Rate/sqft). */
+export function bulkUpdatePanels(ids: string[], patch: Record<string, unknown>): Promise<OpResult<{ updated: number }>> {
+  return bust(bulkUpdate("Panel", ids, patch));
 }
 
 export async function bulkDeletePanels(panels: PanelRow[], reason?: string): Promise<BulkResult> {
