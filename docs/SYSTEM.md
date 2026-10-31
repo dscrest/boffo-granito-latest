@@ -471,7 +471,8 @@ ColumnDef-driven (CR-161/279/472/481/495/499, key `packingSheetColumns.v7.<stage
 Batch, then **Pallet Type** (CR-499 — the master's `pallet_type`, line `palletKind`; composite name + capacity on hover — it
 comes BEFORE the counts because its capacity explains them), then per page the counts as one left → right story —
 *Ready for Palletization*: **Boxes** (queued) · **Pallets** (whole) · **Loose** (CR-495, amber); *In Palletization*:
-**Pending** (batch total − recorded) · **Pallets** (of the pending) · **Loose** · **Prepared** (`N (boxes)`, `readyPalletsLabel`);
+**Boxes** (the row's boxes in palletization) · **Boxes per Pallet** (capacity, CR-510 — back for this page only) · **Pallets**
+(whole pallets of the row's boxes) · **Prepared** (`N (boxes)`, `readyPalletsLabel`); Pending and Loose left this page with CR-510 (2026-10-31);
 *Palletization Completed*: **Pallets** · **Boxes** (= pallets × capacity; a Mix Batch row shows its own boxes). Ordered Boxes and
 the prepared-Boxes column went with CR-499 (user: three "…Boxes" columns confused). Then Location, Date, Status, Age, **PAL** last and hideable; checkbox / edit inputs / "+"
 cell fixed) and has **no stage band**. **Pallets are WHOLE (CR-481):** `wholePallets` = floor(boxes ÷
@@ -489,7 +490,7 @@ Palletization records PALLETS (CR-481):** with a capacity known the per-line inp
 the server as before, the remainder stays Palletizing for a Top Up; capacity 0 keeps the boxes input.
 A **partial Complete** (Palletizing → ReadyToLoad with fewer boxes than the line) splits off the
 recorded slice and the **remainder stays In Palletization** (CR-492, server — reverses CR-281's re-queue):
-the loose boxes read Pending · Loose Boxes · chip Partial on `/palletizing` until a Top Up merges them;
+the loose boxes read as their own Boxes row · chip Partial on `/palletizing` until a Top Up merges them;
 nothing returns to `/packing`. Under the grid (both views) sits the **totals /
 selection bar** (CR-178): idle it reads **Total · N pallets · N boxes** in Kanban only (`palletsOf`;
 blank on the Sheet, whose tfoot carries the totals), with rows ticked it reads *N selected · N boxes*

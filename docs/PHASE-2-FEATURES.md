@@ -742,6 +742,8 @@ Hours follow the Phase 1 method (recorded ≈ actual sessions; conventional ≈ 
   required per line, header field removed; shown on the SO items, the Production grid / sheet / page. ≈ 2 h.
 - **Allocate Stock filtered by Box Brand** (CR-509, 2026-10-31, LIVE + DEMO). Only batches packed in the line's
   carton are offered; server 409 for the rest. ≈ 0.5 h.
+- **In Palletization columns** (CR-510, 2026-10-31, LIVE + DEMO). Boxes · Boxes per Pallet · Pallets · Prepared;
+  Pending and Loose removed from that page. ≈ 0.5 h.
 
 ## 12 · Documentation & process
 

@@ -176,11 +176,6 @@ export function DispatchBoard({
   // via the ColumnPicker. Customer then Item lead; the PAL line code sits
   // LAST and is hideable. The checkbox, edit-mode inputs and the "+" menu
   // stay fixed outside the picker.
-  // Boxes of a batch still to palletize (In Palletization's Pending).
-  const pendingOf = (l: PalPlanLine) => {
-    const prog = oiProgress.get(batchKey(l));
-    return Math.max(0, (prog?.total ?? 0) - (prog?.done ?? 0));
-  };
   const pageStages = new Set<string>(cols.map((c) => c.key));
   type SheetCol = ColumnDef<Entry> & { stages?: ColKey[] };
   const SHEET_COLS = useMemo<SheetCol[]>(() => {
@@ -232,9 +227,10 @@ export function DispatchBoard({
       // CR-499 (reshapes CR-481/495): the numbers read as ONE story left → right, per page —
       //   identity (Customer · Item · PO · Batch) → Pallet Type (its capacity explains the counts) →
       //   Ready for Palletization: Boxes · Pallets · Loose
-      //   In Palletization:        Pending · Pallets · Loose · Prepared "N (boxes)"
+      //   In Palletization:        Boxes · Boxes per Pallet · Pallets · Prepared "N (boxes)"  (CR-510, 2026-10-31:
+      //                            Pending + Loose gone here; Boxes = the row's boxes in palletization, capacity shown)
       //   Palletization Completed: Pallets · Boxes
-      //   → Location. Pallets are WHOLE (floor); Ordered Boxes / prepared Boxes / Boxes-per-pallet are
+      //   → Location. Pallets are WHOLE (floor); Ordered Boxes / prepared Boxes are
       // gone — the user reads pallets, not arithmetic (user 2026-10-29: "Confusing details. Boxes, loose boxes. Ordered boxes").
       {
         key: "pallet",
@@ -244,14 +240,15 @@ export function DispatchBoard({
           <span title={`${l.palletName}${l.boxesPerPallet > 0 ? ` — ${fmt(l.boxesPerPallet)} boxes per pallet` : ""}`}>{l.palletKind || l.palletName}</span>
         ),
       },
-      { key: "boxes", label: "Boxes", stages: ["Planning"], className: "num mono", style: { textAlign: "right" }, render: ({ l }) => fmt(l.boxes) },
+      { key: "boxes", label: "Boxes", stages: ["Planning", "Palletizing"], className: "num mono", style: { textAlign: "right" }, render: ({ l }) => <span title="Boxes on this row">{fmt(l.boxes)}</span> },
+      // CR-510: the pallet's capacity as its own column on In Palletization (reverses CR-481 for this page).
       {
-        key: "pending",
-        label: "Pending",
+        key: "bpp",
+        label: "Boxes per Pallet",
         stages: ["Palletizing"],
         className: "num mono",
         style: { textAlign: "right" },
-        render: ({ l }) => fmt(pendingOf(l)),
+        render: ({ l }) => (l.boxesPerPallet > 0 ? fmt(l.boxesPerPallet) : <span className="dim" title="Pick a pallet to see the capacity">—</span>),
       },
       {
         key: "possible",
@@ -260,7 +257,7 @@ export function DispatchBoard({
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => {
-          const n = wholePallets(l.status === "Palletizing" ? pendingOf(l) : l.boxes, l.boxesPerPallet);
+          const n = wholePallets(l.boxes, l.boxesPerPallet);
           return n ? (
             <span title={`Whole pallets these boxes fill (${fmt(l.boxesPerPallet)} boxes per ${l.palletKind || l.palletName || "pallet"})`}>{fmt(n)}</span>
           ) : (
@@ -271,11 +268,11 @@ export function DispatchBoard({
       {
         key: "loose",
         label: "Loose",
-        stages: ["Planning", "Palletizing"],
+        stages: ["Planning"], // CR-510: gone from In Palletization
         className: "num mono",
         style: { textAlign: "right" },
         render: ({ l }) => {
-          const n = looseBoxes(l.status === "Palletizing" ? pendingOf(l) : l.boxes, l.boxesPerPallet);
+          const n = looseBoxes(l.boxes, l.boxesPerPallet);
           return n ? <span style={{ color: "var(--c-amber)" }} title="Boxes short of a whole pallet — Top Up Batch merges them with another batch of this item">{fmt(n)}</span> : <span className="dim">—</span>;
         },
       },
@@ -340,7 +337,7 @@ export function DispatchBoard({
   // .v5 (CR-481/482): per-stage pallet columns (whole pallets), PO Number leads, SO Number hidden last.
   // .v6 (CR-495): Loose Boxes after Possible Pallets on the queue + In Palletization pages.
   // .v7 (CR-499): Pallet Type before the counts; Ordered Boxes + prepared Boxes gone; Prepared = N (boxes).
-  const sheetCols = useColumns(`packingSheetColumns.v7.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
+  const sheetCols = useColumns(`packingSheetColumns.v8.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -579,16 +576,11 @@ export function DispatchBoard({
   const bppOf = (k: string) => sheetLines.find((l) => batchKey(l) === k)?.boxesPerPallet ?? 0;
   // CR-481: whole-pallet footers, per batch.
   const doneOf = (k: string) => oiProgress.get(k)?.done ?? 0;
-  const pendOf = (k: string) => Math.max(0, (oiProgress.get(k)?.total ?? 0) - doneOf(k));
-  const totalPending = bKeys.reduce((s, k) => s + pendOf(k), 0);
   const totalPrepared = bKeys.reduce((s, k) => s + wholePallets(doneOf(k), bppOf(k)), 0);
   const totalPreparedBoxes = bKeys.reduce((s, k) => s + palletBoxes(doneOf(k), bppOf(k)), 0);
-  const totalPossible = pageStages.has("Palletizing")
-    ? bKeys.reduce((s, k) => s + wholePallets(pendOf(k), bppOf(k)), 0)
-    : sheetLines.reduce((s, l) => s + wholePallets(l.boxes, l.boxesPerPallet), 0);
-  const totalLoose = pageStages.has("Palletizing")
-    ? bKeys.reduce((s, k) => s + looseBoxes(pendOf(k), bppOf(k)), 0)
-    : sheetLines.reduce((s, l) => s + looseBoxes(l.boxes, l.boxesPerPallet), 0);
+  // CR-510: Pallets / Loose follow the rows' own boxes on every page (Pending is gone).
+  const totalPossible = sheetLines.reduce((s, l) => s + wholePallets(l.boxes, l.boxesPerPallet), 0);
+  const totalLoose = sheetLines.reduce((s, l) => s + looseBoxes(l.boxes, l.boxesPerPallet), 0);
   const totalReadyBoxes = sheetLines.reduce((s, l) => s + (l.palletGroup || l.boxesPerPallet <= 0 ? l.boxes : palletBoxes(l.boxes, l.boxesPerPallet)), 0);
 
   // ---- selection ----------------------------------------------
@@ -983,7 +975,7 @@ export function DispatchBoard({
                           title={
                             c.key === "pallet" ? "The pallet master this batch is built on — its capacity drives the counts"
                             : c.key === "boxes" ? "Boxes waiting in this row"
-                            : c.key === "pending" ? "Boxes of this batch still to palletize"
+                            : c.key === "bpp" ? "Boxes one pallet of this type holds"
                             : c.key === "possible" ? "Whole pallets these boxes fill"
                             : c.key === "loose" ? "Boxes short of a whole pallet — Top Up Batch merges them"
                             : c.key === "prepared" ? "Pallets already palletized for this batch (boxes on them)"
@@ -1137,7 +1129,6 @@ export function DispatchBoard({
                         {ci === 0
                           ? `Total · ${fmt(totalPallets)} pallet${totalPallets === 1 ? "" : "s"}`
                           : c.key === "boxes" ? fmt(totalBoxes)
-                          : c.key === "pending" ? fmt(totalPending)
                           : c.key === "possible" ? fmt(totalPossible)
                           : c.key === "loose" ? fmt(totalLoose)
                           : c.key === "prepared" ? (totalPrepared ? `${fmt(totalPrepared)} (${fmt(totalPreparedBoxes)})` : "—")

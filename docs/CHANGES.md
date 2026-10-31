@@ -3,6 +3,12 @@
 > Newest first. For the system as it currently stands, see [`SYSTEM.md`](SYSTEM.md);
 > for what was requested and whether it shipped, see [`CHANGE-REQUESTS.md`](CHANGE-REQUESTS.md).
 
+## 2026-10-31 — In Palletization columns (CR-510) — LIVE + DEMO
+
+- **In Palletization reads Boxes · Boxes per Pallet · Pallets · Prepared.** The Pending and Loose columns are gone;
+  Boxes is the row's boxes in palletization, Boxes per Pallet is the pallet's capacity, Pallets is the whole pallets
+  those boxes fill (144 boxes at 48 per pallet = 3). Ready for Palletization is unchanged.
+
 ## 2026-10-31 — One line per item, Box Brand per line, Allocate Stock by brand (CR-507…509) — LIVE + DEMO
 
 - **Same item twice on a Quote or Sales Order.** While you add lines, an amber note says the item is already
