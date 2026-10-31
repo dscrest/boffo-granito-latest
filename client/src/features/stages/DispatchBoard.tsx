@@ -35,7 +35,6 @@ import {
   palletBoxes,
   palletsOf,
   palTopUp,
-  readyPalletsLabel,
   wholePallets,
   setPalLineLocation,
   setPalLineStatus,
@@ -227,7 +226,7 @@ export function DispatchBoard({
       // CR-499 (reshapes CR-481/495): the numbers read as ONE story left → right, per page —
       //   identity (Customer · Item · PO · Batch) → Pallet Type (its capacity explains the counts) →
       //   Ready for Palletization: Boxes · Pallets · Loose
-      //   In Palletization:        Boxes · Boxes per Pallet · Pallets · Prepared "N (boxes)"  (CR-510, 2026-10-31:
+      //   In Palletization:        Boxes · Boxes per Pallet · Pallets · Ready Boxes  (CR-510, 2026-10-31:
       //                            Pending + Loose gone here; Boxes = the row's boxes in palletization, capacity shown)
       //   Palletization Completed: Pallets · Boxes
       //   → Location. Pallets are WHOLE (floor); Ordered Boxes / prepared Boxes are
@@ -276,16 +275,17 @@ export function DispatchBoard({
           return n ? <span style={{ color: "var(--c-amber)" }} title="Boxes short of a whole pallet — Top Up Batch merges them with another batch of this item">{fmt(n)}</span> : <span className="dim">—</span>;
         },
       },
+      // CR-510 follow-up (user 2026-10-31): "Ready Boxes instead of Prepared" — the plain boxes already
+      // palletized for this batch, not the pallets label.
       {
-        key: "prepared",
-        label: "Prepared",
+        key: "ready",
+        label: "Ready Boxes",
         stages: ["Palletizing"],
         className: "num mono nw",
         style: { textAlign: "right" },
         render: ({ l }) => {
           const done = oiProgress.get(batchKey(l))?.done ?? 0;
-          const label = readyPalletsLabel(done, l.boxesPerPallet, fmt);
-          return label === "—" ? <span className="dim">—</span> : <span style={{ color: "var(--c-green)" }} title="Whole pallets already palletized for this batch (boxes on them)">{label}</span>;
+          return done ? <span style={{ color: "var(--c-green)" }} title="Boxes already palletized for this batch">{fmt(done)}</span> : <span className="dim">—</span>;
         },
       },
       {
@@ -337,7 +337,7 @@ export function DispatchBoard({
   // .v5 (CR-481/482): per-stage pallet columns (whole pallets), PO Number leads, SO Number hidden last.
   // .v6 (CR-495): Loose Boxes after Possible Pallets on the queue + In Palletization pages.
   // .v7 (CR-499): Pallet Type before the counts; Ordered Boxes + prepared Boxes gone; Prepared = N (boxes).
-  const sheetCols = useColumns(`packingSheetColumns.v8.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
+  const sheetCols = useColumns(`packingSheetColumns.v9.${[...pageStages].join("-")}`, SHEET_COLS, whEnabled ? ["pal", "so"] : ["pal", "so", "location"]);
 
   // Prune stale selection after a refresh moves lines on.
   useEffect(() => {
@@ -576,8 +576,7 @@ export function DispatchBoard({
   const bppOf = (k: string) => sheetLines.find((l) => batchKey(l) === k)?.boxesPerPallet ?? 0;
   // CR-481: whole-pallet footers, per batch.
   const doneOf = (k: string) => oiProgress.get(k)?.done ?? 0;
-  const totalPrepared = bKeys.reduce((s, k) => s + wholePallets(doneOf(k), bppOf(k)), 0);
-  const totalPreparedBoxes = bKeys.reduce((s, k) => s + palletBoxes(doneOf(k), bppOf(k)), 0);
+  const totalReady = bKeys.reduce((s, k) => s + doneOf(k), 0); // CR-510: Ready Boxes footer
   // CR-510: Pallets / Loose follow the rows' own boxes on every page (Pending is gone).
   const totalPossible = sheetLines.reduce((s, l) => s + wholePallets(l.boxes, l.boxesPerPallet), 0);
   const totalLoose = sheetLines.reduce((s, l) => s + looseBoxes(l.boxes, l.boxesPerPallet), 0);
@@ -978,7 +977,7 @@ export function DispatchBoard({
                             : c.key === "bpp" ? "Boxes one pallet of this type holds"
                             : c.key === "possible" ? "Whole pallets these boxes fill"
                             : c.key === "loose" ? "Boxes short of a whole pallet — Top Up Batch merges them"
-                            : c.key === "prepared" ? "Pallets already palletized for this batch (boxes on them)"
+                            : c.key === "ready" ? "Boxes already palletized for this batch"
                             : undefined
                           }>
                         {c.label}
@@ -1131,7 +1130,7 @@ export function DispatchBoard({
                           : c.key === "boxes" ? fmt(totalBoxes)
                           : c.key === "possible" ? fmt(totalPossible)
                           : c.key === "loose" ? fmt(totalLoose)
-                          : c.key === "prepared" ? (totalPrepared ? `${fmt(totalPrepared)} (${fmt(totalPreparedBoxes)})` : "—")
+                          : c.key === "ready" ? (totalReady ? fmt(totalReady) : "—")
                           : c.key === "pallets" ? fmt(totalPallets)
                           : c.key === "readyBoxes" ? fmt(totalReadyBoxes)
                           : ""}

@@ -5,9 +5,10 @@
 
 ## 2026-10-31 — In Palletization columns (CR-510) — LIVE + DEMO
 
-- **In Palletization reads Boxes · Boxes per Pallet · Pallets · Prepared.** The Pending and Loose columns are gone;
+- **In Palletization reads Boxes · Boxes per Pallet · Pallets · Ready Boxes.** The Pending and Loose columns are gone;
   Boxes is the row's boxes in palletization, Boxes per Pallet is the pallet's capacity, Pallets is the whole pallets
-  those boxes fill (144 boxes at 48 per pallet = 3). Ready for Palletization is unchanged.
+  those boxes fill (144 boxes at 48 per pallet = 3), Ready Boxes is what is already palletized for the batch.
+  Ready for Palletization is unchanged.
 
 ## 2026-10-31 — One line per item, Box Brand per line, Allocate Stock by brand (CR-507…509) — LIVE + DEMO
 

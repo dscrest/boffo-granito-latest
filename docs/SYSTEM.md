@@ -472,7 +472,7 @@ Batch, then **Pallet Type** (CR-499 — the master's `pallet_type`, line `pallet
 comes BEFORE the counts because its capacity explains them), then per page the counts as one left → right story —
 *Ready for Palletization*: **Boxes** (queued) · **Pallets** (whole) · **Loose** (CR-495, amber); *In Palletization*:
 **Boxes** (the row's boxes in palletization) · **Boxes per Pallet** (capacity, CR-510 — back for this page only) · **Pallets**
-(whole pallets of the row's boxes) · **Prepared** (`N (boxes)`, `readyPalletsLabel`); Pending and Loose left this page with CR-510 (2026-10-31);
+(whole pallets of the row's boxes) · **Ready Boxes** (boxes already palletized for the batch — plain count, green); Pending, Loose and the `N (boxes)` Prepared label left this page with CR-510 (2026-10-31);
 *Palletization Completed*: **Pallets** · **Boxes** (= pallets × capacity; a Mix Batch row shows its own boxes). Ordered Boxes and
 the prepared-Boxes column went with CR-499 (user: three "…Boxes" columns confused). Then Location, Date, Status, Age, **PAL** last and hideable; checkbox / edit inputs / "+"
 cell fixed) and has **no stage band**. **Pallets are WHOLE (CR-481):** `wholePallets` = floor(boxes ÷
